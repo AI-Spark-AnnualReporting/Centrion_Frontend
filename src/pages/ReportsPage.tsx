@@ -52,8 +52,66 @@ const missingMetrics = [
   { title: 'Executive Pay Ratio (GRI 2-21)', category: 'Governance · GRI 200 Series · SAMA ESG Framework', desc: 'CEO-to-median-pay ratio is an increasingly demanded metric by ESG-focused investors including GPIF and BlackRock. Absence signals governance opacity. Required for SAMA ESG framework Pillar 3 compliance by 2026.', impact: '+6 pts', severity: 'HIGH' },
 ];
 
-const allFrameworks = ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SASB', 'SGI', 'CDP', 'ISAE 3000'];
-const defaultChecked = ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI'];
+const globalFrameworks = ['GRI 2021', 'IFRS S1', 'IFRS S2'];
+
+const regionData: Record<string, { countries: string[]; frameworks: Record<string, string[]> }> = {
+  'Middle East': {
+    countries: ['Saudi Arabia', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Kuwait', 'Jordan'],
+    frameworks: {
+      'Saudi Arabia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI', 'SASB'],
+      'UAE': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ADX ESG', 'SCA Guidelines', 'SASB'],
+      'Qatar': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'QSE ESG', 'SASB'],
+      'Bahrain': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CBB ESG', 'SASB'],
+      'Oman': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Oman ESG', 'SASB'],
+      'Kuwait': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Kuwait', 'SASB'],
+      'Jordan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'JSC ESG', 'SASB'],
+    },
+  },
+  'Europe': {
+    countries: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Sweden', 'Switzerland'],
+    frameworks: {
+      'United Kingdom': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'UK SDR', 'FCA ESG', 'SASB'],
+      'Germany': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'France': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'Article 29'],
+      'Netherlands': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Sweden': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Switzerland': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'Swiss CO Ordinance', 'SASB'],
+    },
+  },
+  'Asia Pacific': {
+    countries: ['Singapore', 'Hong Kong', 'Japan', 'Australia', 'India', 'South Korea'],
+    frameworks: {
+      'Singapore': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SGX Core ESG', 'SASB'],
+      'Hong Kong': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'HKEX ESG', 'SASB'],
+      'Japan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SSBJ Standards', 'SASB'],
+      'Australia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ASRS Standards', 'SASB'],
+      'India': ['GRI 2021', 'IFRS S1/S2', 'BRSR', 'SEBI ESG', 'SASB'],
+      'South Korea': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'KSSB Standards', 'SASB'],
+    },
+  },
+  'Africa': {
+    countries: ['South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco'],
+    frameworks: {
+      'South Africa': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'King IV', 'JSE ESG', 'SASB'],
+      'Nigeria': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NGX ESG', 'SASB'],
+      'Kenya': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NSE ESG', 'SASB'],
+      'Egypt': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'EGX ESG', 'SASB'],
+      'Morocco': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'AMMC ESG', 'SASB'],
+    },
+  },
+  'Americas': {
+    countries: ['United States', 'Canada', 'Brazil', 'Mexico', 'Chile'],
+    frameworks: {
+      'United States': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SEC Climate', 'SASB', 'CDP'],
+      'Canada': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CSSB Standards', 'SASB', 'CDP'],
+      'Brazil': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CVM ESG', 'SASB'],
+      'Mexico': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'BMV ESG', 'SASB'],
+      'Chile': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMF ESG', 'SASB'],
+    },
+  },
+};
+
+const regions = Object.keys(regionData);
 
 function ScoreRing({ score, size = 52 }: { score: number; size?: number }) {
   const r = (size - 6) / 2;
@@ -87,9 +145,41 @@ function MetricRow({ m }: { m: typeof envMetrics[0] }) {
 export default function ReportsPage() {
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
   const [genOpen, setGenOpen] = useState(true);
-  const [checkedFw, setCheckedFw] = useState<string[]>(defaultChecked);
+  const [scope, setScope] = useState<'global' | 'regional'>('global');
+  const [selectedRegion, setSelectedRegion] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState('');
+  const [checkedFw, setCheckedFw] = useState<string[]>(globalFrameworks);
 
   const toggleFw = (fw: string) => setCheckedFw(prev => prev.includes(fw) ? prev.filter(f => f !== fw) : [...prev, fw]);
+
+  const handleScopeChange = (newScope: 'global' | 'regional') => {
+    setScope(newScope);
+    if (newScope === 'global') {
+      setSelectedRegion('');
+      setSelectedCountry('');
+      setCheckedFw(globalFrameworks);
+    } else {
+      setCheckedFw([]);
+    }
+  };
+
+  const handleRegionChange = (region: string) => {
+    setSelectedRegion(region);
+    setSelectedCountry('');
+    setCheckedFw([]);
+  };
+
+  const handleCountryChange = (country: string) => {
+    setSelectedCountry(country);
+    if (selectedRegion && regionData[selectedRegion]?.frameworks[country]) {
+      setCheckedFw(regionData[selectedRegion].frameworks[country]);
+    }
+  };
+
+  const availableCountries = selectedRegion ? regionData[selectedRegion]?.countries || [] : [];
+  const availableFrameworks = scope === 'global'
+    ? globalFrameworks
+    : (selectedCountry && selectedRegion ? regionData[selectedRegion]?.frameworks[selectedCountry] || [] : []);
 
   return (
     <div>
@@ -122,23 +212,62 @@ export default function ReportsPage() {
         </div>
         {genOpen && (
           <div style={{ padding: '18px 20px' }}>
+            {/* Row 1: Year, Sector, Regulator, Regional Authority */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 18 }}>
-              <div><label className="fl-label">Reporting Year</label><select className="inp sel"><option>FY 2025</option></select></div>
+              <div><label className="fl-label">Reporting Year</label><select className="inp sel"><option>FY 2025</option><option>FY 2024</option><option>FY 2023</option></select></div>
               <div><label className="fl-label">Industry Sector</label><select className="inp sel"><option>Financial Services – Asset Mgmt</option></select></div>
               <div><label className="fl-label">Global Regulator</label><select className="inp sel"><option>IOSCO – Intl. Securities</option></select></div>
               <div><label className="fl-label">Regional Authority <span style={{ color: '#9BA3C4', fontWeight: 400, textTransform: 'none' }}>(Optional)</span></label><select className="inp sel"><option>Auto-detected from sector...</option></select></div>
             </div>
-            <div style={{ marginBottom: 18 }}>
-              <label className="fl-label">ESG Frameworks</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginTop: 5 }}>
-                {allFrameworks.map(fw => (
-                  <label key={fw} className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
-                    <input type="checkbox" checked={checkedFw.includes(fw)} onChange={() => toggleFw(fw)} style={{ accentColor: '#4040C8' }} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
-                  </label>
-                ))}
+
+            {/* Row 2: Scope + conditional Region/Country */}
+            <div style={{ display: 'grid', gridTemplateColumns: scope === 'regional' ? '1fr 1fr 1fr' : '1fr', gap: 12, marginBottom: 18 }}>
+              <div>
+                <label className="fl-label">Report Scope</label>
+                <select className="inp sel" value={scope} onChange={e => handleScopeChange(e.target.value as 'global' | 'regional')}>
+                  <option value="global">Global</option>
+                  <option value="regional">Regional</option>
+                </select>
               </div>
+              {scope === 'regional' && (
+                <>
+                  <div>
+                    <label className="fl-label">Region</label>
+                    <select className="inp sel" value={selectedRegion} onChange={e => handleRegionChange(e.target.value)}>
+                      <option value="">Select Region...</option>
+                      {regions.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="fl-label">Country</label>
+                    <select className="inp sel" value={selectedCountry} onChange={e => handleCountryChange(e.target.value)} disabled={!selectedRegion}>
+                      <option value="">Select Country...</option>
+                      {availableCountries.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
+
+            {/* ESG Frameworks — dynamic based on scope */}
+            <div style={{ marginBottom: 18 }}>
+              <label className="fl-label">ESG Frameworks {scope === 'regional' && selectedCountry && <span style={{ fontWeight: 400, textTransform: 'none', color: '#4040C8' }}>· {selectedCountry}</span>}</label>
+              {availableFrameworks.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
+                  {availableFrameworks.map(fw => (
+                    <label key={fw} className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
+                      <input type="checkbox" checked={checkedFw.includes(fw)} onChange={() => toggleFw(fw)} style={{ accentColor: '#4040C8' }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: '14px', background: '#F2F3FA', borderRadius: 10, fontSize: 12, color: '#9BA3C4', marginTop: 5 }}>
+                  {scope === 'regional' ? 'Select a region and country to see applicable frameworks' : 'No frameworks available'}
+                </div>
+              )}
+            </div>
+
             <div style={{ marginBottom: 18 }}>
               <label className="fl-label">Upload Source Documents <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>(PDF, Excel, CSV, Word)</span></label>
               <div className="upload-z" style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '16px 20px' }}>
