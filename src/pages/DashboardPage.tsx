@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { DashboardESG } from './DashboardESG';
-import { DashboardFinancial } from './DashboardFinancial';
-import { DashboardBoard } from './DashboardBoard';
-import { ESGModal } from '../shared/ESGModal';
+import { DashboardESG } from '@/components/dashboard/DashboardESG';
+import { DashboardFinancial } from '@/components/dashboard/DashboardFinancial';
+import { DashboardBoard } from '@/components/dashboard/DashboardBoard';
+import { ESGModal } from '@/components/shared/ESGModal';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'esg' | 'fin' | 'brd'>('esg');
