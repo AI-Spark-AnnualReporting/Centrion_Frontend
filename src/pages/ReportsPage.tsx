@@ -52,8 +52,66 @@ const missingMetrics = [
   { title: 'Executive Pay Ratio (GRI 2-21)', category: 'Governance · GRI 200 Series · SAMA ESG Framework', desc: 'CEO-to-median-pay ratio is an increasingly demanded metric by ESG-focused investors including GPIF and BlackRock. Absence signals governance opacity. Required for SAMA ESG framework Pillar 3 compliance by 2026.', impact: '+6 pts', severity: 'HIGH' },
 ];
 
-const allFrameworks = ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SASB', 'SGI', 'CDP', 'ISAE 3000'];
-const defaultChecked = ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI'];
+const globalFrameworks = ['GRI 2021', 'IFRS S1', 'IFRS S2'];
+
+const regionData: Record<string, { countries: string[]; frameworks: Record<string, string[]> }> = {
+  'Middle East': {
+    countries: ['Saudi Arabia', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Kuwait', 'Jordan'],
+    frameworks: {
+      'Saudi Arabia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI', 'SASB'],
+      'UAE': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ADX ESG', 'SCA Guidelines', 'SASB'],
+      'Qatar': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'QSE ESG', 'SASB'],
+      'Bahrain': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CBB ESG', 'SASB'],
+      'Oman': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Oman ESG', 'SASB'],
+      'Kuwait': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Kuwait', 'SASB'],
+      'Jordan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'JSC ESG', 'SASB'],
+    },
+  },
+  'Europe': {
+    countries: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Sweden', 'Switzerland'],
+    frameworks: {
+      'United Kingdom': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'UK SDR', 'FCA ESG', 'SASB'],
+      'Germany': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'France': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'Article 29'],
+      'Netherlands': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Sweden': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Switzerland': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'Swiss CO Ordinance', 'SASB'],
+    },
+  },
+  'Asia Pacific': {
+    countries: ['Singapore', 'Hong Kong', 'Japan', 'Australia', 'India', 'South Korea'],
+    frameworks: {
+      'Singapore': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SGX Core ESG', 'SASB'],
+      'Hong Kong': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'HKEX ESG', 'SASB'],
+      'Japan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SSBJ Standards', 'SASB'],
+      'Australia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ASRS Standards', 'SASB'],
+      'India': ['GRI 2021', 'IFRS S1/S2', 'BRSR', 'SEBI ESG', 'SASB'],
+      'South Korea': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'KSSB Standards', 'SASB'],
+    },
+  },
+  'Africa': {
+    countries: ['South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco'],
+    frameworks: {
+      'South Africa': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'King IV', 'JSE ESG', 'SASB'],
+      'Nigeria': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NGX ESG', 'SASB'],
+      'Kenya': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NSE ESG', 'SASB'],
+      'Egypt': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'EGX ESG', 'SASB'],
+      'Morocco': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'AMMC ESG', 'SASB'],
+    },
+  },
+  'Americas': {
+    countries: ['United States', 'Canada', 'Brazil', 'Mexico', 'Chile'],
+    frameworks: {
+      'United States': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SEC Climate', 'SASB', 'CDP'],
+      'Canada': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CSSB Standards', 'SASB', 'CDP'],
+      'Brazil': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CVM ESG', 'SASB'],
+      'Mexico': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'BMV ESG', 'SASB'],
+      'Chile': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMF ESG', 'SASB'],
+    },
+  },
+};
+
+const regions = Object.keys(regionData);
 
 function ScoreRing({ score, size = 52 }: { score: number; size?: number }) {
   const r = (size - 6) / 2;
