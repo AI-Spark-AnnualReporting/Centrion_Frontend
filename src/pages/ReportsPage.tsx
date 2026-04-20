@@ -162,6 +162,7 @@ function MetricRow({ m }: { m: typeof envMetrics[0] }) {
 export default function ReportsPage() {
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
   const [genOpen, setGenOpen] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
