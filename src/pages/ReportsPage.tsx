@@ -259,6 +259,14 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {isGenerating ? (
+        <GeneratingScreen
+          onComplete={() => setIsGenerating(false)}
+          onCancel={() => setIsGenerating(false)}
+        />
+      ) : (
+      <>
+
       {/* Generate New ESG Report — collapsible */}
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer', borderBottom: genOpen ? '1px solid #ECEEF8' : 'none' }} onClick={() => setGenOpen(!genOpen)}>
