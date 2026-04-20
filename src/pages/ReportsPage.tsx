@@ -511,6 +511,7 @@ export default function ReportsPage() {
                   <button
                     type="button"
                     disabled={!canGenerate}
+                    onClick={() => canGenerate && setIsGenerating(true)}
                     className="btn bp"
                     title={canGenerate ? undefined : disabledReason}
                     style={{
@@ -692,6 +693,8 @@ export default function ReportsPage() {
             );
           })()}
         </div>
+      )}
+      </>
       )}
     </div>
   );
