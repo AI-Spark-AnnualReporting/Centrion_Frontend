@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSectors } from '@/lib/api';
 import type { Sector } from '@/types/company';
+import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
@@ -161,6 +162,7 @@ function MetricRow({ m }: { m: typeof envMetrics[0] }) {
 export default function ReportsPage() {
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
   const [genOpen, setGenOpen] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
@@ -256,6 +258,14 @@ export default function ReportsPage() {
           <button className="tab">Sustainability</button>
         </div>
       </div>
+
+      {isGenerating ? (
+        <GeneratingScreen
+          onComplete={() => setIsGenerating(false)}
+          onCancel={() => setIsGenerating(false)}
+        />
+      ) : (
+      <>
 
       {/* Generate New ESG Report — collapsible */}
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
@@ -501,6 +511,7 @@ export default function ReportsPage() {
                   <button
                     type="button"
                     disabled={!canGenerate}
+                    onClick={() => canGenerate && setIsGenerating(true)}
                     className="btn bp"
                     title={canGenerate ? undefined : disabledReason}
                     style={{
@@ -682,6 +693,8 @@ export default function ReportsPage() {
             );
           })()}
         </div>
+      )}
+      </>
       )}
     </div>
   );
