@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSectors } from '@/lib/api';
 import type { Sector } from '@/types/company';
+import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
