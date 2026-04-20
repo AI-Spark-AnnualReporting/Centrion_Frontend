@@ -1,4 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { getSectors } from '@/lib/api';
+import type { Sector } from '@/types/company';
+
+const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
+const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
+
+function hasAcceptedExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ACCEPTED_UPLOAD_EXT.some((ext) => lower.endsWith(ext));
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const reportData = [
   { title: 'ESG Sustainability Report', period: 'FY 2025 · GRI 2021 · IFRS S1/S2', score: 78, env: 82, soc: 74, gov: 79, metrics: '33/36', gaps: '3 gaps', date: 'Apr 12, 2025', gradient: 'linear-gradient(135deg,#3535B5,#4747CC)', frameworks: ['GRI 2021', 'IFRS S1/S2', 'SAMA', 'TCFD'], confidence: 91.7, company: 'Al-Noor Capital' },
@@ -149,11 +165,59 @@ export default function ReportsPage() {
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
   const [checkedFw, setCheckedFw] = useState<string[]>(globalFrameworks);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [sectorsLoading, setSectorsLoading] = useState(true);
+  const [selectedSectorId, setSelectedSectorId] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const acceptFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!hasAcceptedExtension(file.name)) {
+      setUploadError(`Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`);
+      return;
+    }
+    setUploadError(null);
+    setUploadedFile(file);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    acceptFile(e.target.files?.[0] ?? undefined);
+    // Reset so selecting the same file again re-fires onChange.
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    acceptFile(e.dataTransfer.files?.[0] ?? undefined);
+  };
+
+  const openFilePicker = () => fileInputRef.current?.click();
+  const clearUploadedFile = () => {
+    setUploadedFile(null);
+    setUploadError(null);
+  };
+
+  useEffect(() => {
+    getSectors()
+      .then((data) => setSectors(data))
+      .catch(() => setSectors([]))
+      .finally(() => setSectorsLoading(false));
+  }, []);
 
   const toggleFw = (fw: string) => setCheckedFw(prev => prev.includes(fw) ? prev.filter(f => f !== fw) : [...prev, fw]);
 
   const handleScopeChange = (newScope: 'global' | 'regional') => {
     setScope(newScope);
+    // Upload is only allowed in global scope — clear any prior file on switch.
+    if (newScope !== 'global') {
+      setUploadedFile(null);
+      setUploadError(null);
+      setIsDragging(false);
+    }
     if (newScope === 'global') {
       setSelectedRegion('');
       setSelectedCountry('');
@@ -212,12 +276,40 @@ export default function ReportsPage() {
         </div>
         {genOpen && (
           <div style={{ padding: '18px 20px' }}>
-            {/* Row 1: Year, Sector, Regulator, Regional Authority */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 18 }}>
-              <div><label className="fl-label">Reporting Year</label><select className="inp sel"><option>FY 2025</option><option>FY 2024</option><option>FY 2023</option></select></div>
-              <div><label className="fl-label">Industry Sector</label><select className="inp sel"><option>Financial Services – Asset Mgmt</option></select></div>
-              <div><label className="fl-label">Global Regulator</label><select className="inp sel"><option>IOSCO – Intl. Securities</option></select></div>
-              <div><label className="fl-label">Regional Authority <span style={{ color: '#9BA3C4', fontWeight: 400, textTransform: 'none' }}>(Optional)</span></label><select className="inp sel"><option>Auto-detected from sector...</option></select></div>
+            {/* Row 1: Reporting Year, Industry Sector (from live API) */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+              <div>
+                <label className="fl-label">Reporting Year</label>
+                <select className="inp sel">
+                  <option>FY 2025</option>
+                  <option>FY 2024</option>
+                  <option>FY 2023</option>
+                </select>
+              </div>
+              <div>
+                <label className="fl-label">Industry Sector</label>
+                {/* Selection is disabled for now — user can open the list to preview
+                    all sectors, but none are pickable. Wire onChange + remove option
+                    disables when the generate flow is ready. */}
+                <select
+                  className="inp sel"
+                  value={selectedSectorId}
+                  onChange={(e) => setSelectedSectorId(e.target.value)}
+                >
+                  {sectorsLoading ? (
+                    <option value="" disabled>Loading sectors…</option>
+                  ) : (
+                    <>
+                      <option value="">None</option>
+                      {sectors.map((s) => (
+                        <option key={s.id} value={s.id} disabled>
+                          {s.name}
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
+              </div>
             </div>
 
             {/* Row 2: Scope + conditional Region/Country */}
@@ -233,16 +325,20 @@ export default function ReportsPage() {
                 <>
                   <div>
                     <label className="fl-label">Region</label>
+                    {/* Selection disabled for now — options visible as preview only. */}
                     <select className="inp sel" value={selectedRegion} onChange={e => handleRegionChange(e.target.value)}>
-                      <option value="">Select Region...</option>
-                      {regions.map(r => <option key={r} value={r}>{r}</option>)}
+                      <option value="">None</option>
+                      {regions.map(r => <option key={r} value={r} disabled>{r}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="fl-label">Country</label>
-                    <select className="inp sel" value={selectedCountry} onChange={e => handleCountryChange(e.target.value)} disabled={!selectedRegion}>
-                      <option value="">Select Country...</option>
-                      {availableCountries.map(c => <option key={c} value={c}>{c}</option>)}
+                    {/* Selection disabled for now — options visible as preview only. */}
+                    <select className="inp sel" value={selectedCountry} onChange={e => handleCountryChange(e.target.value)}>
+                      <option value="">None</option>
+                      {Object.values(regionData).flatMap(r => r.countries).map(c => (
+                        <option key={c} value={c} disabled>{c}</option>
+                      ))}
                     </select>
                   </div>
                 </>
@@ -254,12 +350,34 @@ export default function ReportsPage() {
               <label className="fl-label">ESG Frameworks {scope === 'regional' && selectedCountry && <span style={{ fontWeight: 400, textTransform: 'none', color: '#4040C8' }}>· {selectedCountry}</span>}</label>
               {availableFrameworks.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
-                  {availableFrameworks.map(fw => (
-                    <label key={fw} className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
-                      <input type="checkbox" checked={checkedFw.includes(fw)} onChange={() => toggleFw(fw)} style={{ accentColor: '#4040C8' }} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
-                    </label>
-                  ))}
+                  {availableFrameworks.map(fw => {
+                    // In global scope, IFRS S1 / IFRS S2 are preview-only for now.
+                    const isDisabled = scope === 'global' && (fw === 'IFRS S1' || fw === 'IFRS S2');
+                    return (
+                      <label
+                        key={fw}
+                        className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '10px 12px',
+                          opacity: isDisabled ? 0.5 : 1,
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                        }}
+                        title={isDisabled ? 'Not available yet' : undefined}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checkedFw.includes(fw)}
+                          onChange={() => toggleFw(fw)}
+                          disabled={isDisabled}
+                          style={{ accentColor: '#4040C8' }}
+                        />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               ) : (
                 <div style={{ padding: '14px', background: '#F2F3FA', borderRadius: 10, fontSize: 12, color: '#9BA3C4', marginTop: 5 }}>
@@ -269,23 +387,149 @@ export default function ReportsPage() {
             </div>
 
             <div style={{ marginBottom: 18 }}>
-              <label className="fl-label">Upload Source Documents <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>(PDF, Excel, CSV, Word)</span></label>
-              <div className="upload-z" style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '16px 20px' }}>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /><path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                <span style={{ fontSize: 12, color: '#5A6080' }}>Click to upload or drag & drop annual report, HR data, financial statements</span>
-              </div>
+              <label className="fl-label">
+                Upload Source Document <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
+                <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
+                  (PDF, DOCX, TXT, CSV, XLSX — one file)
+                </span>
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_UPLOAD_ATTR}
+                onChange={handleFileInputChange}
+                disabled={scope !== 'global'}
+                style={{ display: 'none' }}
+              />
+              {uploadedFile ? (
+                <div
+                  className="upload-z"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    textAlign: 'left',
+                    padding: '14px 16px',
+                    borderColor: '#4040C8',
+                    background: 'rgba(64,64,200,.04)',
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                  </svg>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {uploadedFile.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(uploadedFile.size)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openFilePicker}
+                    style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: 0, padding: '4px 8px', cursor: 'pointer' }}
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearUploadedFile}
+                    aria-label="Remove file"
+                    title="Remove file"
+                    style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  role="button"
+                  tabIndex={scope === 'global' ? 0 : -1}
+                  aria-disabled={scope !== 'global'}
+                  onClick={scope === 'global' ? openFilePicker : undefined}
+                  onKeyDown={(e) => {
+                    if (scope !== 'global') return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openFilePicker();
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (scope !== 'global') return;
+                    e.preventDefault();
+                    if (!isDragging) setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={scope === 'global' ? handleDrop : (e) => e.preventDefault()}
+                  className="upload-z"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    textAlign: 'left',
+                    padding: '16px 20px',
+                    cursor: scope === 'global' ? 'pointer' : 'not-allowed',
+                    opacity: scope === 'global' ? 1 : 0.55,
+                    borderColor: isDragging && scope === 'global' ? '#4040C8' : undefined,
+                    background: isDragging && scope === 'global' ? 'rgba(64,64,200,.06)' : undefined,
+                  }}
+                  title={scope === 'global' ? undefined : 'Upload is only available in Global scope'}
+                >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /><path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                  <span style={{ fontSize: 12, color: '#5A6080' }}>
+                    {scope === 'global'
+                      ? 'Click to upload or drag & drop annual report, HR data, financial statements'
+                      : 'Upload is only available in Global scope'}
+                  </span>
+                </div>
+              )}
+              {uploadError && (
+                <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">{uploadError}</div>
+              )}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn bp" style={{ padding: '11px 24px', fontSize: 13, fontWeight: 700, borderRadius: 10, border: 'none', background: '#4040C8', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}>
-                <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
-                Generate Report
-              </button>
+              {/* Enabled only for Global scope + uploaded source document for now. */}
+              {(() => {
+                const canGenerate = scope === 'global' && uploadedFile !== null;
+                const disabledReason =
+                  scope !== 'global'
+                    ? 'Regional generation is not available yet'
+                    : 'Upload a source document to continue';
+                return (
+                  <button
+                    type="button"
+                    disabled={!canGenerate}
+                    className="btn bp"
+                    title={canGenerate ? undefined : disabledReason}
+                    style={{
+                      padding: '11px 24px',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      borderRadius: 10,
+                      border: 'none',
+                      background: '#4040C8',
+                      color: '#fff',
+                      cursor: canGenerate ? 'pointer' : 'not-allowed',
+                      opacity: canGenerate ? 1 : 0.55,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
+                    Generate Report
+                  </button>
+                );
+              })()}
             </div>
           </div>
         )}
       </div>
 
-      {/* Report cards */}
+      {/* Report cards — hidden for now; will render real reports from API later. */}
+      {/*
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 14 }}>
         {reportData.map((r, i) => (
           <div key={i} className="esg-rpt-card" onClick={() => setExpandedReport(expandedReport === i ? null : i)}>
@@ -313,6 +557,7 @@ export default function ReportsPage() {
           </div>
         ))}
       </div>
+      */}
 
       {/* Expanded Report Detail View */}
       {expandedReport !== null && (

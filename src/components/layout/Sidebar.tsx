@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 
 const NAV_ITEMS = [
   {
@@ -46,14 +47,25 @@ const icons: Record<string, JSX.Element> = {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   const handleNav = (path: string) => {
     navigate(path);
   };
 
   const handleLogout = () => {
-    navigate('/');
+    logout();
+    navigate('/login', { replace: true });
   };
+
+  const displayName = user?.full_name ?? 'Ahmad Al-Rashid';
+  const displayRole = user?.role ?? 'ESG Manager';
+  const initials = (user?.full_name ?? 'AR')
+    .split(' ')
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   return (
     <nav className="sb">
@@ -98,12 +110,12 @@ export function Sidebar() {
       <div style={{ flex: 1 }} />
       <div className="sb-div" />
       <div className="sb-user">
-        <div className="sb-uav">AR</div>
+        <div className="sb-uav">{initials}</div>
         <div>
-          <div className="sb-uname">Ahmad Al-Rashid</div>
-          <div className="sb-urole">ESG Manager</div>
+          <div className="sb-uname">{displayName}</div>
+          <div className="sb-urole">{displayRole}</div>
         </div>
-        <button className="sb-logout" onClick={handleLogout}>
+        <button className="sb-logout" onClick={handleLogout} type="button" aria-label="Log out" title="Log out">
           <svg viewBox="0 0 13 13" fill="none"><path d="M5 11H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h2M8.5 8.5l3-2.5-3-2.5M11.5 6H5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>
