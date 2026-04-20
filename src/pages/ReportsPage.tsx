@@ -1,7 +1,104 @@
 import { useEffect, useRef, useState } from 'react';
-import { getSectors } from '@/lib/api';
+import { getSectors, reports as reportsApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type { Sector } from '@/types/company';
+import type {
+  CoverageIndicator,
+  CoverageResponse,
+  GenerateReportResponse,
+} from '@/types/report';
 import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
+
+interface ReportGenerationConfig {
+  region?: string | null;
+  sector_id?: string | null;
+  country_id?: string | null;
+  scope_type?: string;
+  regulator_ids?: string[];
+  framework_codes?: string[];
+}
+
+interface ReportSummary {
+  id: string;
+  period: string;
+  generation_config?: ReportGenerationConfig;
+}
+
+interface ReportsListResponse {
+  reports: ReportSummary[];
+}
+
+// Normalise API period strings like "FY-2026" → "FY 2026" for display.
+function formatPeriod(period: string): string {
+  return period.replace(/-/g, ' ').trim();
+}
+
+// Secondary picker for "+ Add new…" — current year ±10 → 21 options (year numbers only).
+function yearPickerOptions(): number[] {
+  const current = new Date().getFullYear();
+  const years: number[] = [];
+  for (let y = current + 10; y >= current - 10; y--) years.push(y);
+  return years;
+}
+
+const ADD_NEW_SENTINEL = '__add_new__';
+
+// UI labels → backend framework codes for POST /api/v1/reports/{id}/generate.
+function frameworkLabelToCode(label: string): string {
+  if (label.startsWith('GRI')) return 'GRI';
+  if (label === 'IFRS S1') return 'IFRS_S1';
+  if (label === 'IFRS S2') return 'IFRS_S2';
+  return label;
+}
+
+// Extract the 4-digit year from a period string like "FY-2026".
+function yearFromPeriod(period: string): number | null {
+  const m = period.match(/(\d{4})/);
+  return m ? Number(m[1]) : null;
+}
+
+// Coverage rendering helpers -------------------------------------------------
+function indicatorDisplayValue(i: CoverageIndicator): string {
+  if (i.status === 'NOT_DISCLOSED') return 'Missing';
+  if (i.value !== null && i.value !== undefined) return String(i.value);
+  if (i.text_value) return i.text_value;
+  if (i.bool_value !== null) return i.bool_value ? 'Yes' : 'No';
+  return '—';
+}
+
+function pillarBaseKey(p: string): 'E' | 'S' | 'G' | 'OTHER' {
+  if (p === 'E' || p === 'S' || p === 'G') return p;
+  return 'OTHER';
+}
+
+function coveragePercent(found: number, total: number): number {
+  if (!total) return 0;
+  return Math.round((found / total) * 100);
+}
+
+const PILLAR_STYLES: Record<
+  'E' | 'S' | 'G',
+  { label: string; emoji: string; gradient: string; accent: string }
+> = {
+  E: {
+    label: 'Environmental',
+    emoji: '🌿',
+    gradient: 'linear-gradient(135deg,#065F46,#059669)',
+    accent: '#059669',
+  },
+  S: {
+    label: 'Social',
+    emoji: '👥',
+    gradient: 'linear-gradient(135deg,#0369A1,#0891B2)',
+    accent: '#0891B2',
+  },
+  G: {
+    label: 'Governance',
+    emoji: '🏛',
+    gradient: 'linear-gradient(135deg,#4C1D95,#7C3AED)',
+    accent: '#7C3AED',
+  },
+};
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
@@ -70,6 +167,9 @@ const missingMetrics = [
 ];
 
 const globalFrameworks = ['GRI 2021', 'IFRS S1', 'IFRS S2'];
+// Only GRI is wired for generation today — IFRS S1/S2 are visible but disabled
+// and should not be pre-checked.
+const defaultGlobalCheckedFrameworks = ['GRI 2021'];
 
 const regionData: Record<string, { countries: string[]; frameworks: Record<string, string[]> }> = {
   'Middle East': {
@@ -163,10 +263,12 @@ export default function ReportsPage() {
   const [expandedReport, setExpandedReport] = useState<number | null>(null);
   const [genOpen, setGenOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
+  const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
-  const [checkedFw, setCheckedFw] = useState<string[]>(globalFrameworks);
+  const [checkedFw, setCheckedFw] = useState<string[]>(defaultGlobalCheckedFrameworks);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorsLoading, setSectorsLoading] = useState(true);
   const [selectedSectorId, setSelectedSectorId] = useState('');
@@ -174,6 +276,192 @@ export default function ReportsPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? null;
+  const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
+  const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
+  // Selecting an existing report puts the form into read-from-report mode;
+  // picking "+ Add new…" + a year puts the form into create-new mode.
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [customYear, setCustomYear] = useState<number | null>(null);
+  const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(false);
+
+  const selectedReport =
+    selectedReportId != null
+      ? existingReports.find((r) => r.id === selectedReportId) ?? null
+      : null;
+  const selectedPeriod = selectedReport
+    ? selectedReport.period
+    : customYear != null
+      ? `FY-${customYear}`
+      : '';
+
+  useEffect(() => {
+    if (!companyId) {
+      setExistingReports([]);
+      setPeriodsLoading(false);
+      setIsAddingNewPeriod(true);
+      return;
+    }
+
+    let cancelled = false;
+    setPeriodsLoading(true);
+    reportsApi
+      .list<ReportsListResponse>(companyId)
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.reports ?? []).filter((r) => r && r.period);
+        list.sort((a, b) => b.period.localeCompare(a.period));
+        setExistingReports(list);
+        // If the company has no reports yet, jump straight to the year picker.
+        setIsAddingNewPeriod(list.length === 0);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExistingReports([]);
+          setIsAddingNewPeriod(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPeriodsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const applyReportToForm = (report: ReportSummary) => {
+    const cfg = report.generation_config ?? {};
+    setScope(cfg.scope_type === 'regional' ? 'regional' : 'global');
+    setSelectedSectorId(cfg.sector_id ?? '');
+    setCheckedFw(cfg.framework_codes ?? []);
+    setSelectedRegion(cfg.region ?? '');
+    // Country auto-fill skipped — our UI uses country names, API returns ids.
+    setSelectedCountry('');
+    setUploadedFile(null);
+    setUploadError(null);
+  };
+
+  const resetFormForNewReport = () => {
+    setScope('global');
+    // Display-wise the sector stays "None"; submission still sends a real
+    // sector_id (falls back to the first loaded sector) — see triggerGenerate.
+    setSelectedSectorId('');
+    setCheckedFw(defaultGlobalCheckedFrameworks);
+    setSelectedRegion('');
+    setSelectedCountry('');
+    // Leave uploadedFile alone — user may have uploaded before choosing a year.
+  };
+
+  const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === ADD_NEW_SENTINEL) {
+      setSelectedReportId(null);
+      setIsAddingNewPeriod(true);
+      return;
+    }
+    // User picked an existing report — auto-fill form, disable Generate.
+    setCustomYear(null);
+    setSelectedReportId(value);
+    const report = existingReports.find((r) => r.id === value);
+    if (report) applyReportToForm(report);
+  };
+
+  const pickCustomYear = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const year = Number(e.target.value);
+    if (!year) return;
+    setSelectedReportId(null);
+    setCustomYear(year);
+    setIsAddingNewPeriod(false);
+    resetFormForNewReport();
+  };
+
+  const cancelAddNewPeriod = () => {
+    setIsAddingNewPeriod(false);
+  };
+
+  const clearCustomYear = () => {
+    setCustomYear(null);
+  };
+
+  // Years already taken by an existing report — blocked in the year picker
+  // so one ESG report per year is enforced.
+  const usedYears = new Set<number>(
+    existingReports
+      .map((r) => yearFromPeriod(r.period))
+      .filter((y): y is number => y != null),
+  );
+
+  // --- Report generation submission -----------------------------------------
+  // The loading screen stays mounted for the full duration of the API call.
+  // We ignore GeneratingScreen's own animation timer — transitions are driven
+  // by the response from POST /api/v1/reports/{company_id}/generate.
+  const [genError, setGenError] = useState<string | null>(null);
+  const genRequestIdRef = useRef(0);
+
+  const triggerGenerate = () => {
+    if (
+      !companyId ||
+      scope !== 'global' ||
+      customYear == null ||
+      selectedReport !== null ||
+      !uploadedFile
+    ) {
+      return;
+    }
+
+    const requestId = ++genRequestIdRef.current;
+    setGenError(null);
+    setHasGenerated(false);
+    setCoverage(null);
+    setExpandedReport(null);
+    setIsGenerating(true);
+
+    // The dropdown displays "None" by default, but the backend requires a
+    // valid sector_id — fall back to the first loaded sector.
+    const sectorIdForApi = selectedSectorId || sectors[0]?.id || '';
+
+    reportsApi
+      .generate<GenerateReportResponse>(companyId, {
+        files: [uploadedFile],
+        year: customYear,
+        sector_id: sectorIdForApi,
+        scope_type: scope,
+        report_type: 'esg',
+        framework_codes: checkedFw.map(frameworkLabelToCode),
+      })
+      .then((gen) => {
+        if (requestId !== genRequestIdRef.current) return null;
+        if (!gen?.report_id) {
+          throw new Error('Report generated but no report_id returned.');
+        }
+        // Chain: pull the indicator coverage so we can render the detail view.
+        return reportsApi.getCoverage<CoverageResponse>(companyId, gen.report_id);
+      })
+      .then((cov) => {
+        if (cov == null) return;
+        if (requestId !== genRequestIdRef.current) return;
+        setCoverage(cov);
+        setIsGenerating(false);
+        setHasGenerated(true);
+        setGenOpen(false);
+        setExpandedReport(0);
+      })
+      .catch((err: unknown) => {
+        if (requestId !== genRequestIdRef.current) return;
+        setIsGenerating(false);
+        setGenError(
+          err instanceof Error ? err.message : 'Generation failed. Please try again.',
+        );
+      });
+  };
+
+  const handleGeneratingCancel = () => {
+    // Bump the request id so the outstanding promise's callbacks become no-ops.
+    genRequestIdRef.current += 1;
+    setIsGenerating(false);
+  };
 
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
@@ -223,7 +511,7 @@ export default function ReportsPage() {
     if (newScope === 'global') {
       setSelectedRegion('');
       setSelectedCountry('');
-      setCheckedFw(globalFrameworks);
+      setCheckedFw(defaultGlobalCheckedFrameworks);
     } else {
       setCheckedFw([]);
     }
@@ -261,8 +549,9 @@ export default function ReportsPage() {
 
       {isGenerating ? (
         <GeneratingScreen
-          onComplete={() => setIsGenerating(false)}
-          onCancel={() => setIsGenerating(false)}
+          // No-op — we stay on the loading screen until the API responds.
+          onComplete={() => undefined}
+          onCancel={handleGeneratingCancel}
         />
       ) : (
       <>
@@ -290,11 +579,94 @@ export default function ReportsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
               <div>
                 <label className="fl-label">Reporting Year</label>
-                <select className="inp sel">
-                  <option>FY 2025</option>
-                  <option>FY 2024</option>
-                  <option>FY 2023</option>
-                </select>
+                {periodsLoading ? (
+                  <select className="inp sel" disabled>
+                    <option>Loading reporting years…</option>
+                  </select>
+                ) : customYear != null ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    <div
+                      className="inp sel"
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                      <span style={{ fontWeight: 600, color: '#1A1D2E' }}>
+                        {formatPeriod(`FY-${customYear}`)}
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                        New report
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearCustomYear}
+                      aria-label="Change year"
+                      title="Change year"
+                      style={{
+                        width: 38,
+                        border: '1px solid #E5E7EF',
+                        background: '#fff',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        color: '#5A6080',
+                        fontSize: 16,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : isAddingNewPeriod ? (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    <select
+                      className="inp sel"
+                      value=""
+                      onChange={pickCustomYear}
+                      style={{ flex: 1 }}
+                    >
+                      <option value="" disabled>Select year…</option>
+                      {yearPickerOptions().map((y) => {
+                        const taken = usedYears.has(y);
+                        return (
+                          <option key={y} value={y} disabled={taken}>
+                            {taken ? `${y} — already has a report` : y}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {existingReports.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={cancelAddNewPeriod}
+                        aria-label="Cancel"
+                        title="Cancel"
+                        style={{
+                          width: 38,
+                          border: '1px solid #E5E7EF',
+                          background: '#fff',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          color: '#5A6080',
+                          fontSize: 16,
+                          lineHeight: 1,
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <select
+                    className="inp sel"
+                    value={selectedReportId ?? ''}
+                    onChange={handlePeriodChange}
+                  >
+                    <option value="" disabled>Select a reporting year…</option>
+                    {existingReports.map((r) => (
+                      <option key={r.id} value={r.id}>{formatPeriod(r.period)}</option>
+                    ))}
+                    <option value={ADD_NEW_SENTINEL}>+ Add new…</option>
+                  </select>
+                )}
               </div>
               <div>
                 <label className="fl-label">Industry Sector</label>
@@ -499,19 +871,46 @@ export default function ReportsPage() {
                 <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">{uploadError}</div>
               )}
             </div>
+            {genError && (
+              <div
+                role="alert"
+                style={{
+                  marginBottom: 12,
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(229,72,77,.08)',
+                  border: '1px solid rgba(229,72,77,.25)',
+                  color: '#B33A3E',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {genError}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              {/* Enabled only for Global scope + uploaded source document for now. */}
+              {/* Enabled only when creating a new report: Global scope + uploaded file + chosen year. */}
               {(() => {
-                const canGenerate = scope === 'global' && uploadedFile !== null;
-                const disabledReason =
-                  scope !== 'global'
+                const canGenerate =
+                  scope === 'global' &&
+                  uploadedFile !== null &&
+                  customYear !== null &&
+                  selectedReport === null;
+                const disabledReason = selectedReport
+                  ? 'This reporting year already has a generated report'
+                  : scope !== 'global'
                     ? 'Regional generation is not available yet'
-                    : 'Upload a source document to continue';
+                    : customYear === null
+                      ? 'Select a reporting year to continue'
+                      : 'Upload a source document to continue';
                 return (
                   <button
                     type="button"
                     disabled={!canGenerate}
-                    onClick={() => canGenerate && setIsGenerating(true)}
+                    onClick={() => {
+                      if (!canGenerate) return;
+                      triggerGenerate();
+                    }}
                     className="btn bp"
                     title={canGenerate ? undefined : disabledReason}
                     style={{
@@ -539,161 +938,149 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* Report cards — hidden for now; will render real reports from API later. */}
-      {/*
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 14 }}>
-        {reportData.map((r, i) => (
-          <div key={i} className="esg-rpt-card" onClick={() => setExpandedReport(expandedReport === i ? null : i)}>
-            <div style={{ background: r.gradient, padding: 18, position: 'relative', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 6 }}>{r.period}</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', marginBottom: 8 }}>{r.title}</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{ fontSize: 32, fontWeight: 800, color: '#fff', fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{r.score}</span>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,.5)' }}>OVERALL</span>
-                <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,.2)', borderRadius: 2, overflow: 'hidden', marginLeft: 8 }}><div style={{ width: `${r.score}%`, height: '100%', background: 'rgba(255,255,255,.6)', borderRadius: 2 }} /></div>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,.6)' }}>{r.score}/100</span>
+      {/* Generated-report detail view — driven by GET /.../coverage. */}
+      {hasGenerated && coverage && (() => {
+        const summary = coverage.summary;
+        const missing = coverage.indicators.filter((i) => i.status === 'NOT_DISCLOSED');
+        return (
+          <div style={{ marginTop: 4 }}>
+            {/* Header bar */}
+            <div style={{ background: 'linear-gradient(135deg,#1A1D2E,#2D3154)', borderRadius: 14, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <ScoreRing score={coveragePercent(summary.found_count, summary.total_indicators)} size={52} />
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, background: '#22C55E', color: '#fff', padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>★ Report Generated</span>
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>
+                    ESG Sustainability Report — {formatPeriod(coverage.period)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>
+                    {summary.found_count} of {summary.total_indicators} indicators disclosed · Disclosure rate {Math.round((summary.disclosure_rate || 0) * 100)}%
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
+                    {coverage.frameworks.map((fw) => (
+                      <span key={fw} style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.8)' }}>{fw}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', background: 'rgba(255,255,255,.08)', borderRadius: 12, padding: '10px 18px', border: '1px solid rgba(255,255,255,.1)' }}>
+                <div style={{ display: 'flex', gap: 14, alignItems: 'baseline' }}>
+                  <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#22C55E' }}>{summary.found_count}</div></div>
+                  <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#EF4444' }}>{summary.not_disclosed_count}</div></div>
+                </div>
+                <div style={{ fontSize: 9, color: 'rgba(255,255,255,.4)', marginTop: 2 }}>Disclosed &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Gaps</div>
               </div>
             </div>
-            <div style={{ padding: '12px 18px', display: 'flex', justifyContent: 'space-around' }}>
-              {[{ label: 'ENV', val: r.env, color: '#22C55E' }, { label: 'SOC', val: r.soc, color: '#0891B2' }, { label: 'GOV', val: r.gov, color: '#7C3AED' }].map(p => (
-                <div key={p.label} style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: p.color, fontFamily: "'DM Mono',monospace" }}>{p.val}</div><div style={{ fontSize: 9, color: '#9BA3C4', fontWeight: 700, textTransform: 'uppercase' }}>{p.label}</div></div>
-              ))}
+
+            {/* Three pillar sections driven by coverage.indicators + by_pillar */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 14 }}>
+              {(['E', 'S', 'G'] as const).map((pk) => {
+                const style = PILLAR_STYLES[pk];
+                const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
+                const coveragePct = coveragePercent(p.found, p.total);
+                const score = coveragePct;
+                const pillarIndicators = coverage.indicators.filter(
+                  (i) => pillarBaseKey(i.pillar) === pk,
+                );
+                return (
+                  <div key={pk} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
+                    <div style={{ background: style.gradient, padding: '14px 16px', color: '#fff' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>
+                        {style.emoji} {style.label}
+                      </div>
+                      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1, marginBottom: 8 }}>{score}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{p.found}<br /><span style={{ fontSize: 8, opacity: .6 }}>FOUND</span></span>
+                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{p.not_disclosed}<br /><span style={{ fontSize: 8, opacity: .6 }}>MISSING</span></span>
+                        <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{coveragePct}%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
+                      </div>
+                    </div>
+                    <div style={{ padding: '8px 14px', maxHeight: 420, overflowY: 'auto' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
+                        {coverage.frameworks.join(' / ')} metrics
+                      </div>
+                      {pillarIndicators.length === 0 ? (
+                        <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No indicators for this pillar.</div>
+                      ) : (
+                        pillarIndicators.map((ind) => {
+                          const isFound = ind.status === 'FOUND';
+                          const isMissing = ind.status === 'NOT_DISCLOSED';
+                          return (
+                            <div
+                              key={ind.framework_indicator_id}
+                              style={{ display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #ECEEF8', fontSize: 11, gap: 8 }}
+                            >
+                              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+                                {ind.framework} {ind.source_code}
+                              </span>
+                              <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ind.indicator_label}>
+                                {ind.indicator_label}
+                              </span>
+                              <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E' }}>
+                                {indicatorDisplayValue(ind)}
+                              </span>
+                              {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2 }}>{ind.unit}</span>}
+                              {isFound ? (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+                              ) : isMissing ? (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+                              ) : (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{ padding: '8px 18px 12px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
-              <span style={{ color: '#4040C8', fontWeight: 700 }}>{r.metrics} metrics</span>
-              <span style={{ color: '#EF4444', fontWeight: 700 }}>{r.gaps}</span>
-              <span style={{ color: '#9BA3C4' }}>Generated {r.date}</span>
-            </div>
+
+            {/* Missing Metrics — Impact Analysis */}
+            {missing.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Missing Metrics — Impact Analysis</span>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
+                    {missing.length} {missing.length === 1 ? 'gap' : 'gaps'}
+                  </span>
+                </div>
+                {missing.slice(0, 5).map((mm) => (
+                  <div
+                    key={mm.framework_indicator_id}
+                    style={{ background: '#fff', border: '1px solid #E2E4F0', borderLeft: '4px solid #EF4444', borderRadius: 12, padding: '14px 18px', marginBottom: 10 }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+                          {mm.indicator_label} <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>({mm.framework} {mm.source_code})</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: '#5A6080' }}>
+                          {mm.esg_category} · {mm.framework} · {mm.data_type.replace(/_/g, ' ')}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: '#EF4444', color: '#fff' }}>CRITICAL</span>
+                    </div>
+                    <p style={{ fontSize: 11, color: '#5A6080', lineHeight: 1.5, marginBottom: 10 }}>
+                      Not disclosed in the uploaded documents. Add evidence for this indicator to raise the {PILLAR_STYLES[pillarBaseKey(mm.pillar) as 'E' | 'S' | 'G']?.label ?? 'overall'} pillar score.
+                    </p>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: 'none', background: '#059669', color: '#fff', cursor: 'pointer' }}>Generate Question</button>
+                      <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: '1px solid #E2E4F0', background: '#fff', color: '#1A1D2E', cursor: 'pointer' }}>View Template</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ))}
-      </div>
-      */}
-
-      {/* Expanded Report Detail View */}
-      {expandedReport !== null && (
-        <div style={{ marginTop: 18 }}>
-          {(() => {
-            const r = reportData[expandedReport];
-            const metricsFound = parseInt(r.metrics.split('/')[0]);
-            const metricsTotal = parseInt(r.metrics.split('/')[1]);
-            const gapsCount = parseInt(r.gaps);
-            return (
-              <>
-                {/* Header bar */}
-                <div style={{ background: 'linear-gradient(135deg,#1A1D2E,#2D3154)', borderRadius: 14, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                    <ScoreRing score={r.score} size={52} />
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, background: '#22C55E', color: '#fff', padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>★ Report Generated</span>
-                      </div>
-                      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>ESG Sustainability Report — {r.period.split('·')[0].trim()}</div>
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>{r.company} · {metricsFound} of {metricsTotal} metrics disclosed · Confidence {r.confidence}%</div>
-                      <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
-                        {r.frameworks.map(fw => (
-                          <span key={fw} style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.8)' }}>{fw}</span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'center', background: 'rgba(255,255,255,.08)', borderRadius: 12, padding: '10px 18px', border: '1px solid rgba(255,255,255,.1)' }}>
-                    <div style={{ display: 'flex', gap: 14, alignItems: 'baseline' }}>
-                      <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#22C55E' }}>{metricsFound}</div></div>
-                      <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#EF4444' }}>{gapsCount}</div></div>
-                    </div>
-                    <div style={{ fontSize: 9, color: 'rgba(255,255,255,.4)', marginTop: 2 }}>Disclosed &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Gaps</div>
-                  </div>
-                </div>
-
-                {/* Three pillar sections */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 14 }}>
-                  {/* Environmental */}
-                  <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
-                    <div style={{ background: 'linear-gradient(135deg,#065F46,#059669)', padding: '14px 16px', color: '#fff' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>🌿 Environmental</div>
-                      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1, marginBottom: 8 }}>{r.env}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>10<br /><span style={{ fontSize: 8, opacity: .6 }}>FOUND</span></span>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>2<br /><span style={{ fontSize: 8, opacity: .6 }}>MISSING</span></span>
-                        <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>83%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
-                      </div>
-                    </div>
-                    <div style={{ padding: '8px 14px' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>GRI 300 Series Metrics</div>
-                      {envMetrics.map((m, i) => <MetricRow key={i} m={m} />)}
-                    </div>
-                  </div>
-
-                  {/* Social */}
-                  <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
-                    <div style={{ background: 'linear-gradient(135deg,#0369A1,#0891B2)', padding: '14px 16px', color: '#fff' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>👥 Social</div>
-                      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1, marginBottom: 8 }}>{r.soc}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>11<br /><span style={{ fontSize: 8, opacity: .6 }}>FOUND</span></span>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>1<br /><span style={{ fontSize: 8, opacity: .6 }}>MISSING</span></span>
-                        <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>92%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
-                      </div>
-                    </div>
-                    <div style={{ padding: '8px 14px' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>GRI 400 Series Metrics</div>
-                      {socMetrics.map((m, i) => <MetricRow key={i} m={m} />)}
-                    </div>
-                  </div>
-
-                  {/* Governance */}
-                  <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
-                    <div style={{ background: 'linear-gradient(135deg,#4C1D95,#7C3AED)', padding: '14px 16px', color: '#fff' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>🏛 Governance</div>
-                      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1, marginBottom: 8 }}>{r.gov}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>9<br /><span style={{ fontSize: 8, opacity: .6 }}>FOUND</span></span>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>2<br /><span style={{ fontSize: 8, opacity: .6 }}>MISSING</span></span>
-                        <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>75%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
-                      </div>
-                    </div>
-                    <div style={{ padding: '8px 14px' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>GRI 200 / CMA CGR Metrics</div>
-                      {govMetrics.map((m, i) => <MetricRow key={i} m={m} />)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Missing Metrics — Impact Analysis */}
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
-                      <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Missing Metrics — Impact Analysis</span>
-                    </div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>{gapsCount} critical gaps · ~27 pts potential</span>
-                  </div>
-                  {missingMetrics.map((mm, i) => (
-                    <div key={i} style={{ background: '#fff', border: '1px solid #E2E4F0', borderLeft: `4px solid ${mm.severity === 'CRITICAL' ? '#EF4444' : '#F59E0B'}`, borderRadius: 12, padding: '14px 18px', marginBottom: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>{mm.title}</div>
-                          <div style={{ fontSize: 10, color: '#5A6080' }}>{mm.category}</div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>{mm.impact}</span>
-                          <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: mm.severity === 'CRITICAL' ? '#EF4444' : '#F59E0B', color: '#fff' }}>{mm.severity}</span>
-                        </div>
-                      </div>
-                      <p style={{ fontSize: 11, color: '#5A6080', lineHeight: 1.5, marginBottom: 10 }}>{mm.desc}</p>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: 'none', background: '#059669', color: '#fff', cursor: 'pointer' }}>Generate Question</button>
-                        <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: '1px solid #E2E4F0', background: '#fff', color: '#1A1D2E', cursor: 'pointer' }}>View Template</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
+        );
+      })()}
       </>
       )}
     </div>

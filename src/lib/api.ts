@@ -34,6 +34,32 @@ export function setAuthToken(token: string | null): void {
   else localStorage.setItem(TOKEN_STORAGE_KEY, token);
 }
 
+// Decode the base64url-encoded payload of a JWT. Returns null on any failure.
+// The signature is NOT verified — we trust the backend's auth middleware to
+// reject forgeries; this is purely for reading claims the server put there.
+export function parseJwtPayload<T = Record<string, unknown>>(
+  token: string,
+): T | null {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const json =
+      typeof atob === "function"
+        ? atob(padded)
+        : Buffer.from(padded, "base64").toString("binary");
+    const decoded = decodeURIComponent(
+      Array.from(json)
+        .map((c) => `%${("00" + c.charCodeAt(0).toString(16)).slice(-2)}`)
+        .join(""),
+    );
+    return JSON.parse(decoded) as T;
+  } catch {
+    return null;
+  }
+}
+
 function handleUnauthorized() {
   logout();
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
@@ -469,10 +495,22 @@ export async function login(
 ): Promise<LoginResponse> {
   const res = await auth.login<LoginResponse>({ email, password });
   setAuthToken(res.access_token);
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(res.user));
+
+  // Every user belongs to a company. If the login payload's user object didn't
+  // surface company_id, read it from the JWT claims so the rest of the app can
+  // rely on `useAuth().user.company_id`.
+  const user: AuthUser = { ...res.user };
+  if (user.company_id == null) {
+    const claims = parseJwtPayload<{ company_id?: string | null }>(
+      res.access_token,
+    );
+    if (claims && "company_id" in claims) user.company_id = claims.company_id;
   }
-  return res;
+
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+  }
+  return { ...res, user };
 }
 
 export function logout(): void {
@@ -490,7 +528,19 @@ export function getStoredUser(): AuthUser | null {
   const raw = localStorage.getItem(USER_STORAGE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as AuthUser;
+    const user = JSON.parse(raw) as AuthUser;
+    if (user.company_id != null) return user;
+
+    // Backfill from the JWT for sessions saved before company_id was captured.
+    const token = getAuthToken();
+    if (!token) return user;
+    const claims = parseJwtPayload<{ company_id?: string | null }>(token);
+    if (claims && "company_id" in claims) {
+      const merged = { ...user, company_id: claims.company_id };
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
+      return merged;
+    }
+    return user;
   } catch {
     return null;
   }
