@@ -23,11 +23,7 @@ const API_BASE_URL = (
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
 
-// ngrok free tier serves an HTML interstitial to non-browser-UA requests;
-// attaching this header tells it to pass the call through to the backend.
-const DEFAULT_REQUEST_HEADERS: Record<string, string> = {
-  "ngrok-skip-browser-warning": "true",
-};
+const DEFAULT_REQUEST_HEADERS: Record<string, string> = {};
 
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") return null;

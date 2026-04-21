@@ -13,12 +13,9 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       "/api": {
-        target: "https://reliably-unawake-strudel.ngrok-free.dev",
+        target:
+          "https://centrion-backend-gbe4a7a7d2h5dkde.canadacentral-01.azurewebsites.net",
         changeOrigin: true,
-        secure: false,
-        // ngrok free tier otherwise serves an HTML interstitial to non-browser
-        // requests; this header tells it to pass through to the backend.
-        headers: { "ngrok-skip-browser-warning": "true" },
       },
     },
   },

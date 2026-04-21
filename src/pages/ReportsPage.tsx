@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getSectors, reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Sector } from '@/types/company';
@@ -308,6 +309,89 @@ export default function ReportsPage() {
 
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Dashboard "Generate ESG Report" modal hands off a payload here. We show
+  // the full-width loading screen and run the same generate → coverage chain
+  // the rest of this page uses, then clear the router state.
+  useEffect(() => {
+    const state = location.state as
+      | {
+          pendingGenerate?: {
+            year: number;
+            sector_id: string;
+            scope_type: string;
+            framework_codes: string[];
+            file: File;
+          };
+        }
+      | null;
+    const pending = state?.pendingGenerate;
+    if (!pending || !companyId) return;
+
+    const requestId = ++genRequestIdRef.current;
+    setGenError(null);
+    setGenWarning(null);
+    setHasGenerated(false);
+    setCoverage(null);
+    setExpandedReport(null);
+    setIsGenerating(true);
+
+    let alreadyProcessedWarning: string | null = null;
+
+    reportsApi
+      .generate<GenerateReportResponse>(companyId, {
+        files: [pending.file],
+        year: pending.year,
+        sector_id: pending.sector_id,
+        scope_type: pending.scope_type,
+        report_type: 'esg',
+        framework_codes: pending.framework_codes,
+      })
+      .then((gen) => {
+        if (requestId !== genRequestIdRef.current) return null;
+        if (!gen?.report_id) {
+          throw new Error('Report generated but no report_id returned.');
+        }
+        const skipped = (gen.documents ?? []).filter(
+          (d) => d.status === 'skipped' && d.reason === 'file already processed',
+        );
+        if (skipped.length > 0) {
+          const names = skipped.map((d) => d.filename).join(', ');
+          alreadyProcessedWarning =
+            skipped.length === 1
+              ? `"${names}" was already processed. Showing the existing report.`
+              : `These documents were already processed: ${names}. Showing the existing report.`;
+        }
+        return reportsApi.getCoverage<CoverageResponse>(companyId, gen.report_id);
+      })
+      .then((cov) => {
+        if (cov == null) return;
+        if (requestId !== genRequestIdRef.current) return;
+        setCoverage(cov);
+        setIsGenerating(false);
+        setHasGenerated(true);
+        setExpandedReport(0);
+        if (alreadyProcessedWarning) {
+          setGenWarning(alreadyProcessedWarning);
+          setGenOpen(true);
+        } else {
+          setGenWarning(null);
+          setGenOpen(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (requestId !== genRequestIdRef.current) return;
+        setIsGenerating(false);
+        setGenError(
+          err instanceof Error ? err.message : 'Generation failed. Please try again.',
+        );
+      });
+
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, companyId]);
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
@@ -813,7 +897,14 @@ export default function ReportsPage() {
 
             {/* ESG Frameworks — dynamic based on scope */}
             <div style={{ marginBottom: 18 }}>
-              <label className="fl-label">ESG Frameworks {scope === 'regional' && selectedCountry && <span style={{ fontWeight: 400, textTransform: 'none', color: '#4040C8' }}>· {selectedCountry}</span>}</label>
+              <label className="fl-label">
+                ESG Frameworks <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
+                {scope === 'regional' && selectedCountry && (
+                  <span style={{ fontWeight: 400, textTransform: 'none', color: '#4040C8' }}>
+                    {' '}· {selectedCountry}
+                  </span>
+                )}
+              </label>
               {availableFrameworks.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
                   {availableFrameworks.map(fw => {
@@ -1020,26 +1111,31 @@ export default function ReportsPage() {
                   an existing report in "Generate from DB" mode. Upload-new-
                   documents flow for existing reports is not wired yet. */}
               {(() => {
+                const hasFramework = checkedFw.length > 0;
                 const canGenerateNew =
                   scope === 'global' &&
                   selectedReport === null &&
                   customYear !== null &&
-                  uploadedFile !== null;
+                  uploadedFile !== null &&
+                  hasFramework;
                 const canGenerateFromDb =
                   scope === 'global' &&
                   selectedReport !== null &&
-                  existingReportSource === 'db';
+                  existingReportSource === 'db' &&
+                  hasFramework;
                 const canGenerate = canGenerateNew || canGenerateFromDb;
                 const disabledReason =
                   scope !== 'global'
                     ? 'Regional generation is not available yet'
                     : selectedReport !== null && existingReportSource === 'upload'
                       ? 'Uploading new documents for an existing report is not available yet'
-                      : selectedReport === null && customYear === null
-                        ? 'Select a reporting year to continue'
-                        : selectedReport === null && uploadedFile === null
-                          ? 'Upload a source document to continue'
-                          : undefined;
+                      : !hasFramework
+                        ? 'Select at least one ESG framework to continue'
+                        : selectedReport === null && customYear === null
+                          ? 'Select a reporting year to continue'
+                          : selectedReport === null && uploadedFile === null
+                            ? 'Upload a source document to continue'
+                            : undefined;
                 return (
                   <button
                     type="button"
