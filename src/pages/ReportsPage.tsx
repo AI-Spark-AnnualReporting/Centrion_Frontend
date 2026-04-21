@@ -66,8 +66,27 @@ function indicatorDisplayValue(i: CoverageIndicator): string {
   return '—';
 }
 
-function pillarBaseKey(p: string): 'E' | 'S' | 'G' | 'OTHER' {
-  if (p === 'E' || p === 'S' || p === 'G') return p;
+// Display order: numeric values first, then booleans, then narratives,
+// then everything else, and finally NOT_DISCLOSED (missing) at the end.
+function indicatorSortRank(i: CoverageIndicator): number {
+  if (i.status === 'NOT_DISCLOSED') return 4;
+  if (i.value !== null && i.value !== undefined) return 0;
+  if (i.bool_value !== null && i.bool_value !== undefined) return 1;
+  if (i.text_value !== null && i.text_value !== undefined && i.text_value !== '') return 2;
+  return 3;
+}
+
+function sortIndicators(list: CoverageIndicator[]): CoverageIndicator[] {
+  return [...list].sort((a, b) => {
+    const rankDiff = indicatorSortRank(a) - indicatorSortRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    // Stable secondary order by source code for predictable display.
+    return a.source_code.localeCompare(b.source_code, undefined, { numeric: true });
+  });
+}
+
+function pillarBaseKey(p: string): 'E' | 'S' | 'G' | 'ESG' | 'OTHER' {
+  if (p === 'E' || p === 'S' || p === 'G' || p === 'ESG') return p;
   return 'OTHER';
 }
 
@@ -77,7 +96,7 @@ function coveragePercent(found: number, total: number): number {
 }
 
 const PILLAR_STYLES: Record<
-  'E' | 'S' | 'G',
+  'E' | 'S' | 'G' | 'ESG',
   { label: string; emoji: string; gradient: string; accent: string }
 > = {
   E: {
@@ -97,6 +116,12 @@ const PILLAR_STYLES: Record<
     emoji: '🏛',
     gradient: 'linear-gradient(135deg,#4C1D95,#7C3AED)',
     accent: '#7C3AED',
+  },
+  ESG: {
+    label: 'Universal (ESG)',
+    emoji: '♻️',
+    gradient: 'linear-gradient(135deg,#1E293B,#4040C8)',
+    accent: '#4040C8',
   },
 };
 
@@ -276,6 +301,10 @@ export default function ReportsPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // When an existing report is selected, user chooses between reloading from
+  // the DB or attaching more documents to that report.
+  const [existingReportSource, setExistingReportSource] =
+    useState<'db' | 'upload'>('db');
 
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
@@ -361,9 +390,10 @@ export default function ReportsPage() {
       setIsAddingNewPeriod(true);
       return;
     }
-    // User picked an existing report — auto-fill form, disable Generate.
+    // User picked an existing report — auto-fill form; source defaults to DB.
     setCustomYear(null);
     setSelectedReportId(value);
+    setExistingReportSource('db');
     const report = existingReports.find((r) => r.id === value);
     if (report) applyReportToForm(report);
   };
@@ -398,21 +428,50 @@ export default function ReportsPage() {
   // We ignore GeneratingScreen's own animation timer — transitions are driven
   // by the response from POST /api/v1/reports/{company_id}/generate.
   const [genError, setGenError] = useState<string | null>(null);
+  const [genWarning, setGenWarning] = useState<string | null>(null);
   const genRequestIdRef = useRef(0);
 
   const triggerGenerate = () => {
-    if (
-      !companyId ||
-      scope !== 'global' ||
-      customYear == null ||
-      selectedReport !== null ||
-      !uploadedFile
-    ) {
+    if (!companyId || scope !== 'global') return;
+
+    // Branch A — existing report + "Generate report from DB": skip /generate
+    // and render the stored coverage directly. Loading screen stays up until
+    // /coverage responds.
+    if (selectedReport && existingReportSource === 'db') {
+      const requestId = ++genRequestIdRef.current;
+      setGenError(null);
+      setGenWarning(null);
+      setHasGenerated(false);
+      setCoverage(null);
+      setExpandedReport(null);
+      setIsGenerating(true);
+
+      reportsApi
+        .getCoverage<CoverageResponse>(companyId, selectedReport.id)
+        .then((cov) => {
+          if (requestId !== genRequestIdRef.current) return;
+          setCoverage(cov);
+          setIsGenerating(false);
+          setHasGenerated(true);
+          setGenOpen(false);
+          setExpandedReport(0);
+        })
+        .catch((err: unknown) => {
+          if (requestId !== genRequestIdRef.current) return;
+          setIsGenerating(false);
+          setGenError(
+            err instanceof Error ? err.message : 'Failed to load report from DB.',
+          );
+        });
       return;
     }
 
+    // Branch B — new report: requires a year picked via "+ Add new…" + a file.
+    if (customYear == null || selectedReport !== null || !uploadedFile) return;
+
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
+    setGenWarning(null);
     setHasGenerated(false);
     setCoverage(null);
     setExpandedReport(null);
@@ -421,6 +480,9 @@ export default function ReportsPage() {
     // The dropdown displays "None" by default, but the backend requires a
     // valid sector_id — fall back to the first loaded sector.
     const sectorIdForApi = selectedSectorId || sectors[0]?.id || '';
+
+    // Captured inside the chain so we can surface it after /coverage resolves.
+    let alreadyProcessedWarning: string | null = null;
 
     reportsApi
       .generate<GenerateReportResponse>(companyId, {
@@ -436,6 +498,19 @@ export default function ReportsPage() {
         if (!gen?.report_id) {
           throw new Error('Report generated but no report_id returned.');
         }
+
+        // Detect files the backend skipped because they were already processed.
+        const skipped = (gen.documents ?? []).filter(
+          (d) => d.status === 'skipped' && d.reason === 'file already processed',
+        );
+        if (skipped.length > 0) {
+          const names = skipped.map((d) => d.filename).join(', ');
+          alreadyProcessedWarning =
+            skipped.length === 1
+              ? `"${names}" was already processed. Showing the existing report.`
+              : `These documents were already processed: ${names}. Showing the existing report.`;
+        }
+
         // Chain: pull the indicator coverage so we can render the detail view.
         return reportsApi.getCoverage<CoverageResponse>(companyId, gen.report_id);
       })
@@ -445,8 +520,17 @@ export default function ReportsPage() {
         setCoverage(cov);
         setIsGenerating(false);
         setHasGenerated(true);
-        setGenOpen(false);
         setExpandedReport(0);
+        if (alreadyProcessedWarning) {
+          // Redirect the user back to the form so they see the explanation;
+          // still render the returned report below.
+          setGenWarning(alreadyProcessedWarning);
+          setGenOpen(true);
+          setUploadedFile(null);
+        } else {
+          setGenWarning(null);
+          setGenOpen(false);
+        }
       })
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -768,9 +852,35 @@ export default function ReportsPage() {
               )}
             </div>
 
-            <div style={{ marginBottom: 18 }}>
+            {selectedReport && (
+              <div style={{ marginBottom: 18 }}>
+                <label className="fl-label">Source</label>
+                <select
+                  className="inp sel"
+                  value={existingReportSource}
+                  onChange={(e) =>
+                    setExistingReportSource(e.target.value as 'db' | 'upload')
+                  }
+                >
+                  <option value="db">Generate report from DB</option>
+                  <option value="upload">Upload new documents</option>
+                </select>
+              </div>
+            )}
+            <div
+              style={{
+                marginBottom: 18,
+                // Hide the upload field when the user wants to use DB data only.
+                display: selectedReport && existingReportSource === 'db' ? 'none' : undefined,
+              }}
+            >
               <label className="fl-label">
-                Upload Source Document <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
+                Upload Source Document{!selectedReport && (
+                  <>
+                    {' '}
+                    <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
+                  </>
+                )}{' '}
                 <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
                   (PDF, DOCX, TXT, CSV, XLSX — one file)
                 </span>
@@ -888,21 +998,48 @@ export default function ReportsPage() {
                 {genError}
               </div>
             )}
+            {genWarning && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: 12,
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(245,158,11,.08)',
+                  border: '1px solid rgba(245,158,11,.3)',
+                  color: '#B4730B',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {genWarning}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              {/* Enabled only when creating a new report: Global scope + uploaded file + chosen year. */}
+              {/* Enabled for either: a brand-new report (Global + file + year) or
+                  an existing report in "Generate from DB" mode. Upload-new-
+                  documents flow for existing reports is not wired yet. */}
               {(() => {
-                const canGenerate =
+                const canGenerateNew =
                   scope === 'global' &&
-                  uploadedFile !== null &&
+                  selectedReport === null &&
                   customYear !== null &&
-                  selectedReport === null;
-                const disabledReason = selectedReport
-                  ? 'This reporting year already has a generated report'
-                  : scope !== 'global'
+                  uploadedFile !== null;
+                const canGenerateFromDb =
+                  scope === 'global' &&
+                  selectedReport !== null &&
+                  existingReportSource === 'db';
+                const canGenerate = canGenerateNew || canGenerateFromDb;
+                const disabledReason =
+                  scope !== 'global'
                     ? 'Regional generation is not available yet'
-                    : customYear === null
-                      ? 'Select a reporting year to continue'
-                      : 'Upload a source document to continue';
+                    : selectedReport !== null && existingReportSource === 'upload'
+                      ? 'Uploading new documents for an existing report is not available yet'
+                      : selectedReport === null && customYear === null
+                        ? 'Select a reporting year to continue'
+                        : selectedReport === null && uploadedFile === null
+                          ? 'Upload a source document to continue'
+                          : undefined;
                 return (
                   <button
                     type="button"
@@ -941,7 +1078,6 @@ export default function ReportsPage() {
       {/* Generated-report detail view — driven by GET /.../coverage. */}
       {hasGenerated && coverage && (() => {
         const summary = coverage.summary;
-        const missing = coverage.indicators.filter((i) => i.status === 'NOT_DISCLOSED');
         return (
           <div style={{ marginTop: 4 }}>
             {/* Header bar */}
@@ -981,8 +1117,12 @@ export default function ReportsPage() {
                 const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
                 const coveragePct = coveragePercent(p.found, p.total);
                 const score = coveragePct;
-                const pillarIndicators = coverage.indicators.filter(
-                  (i) => pillarBaseKey(i.pillar) === pk,
+                // Narrative (text_block) indicators are rendered in the dedicated
+                // "Narrative Disclosures" section below — hide them from pillar cards.
+                const pillarIndicators = sortIndicators(
+                  coverage.indicators.filter(
+                    (i) => pillarBaseKey(i.pillar) === pk && i.data_type !== 'text_block',
+                  ),
                 );
                 return (
                   <div key={pk} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
@@ -1039,45 +1179,143 @@ export default function ReportsPage() {
               })}
             </div>
 
-            {/* Missing Metrics — Impact Analysis */}
-            {missing.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
-                    <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Missing Metrics — Impact Analysis</span>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
-                    {missing.length} {missing.length === 1 ? 'gap' : 'gaps'}
-                  </span>
-                </div>
-                {missing.slice(0, 5).map((mm) => (
-                  <div
-                    key={mm.framework_indicator_id}
-                    style={{ background: '#fff', border: '1px solid #E2E4F0', borderLeft: '4px solid #EF4444', borderRadius: 12, padding: '14px 18px', marginBottom: 10 }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
-                          {mm.indicator_label} <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>({mm.framework} {mm.source_code})</span>
-                        </div>
-                        <div style={{ fontSize: 10, color: '#5A6080' }}>
-                          {mm.esg_category} · {mm.framework} · {mm.data_type.replace(/_/g, ' ')}
-                        </div>
+            {/* ESG (Universal) — full-width card, expanded layout */}
+            {(() => {
+              const pk = 'ESG' as const;
+              const style = PILLAR_STYLES[pk];
+              const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
+              if (p.total === 0) return null;
+              const coveragePct = coveragePercent(p.found, p.total);
+              const score = coveragePct;
+              // Narrative (text_block) indicators are rendered in the dedicated
+              // "Narrative Disclosures" section below — hide them from this card.
+              const pillarIndicators = sortIndicators(
+                coverage.indicators.filter(
+                  (i) => pillarBaseKey(i.pillar) === pk && i.data_type !== 'text_block',
+                ),
+              );
+              return (
+                <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', marginBottom: 14 }}>
+                  <div style={{ background: style.gradient, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', gap: 24 }}>
+                    <div style={{ flex: '0 0 auto' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>
+                        {style.emoji} {style.label}
                       </div>
-                      <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: '#EF4444', color: '#fff' }}>CRITICAL</span>
+                      <div style={{ fontSize: 40, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}</div>
+                      <div style={{ fontSize: 10, opacity: .6, marginTop: 2 }}>Overall coverage</div>
                     </div>
-                    <p style={{ fontSize: 11, color: '#5A6080', lineHeight: 1.5, marginBottom: 10 }}>
-                      Not disclosed in the uploaded documents. Add evidence for this indicator to raise the {PILLAR_STYLES[pillarBaseKey(mm.pillar) as 'E' | 'S' | 'G']?.label ?? 'overall'} pillar score.
-                    </p>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: 'none', background: '#059669', color: '#fff', cursor: 'pointer' }}>Generate Question</button>
-                      <button style={{ padding: '5px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: '1px solid #E2E4F0', background: '#fff', color: '#1A1D2E', cursor: 'pointer' }}>View Template</button>
+                    <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+                      <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
+                        {p.found}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>FOUND</span>
+                      </span>
+                      <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
+                        {p.not_disclosed}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>MISSING</span>
+                      </span>
+                      <span style={{ flex: 2, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
+                        {coveragePct}%<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>COVERAGE</span>
+                      </span>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div style={{ padding: '14px 18px' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
+                      {coverage.frameworks.join(' / ')} universal indicators
+                    </div>
+                    {pillarIndicators.length === 0 ? (
+                      <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No universal indicators for this report.</div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
+                        {pillarIndicators.map((ind) => {
+                          const isFound = ind.status === 'FOUND';
+                          const isMissing = ind.status === 'NOT_DISCLOSED';
+                          return (
+                            <div
+                              key={ind.framework_indicator_id}
+                              style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #ECEEF8', fontSize: 11, gap: 8 }}
+                            >
+                              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+                                {ind.framework} {ind.source_code}
+                              </span>
+                              <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ind.indicator_label}>
+                                {ind.indicator_label}
+                              </span>
+                              <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E' }}>
+                                {indicatorDisplayValue(ind)}
+                              </span>
+                              {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2 }}>{ind.unit}</span>}
+                              {isFound ? (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+                              ) : isMissing ? (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+                              ) : (
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Narrative disclosures — every text_block indicator across all pillars. */}
+            {(() => {
+              const narratives = sortIndicators(
+                coverage.indicators.filter((i) => i.data_type === 'text_block'),
+              );
+              if (narratives.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4040C8' }} />
+                      <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Narrative Disclosures</span>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
+                      {narratives.length} {narratives.length === 1 ? 'indicator' : 'indicators'}
+                    </span>
+                  </div>
+                  {narratives.map((nn) => {
+                    const pk = pillarBaseKey(nn.pillar);
+                    // Use the pillar label the indicator is rendered under, not the
+                    // raw esg_category (which for GRI 200 series says "Economic" even
+                    // though those indicators live under Governance).
+                    const pillarLabel =
+                      pk !== 'OTHER' ? PILLAR_STYLES[pk].label : nn.esg_category;
+                    const pillarLabelForBody =
+                      pk !== 'OTHER' ? PILLAR_STYLES[pk].label : 'overall';
+                    const body =
+                      nn.status === 'NOT_DISCLOSED'
+                        ? `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar score.`
+                        : nn.text_value && nn.text_value.trim().length > 0
+                          ? nn.text_value
+                          : 'Disclosed, but no narrative text was captured.';
+                    return (
+                      <div
+                        key={nn.framework_indicator_id}
+                        style={{ background: '#fff', border: '1px solid #E2E4F0', borderRadius: 12, padding: '14px 18px', marginBottom: 10 }}
+                      >
+                        <div style={{ marginBottom: 4 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+                            {nn.indicator_label}{' '}
+                            <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>
+                              ({nn.framework} {nn.source_code})
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 10, color: '#5A6080' }}>
+                            {pillarLabel} · {nn.framework} · {nn.data_type.replace(/_/g, ' ')}
+                          </div>
+                        </div>
+                        <p style={{ fontSize: 11, color: '#5A6080', lineHeight: 1.5, margin: 0 }}>
+                          {body}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         );
       })()}

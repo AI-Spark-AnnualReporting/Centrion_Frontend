@@ -13,8 +13,12 @@ export default defineConfig(({ mode }) => ({
     },
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: "https://reliably-unawake-strudel.ngrok-free.dev",
         changeOrigin: true,
+        secure: false,
+        // ngrok free tier otherwise serves an HTML interstitial to non-browser
+        // requests; this header tells it to pass through to the backend.
+        headers: { "ngrok-skip-browser-warning": "true" },
       },
     },
   },

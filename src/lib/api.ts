@@ -23,6 +23,12 @@ const API_BASE_URL = (
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
 
+// ngrok free tier serves an HTML interstitial to non-browser-UA requests;
+// attaching this header tells it to pass the call through to the backend.
+const DEFAULT_REQUEST_HEADERS: Record<string, string> = {
+  "ngrok-skip-browser-warning": "true",
+};
+
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") return null;
   return localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -105,7 +111,7 @@ interface RequestOptions {
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = `${API_BASE_URL}${path}${buildQuery(opts.query)}`;
-  const headers: Record<string, string> = { ...(opts.headers ?? {}) };
+  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS, ...(opts.headers ?? {}) };
 
   let body: BodyInit | undefined;
   if (opts.form) {
@@ -556,6 +562,9 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   const token = getToken();
   const headers = new Headers(options.headers);
+  for (const [k, v] of Object.entries(DEFAULT_REQUEST_HEADERS)) {
+    if (!headers.has(k)) headers.set(k, v);
+  }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   if (res.status === 401) handleUnauthorized();
@@ -580,7 +589,10 @@ export async function register(
   try {
     res = await fetch(
       `${API_BASE_URL}/api/v1/auth/register?${query.toString()}`,
-      { method: "POST", headers: { accept: "application/json" } },
+      {
+        method: "POST",
+        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+      },
     );
   } catch {
     throw new Error("Unable to connect. Check your connection.");
@@ -613,7 +625,7 @@ export async function getSectors(): Promise<Sector[]> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
     });
   } catch {
     throw new Error("Unable to connect. Check your connection.");
@@ -638,7 +650,10 @@ export async function createCompany(
   try {
     res = await fetch(
       `${API_BASE_URL}/api/v1/companies/?${query.toString()}`,
-      { method: "POST", headers: { accept: "application/json" } },
+      {
+        method: "POST",
+        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+      },
     );
   } catch {
     throw new Error("Unable to connect. Check your connection.");

@@ -6,7 +6,7 @@ const NAV_ITEMS = [
     section: 'IR System',
     items: [
       { key: 'dashboard', label: 'Command Center', path: '/dashboard', icon: 'grid', badge: null },
-      { key: 'reports', label: 'Reports', path: '/reports', icon: 'doc', badge: { text: '4', cls: 'or' } },
+      { key: 'reports', label: 'Reports', path: '/reports', icon: 'doc', badge: null },
       { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: { text: 'New', cls: 'gn' } },
       { key: 'compliance', label: 'Compliance', path: '/compliance', icon: 'shield', badge: { text: '!', cls: 'rd' } },
       { key: 'ai', label: 'IR Copilot', path: '/ai', icon: 'chat', badge: { text: 'AI', cls: 'tl' } },
