@@ -8,23 +8,52 @@ const STEPS = [
   'Identifying gaps & scoring impacts',
 ];
 
+export type GeneratingPhase = 'running' | 'completed' | 'failed' | 'timeout';
+
 interface GeneratingScreenProps {
   onComplete?: () => void;
   onCancel?: () => void;
+
+  // Poll-driven mode — when `phase` is provided the screen holds on the last
+  // step while "running", finalises on "completed", and swaps to a failure /
+  // timeout card on the other two phases.
+  phase?: GeneratingPhase;
+  errorMessage?: string | null;
+  onRetry?: () => void;
+  onKeepWaiting?: () => void;
+  fileName?: string | null;
 }
 
-export function GeneratingScreen({ onComplete, onCancel }: GeneratingScreenProps) {
+export function GeneratingScreen({
+  onComplete,
+  onCancel,
+  phase,
+  errorMessage,
+  onRetry,
+  onKeepWaiting,
+  fileName,
+}: GeneratingScreenProps) {
+  const isExternallyDriven = phase !== undefined;
   const [activeIdx, setActiveIdx] = useState(0);
   const [doneSteps, setDoneSteps] = useState<number[]>([]);
   const [progress, setProgress] = useState(8);
 
+  // Visual step-through animation. When externally driven, we pause on the
+  // last step (without marking it done) until phase flips to "completed".
   useEffect(() => {
     const stepDuration = 2200;
+    const lastIdx = STEPS.length - 1;
     const timers: number[] = [];
 
     STEPS.forEach((_, i) => {
       timers.push(
         window.setTimeout(() => {
+          if (i === lastIdx && isExternallyDriven) {
+            // Enter the last step but wait for external completion to check it.
+            setActiveIdx(lastIdx);
+            setProgress((p) => Math.max(p, 95));
+            return;
+          }
           setDoneSteps((prev) => [...prev, i]);
           setActiveIdx(i + 1);
           setProgress(Math.round(((i + 1) / STEPS.length) * 100));
@@ -32,32 +61,80 @@ export function GeneratingScreen({ onComplete, onCancel }: GeneratingScreenProps
       );
     });
 
-    // Smooth progress trickle between steps.
     const trickle = window.setInterval(() => {
       setProgress((p) => {
-        const cap = Math.round(((activeIdx + 1) / STEPS.length) * 100) - 2;
+        const cap = isExternallyDriven
+          ? 95
+          : Math.round(((activeIdx + 1) / STEPS.length) * 100) - 2;
         return p < cap ? p + 1 : p;
       });
     }, 180);
     timers.push(trickle);
 
-    timers.push(
-      window.setTimeout(() => {
-        onComplete?.();
-      }, STEPS.length * stepDuration + 600)
-    );
+    // Legacy timer-driven completion for callers that don't pass a phase.
+    if (!isExternallyDriven) {
+      timers.push(
+        window.setTimeout(() => {
+          onComplete?.();
+        }, STEPS.length * stepDuration + 600)
+      );
+    }
 
     return () => timers.forEach((t) => window.clearTimeout(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Poll-driven completion. When phase flips to "completed", finalise the
+  // animation (check every step, snap to 100%) and then fire onComplete.
+  useEffect(() => {
+    if (phase !== 'completed') return;
+    setDoneSteps(STEPS.map((_, i) => i));
+    setActiveIdx(STEPS.length);
+    setProgress(100);
+    const t = window.setTimeout(() => onComplete?.(), 450);
+    return () => window.clearTimeout(t);
+  }, [phase, onComplete]);
+
+  if (phase === 'failed') {
+    return (
+      <ResultCard
+        title="Report generation failed"
+        body={errorMessage ?? 'The pipeline reported an error.'}
+        primaryLabel={onRetry ? 'Try Again' : undefined}
+        onPrimary={onRetry}
+        secondaryLabel="Back to Reports"
+        onSecondary={onCancel}
+        tone="error"
+      />
+    );
+  }
+
+  if (phase === 'timeout') {
+    return (
+      <ResultCard
+        title="Taking longer than expected"
+        body="The pipeline is usually still running on the server — keep waiting, or come back later from Reports."
+        primaryLabel={onKeepWaiting ? 'Keep waiting' : undefined}
+        onPrimary={onKeepWaiting}
+        secondaryLabel="Back to Reports"
+        onSecondary={onCancel}
+        tone="warning"
+      />
+    );
+  }
+
   return (
     <div className="card" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', animation: 'fade-in .4s ease-out' }}>
       <div className="proc-ring" style={{ marginBottom: 18 }} />
       <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1D2E', marginBottom: 4 }}>Generating ESG Report</div>
-      <div style={{ fontSize: 12, color: '#5A6080', marginBottom: 22 }}>
+      <div style={{ fontSize: 12, color: '#5A6080', marginBottom: fileName ? 6 : 22 }}>
         Extracting, mapping & scoring metrics from your documents
       </div>
+      {fileName && (
+        <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 18, fontFamily: "'DM Mono',monospace" }}>
+          {fileName}
+        </div>
+      )}
 
       <div style={{ width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {STEPS.map((txt, i) => {
@@ -89,9 +166,74 @@ export function GeneratingScreen({ onComplete, onCancel }: GeneratingScreenProps
           onClick={onCancel}
           style={{ marginTop: 22, padding: '8px 18px', fontSize: 11, fontWeight: 600, color: '#5A6080', background: 'transparent', border: '1px solid #E2E4F0', borderRadius: 8, cursor: 'pointer' }}
         >
-          Cancel
+          {isExternallyDriven ? 'Run in background' : 'Cancel'}
         </button>
       )}
+    </div>
+  );
+}
+
+// --- Fail / timeout card --------------------------------------------------
+
+interface ResultCardProps {
+  title: string;
+  body: string;
+  primaryLabel?: string;
+  onPrimary?: () => void;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  tone: 'error' | 'warning';
+}
+
+function ResultCard({ title, body, primaryLabel, onPrimary, secondaryLabel, onSecondary, tone }: ResultCardProps) {
+  const iconBg = tone === 'error' ? '#EF4444' : '#F59E0B';
+  return (
+    <div
+      className="card"
+      style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', animation: 'fade-in .4s ease-out' }}
+    >
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          background: iconBg,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 16,
+        }}
+      >
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          {tone === 'error' ? (
+            <path d="M7 7l8 8M15 7l-8 8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          ) : (
+            <path d="M11 6v6M11 16v.01" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          )}
+        </svg>
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1D2E', marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 12, color: '#5A6080', marginBottom: 22, maxWidth: 520 }}>{body}</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {secondaryLabel && (
+          <button
+            type="button"
+            onClick={onSecondary}
+            style={{ padding: '8px 18px', fontSize: 11, fontWeight: 600, color: '#5A6080', background: 'transparent', border: '1px solid #E2E4F0', borderRadius: 8, cursor: 'pointer' }}
+          >
+            {secondaryLabel}
+          </button>
+        )}
+        {primaryLabel && (
+          <button
+            type="button"
+            onClick={onPrimary}
+            style={{ padding: '10px 20px', fontSize: 12, fontWeight: 700, color: '#fff', background: '#4040C8', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+          >
+            {primaryLabel}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

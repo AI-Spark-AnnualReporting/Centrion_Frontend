@@ -15,6 +15,12 @@ import type {
   Sector,
   SectorsResponse,
 } from "@/types/company";
+import type {
+  AgentRun,
+  AsyncPipelineResponse,
+  PipelineConflictBody,
+  PipelineHandle,
+} from "@/types/report";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -137,6 +143,60 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   if (res.status === 401 && opts.auth !== false) handleUnauthorized();
   if (!res.ok) throw new ApiError(res.status, res.statusText, parsed, url);
   return parsed as T;
+}
+
+// POST a FormData to an endpoint that returns either 202 Accepted (new run) or
+// 409 Conflict (existing run) and normalise both into a PipelineHandle.
+// FastAPI may wrap HTTPException bodies under `detail`, so we unwrap defensively.
+async function postPipeline(
+  path: string,
+  form: FormData,
+  query?: QueryParams,
+): Promise<PipelineHandle> {
+  const url = `${API_BASE_URL}${path}${buildQuery(query)}`;
+  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const token = getAuthToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: "POST", headers, body: form });
+  const ct = res.headers.get("content-type") ?? "";
+  const parsed: unknown = ct.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => null);
+
+  if (res.status === 401) handleUnauthorized();
+
+  if (res.status === 202) {
+    const body = parsed as AsyncPipelineResponse;
+    return {
+      runId: body.run_id,
+      pollUrl: body.poll_url,
+      reportId: body.report_id ?? null,
+      startedAt: body.started_at,
+      estimatedDurationSeconds: body.estimated_duration_seconds ?? null,
+      fileCount: body.file_count ?? null,
+      isExisting: false,
+    };
+  }
+
+  if (res.status === 409) {
+    const raw = parsed as { detail?: PipelineConflictBody } & Partial<PipelineConflictBody>;
+    const body: PipelineConflictBody | undefined = raw?.detail ?? (raw as PipelineConflictBody);
+    if (body?.existing_run_id && body?.poll_url) {
+      return {
+        runId: body.existing_run_id,
+        pollUrl: body.poll_url,
+        reportId: null,
+        startedAt: body.started_at,
+        estimatedDurationSeconds: null,
+        fileCount: null,
+        isExisting: true,
+        message: body.message,
+      };
+    }
+  }
+
+  throw new ApiError(res.status, res.statusText, parsed, url);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,15 +327,12 @@ export const companies = {
 // ---------------------------------------------------------------------------
 
 export const documents = {
-  upload: <T = unknown>(companyId: string, body: UploadDocumentsBody) => {
+  // Async: returns 202 with a PipelineHandle; caller should poll agentRuns.get.
+  upload: (companyId: string, body: UploadDocumentsBody): Promise<PipelineHandle> => {
     const fd = new FormData();
     body.files.forEach((f) => fd.append("files", f));
     (body.frameworks ?? ["GRI"]).forEach((v) => fd.append("frameworks", v));
-    return request<T>("/api/v1/documents/upload", {
-      method: "POST",
-      query: { company_id: companyId },
-      form: fd,
-    });
+    return postPipeline("/api/v1/documents/upload", fd, { company_id: companyId });
   },
 
   list: <T = unknown>(companyId: string) =>
@@ -394,7 +451,9 @@ export const reports = {
       { method: "POST", query: { channel } },
     ),
 
-  generate: <T = unknown>(companyId: string, body: GenerateReportBody) => {
+  // Async: returns 202 (new run) or 409 (existing run) normalised to a
+  // PipelineHandle. Caller navigates to the processing screen and polls.
+  generate: (companyId: string, body: GenerateReportBody): Promise<PipelineHandle> => {
     const fd = new FormData();
     body.files.forEach((f) => fd.append("files", f));
     fd.append("year", String(body.year));
@@ -405,22 +464,23 @@ export const reports = {
     if (body.region !== undefined) fd.append("region", body.region);
     if (body.country_id !== undefined) fd.append("country_id", body.country_id);
     (body.regulator_ids ?? []).forEach((v) => fd.append("regulator_ids", v));
-    return request<T>(
+    return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/generate`,
-      { method: "POST", form: fd },
+      fd,
     );
   },
 
-  addDocuments: <T = unknown>(
+  // Async: see generate().
+  addDocuments: (
     companyId: string,
     reportId: string,
     body: AddReportDocumentsBody,
-  ) => {
+  ): Promise<PipelineHandle> => {
     const fd = new FormData();
     body.files.forEach((f) => fd.append("files", f));
-    return request<T>(
+    return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/documents`,
-      { method: "POST", form: fd },
+      fd,
     );
   },
 
@@ -433,6 +493,27 @@ export const reports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/coverage`,
       { query },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Agent runs — polling endpoint for async pipelines kicked off by generate /
+// addDocuments / documents.upload.
+// ---------------------------------------------------------------------------
+
+export const agentRuns = {
+  get: (runId: string, signal?: AbortSignal) =>
+    request<AgentRun>(`/api/v1/agent_runs/${encodeURIComponent(runId)}`, {
+      signal,
+    }),
+
+  // Poll a pre-built URL (e.g. PipelineHandle.pollUrl). The URL may be
+  // absolute or server-root-relative; we strip API_BASE_URL if present.
+  getByPollUrl: (pollUrl: string, signal?: AbortSignal) => {
+    const path = pollUrl.startsWith(API_BASE_URL)
+      ? pollUrl.slice(API_BASE_URL.length)
+      : pollUrl;
+    return request<AgentRun>(path, { signal });
+  },
 };
 
 // ---------------------------------------------------------------------------
