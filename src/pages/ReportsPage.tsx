@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getSectors, reports as reportsApi } from '@/lib/api';
+import {
+  clearActivePipeline,
+  loadActivePipeline,
+  type ActivePipelineRecord,
+} from '@/lib/active-pipeline';
 import { useAuth } from '@/context/AuthContext';
 import type { Sector } from '@/types/company';
 import type {
   CoverageIndicator,
   CoverageResponse,
-  GenerateReportResponse,
+  PipelineOutputSummary,
 } from '@/types/report';
+import type { ProcessingPageState } from './ProcessingPage';
 import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
 
 interface ReportGenerationConfig {
@@ -32,6 +38,52 @@ interface ReportsListResponse {
 // Normalise API period strings like "FY-2026" → "FY 2026" for display.
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
+}
+
+// Rough "3 min" / "2 h" humaniser for the resume-run banner.
+function formatSince(timestampMs: number): string {
+  const diffSec = Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.round(diffSec / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs}h`;
+}
+
+// Turn an async pipeline's per-file result list into a user-facing warning.
+// Top-level status is "completed" even when some files failed/skipped, so the
+// partial-failure story lives inside output_summary.results.
+function buildPartialFailureWarning(
+  summary: PipelineOutputSummary | null,
+  wasReconnected: boolean,
+): string | null {
+  const results = summary?.results ?? [];
+  const failed = results.filter((r) => r.status === 'failed');
+  const skipped = results.filter((r) => r.status === 'skipped');
+  const parts: string[] = [];
+
+  if (failed.length > 0) {
+    const detail = failed
+      .map((r) => (r.error ? `${r.file_name} (${r.error})` : r.file_name))
+      .join(', ');
+    parts.push(
+      failed.length === 1
+        ? `1 file failed to process: ${detail}.`
+        : `${failed.length} files failed to process: ${detail}.`,
+    );
+  }
+  if (skipped.length > 0) {
+    const names = skipped.map((r) => r.file_name).join(', ');
+    parts.push(
+      skipped.length === 1
+        ? `"${names}" was skipped (already processed).`
+        : `Skipped (already processed): ${names}.`,
+    );
+  }
+  if (parts.length === 0 && wasReconnected) {
+    return 'A run was already in progress for this report — reconnected and loaded the result.';
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 // Secondary picker for "+ Add new…" — current year ±10 → 21 options (year numbers only).
@@ -307,6 +359,16 @@ export default function ReportsPage() {
   const [existingReportSource, setExistingReportSource] =
     useState<'db' | 'upload'>('db');
 
+  // Populated from localStorage on mount when a pipeline run is still tracked
+  // as active — lets the user resume watching it from /reports/processing.
+  const [resumableRun, setResumableRun] = useState<ActivePipelineRecord | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setResumableRun(loadActivePipeline());
+  }, []);
+
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const location = useLocation();
@@ -336,12 +398,13 @@ export default function ReportsPage() {
     setHasGenerated(false);
     setCoverage(null);
     setExpandedReport(null);
-    setIsGenerating(true);
 
-    let alreadyProcessedWarning: string | null = null;
+    // Clear the router state early so a refresh of /reports doesn't re-fire
+    // this effect with the same pendingGenerate payload.
+    navigate(location.pathname, { replace: true, state: null });
 
     reportsApi
-      .generate<GenerateReportResponse>(companyId, {
+      .generate(companyId, {
         files: [pending.file],
         year: pending.year,
         sector_id: pending.sector_id,
@@ -349,49 +412,102 @@ export default function ReportsPage() {
         report_type: 'esg',
         framework_codes: pending.framework_codes,
       })
-      .then((gen) => {
-        if (requestId !== genRequestIdRef.current) return null;
-        if (!gen?.report_id) {
-          throw new Error('Report generated but no report_id returned.');
-        }
-        const skipped = (gen.documents ?? []).filter(
-          (d) => d.status === 'skipped' && d.reason === 'file already processed',
-        );
-        if (skipped.length > 0) {
-          const names = skipped.map((d) => d.filename).join(', ');
-          alreadyProcessedWarning =
-            skipped.length === 1
-              ? `"${names}" was already processed. Showing the existing report.`
-              : `These documents were already processed: ${names}. Showing the existing report.`;
-        }
-        return reportsApi.getCoverage<CoverageResponse>(companyId, gen.report_id);
-      })
-      .then((cov) => {
-        if (cov == null) return;
+      .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
-        setCoverage(cov);
-        setIsGenerating(false);
-        setHasGenerated(true);
-        setExpandedReport(0);
-        if (alreadyProcessedWarning) {
-          setGenWarning(alreadyProcessedWarning);
-          setGenOpen(true);
-        } else {
-          setGenWarning(null);
-          setGenOpen(false);
-        }
+        const processingState: ProcessingPageState = {
+          runId: handle.runId,
+          pollUrl: handle.pollUrl,
+          reportId: handle.reportId,
+          companyId,
+          estimatedDurationSeconds: handle.estimatedDurationSeconds,
+          fileName: pending.file.name,
+          isExisting: handle.isExisting,
+          conflictMessage: handle.message,
+        };
+        navigate('/reports/processing', { replace: true, state: processingState });
       })
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
-        setIsGenerating(false);
         setGenError(
           err instanceof Error ? err.message : 'Generation failed. Please try again.',
         );
       });
-
-    navigate(location.pathname, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
+
+  // Returning from /reports/processing — pull coverage + surface any per-file
+  // failures the pipeline reported inside output_summary.results.
+  useEffect(() => {
+    const state = location.state as
+      | {
+          completedRun?: {
+            reportId: string | null;
+            companyId: string | null;
+            outputSummary: PipelineOutputSummary | null;
+            wasReconnected: boolean;
+            coverage?: CoverageResponse | null;
+          };
+        }
+      | null;
+    const completed = state?.completedRun;
+    if (!completed || !completed.reportId || !completed.companyId) return;
+
+    const requestId = ++genRequestIdRef.current;
+    setGenError(null);
+    setGenWarning(null);
+    setHasGenerated(false);
+    setCoverage(null);
+    setExpandedReport(null);
+
+    navigate(location.pathname, { replace: true, state: null });
+
+    const applyResult = (cov: CoverageResponse) => {
+      if (requestId !== genRequestIdRef.current) return;
+      setCoverage(cov);
+      setIsGenerating(false);
+      setHasGenerated(true);
+      setExpandedReport(0);
+
+      // Completed successfully — drop the persisted run so we don't offer to
+      // resume a run that's already done.
+      clearActivePipeline();
+      setResumableRun(null);
+
+      const warning = buildPartialFailureWarning(
+        completed.outputSummary,
+        completed.wasReconnected,
+      );
+      if (warning) {
+        setGenWarning(warning);
+        setGenOpen(true);
+      } else {
+        setGenOpen(false);
+      }
+      setUploadedFile(null);
+    };
+
+    // Fast path — ProcessingPage already fetched the coverage, render directly.
+    if (completed.coverage) {
+      applyResult(completed.coverage);
+      return;
+    }
+
+    // Fallback — fetch coverage ourselves. Only path that still needs the
+    // inline loading state.
+    setIsGenerating(true);
+    reportsApi
+      .getCoverage<CoverageResponse>(completed.companyId, completed.reportId)
+      .then((cov) => applyResult(cov))
+      .catch((err: unknown) => {
+        if (requestId !== genRequestIdRef.current) return;
+        setIsGenerating(false);
+        setGenError(
+          err instanceof Error ? err.message : 'Failed to load completed report.',
+        );
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
@@ -559,66 +675,37 @@ export default function ReportsPage() {
     setHasGenerated(false);
     setCoverage(null);
     setExpandedReport(null);
-    setIsGenerating(true);
 
     // The dropdown displays "None" by default, but the backend requires a
     // valid sector_id — fall back to the first loaded sector.
     const sectorIdForApi = selectedSectorId || sectors[0]?.id || '';
-
-    // Captured inside the chain so we can surface it after /coverage resolves.
-    let alreadyProcessedWarning: string | null = null;
+    const submittedFile = uploadedFile;
 
     reportsApi
-      .generate<GenerateReportResponse>(companyId, {
-        files: [uploadedFile],
+      .generate(companyId, {
+        files: [submittedFile],
         year: customYear,
         sector_id: sectorIdForApi,
         scope_type: scope,
         report_type: 'esg',
         framework_codes: checkedFw.map(frameworkLabelToCode),
       })
-      .then((gen) => {
-        if (requestId !== genRequestIdRef.current) return null;
-        if (!gen?.report_id) {
-          throw new Error('Report generated but no report_id returned.');
-        }
-
-        // Detect files the backend skipped because they were already processed.
-        const skipped = (gen.documents ?? []).filter(
-          (d) => d.status === 'skipped' && d.reason === 'file already processed',
-        );
-        if (skipped.length > 0) {
-          const names = skipped.map((d) => d.filename).join(', ');
-          alreadyProcessedWarning =
-            skipped.length === 1
-              ? `"${names}" was already processed. Showing the existing report.`
-              : `These documents were already processed: ${names}. Showing the existing report.`;
-        }
-
-        // Chain: pull the indicator coverage so we can render the detail view.
-        return reportsApi.getCoverage<CoverageResponse>(companyId, gen.report_id);
-      })
-      .then((cov) => {
-        if (cov == null) return;
+      .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
-        setCoverage(cov);
-        setIsGenerating(false);
-        setHasGenerated(true);
-        setExpandedReport(0);
-        if (alreadyProcessedWarning) {
-          // Redirect the user back to the form so they see the explanation;
-          // still render the returned report below.
-          setGenWarning(alreadyProcessedWarning);
-          setGenOpen(true);
-          setUploadedFile(null);
-        } else {
-          setGenWarning(null);
-          setGenOpen(false);
-        }
+        const processingState: ProcessingPageState = {
+          runId: handle.runId,
+          pollUrl: handle.pollUrl,
+          reportId: handle.reportId,
+          companyId,
+          estimatedDurationSeconds: handle.estimatedDurationSeconds,
+          fileName: submittedFile.name,
+          isExisting: handle.isExisting,
+          conflictMessage: handle.message,
+        };
+        navigate('/reports/processing', { state: processingState });
       })
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
-        setIsGenerating(false);
         setGenError(
           err instanceof Error ? err.message : 'Generation failed. Please try again.',
         );
@@ -723,6 +810,80 @@ export default function ReportsPage() {
         />
       ) : (
       <>
+
+      {resumableRun && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            borderRadius: 10,
+            background: 'rgba(64,64,200,.06)',
+            border: '1px solid rgba(64,64,200,.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div style={{ flex: 1, fontSize: 12, color: '#1A1D2E' }}>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>
+              A report is still processing
+            </div>
+            <div style={{ color: '#5A6080' }}>
+              {resumableRun.fileName
+                ? `"${resumableRun.fileName}" — started ${formatSince(resumableRun.savedAt)} ago.`
+                : `Started ${formatSince(resumableRun.savedAt)} ago.`}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              clearActivePipeline();
+              setResumableRun(null);
+            }}
+            style={{
+              padding: '6px 12px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#5A6080',
+              background: 'transparent',
+              border: '1px solid #E2E4F0',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              navigate('/reports/processing', {
+                state: {
+                  runId: resumableRun.runId,
+                  pollUrl: resumableRun.pollUrl,
+                  reportId: resumableRun.reportId,
+                  companyId: resumableRun.companyId,
+                  estimatedDurationSeconds: resumableRun.estimatedDurationSeconds,
+                  fileName: resumableRun.fileName,
+                  isExisting: true,
+                },
+              });
+            }}
+            style={{
+              padding: '6px 14px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#fff',
+              background: '#4040C8',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            Resume watching
+          </button>
+        </div>
+      )}
 
       {/* Generate New ESG Report — collapsible */}
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
