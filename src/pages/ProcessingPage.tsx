@@ -29,7 +29,8 @@ export default function ProcessingPage() {
   const state = location.state as ProcessingPageState | null;
 
   const pollUrl = state?.pollUrl ?? null;
-  const { state: poll, restart } = usePipelinePoll(pollUrl);
+  const runId = state?.runId ?? null;
+  const { state: poll, restart } = usePipelinePoll(runId, pollUrl);
 
   // Coverage is fetched on this page on completion so the handoff back to
   // /reports renders the report immediately (no intermediate loader flash).
@@ -144,6 +145,7 @@ export default function ProcessingPage() {
       onRetry={() => navigate("/reports", { replace: true })}
       onKeepWaiting={restart}
       fileName={fileNameFor(poll, state)}
+      nodes={poll.nodes}
     />
   );
 }

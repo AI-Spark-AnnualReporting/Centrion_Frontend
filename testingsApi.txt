@@ -1,0 +1,60 @@
+POST
+/api/v1/reports/{company_id}/{report_id}/documents
+Add Report Documents
+
+
+Attach more documents to an existing report.
+
+Scope (year, sector, frameworks, regulators) is read from the report's stored generation_config — the caller never re-enters params. Files go through the same worker pipeline as /generate, with report_id threaded so every downstream row (documents, digital_twin_states, esg_evidence) is stamped with this report.
+
+Parameters
+Try it out
+Name	Description
+company_id *
+string
+(path)
+company_id
+report_id *
+string
+(path)
+report_id
+Request body
+
+multipart/form-data
+files *
+array<string>
+Responses
+Code	Description	Links
+200	
+Successful Response
+
+Media type
+
+application/json
+Controls Accept header.
+Example Value
+Schema
+"string"
+No links
+422	
+Validation Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "detail": [
+    {
+      "loc": [
+        "string",
+        0
+      ],
+      "msg": "string",
+      "type": "string",
+      "input": "string",
+      "ctx": {}
+    }
+  ]
+}

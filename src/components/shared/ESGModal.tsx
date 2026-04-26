@@ -19,7 +19,7 @@ interface ReportsListResponse {
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const GLOBAL_FRAMEWORKS = ['GRI 2021', 'IFRS S1', 'IFRS S2'];
+const GLOBAL_FRAMEWORKS = ['GRI 2021', 'IFRS'];
 const DEFAULT_GLOBAL_CHECKED = ['GRI 2021'];
 const ADD_NEW_SENTINEL = '__add_new__';
 
@@ -48,8 +48,7 @@ function yearFromPeriod(period: string): number | null {
 
 function frameworkLabelToCode(label: string): string {
   if (label.startsWith('GRI')) return 'GRI';
-  if (label === 'IFRS S1') return 'IFRS_S1';
-  if (label === 'IFRS S2') return 'IFRS_S2';
+  if (label === 'IFRS') return 'IFRS';
   return label;
 }
 
@@ -362,13 +361,13 @@ export function ESGModal({ onClose }: ESGModalProps) {
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(3,1fr)',
+                      gridTemplateColumns: 'repeat(2,1fr)',
                       gap: 8,
                       marginTop: 5,
                     }}
                   >
                     {GLOBAL_FRAMEWORKS.map((fw) => {
-                      const isDisabled = fw === 'IFRS S1' || fw === 'IFRS S2';
+                      const isDisabled = fw === 'IFRS';
                       return (
                         <label
                           key={fw}

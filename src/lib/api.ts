@@ -17,6 +17,7 @@ import type {
 } from "@/types/company";
 import type {
   AgentRun,
+  AgentNodesResponse,
   AsyncPipelineResponse,
   PipelineConflictBody,
   PipelineHandle,
@@ -29,7 +30,12 @@ const API_BASE_URL = (
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
 
-const DEFAULT_REQUEST_HEADERS: Record<string, string> = {};
+// `ngrok-skip-browser-warning` bypasses ngrok's HTML interstitial on the free
+// tier. Azure ignores unknown headers, so it's safe to leave on permanently —
+// the backend switches but this header stays.
+const DEFAULT_REQUEST_HEADERS: Record<string, string> = {
+  "ngrok-skip-browser-warning": "true",
+};
 
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") return null;
@@ -514,6 +520,13 @@ export const agentRuns = {
       : pollUrl;
     return request<AgentRun>(path, { signal });
   },
+
+  // Per-agent node rows driving the live timeline on the Processing page.
+  getNodes: (runId: string, signal?: AbortSignal) =>
+    request<AgentNodesResponse>(
+      `/api/v1/agent_runs/${encodeURIComponent(runId)}/nodes`,
+      { signal },
+    ),
 };
 
 // ---------------------------------------------------------------------------
