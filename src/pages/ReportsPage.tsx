@@ -135,9 +135,35 @@ function sortIndicators(list: CoverageIndicator[]): CoverageIndicator[] {
   });
 }
 
+// Narrative sort order: indicators with real captured text first,
+// "Disclosed, but no narrative text was captured" entries last.
+function narrativeSortRank(i: CoverageIndicator): number {
+  if (i.text_value && i.text_value.trim().length > 0) return 0;
+  return 1;
+}
+
+function sortNarratives(list: CoverageIndicator[]): CoverageIndicator[] {
+  return [...list].sort((a, b) => {
+    const rankDiff = narrativeSortRank(a) - narrativeSortRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return a.source_code.localeCompare(b.source_code, undefined, { numeric: true });
+  });
+}
+
 function pillarBaseKey(p: string): 'E' | 'S' | 'G' | 'ESG' | 'OTHER' {
   if (p === 'E' || p === 'S' || p === 'G' || p === 'ESG') return p;
   return 'OTHER';
+}
+
+// Body text for a narrative (text_block) indicator — mirrors the copy used by
+// the standalone narrative section before it was folded into the pillar cards.
+function narrativeBodyText(nn: CoverageIndicator): string {
+  const pk = pillarBaseKey(nn.pillar);
+  const pillarLabelForBody = pk !== 'OTHER' ? PILLAR_STYLES[pk].label : 'overall';
+  if (nn.status === 'NOT_DISCLOSED')
+    return `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar score.`;
+  if (nn.text_value && nn.text_value.trim().length > 0) return nn.text_value;
+  return 'Disclosed, but no narrative text was captured.';
 }
 
 function coveragePercent(found: number, total: number): number {
@@ -329,6 +355,94 @@ function MetricRow({ m }: { m: typeof envMetrics[0] }) {
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
       ) : (
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+      )}
+    </div>
+  );
+}
+
+// Numeric/bool/missing indicator row. Clicking the row expands it to show
+// the full indicator label (useful when the label is truncated with "...").
+function IndicatorRow({ ind }: { ind: CoverageIndicator }) {
+  const [expanded, setExpanded] = useState(false);
+  const isFound = ind.status === 'FOUND';
+  const isMissing = ind.status === 'NOT_DISCLOSED';
+  return (
+    // minWidth: 0 + overflow: hidden so this can sit inside a CSS Grid
+    // cell (1fr) without its intrinsic content widening the column.
+    <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
+        title="Click to expand"
+      >
+        <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {ind.framework} {ind.source_code}
+        </span>
+        <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={ind.indicator_label}>
+          {ind.indicator_label}
+        </span>
+        <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {indicatorDisplayValue(ind)}
+        </span>
+        {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2, flexShrink: 0 }}>{ind.unit}</span>}
+        {isFound ? (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+        ) : isMissing ? (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        )}
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55 }}>
+          <div style={{ fontWeight: 600, color: '#1A1D2E', marginBottom: 2 }}>{ind.indicator_label}</div>
+          {ind.text_value && ind.text_value.trim().length > 0 && ind.status !== 'NOT_DISCLOSED' && (
+            <div style={{ whiteSpace: 'pre-wrap' }}>{ind.text_value}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Narrative indicator rendered in the same single-row format as numeric
+// indicators. Body text is shown inline (truncated with ellipsis); clicking
+// the row expands it to reveal the full narrative.
+function NarrativeRow({ nn }: { nn: CoverageIndicator }) {
+  const [expanded, setExpanded] = useState(false);
+  const body = narrativeBodyText(nn);
+  const isFound = nn.status === 'FOUND';
+  const isMissing = nn.status === 'NOT_DISCLOSED';
+  return (
+    // minWidth: 0 + overflow: hidden so the row can sit inside a CSS Grid
+    // cell (1fr) without its `nowrap` body text widening the column.
+    <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
+        title="Click to expand"
+      >
+        <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+          {nn.framework} {nn.source_code}
+        </span>
+        <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={nn.indicator_label}>
+          {nn.indicator_label}
+        </span>
+        <span style={{ flex: 1, color: '#5A6080', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, fontStyle: 'italic' }}>
+          {body}
+        </span>
+        {isFound ? (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+        ) : isMissing ? (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        )}
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+          {body}
+        </div>
       )}
     </div>
   );
@@ -1457,11 +1571,23 @@ export default function ReportsPage() {
                 const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
                 const coveragePct = coveragePercent(p.found, p.total);
                 const score = coveragePct;
-                // Narrative (text_block) indicators are rendered in the dedicated
-                // "Narrative Disclosures" section below — hide them from pillar cards.
+                // Metrics section holds numeric/bool indicators + any narrative
+                // indicators that were NOT disclosed (so all "missing" items are
+                // listed together). Narrative section only holds FOUND narratives,
+                // sorted with real-text entries first and empty-text last.
                 const pillarIndicators = sortIndicators(
                   coverage.indicators.filter(
-                    (i) => pillarBaseKey(i.pillar) === pk && i.data_type !== 'text_block',
+                    (i) =>
+                      pillarBaseKey(i.pillar) === pk &&
+                      (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
+                  ),
+                );
+                const pillarNarratives = sortNarratives(
+                  coverage.indicators.filter(
+                    (i) =>
+                      pillarBaseKey(i.pillar) === pk &&
+                      i.data_type === 'text_block' &&
+                      i.status !== 'NOT_DISCLOSED',
                   ),
                 );
                 return (
@@ -1477,41 +1603,28 @@ export default function ReportsPage() {
                         <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{coveragePct}%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
                       </div>
                     </div>
-                    <div style={{ padding: '8px 14px', maxHeight: 420, overflowY: 'auto' }}>
+                    <div style={{ padding: '8px 14px', maxHeight: 480, overflowY: 'auto' }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
                         {coverage.frameworks.join(' / ')} metrics
                       </div>
-                      {pillarIndicators.length === 0 ? (
+                      {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
                         <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No indicators for this pillar.</div>
                       ) : (
-                        pillarIndicators.map((ind) => {
-                          const isFound = ind.status === 'FOUND';
-                          const isMissing = ind.status === 'NOT_DISCLOSED';
-                          return (
-                            <div
-                              key={ind.framework_indicator_id}
-                              style={{ display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #ECEEF8', fontSize: 11, gap: 8 }}
-                            >
-                              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-                                {ind.framework} {ind.source_code}
-                              </span>
-                              <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ind.indicator_label}>
-                                {ind.indicator_label}
-                              </span>
-                              <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E' }}>
-                                {indicatorDisplayValue(ind)}
-                              </span>
-                              {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2 }}>{ind.unit}</span>}
-                              {isFound ? (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-                              ) : isMissing ? (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-                              ) : (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
-                              )}
-                            </div>
-                          );
-                        })
+                        <>
+                          {pillarIndicators.map((ind) => (
+                            <IndicatorRow key={ind.framework_indicator_id} ind={ind} />
+                          ))}
+                          {pillarNarratives.length > 0 && (
+                            <>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 14, marginBottom: 6, paddingTop: 10, borderTop: '1px solid #E2E4F0' }}>
+                                Narrative disclosures
+                              </div>
+                              {pillarNarratives.map((nn) => (
+                                <NarrativeRow key={nn.framework_indicator_id} nn={nn} />
+                              ))}
+                            </>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1527,11 +1640,23 @@ export default function ReportsPage() {
               if (p.total === 0) return null;
               const coveragePct = coveragePercent(p.found, p.total);
               const score = coveragePct;
-              // Narrative (text_block) indicators are rendered in the dedicated
-              // "Narrative Disclosures" section below — hide them from this card.
+              // Metrics section holds numeric/bool indicators + any narrative
+              // indicators that were NOT disclosed (so all "missing" items are
+              // listed together). Narrative section only holds FOUND narratives,
+              // sorted with real-text entries first and empty-text last.
               const pillarIndicators = sortIndicators(
                 coverage.indicators.filter(
-                  (i) => pillarBaseKey(i.pillar) === pk && i.data_type !== 'text_block',
+                  (i) =>
+                    pillarBaseKey(i.pillar) === pk &&
+                    (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
+                ),
+              );
+              const pillarNarratives = sortNarratives(
+                coverage.indicators.filter(
+                  (i) =>
+                    pillarBaseKey(i.pillar) === pk &&
+                    i.data_type === 'text_block' &&
+                    i.status !== 'NOT_DISCLOSED',
                 ),
               );
               return (
@@ -1560,99 +1685,32 @@ export default function ReportsPage() {
                     <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
                       {coverage.frameworks.join(' / ')} universal indicators
                     </div>
-                    {pillarIndicators.length === 0 ? (
+                    {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
                       <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No universal indicators for this report.</div>
                     ) : (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
-                        {pillarIndicators.map((ind) => {
-                          const isFound = ind.status === 'FOUND';
-                          const isMissing = ind.status === 'NOT_DISCLOSED';
-                          return (
-                            <div
-                              key={ind.framework_indicator_id}
-                              style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #ECEEF8', fontSize: 11, gap: 8 }}
-                            >
-                              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-                                {ind.framework} {ind.source_code}
-                              </span>
-                              <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ind.indicator_label}>
-                                {ind.indicator_label}
-                              </span>
-                              <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E' }}>
-                                {indicatorDisplayValue(ind)}
-                              </span>
-                              {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2 }}>{ind.unit}</span>}
-                              {isFound ? (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-                              ) : isMissing ? (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-                              ) : (
-                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
-                              )}
+                      <>
+                        {pillarIndicators.length > 0 && (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
+                            {pillarIndicators.map((ind) => (
+                              <IndicatorRow key={ind.framework_indicator_id} ind={ind} />
+                            ))}
+                          </div>
+                        )}
+                        {pillarNarratives.length > 0 && (
+                          <>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: pillarIndicators.length > 0 ? 18 : 0, marginBottom: 4, paddingTop: pillarIndicators.length > 0 ? 14 : 0, borderTop: pillarIndicators.length > 0 ? '1px solid #E2E4F0' : 'none' }}>
+                              Narrative disclosures
                             </div>
-                          );
-                        })}
-                      </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
+                              {pillarNarratives.map((nn) => (
+                                <NarrativeRow key={nn.framework_indicator_id} nn={nn} />
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
-                </div>
-              );
-            })()}
-
-            {/* Narrative disclosures — every text_block indicator across all pillars. */}
-            {(() => {
-              const narratives = sortIndicators(
-                coverage.indicators.filter((i) => i.data_type === 'text_block'),
-              );
-              if (narratives.length === 0) return null;
-              return (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4040C8' }} />
-                      <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Narrative Disclosures</span>
-                    </div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
-                      {narratives.length} {narratives.length === 1 ? 'indicator' : 'indicators'}
-                    </span>
-                  </div>
-                  {narratives.map((nn) => {
-                    const pk = pillarBaseKey(nn.pillar);
-                    // Use the pillar label the indicator is rendered under, not the
-                    // raw esg_category (which for GRI 200 series says "Economic" even
-                    // though those indicators live under Governance).
-                    const pillarLabel =
-                      pk !== 'OTHER' ? PILLAR_STYLES[pk].label : nn.esg_category;
-                    const pillarLabelForBody =
-                      pk !== 'OTHER' ? PILLAR_STYLES[pk].label : 'overall';
-                    const body =
-                      nn.status === 'NOT_DISCLOSED'
-                        ? `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar score.`
-                        : nn.text_value && nn.text_value.trim().length > 0
-                          ? nn.text_value
-                          : 'Disclosed, but no narrative text was captured.';
-                    return (
-                      <div
-                        key={nn.framework_indicator_id}
-                        style={{ background: '#fff', border: '1px solid #E2E4F0', borderRadius: 12, padding: '14px 18px', marginBottom: 10 }}
-                      >
-                        <div style={{ marginBottom: 4 }}>
-                          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
-                            {nn.indicator_label}{' '}
-                            <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>
-                              ({nn.framework} {nn.source_code})
-                            </span>
-                          </div>
-                          <div style={{ fontSize: 10, color: '#5A6080' }}>
-                            {pillarLabel} · {nn.framework} · {nn.data_type.replace(/_/g, ' ')}
-                          </div>
-                        </div>
-                        <p style={{ fontSize: 11, color: '#5A6080', lineHeight: 1.5, margin: 0 }}>
-                          {body}
-                        </p>
-                      </div>
-                    );
-                  })}
                 </div>
               );
             })()}
