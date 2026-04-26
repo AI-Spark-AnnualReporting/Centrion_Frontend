@@ -619,6 +619,13 @@ export function getToken(): string | null {
   return getAuthToken();
 }
 
+// Persist a user object to localStorage. Used by AuthContext when it
+// enriches the user with extra fields (e.g. company_name fetched after login).
+export function setStoredUser(user: AuthUser): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
 export function getStoredUser(): AuthUser | null {
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(USER_STORAGE_KEY);

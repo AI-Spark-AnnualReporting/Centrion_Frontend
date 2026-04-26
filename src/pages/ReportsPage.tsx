@@ -8,13 +8,7 @@ import {
 } from '@/lib/active-pipeline';
 import { useAuth } from '@/context/AuthContext';
 import type { Sector } from '@/types/company';
-import type {
-  CoverageIndicator,
-  CoverageResponse,
-  PipelineOutputSummary,
-} from '@/types/report';
 import type { ProcessingPageState } from './ProcessingPage';
-import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
 
 interface ReportGenerationConfig {
   region?: string | null;
@@ -25,10 +19,30 @@ interface ReportGenerationConfig {
   framework_codes?: string[];
 }
 
+interface ReportPillarCoverage {
+  total: number;
+  found: number;
+  partial: number;
+  not_disclosed: number;
+  percentage: number;
+}
+
+interface ReportCoverage {
+  percentage: number;
+  metrics_total: number;
+  metrics_disclosed: number;
+  gaps: number;
+  by_pillar?: Partial<Record<'E' | 'S' | 'G' | 'ESG', ReportPillarCoverage>>;
+}
+
 interface ReportSummary {
   id: string;
   period: string;
   generation_config?: ReportGenerationConfig;
+  title?: string;
+  frameworks?: string[];
+  generated_at?: string;
+  coverage?: ReportCoverage;
 }
 
 interface ReportsListResponse {
@@ -40,6 +54,22 @@ function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
 }
 
+// "2026-04-26T07:47:38..." → "Apr 26, 2026" for the gallery card footer.
+function formatGenDate(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Cycles through three brand-aligned gradients so consecutive cards look
+// distinct without forcing per-report styling on the backend.
+const REPORT_CARD_GRADIENTS = [
+  'linear-gradient(135deg,#3535B5,#4747CC)',
+  'linear-gradient(135deg,#059669,#10B981)',
+  'linear-gradient(135deg,#7C3AED,#8B5CF6)',
+] as const;
+
 // Rough "3 min" / "2 h" humaniser for the resume-run banner.
 function formatSince(timestampMs: number): string {
   const diffSec = Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
@@ -48,38 +78,6 @@ function formatSince(timestampMs: number): string {
   if (mins < 60) return `${mins}m`;
   const hrs = Math.round(mins / 60);
   return `${hrs}h`;
-}
-
-// Turn an async pipeline's per-file result list into a user-facing warning.
-// Top-level status is "completed" even when some files failed/skipped, so the
-// partial-failure story lives inside output_summary.results.
-function buildPartialFailureWarning(
-  summary: PipelineOutputSummary | null,
-): string | null {
-  const results = summary?.results ?? [];
-  const failed = results.filter((r) => r.status === 'failed');
-  const skipped = results.filter((r) => r.status === 'skipped');
-  const parts: string[] = [];
-
-  if (failed.length > 0) {
-    const detail = failed
-      .map((r) => (r.error ? `${r.file_name} (${r.error})` : r.file_name))
-      .join(', ');
-    parts.push(
-      failed.length === 1
-        ? `1 file failed to process: ${detail}.`
-        : `${failed.length} files failed to process: ${detail}.`,
-    );
-  }
-  if (skipped.length > 0) {
-    const names = skipped.map((r) => r.file_name).join(', ');
-    parts.push(
-      skipped.length === 1
-        ? `"${names}" was skipped (already processed).`
-        : `Skipped (already processed): ${names}.`,
-    );
-  }
-  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 // Secondary picker for "+ Add new…" — current year ±10 → 21 options (year numbers only).
@@ -107,99 +105,6 @@ function yearFromPeriod(period: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-// Coverage rendering helpers -------------------------------------------------
-function indicatorDisplayValue(i: CoverageIndicator): string {
-  if (i.status === 'NOT_DISCLOSED') return 'Missing';
-  if (i.value !== null && i.value !== undefined) return String(i.value);
-  if (i.text_value) return i.text_value;
-  if (i.bool_value !== null) return i.bool_value ? 'Yes' : 'No';
-  return '—';
-}
-
-// Display order: numeric values first, then booleans, then narratives,
-// then everything else, and finally NOT_DISCLOSED (missing) at the end.
-function indicatorSortRank(i: CoverageIndicator): number {
-  if (i.status === 'NOT_DISCLOSED') return 4;
-  if (i.value !== null && i.value !== undefined) return 0;
-  if (i.bool_value !== null && i.bool_value !== undefined) return 1;
-  if (i.text_value !== null && i.text_value !== undefined && i.text_value !== '') return 2;
-  return 3;
-}
-
-function sortIndicators(list: CoverageIndicator[]): CoverageIndicator[] {
-  return [...list].sort((a, b) => {
-    const rankDiff = indicatorSortRank(a) - indicatorSortRank(b);
-    if (rankDiff !== 0) return rankDiff;
-    // Stable secondary order by source code for predictable display.
-    return a.source_code.localeCompare(b.source_code, undefined, { numeric: true });
-  });
-}
-
-// Narrative sort order: indicators with real captured text first,
-// "Disclosed, but no narrative text was captured" entries last.
-function narrativeSortRank(i: CoverageIndicator): number {
-  if (i.text_value && i.text_value.trim().length > 0) return 0;
-  return 1;
-}
-
-function sortNarratives(list: CoverageIndicator[]): CoverageIndicator[] {
-  return [...list].sort((a, b) => {
-    const rankDiff = narrativeSortRank(a) - narrativeSortRank(b);
-    if (rankDiff !== 0) return rankDiff;
-    return a.source_code.localeCompare(b.source_code, undefined, { numeric: true });
-  });
-}
-
-function pillarBaseKey(p: string): 'E' | 'S' | 'G' | 'ESG' | 'OTHER' {
-  if (p === 'E' || p === 'S' || p === 'G' || p === 'ESG') return p;
-  return 'OTHER';
-}
-
-// Body text for a narrative (text_block) indicator — mirrors the copy used by
-// the standalone narrative section before it was folded into the pillar cards.
-function narrativeBodyText(nn: CoverageIndicator): string {
-  const pk = pillarBaseKey(nn.pillar);
-  const pillarLabelForBody = pk !== 'OTHER' ? PILLAR_STYLES[pk].label : 'overall';
-  if (nn.status === 'NOT_DISCLOSED')
-    return `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar score.`;
-  if (nn.text_value && nn.text_value.trim().length > 0) return nn.text_value;
-  return 'Disclosed, but no narrative text was captured.';
-}
-
-function coveragePercent(found: number, total: number): number {
-  if (!total) return 0;
-  return Math.round((found / total) * 100);
-}
-
-const PILLAR_STYLES: Record<
-  'E' | 'S' | 'G' | 'ESG',
-  { label: string; emoji: string; gradient: string; accent: string }
-> = {
-  E: {
-    label: 'Environmental',
-    emoji: '🌿',
-    gradient: 'linear-gradient(135deg,#065F46,#059669)',
-    accent: '#059669',
-  },
-  S: {
-    label: 'Social',
-    emoji: '👥',
-    gradient: 'linear-gradient(135deg,#0369A1,#0891B2)',
-    accent: '#0891B2',
-  },
-  G: {
-    label: 'Governance',
-    emoji: '🏛',
-    gradient: 'linear-gradient(135deg,#4C1D95,#7C3AED)',
-    accent: '#7C3AED',
-  },
-  ESG: {
-    label: 'Universal (ESG)',
-    emoji: '♻️',
-    gradient: 'linear-gradient(135deg,#1E293B,#4040C8)',
-    accent: '#4040C8',
-  },
-};
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
@@ -214,58 +119,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-const reportData = [
-  { title: 'ESG Sustainability Report', period: 'FY 2025 · GRI 2021 · IFRS S1/S2', score: 78, env: 82, soc: 74, gov: 79, metrics: '33/36', gaps: '3 gaps', date: 'Apr 12, 2025', gradient: 'linear-gradient(135deg,#3535B5,#4747CC)', frameworks: ['GRI 2021', 'IFRS S1/S2', 'SAMA', 'TCFD'], confidence: 91.7, company: 'Al-Noor Capital' },
-  { title: 'Mid-Year ESG Review', period: 'H1 2025 · GRI 2021 · SAMA', score: 74, env: 78, soc: 70, gov: 75, metrics: '31/36', gaps: '5 gaps', date: 'Jul 8, 2024', gradient: 'linear-gradient(135deg,#059669,#10B981)', frameworks: ['GRI 2021', 'SAMA'], confidence: 87.2, company: 'Al-Noor Capital' },
-  { title: 'Annual ESG Report 2024', period: 'FY 2024 · GRI 2021 · TCFD', score: 74, env: 76, soc: 71, gov: 73, metrics: '30/36', gaps: '6 gaps', date: 'Apr 5, 2024', gradient: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', frameworks: ['GRI 2021', 'TCFD'], confidence: 85.1, company: 'Al-Noor Capital' },
-];
-
-const envMetrics = [
-  { code: 'GRI 305-1', name: 'Scope 1 GHG Emissions', value: '1,842', unit: 'tCO₂e', status: 'found' },
-  { code: 'GRI 305-2', name: 'Scope 2 GHG (market)', value: '3,218', unit: 'tCO₂e', status: 'found' },
-  { code: 'GRI 305-4', name: 'Carbon Intensity', value: 'Missing', unit: 'tCO₂/M', status: 'missing' },
-  { code: 'GRI 302-1', name: 'Total Energy Consumed', value: '24,180', unit: 'MWh', status: 'found' },
-  { code: 'GRI 302-4', name: 'Energy Reduction', value: '8.4%', unit: '', status: 'found' },
-  { code: 'GRI 303-3', name: 'Water Recycled', value: '22%', unit: '', status: 'found' },
-  { code: 'GRI 306-3', name: 'Waste Generated', value: '142', unit: 'tonnes', status: 'found' },
-  { code: 'GRI 301-1', name: 'Materials Used', value: '18.4%', unit: 'recov.', status: 'found' },
-  { code: 'GRI 304-1', name: 'Biodiversity Impact', value: 'Low', unit: '', status: 'found' },
-  { code: 'GRI 305-3', name: 'Scope 3 GHG Emissions', value: 'Missing', unit: 'tCO₂e', status: 'missing' },
-];
-
-const socMetrics = [
-  { code: 'GRI 401-1', name: 'Total Employees (FTE)', value: '2,847', unit: 'FTE', status: 'found' },
-  { code: 'HRDP', name: 'Saudization Rate', value: '68.4%', unit: '', status: 'found' },
-  { code: 'GRI 405-1', name: 'Gender Diversity', value: '38.2%', unit: 'women', status: 'found' },
-  { code: 'GRI 403-9', name: 'Lost Time Injury Rate', value: '0.42', unit: '', status: 'found' },
-  { code: 'GRI 404-1', name: 'Training Hours / Employee', value: '42', unit: 'hrs', status: 'found' },
-  { code: 'GRI 401-3', name: 'Parental Leave Return Rate', value: '94%', unit: '', status: 'found' },
-  { code: 'GRI 406-1', name: 'Discrimination Incidents', value: '0', unit: '', status: 'found' },
-  { code: 'GRI 413-1', name: 'Community Engagement', value: 'SAR 4.2M', unit: '', status: 'found' },
-  { code: 'GRI 418-1', name: 'Data Privacy Breaches', value: '0', unit: '', status: 'found' },
-  { code: 'GRI 407-1', name: 'Freedom of Association', value: 'Full', unit: '', status: 'found' },
-  { code: 'GRI 201-1', name: 'Community Investment SAR', value: 'Missing', unit: '', status: 'missing' },
-];
-
-const govMetrics = [
-  { code: 'GRI 2-9', name: 'Board Independence', value: '67%', unit: '', status: 'found' },
-  { code: 'GRI 2-9', name: 'Board Size', value: 'Missing', unit: '', status: 'missing' },
-  { code: 'GRI 2-18', name: 'Board Evaluation', value: 'Annual', unit: '', status: 'found' },
-  { code: 'GRI 2-24', name: 'Commitments Embedded', value: 'Yes', unit: '', status: 'found' },
-  { code: 'CMA 14', name: 'Women on Board', value: '2/5', unit: '40%', status: 'found' },
-  { code: 'GRI 205-1', name: 'Anti-Corruption Policy', value: '100%', unit: '', status: 'found' },
-  { code: 'GRI 206-1', name: 'Anti-Competitive Cases', value: '0', unit: '', status: 'found' },
-  { code: 'GRI 207-1', name: 'Tax Transparency', value: 'Full', unit: '', status: 'found' },
-  { code: 'GRI 2-30', name: 'Collective Bargaining', value: 'N/A', unit: '', status: 'found' },
-  { code: 'GRI 2-21', name: 'Executive Pay Ratio', value: 'Missing', unit: '', status: 'missing' },
-];
-
-const missingMetrics = [
-  { title: 'Carbon Intensity (GRI 305-4)', category: 'Environmental · GRI 300 Series · IFRS S2 Physical', desc: 'Investors require carbon intensity ratio to benchmark emissions efficiency. Without this metric, TCFD Physical Risk alignment is incomplete and ISSB S2 compliance cannot be confirmed. This metric is mandatory for top-quartile GCC ESG ratings.', impact: '+12 pts', severity: 'CRITICAL' },
-  { title: 'Board Size (GRI 2-9)', category: 'Governance · GRI 200 Series · CMA CGR Article 14', desc: 'CMA Corporate Governance Regulations Article 14 mandates disclosure of board composition. Missing this metric creates a CMA compliance gap and directly reduces Governance pillar score. Required for all listed entities on Tadawul.', impact: '+9 pts', severity: 'CRITICAL' },
-  { title: 'Executive Pay Ratio (GRI 2-21)', category: 'Governance · GRI 200 Series · SAMA ESG Framework', desc: 'CEO-to-median-pay ratio is an increasingly demanded metric by ESG-focused investors including GPIF and BlackRock. Absence signals governance opacity. Required for SAMA ESG framework Pillar 3 compliance by 2026.', impact: '+6 pts', severity: 'HIGH' },
-];
 
 const globalFrameworks = ['GRI 2021', 'IFRS'];
 // Only GRI is wired for generation today — IFRS is visible but disabled
@@ -331,129 +184,9 @@ const regionData: Record<string, { countries: string[]; frameworks: Record<strin
 
 const regions = Object.keys(regionData);
 
-function ScoreRing({ score, size = 52 }: { score: number; size?: number }) {
-  const r = (size - 6) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ - (score / 100) * circ;
-  return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="4" />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#fff" strokeWidth="4" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
-      <text x={size / 2} y={size / 2 + 1} textAnchor="middle" dominantBaseline="central" fill="#fff" fontSize={size * 0.34} fontWeight="800" fontFamily="'DM Mono',monospace" style={{ transform: 'rotate(90deg)', transformOrigin: 'center' }}>{score}</text>
-    </svg>
-  );
-}
-
-function MetricRow({ m }: { m: typeof envMetrics[0] }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #ECEEF8', fontSize: 11, gap: 8 }}>
-      <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: m.code.startsWith('GRI') ? '#4040C8' : m.code === 'HRDP' ? '#059669' : '#7C3AED', background: m.code.startsWith('GRI') ? 'rgba(64,64,200,.08)' : m.code === 'HRDP' ? 'rgba(5,150,105,.08)' : 'rgba(124,58,237,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>{m.code}</span>
-      <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500 }}>{m.name}</span>
-      <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: m.status === 'missing' ? '#EF4444' : '#1A1D2E' }}>{m.value}</span>
-      {m.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2 }}>{m.unit}</span>}
-      {m.status === 'found' ? (
-        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-      ) : (
-        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-      )}
-    </div>
-  );
-}
-
-// Numeric/bool/missing indicator row. Clicking the row expands it to show
-// the full indicator label (useful when the label is truncated with "...").
-function IndicatorRow({ ind }: { ind: CoverageIndicator }) {
-  const [expanded, setExpanded] = useState(false);
-  const isFound = ind.status === 'FOUND';
-  const isMissing = ind.status === 'NOT_DISCLOSED';
-  return (
-    // minWidth: 0 + overflow: hidden so this can sit inside a CSS Grid
-    // cell (1fr) without its intrinsic content widening the column.
-    <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
-      <div
-        onClick={() => setExpanded((v) => !v)}
-        style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
-        title="Click to expand"
-      >
-        <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
-          {ind.framework} {ind.source_code}
-        </span>
-        <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={ind.indicator_label}>
-          {ind.indicator_label}
-        </span>
-        <span style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700, color: isMissing ? '#EF4444' : '#1A1D2E', whiteSpace: 'nowrap', flexShrink: 0 }}>
-          {indicatorDisplayValue(ind)}
-        </span>
-        {ind.unit && <span style={{ fontSize: 9, color: '#9BA3C4', marginLeft: 2, flexShrink: 0 }}>{ind.unit}</span>}
-        {isFound ? (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-        ) : isMissing ? (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
-        )}
-      </div>
-      {expanded && (
-        <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55 }}>
-          <div style={{ fontWeight: 600, color: '#1A1D2E', marginBottom: 2 }}>{ind.indicator_label}</div>
-          {ind.text_value && ind.text_value.trim().length > 0 && ind.status !== 'NOT_DISCLOSED' && (
-            <div style={{ whiteSpace: 'pre-wrap' }}>{ind.text_value}</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Narrative indicator rendered in the same single-row format as numeric
-// indicators. Body text is shown inline (truncated with ellipsis); clicking
-// the row expands it to reveal the full narrative.
-function NarrativeRow({ nn }: { nn: CoverageIndicator }) {
-  const [expanded, setExpanded] = useState(false);
-  const body = narrativeBodyText(nn);
-  const isFound = nn.status === 'FOUND';
-  const isMissing = nn.status === 'NOT_DISCLOSED';
-  return (
-    // minWidth: 0 + overflow: hidden so the row can sit inside a CSS Grid
-    // cell (1fr) without its `nowrap` body text widening the column.
-    <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
-      <div
-        onClick={() => setExpanded((v) => !v)}
-        style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
-        title="Click to expand"
-      >
-        <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
-          {nn.framework} {nn.source_code}
-        </span>
-        <span style={{ flex: 1, color: '#1A1D2E', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={nn.indicator_label}>
-          {nn.indicator_label}
-        </span>
-        <span style={{ flex: 1, color: '#5A6080', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, fontStyle: 'italic' }}>
-          {body}
-        </span>
-        {isFound ? (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-        ) : isMissing ? (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#EF4444" /><path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
-        )}
-      </div>
-      {expanded && (
-        <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-          {body}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function ReportsPage() {
-  const [expandedReport, setExpandedReport] = useState<number | null>(null);
   const [genOpen, setGenOpen] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [hasGenerated, setHasGenerated] = useState(false);
-  const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
@@ -506,9 +239,6 @@ export default function ReportsPage() {
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setGenWarning(null);
-    setHasGenerated(false);
-    setCoverage(null);
-    setExpandedReport(null);
     setIsSubmittingGenerate(true);
 
     // Clear the router state early so a refresh of /reports doesn't re-fire
@@ -548,75 +278,6 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
 
-  // Returning from /reports/processing — pull coverage + surface any per-file
-  // failures the pipeline reported inside output_summary.results.
-  useEffect(() => {
-    const state = location.state as
-      | {
-          completedRun?: {
-            reportId: string | null;
-            companyId: string | null;
-            outputSummary: PipelineOutputSummary | null;
-            wasReconnected: boolean;
-            coverage?: CoverageResponse | null;
-          };
-        }
-      | null;
-    const completed = state?.completedRun;
-    if (!completed || !completed.reportId || !completed.companyId) return;
-
-    const requestId = ++genRequestIdRef.current;
-    setGenError(null);
-    setGenWarning(null);
-    setHasGenerated(false);
-    setCoverage(null);
-    setExpandedReport(null);
-
-    navigate(location.pathname, { replace: true, state: null });
-
-    const applyResult = (cov: CoverageResponse) => {
-      if (requestId !== genRequestIdRef.current) return;
-      setCoverage(cov);
-      setIsGenerating(false);
-      setHasGenerated(true);
-      setExpandedReport(0);
-
-      // Completed successfully — drop the persisted run so we don't offer to
-      // resume a run that's already done.
-      clearActivePipeline();
-      setResumableRun(null);
-
-      const warning = buildPartialFailureWarning(completed.outputSummary);
-      if (warning) {
-        setGenWarning(warning);
-        setGenOpen(true);
-      } else {
-        setGenOpen(false);
-      }
-      setUploadedFile(null);
-    };
-
-    // Fast path — ProcessingPage already fetched the coverage, render directly.
-    if (completed.coverage) {
-      applyResult(completed.coverage);
-      return;
-    }
-
-    // Fallback — fetch coverage ourselves. Only path that still needs the
-    // inline loading state.
-    setIsGenerating(true);
-    reportsApi
-      .getCoverage<CoverageResponse>(completed.companyId, completed.reportId)
-      .then((cov) => applyResult(cov))
-      .catch((err: unknown) => {
-        if (requestId !== genRequestIdRef.current) return;
-        setIsGenerating(false);
-        setGenError(
-          err instanceof Error ? err.message : 'Failed to load completed report.',
-        );
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state]);
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
@@ -734,50 +395,20 @@ export default function ReportsPage() {
   );
 
   // --- Report generation submission -----------------------------------------
-  // The loading screen stays mounted for the full duration of the API call.
-  // We ignore GeneratingScreen's own animation timer — transitions are driven
-  // by the response from POST /api/v1/reports/{company_id}/generate.
   const [genError, setGenError] = useState<string | null>(null);
   const [genWarning, setGenWarning] = useState<string | null>(null);
-  // True from click → /reports/processing navigation. Branch A uses
-  // `isGenerating` for this, but Branch B avoids it (it would flash the
-  // legacy loader pre-navigate). A dedicated submitting flag lets us disable
-  // the button during the POST without changing the visible screen.
+  // True from click → /reports/processing navigation. Lets us disable the
+  // submit button during the POST without changing the visible screen.
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
   const triggerGenerate = () => {
     if (!companyId || scope !== 'global') return;
 
-    // Branch A — existing report + "Generate report from DB": skip /generate
-    // and render the stored coverage directly. Loading screen stays up until
-    // /coverage responds.
+    // Branch A — existing report + "Generate report from DB": just open the
+    // detail page, which fetches /coverage on its own.
     if (selectedReport && existingReportSource === 'db') {
-      const requestId = ++genRequestIdRef.current;
-      setGenError(null);
-      setGenWarning(null);
-      setHasGenerated(false);
-      setCoverage(null);
-      setExpandedReport(null);
-      setIsGenerating(true);
-
-      reportsApi
-        .getCoverage<CoverageResponse>(companyId, selectedReport.id)
-        .then((cov) => {
-          if (requestId !== genRequestIdRef.current) return;
-          setCoverage(cov);
-          setIsGenerating(false);
-          setHasGenerated(true);
-          setGenOpen(false);
-          setExpandedReport(0);
-        })
-        .catch((err: unknown) => {
-          if (requestId !== genRequestIdRef.current) return;
-          setIsGenerating(false);
-          setGenError(
-            err instanceof Error ? err.message : 'Failed to load report from DB.',
-          );
-        });
+      navigate(`/reports/${selectedReport.id}`);
       return;
     }
 
@@ -795,9 +426,6 @@ export default function ReportsPage() {
       const requestId = ++genRequestIdRef.current;
       setGenError(null);
       setGenWarning(null);
-      setHasGenerated(false);
-      setCoverage(null);
-      setExpandedReport(null);
       setIsSubmittingGenerate(true);
       const submittedFile = uploadedFile;
       const targetReportId = selectedReport.id;
@@ -839,9 +467,6 @@ export default function ReportsPage() {
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setGenWarning(null);
-    setHasGenerated(false);
-    setCoverage(null);
-    setExpandedReport(null);
     setIsSubmittingGenerate(true);
 
     // The dropdown displays "None" by default, but the backend requires a
@@ -884,10 +509,10 @@ export default function ReportsPage() {
       });
   };
 
-  const handleGeneratingCancel = () => {
-    // Bump the request id so the outstanding promise's callbacks become no-ops.
-    genRequestIdRef.current += 1;
-    setIsGenerating(false);
+  // Click on a Recent Report card → open the dedicated detail page, which
+  // handles its own coverage fetch and back-navigation.
+  const handleReportCardClick = (report: ReportSummary) => {
+    navigate(`/reports/${report.id}`);
   };
 
   const acceptFile = (file: File | undefined) => {
@@ -973,15 +598,6 @@ export default function ReportsPage() {
           <button className="tab">Sustainability</button>
         </div>
       </div>
-
-      {isGenerating ? (
-        <GeneratingScreen
-          // No-op — we stay on the loading screen until the API responds.
-          onComplete={() => undefined}
-          onCancel={handleGeneratingCancel}
-        />
-      ) : (
-      <>
 
       {resumableRun && (
         <div
@@ -1529,195 +1145,85 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {/* Generated-report detail view — driven by GET /.../coverage. */}
-      {hasGenerated && coverage && (() => {
-        const summary = coverage.summary;
-        return (
-          <div style={{ marginTop: 4 }}>
-            {/* Header bar */}
-            <div style={{ background: 'linear-gradient(135deg,#1A1D2E,#2D3154)', borderRadius: 14, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <ScoreRing score={coveragePercent(summary.found_count, summary.total_indicators)} size={52} />
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, background: '#22C55E', color: '#fff', padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>★ Report Generated</span>
+      {/* Recent Reports — driven by GET /api/v1/reports/{company_id}. */}
+      {existingReports.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
+          {existingReports.map((r, idx) => {
+            const score = Math.round(r.coverage?.percentage ?? 0);
+            const env = r.coverage?.by_pillar?.E?.found ?? 0;
+            const soc = r.coverage?.by_pillar?.S?.found ?? 0;
+            const gov = r.coverage?.by_pillar?.G?.found ?? 0;
+            const metricsDisclosed = r.coverage?.metrics_disclosed ?? 0;
+            const metricsTotal = r.coverage?.metrics_total ?? 0;
+            const gaps = r.coverage?.gaps ?? 0;
+            const headerLine = [formatPeriod(r.period), ...(r.frameworks ?? [])].filter(Boolean).join(' · ');
+            const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
+            return (
+              <div
+                key={r.id}
+                onClick={() => handleReportCardClick(r)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleReportCardClick(r);
+                  }
+                }}
+                title="Open this report"
+                style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', display: 'flex', flexDirection: 'column', cursor: 'pointer', transition: 'transform .15s ease, box-shadow .15s ease' }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 22px rgba(26,29,46,.08)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.transform = 'none';
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = 'none';
+                }}
+              >
+                <div style={{ background: gradient, padding: '16px 18px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
+                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
+                    {headerLine}
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>
-                    ESG Sustainability Report — {formatPeriod(coverage.period)}
+                  <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'ESG Report'}</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                      <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Score</span>
+                    </div>
+                    <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}/100</div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>
-                    {summary.found_count} of {summary.total_indicators} indicators disclosed · Disclosure rate {Math.round((summary.disclosure_rate || 0) * 100)}%
+                  <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${score}%`, height: '100%', background: '#22C55E' }} />
                   </div>
-                  <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
-                    {coverage.frameworks.map((fw) => (
-                      <span key={fw} style={{ fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,.15)', color: 'rgba(255,255,255,.8)' }}>{fw}</span>
+                  <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>OVERALL</div>
+                </div>
+                <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+                    {([['ENV', env, '#059669', 'rgba(5,150,105,.08)'], ['SOC', soc, '#0891B2', 'rgba(8,145,178,.08)'], ['GOV', gov, '#7C3AED', 'rgba(124,58,237,.08)']] as const).map(([label, value, color, bg]) => (
+                      <div key={label} style={{ background: bg, borderRadius: 8, padding: '10px 0', textAlign: 'center' }}>
+                        <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'DM Mono',monospace", color, lineHeight: 1 }}>{value}</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', marginTop: 4, letterSpacing: '.5px' }}>{label}</div>
+                      </div>
                     ))}
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 'auto' }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#16A34A', background: 'rgba(34,197,94,.12)', padding: '3px 8px', borderRadius: 999 }}>
+                        {metricsDisclosed}/{metricsTotal} metrics
+                      </span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#DC2626', background: 'rgba(239,68,68,.12)', padding: '3px 8px', borderRadius: 999 }}>
+                        {gaps} {gaps === 1 ? 'gap' : 'gaps'}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 10, color: '#9BA3C4' }}>Generated {formatGenDate(r.generated_at)}</span>
+                  </div>
                 </div>
               </div>
-              <div style={{ textAlign: 'center', background: 'rgba(255,255,255,.08)', borderRadius: 12, padding: '10px 18px', border: '1px solid rgba(255,255,255,.1)' }}>
-                <div style={{ display: 'flex', gap: 14, alignItems: 'baseline' }}>
-                  <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#22C55E' }}>{summary.found_count}</div></div>
-                  <div><div style={{ fontSize: 28, fontWeight: 800, fontFamily: "'DM Mono',monospace", color: '#EF4444' }}>{summary.not_disclosed_count}</div></div>
-                </div>
-                <div style={{ fontSize: 9, color: 'rgba(255,255,255,.4)', marginTop: 2 }}>Disclosed &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Gaps</div>
-              </div>
-            </div>
-
-            {/* Three pillar sections driven by coverage.indicators + by_pillar */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 14 }}>
-              {(['E', 'S', 'G'] as const).map((pk) => {
-                const style = PILLAR_STYLES[pk];
-                const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
-                const coveragePct = coveragePercent(p.found, p.total);
-                const score = coveragePct;
-                // Metrics section holds numeric/bool indicators + any narrative
-                // indicators that were NOT disclosed (so all "missing" items are
-                // listed together). Narrative section only holds FOUND narratives,
-                // sorted with real-text entries first and empty-text last.
-                const pillarIndicators = sortIndicators(
-                  coverage.indicators.filter(
-                    (i) =>
-                      pillarBaseKey(i.pillar) === pk &&
-                      (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
-                  ),
-                );
-                const pillarNarratives = sortNarratives(
-                  coverage.indicators.filter(
-                    (i) =>
-                      pillarBaseKey(i.pillar) === pk &&
-                      i.data_type === 'text_block' &&
-                      i.status !== 'NOT_DISCLOSED',
-                  ),
-                );
-                return (
-                  <div key={pk} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
-                    <div style={{ background: style.gradient, padding: '14px 16px', color: '#fff' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>
-                        {style.emoji} {style.label}
-                      </div>
-                      <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1, marginBottom: 8 }}>{score}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{p.found}<br /><span style={{ fontSize: 8, opacity: .6 }}>FOUND</span></span>
-                        <span style={{ flex: 1, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{p.not_disclosed}<br /><span style={{ fontSize: 8, opacity: .6 }}>MISSING</span></span>
-                        <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{coveragePct}%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
-                      </div>
-                    </div>
-                    <div style={{ padding: '8px 14px', maxHeight: 480, overflowY: 'auto' }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
-                        {coverage.frameworks.join(' / ')} metrics
-                      </div>
-                      {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
-                        <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No indicators for this pillar.</div>
-                      ) : (
-                        <>
-                          {pillarIndicators.map((ind) => (
-                            <IndicatorRow key={ind.framework_indicator_id} ind={ind} />
-                          ))}
-                          {pillarNarratives.length > 0 && (
-                            <>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 14, marginBottom: 6, paddingTop: 10, borderTop: '1px solid #E2E4F0' }}>
-                                Narrative disclosures
-                              </div>
-                              {pillarNarratives.map((nn) => (
-                                <NarrativeRow key={nn.framework_indicator_id} nn={nn} />
-                              ))}
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* ESG (Universal) — full-width card, expanded layout */}
-            {(() => {
-              const pk = 'ESG' as const;
-              const style = PILLAR_STYLES[pk];
-              const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
-              if (p.total === 0) return null;
-              const coveragePct = coveragePercent(p.found, p.total);
-              const score = coveragePct;
-              // Metrics section holds numeric/bool indicators + any narrative
-              // indicators that were NOT disclosed (so all "missing" items are
-              // listed together). Narrative section only holds FOUND narratives,
-              // sorted with real-text entries first and empty-text last.
-              const pillarIndicators = sortIndicators(
-                coverage.indicators.filter(
-                  (i) =>
-                    pillarBaseKey(i.pillar) === pk &&
-                    (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
-                ),
-              );
-              const pillarNarratives = sortNarratives(
-                coverage.indicators.filter(
-                  (i) =>
-                    pillarBaseKey(i.pillar) === pk &&
-                    i.data_type === 'text_block' &&
-                    i.status !== 'NOT_DISCLOSED',
-                ),
-              );
-              return (
-                <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', marginBottom: 14 }}>
-                  <div style={{ background: style.gradient, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', gap: 24 }}>
-                    <div style={{ flex: '0 0 auto' }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>
-                        {style.emoji} {style.label}
-                      </div>
-                      <div style={{ fontSize: 40, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}</div>
-                      <div style={{ fontSize: 10, opacity: .6, marginTop: 2 }}>Overall coverage</div>
-                    </div>
-                    <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-                      <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {p.found}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>FOUND</span>
-                      </span>
-                      <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {p.not_disclosed}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>MISSING</span>
-                      </span>
-                      <span style={{ flex: 2, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                        {coveragePct}%<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>COVERAGE</span>
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ padding: '14px 18px' }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
-                      {coverage.frameworks.join(' / ')} universal indicators
-                    </div>
-                    {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
-                      <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No universal indicators for this report.</div>
-                    ) : (
-                      <>
-                        {pillarIndicators.length > 0 && (
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
-                            {pillarIndicators.map((ind) => (
-                              <IndicatorRow key={ind.framework_indicator_id} ind={ind} />
-                            ))}
-                          </div>
-                        )}
-                        {pillarNarratives.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: pillarIndicators.length > 0 ? 18 : 0, marginBottom: 4, paddingTop: pillarIndicators.length > 0 ? 14 : 0, borderTop: pillarIndicators.length > 0 ? '1px solid #E2E4F0' : 'none' }}>
-                              Narrative disclosures
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
-                              {pillarNarratives.map((nn) => (
-                                <NarrativeRow key={nn.framework_indicator_id} nn={nn} />
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        );
-      })()}
-      </>
+            );
+          })}
+        </div>
       )}
     </div>
   );

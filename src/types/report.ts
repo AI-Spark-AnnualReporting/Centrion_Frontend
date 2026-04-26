@@ -53,11 +53,23 @@ export interface CoverageIndicator {
   evidence_id: string | null;
 }
 
+export interface CoverageDocument {
+  id: string;
+  filename: string;
+  file_type: string;
+  file_size_bytes: number;
+  extraction_status: string;
+  uploaded_at: string;
+}
+
 export interface CoverageResponse {
   report_id: string;
+  company_id?: string;
+  company_name?: string;
   period: string;
   scope_type: string;
   frameworks: string[];
+  documents?: CoverageDocument[];
   summary: CoverageSummary;
   indicators: CoverageIndicator[];
 }

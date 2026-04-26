@@ -26,9 +26,12 @@ export function Topbar({ pageName }: TopbarProps) {
     <div className="topbar">
       <div className="tb-breadcrumb">
         <span className="tb-page">{pageName}</span>
-        <span className="tb-sep">·</span>
-        <span className="tb-sub">Al-Noor Capital</span>
-        <span className="tb-tag">FY 2025</span>
+        {user?.company_name && (
+          <>
+            <span className="tb-sep">·</span>
+            <span className="tb-sub">{user.company_name}</span>
+          </>
+        )}
       </div>
       <div className="tb-actions">
         <div className="tb-search">

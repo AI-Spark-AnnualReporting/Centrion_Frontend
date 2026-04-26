@@ -4,6 +4,7 @@ export interface AuthUser {
   full_name: string;
   role: "admin" | "user";
   company_id?: string | null;
+  company_name?: string | null;
 }
 
 export interface LoginResponse {
