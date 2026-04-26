@@ -4,6 +4,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
 import ReportsPage from "./pages/ReportsPage";
+import ReportDetailPage from "./pages/ReportDetailPage";
 import ProcessingPage from "./pages/ProcessingPage";
 import KPIPage from "./pages/KPIPage";
 import AIPage from "./pages/AIPage";
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/processing" element={<ProcessingPage />} />
+          <Route path="/reports/:reportId" element={<ReportDetailPage />} />
           <Route path="/kpi" element={<KPIPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/ai" element={<AIPage />} />

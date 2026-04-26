@@ -7,12 +7,15 @@ import {
   type ReactNode,
 } from "react";
 import {
+  companies,
   getStoredUser,
   getToken,
   login as apiLogin,
   logout as apiLogout,
+  setStoredUser,
 } from "@/lib/api";
 import type { AuthUser } from "@/types/auth";
+import type { CompanyRecord } from "@/types/company";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -33,6 +36,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLoading(false);
   }, []);
+
+  // Backfill `company_name` once per session — the login response doesn't
+  // include it, but the topbar (and other surfaces) need a human-readable name.
+  useEffect(() => {
+    if (!user || !user.company_id || user.company_name) return;
+    let cancelled = false;
+    companies
+      .get<CompanyRecord>(user.company_id)
+      .then((company) => {
+        if (cancelled || !company?.name) return;
+        const enriched: AuthUser = { ...user, company_name: company.name };
+        setStoredUser(enriched);
+        setUser(enriched);
+      })
+      .catch(() => {
+        // Silent — topbar simply renders without the company name.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await apiLogin(email, password);

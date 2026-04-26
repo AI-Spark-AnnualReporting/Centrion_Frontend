@@ -7,10 +7,7 @@ import {
 } from "@/lib/active-pipeline";
 import { reports as reportsApi } from "@/lib/api";
 import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
-import type {
-  CoverageResponse,
-  PipelineOutputSummary,
-} from "@/types/report";
+import type { CoverageResponse } from "@/types/report";
 
 export interface ProcessingPageState {
   runId: string;
@@ -63,21 +60,10 @@ export default function ProcessingPage() {
     const resolvedReportId =
       poll.run.input_summary?.report_id ?? state.reportId ?? null;
     if (!resolvedReportId) {
-      // No report id to look up — fall back to ReportsPage fetch.
+      // No report id to look up — fall back to the reports list.
       handedOffRef.current = true;
       clearActivePipeline();
-      navigate("/reports", {
-        replace: true,
-        state: {
-          completedRun: {
-            reportId: null,
-            companyId: state.companyId,
-            outputSummary: poll.run.output_summary,
-            wasReconnected: state.isExisting,
-            coverage: null,
-          },
-        },
-      });
+      navigate("/reports", { replace: true });
       return;
     }
 
@@ -86,17 +72,11 @@ export default function ProcessingPage() {
       .getCoverage<CoverageResponse>(state.companyId, resolvedReportId)
       .then((cov) => {
         clearActivePipeline();
-        navigate("/reports", {
+        // Hand the freshly fetched coverage to the detail page via location
+        // state so it renders immediately without a second GET /coverage.
+        navigate(`/reports/${resolvedReportId}`, {
           replace: true,
-          state: {
-            completedRun: {
-              reportId: resolvedReportId,
-              companyId: state.companyId,
-              outputSummary: poll.run.output_summary,
-              wasReconnected: state.isExisting,
-              coverage: cov,
-            },
-          },
+          state: { coverage: cov },
         });
       })
       .catch((err: unknown) => {
@@ -161,12 +141,3 @@ function fileNameFor(
   return state.fileName;
 }
 
-// Re-exported so ReportsPage can type the returning state shape without
-// duplicating the interface.
-export interface CompletedRunState {
-  reportId: string | null;
-  companyId: string | null;
-  outputSummary: PipelineOutputSummary | null;
-  wasReconnected: boolean;
-  coverage: CoverageResponse | null;
-}
