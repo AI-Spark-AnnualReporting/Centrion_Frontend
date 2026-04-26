@@ -142,3 +142,25 @@ export interface AgentRun {
   output_summary: PipelineOutputSummary | null;
   error_message: string | null;
 }
+
+// Per-agent node rows from GET /api/v1/agent_runs/{run_id}/nodes — one row per
+// step in the pipeline, ordered by created_at ASC. Drives the live timeline on
+// the Processing page.
+export type AgentNodeStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | (string & {});
+
+export interface AgentNode {
+  agent_name: string;
+  status: AgentNodeStatus;
+  elapsed_seconds: number;
+  created_at: string;
+  error_message: string | null;
+}
+
+export interface AgentNodesResponse {
+  run_id: string;
+  nodes: AgentNode[];
+}

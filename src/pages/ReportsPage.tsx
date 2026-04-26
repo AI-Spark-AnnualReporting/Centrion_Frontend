@@ -55,7 +55,6 @@ function formatSince(timestampMs: number): string {
 // partial-failure story lives inside output_summary.results.
 function buildPartialFailureWarning(
   summary: PipelineOutputSummary | null,
-  wasReconnected: boolean,
 ): string | null {
   const results = summary?.results ?? [];
   const failed = results.filter((r) => r.status === 'failed');
@@ -80,9 +79,6 @@ function buildPartialFailureWarning(
         : `Skipped (already processed): ${names}.`,
     );
   }
-  if (parts.length === 0 && wasReconnected) {
-    return 'A run was already in progress for this report — reconnected and loaded the result.';
-  }
   return parts.length > 0 ? parts.join(' ') : null;
 }
 
@@ -97,10 +93,11 @@ function yearPickerOptions(): number[] {
 const ADD_NEW_SENTINEL = '__add_new__';
 
 // UI labels → backend framework codes for POST /api/v1/reports/{id}/generate.
+// IFRS currently maps to a single "IFRS" code — the option is disabled for
+// generation today, so this mapping only matters when it's eventually wired up.
 function frameworkLabelToCode(label: string): string {
   if (label.startsWith('GRI')) return 'GRI';
-  if (label === 'IFRS S1') return 'IFRS_S1';
-  if (label === 'IFRS S2') return 'IFRS_S2';
+  if (label === 'IFRS') return 'IFRS';
   return label;
 }
 
@@ -244,8 +241,8 @@ const missingMetrics = [
   { title: 'Executive Pay Ratio (GRI 2-21)', category: 'Governance · GRI 200 Series · SAMA ESG Framework', desc: 'CEO-to-median-pay ratio is an increasingly demanded metric by ESG-focused investors including GPIF and BlackRock. Absence signals governance opacity. Required for SAMA ESG framework Pillar 3 compliance by 2026.', impact: '+6 pts', severity: 'HIGH' },
 ];
 
-const globalFrameworks = ['GRI 2021', 'IFRS S1', 'IFRS S2'];
-// Only GRI is wired for generation today — IFRS S1/S2 are visible but disabled
+const globalFrameworks = ['GRI 2021', 'IFRS'];
+// Only GRI is wired for generation today — IFRS is visible but disabled
 // and should not be pre-checked.
 const defaultGlobalCheckedFrameworks = ['GRI 2021'];
 
@@ -398,6 +395,7 @@ export default function ReportsPage() {
     setHasGenerated(false);
     setCoverage(null);
     setExpandedReport(null);
+    setIsSubmittingGenerate(true);
 
     // Clear the router state early so a refresh of /reports doesn't re-fire
     // this effect with the same pendingGenerate payload.
@@ -428,6 +426,7 @@ export default function ReportsPage() {
       })
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
+        setIsSubmittingGenerate(false);
         setGenError(
           err instanceof Error ? err.message : 'Generation failed. Please try again.',
         );
@@ -473,10 +472,7 @@ export default function ReportsPage() {
       clearActivePipeline();
       setResumableRun(null);
 
-      const warning = buildPartialFailureWarning(
-        completed.outputSummary,
-        completed.wasReconnected,
-      );
+      const warning = buildPartialFailureWarning(completed.outputSummary);
       if (warning) {
         setGenWarning(warning);
         setGenOpen(true);
@@ -629,6 +625,11 @@ export default function ReportsPage() {
   // by the response from POST /api/v1/reports/{company_id}/generate.
   const [genError, setGenError] = useState<string | null>(null);
   const [genWarning, setGenWarning] = useState<string | null>(null);
+  // True from click → /reports/processing navigation. Branch A uses
+  // `isGenerating` for this, but Branch B avoids it (it would flash the
+  // legacy loader pre-navigate). A dedicated submitting flag lets us disable
+  // the button during the POST without changing the visible screen.
+  const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
   const triggerGenerate = () => {
@@ -666,6 +667,58 @@ export default function ReportsPage() {
       return;
     }
 
+    // Branch C — existing report + "Upload new documents": POST files to
+    // /reports/{company_id}/{report_id}/documents. The backend reads year,
+    // sector, frameworks, and regulators from the report's stored
+    // generation_config, so the form values on this page are ignored — the
+    // only input is the file(s). Response shape and polling handoff match
+    // Branch B.
+    if (
+      selectedReport &&
+      existingReportSource === 'upload' &&
+      uploadedFile
+    ) {
+      const requestId = ++genRequestIdRef.current;
+      setGenError(null);
+      setGenWarning(null);
+      setHasGenerated(false);
+      setCoverage(null);
+      setExpandedReport(null);
+      setIsSubmittingGenerate(true);
+      const submittedFile = uploadedFile;
+      const targetReportId = selectedReport.id;
+
+      reportsApi
+        .addDocuments(companyId, targetReportId, {
+          files: [submittedFile],
+        })
+        .then((handle) => {
+          if (requestId !== genRequestIdRef.current) return;
+          const processingState: ProcessingPageState = {
+            runId: handle.runId,
+            pollUrl: handle.pollUrl,
+            // The backend may or may not echo reportId in the 202 envelope;
+            // fall back to the report we uploaded against so /coverage can be
+            // fetched on completion.
+            reportId: handle.reportId ?? targetReportId,
+            companyId,
+            estimatedDurationSeconds: handle.estimatedDurationSeconds,
+            fileName: submittedFile.name,
+            isExisting: handle.isExisting,
+            conflictMessage: handle.message,
+          };
+          navigate('/reports/processing', { state: processingState });
+        })
+        .catch((err: unknown) => {
+          if (requestId !== genRequestIdRef.current) return;
+          setIsSubmittingGenerate(false);
+          setGenError(
+            err instanceof Error ? err.message : 'Upload failed. Please try again.',
+          );
+        });
+      return;
+    }
+
     // Branch B — new report: requires a year picked via "+ Add new…" + a file.
     if (customYear == null || selectedReport !== null || !uploadedFile) return;
 
@@ -675,6 +728,7 @@ export default function ReportsPage() {
     setHasGenerated(false);
     setCoverage(null);
     setExpandedReport(null);
+    setIsSubmittingGenerate(true);
 
     // The dropdown displays "None" by default, but the backend requires a
     // valid sector_id — fall back to the first loaded sector.
@@ -702,10 +756,14 @@ export default function ReportsPage() {
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
         };
+        // Don't reset isSubmittingGenerate — the component unmounts on
+        // navigate anyway, and keeping it true prevents a flash of an
+        // re-enabled button in the frame before navigation commits.
         navigate('/reports/processing', { state: processingState });
       })
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
+        setIsSubmittingGenerate(false);
         setGenError(
           err instanceof Error ? err.message : 'Generation failed. Please try again.',
         );
@@ -1069,8 +1127,8 @@ export default function ReportsPage() {
               {availableFrameworks.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
                   {availableFrameworks.map(fw => {
-                    // In global scope, IFRS S1 / IFRS S2 are preview-only for now.
-                    const isDisabled = scope === 'global' && (fw === 'IFRS S1' || fw === 'IFRS S2');
+                    // In global scope, IFRS is preview-only for now.
+                    const isDisabled = scope === 'global' && fw === 'IFRS';
                     return (
                       <label
                         key={fw}
@@ -1268,9 +1326,11 @@ export default function ReportsPage() {
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              {/* Enabled for either: a brand-new report (Global + file + year) or
-                  an existing report in "Generate from DB" mode. Upload-new-
-                  documents flow for existing reports is not wired yet. */}
+              {/* Enabled for any of: a brand-new report (Global + file + year),
+                  an existing report in "Generate from DB" mode, or adding new
+                  documents to an existing report (reuses the stored generation
+                  config — frameworks / year / sector are read from the backend,
+                  not the form). */}
               {(() => {
                 const hasFramework = checkedFw.length > 0;
                 const canGenerateNew =
@@ -1284,29 +1344,39 @@ export default function ReportsPage() {
                   selectedReport !== null &&
                   existingReportSource === 'db' &&
                   hasFramework;
-                const canGenerate = canGenerateNew || canGenerateFromDb;
+                // Backend pulls year/sector/frameworks from the report's stored
+                // generation_config, so the local hasFramework check is not
+                // required here — only a file is needed.
+                const canAddDocs =
+                  scope === 'global' &&
+                  selectedReport !== null &&
+                  existingReportSource === 'upload' &&
+                  uploadedFile !== null;
+                const canGenerate = canGenerateNew || canGenerateFromDb || canAddDocs;
                 const disabledReason =
                   scope !== 'global'
                     ? 'Regional generation is not available yet'
-                    : selectedReport !== null && existingReportSource === 'upload'
-                      ? 'Uploading new documents for an existing report is not available yet'
-                      : !hasFramework
+                    : selectedReport !== null && existingReportSource === 'upload' && uploadedFile === null
+                      ? 'Upload a document to add to this report'
+                      : !hasFramework && !(selectedReport !== null && existingReportSource === 'upload')
                         ? 'Select at least one ESG framework to continue'
                         : selectedReport === null && customYear === null
                           ? 'Select a reporting year to continue'
                           : selectedReport === null && uploadedFile === null
                             ? 'Upload a source document to continue'
                             : undefined;
+                const isBusy = isSubmittingGenerate;
+                const btnEnabled = canGenerate && !isBusy;
                 return (
                   <button
                     type="button"
-                    disabled={!canGenerate}
+                    disabled={!btnEnabled}
                     onClick={() => {
-                      if (!canGenerate) return;
+                      if (!btnEnabled) return;
                       triggerGenerate();
                     }}
                     className="btn bp"
-                    title={canGenerate ? undefined : disabledReason}
+                    title={!canGenerate ? disabledReason : undefined}
                     style={{
                       padding: '11px 24px',
                       fontSize: 13,
@@ -1315,15 +1385,28 @@ export default function ReportsPage() {
                       border: 'none',
                       background: '#4040C8',
                       color: '#fff',
-                      cursor: canGenerate ? 'pointer' : 'not-allowed',
-                      opacity: canGenerate ? 1 : 0.55,
+                      cursor: btnEnabled ? 'pointer' : 'not-allowed',
+                      opacity: btnEnabled ? 1 : 0.55,
                       display: 'flex',
                       alignItems: 'center',
                       gap: 7,
                     }}
                   >
-                    <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
-                    Generate Report
+                    {isBusy ? (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        style={{ animation: 'spin 1s linear infinite' }}
+                      >
+                        <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="3" strokeOpacity="0.3" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="white" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
+                    )}
+                    {isBusy ? 'Starting…' : 'Generate Report'}
                   </button>
                 );
               })()}
