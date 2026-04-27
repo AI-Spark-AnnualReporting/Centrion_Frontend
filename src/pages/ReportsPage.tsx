@@ -226,7 +226,7 @@ export default function ReportsPage() {
       | {
           pendingGenerate?: {
             year: number;
-            sector_id: string;
+            sector_id?: string;
             scope_type: string;
             framework_codes: string[];
             file: File;
@@ -249,7 +249,7 @@ export default function ReportsPage() {
       .generate(companyId, {
         files: [pending.file],
         year: pending.year,
-        sector_id: pending.sector_id,
+        ...(pending.sector_id ? { sector_id: pending.sector_id } : {}),
         scope_type: pending.scope_type,
         report_type: 'esg',
         framework_codes: pending.framework_codes,
@@ -345,8 +345,8 @@ export default function ReportsPage() {
 
   const resetFormForNewReport = () => {
     setScope('global');
-    // Display-wise the sector stays "None"; submission still sends a real
-    // sector_id (falls back to the first loaded sector) — see triggerGenerate.
+    // Sector is optional on the backend — leaving the dropdown on "None"
+    // omits sector_id from the request entirely.
     setSelectedSectorId('');
     setCheckedFw(defaultGlobalCheckedFrameworks);
     setSelectedRegion('');
@@ -469,16 +469,13 @@ export default function ReportsPage() {
     setGenWarning(null);
     setIsSubmittingGenerate(true);
 
-    // The dropdown displays "None" by default, but the backend requires a
-    // valid sector_id — fall back to the first loaded sector.
-    const sectorIdForApi = selectedSectorId || sectors[0]?.id || '';
     const submittedFile = uploadedFile;
 
     reportsApi
       .generate(companyId, {
         files: [submittedFile],
         year: customYear,
-        sector_id: sectorIdForApi,
+        ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
         scope_type: scope,
         report_type: 'esg',
         framework_codes: checkedFw.map(frameworkLabelToCode),
@@ -593,9 +590,11 @@ export default function ReportsPage() {
         <div><h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Reports</h2><p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>ESG, Annual, Quarterly & Sustainability</p></div>
         <div className="tabs" style={{ marginBottom: 0 }}>
           <button className="tab act">ESG & Sustainability</button>
+          {/* Other report types hidden until they're wired up.
           <button className="tab">Annual</button>
           <button className="tab">Quarterly</button>
           <button className="tab">Sustainability</button>
+          */}
         </div>
       </div>
 
@@ -681,7 +680,7 @@ export default function ReportsPage() {
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Generate New ESG Report</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Validate ESG Report</div>
               <div style={{ fontSize: 11, color: '#5A6080' }}>Configure parameters & upload source documents</div>
             </div>
           </div>
@@ -787,9 +786,6 @@ export default function ReportsPage() {
               </div>
               <div>
                 <label className="fl-label">Industry Sector</label>
-                {/* Selection is disabled for now — user can open the list to preview
-                    all sectors, but none are pickable. Wire onChange + remove option
-                    disables when the generate flow is ready. */}
                 <select
                   className="inp sel"
                   value={selectedSectorId}
@@ -801,7 +797,7 @@ export default function ReportsPage() {
                     <>
                       <option value="">None</option>
                       {sectors.map((s) => (
-                        <option key={s.id} value={s.id} disabled>
+                        <option key={s.id} value={s.id}>
                           {s.name}
                         </option>
                       ))}
@@ -1136,7 +1132,7 @@ export default function ReportsPage() {
                     ) : (
                       <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
                     )}
-                    {isBusy ? 'Starting…' : 'Generate Report'}
+                    {isBusy ? 'Starting…' : 'Validate Report'}
                   </button>
                 );
               })()}

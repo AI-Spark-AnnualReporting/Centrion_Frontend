@@ -3,7 +3,6 @@ const pages = {
   MeetingsPage: { title: 'Board & Meetings', desc: 'Meeting schedules and board governance', content: 'Upcoming meetings and board activities' },
   CommsPage: { title: 'Comms Hub', desc: 'Stakeholder communication management', content: 'Messages and communications' },
   StakeholdersPage: { title: 'Boards & Investors', desc: 'Stakeholder profiles and management', content: 'Board members and investors' },
-  DocsPage: { title: 'Document Bank', desc: 'Document management and storage', content: 'Uploaded documents and reports' },
   QuestionsPage: { title: 'Questions Bank', desc: 'Gap-closing questions for ESG metrics', content: 'Generated questions for missing data' },
   ProfilePage: { title: 'Profile', desc: 'Account settings and preferences', content: 'User profile and settings' },
 };
@@ -26,6 +25,5 @@ export function CompliancePage() { return <PlaceholderPage {...pages.ComplianceP
 export function MeetingsPage() { return <PlaceholderPage {...pages.MeetingsPage} />; }
 export function CommsPage() { return <PlaceholderPage {...pages.CommsPage} />; }
 export function StakeholdersPage() { return <PlaceholderPage {...pages.StakeholdersPage} />; }
-export function DocsPage() { return <PlaceholderPage {...pages.DocsPage} />; }
 export function QuestionsPage() { return <PlaceholderPage {...pages.QuestionsPage} />; }
 export function ProfilePage() { return <PlaceholderPage {...pages.ProfilePage} />; }

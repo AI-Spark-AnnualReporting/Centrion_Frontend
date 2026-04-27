@@ -178,15 +178,15 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const triggerGenerate = () => {
     if (!canGenerate || !companyId || !uploadedFile || customYear == null) return;
 
-    const sectorIdForApi = selectedSectorId || sectors[0]?.id || '';
     // Close the modal and hand the payload to ReportsPage — it shows the
-    // full-width GeneratingScreen and fires the API chain.
+    // full-width GeneratingScreen and fires the API chain. sector_id is
+    // optional on the backend, so omit it when no sector was picked.
     onClose();
     navigate('/reports', {
       state: {
         pendingGenerate: {
           year: customYear,
-          sector_id: sectorIdForApi,
+          ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
           scope_type: scope,
           framework_codes: checkedFw.map(frameworkLabelToCode),
           file: uploadedFile,
@@ -331,7 +331,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
                   >
                     <option value="">None</option>
                     {sectors.map((s) => (
-                      <option key={s.id} value={s.id} disabled>
+                      <option key={s.id} value={s.id}>
                         {s.name}
                       </option>
                     ))}

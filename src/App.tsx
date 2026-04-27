@@ -8,7 +8,8 @@ import ReportDetailPage from "./pages/ReportDetailPage";
 import ProcessingPage from "./pages/ProcessingPage";
 import KPIPage from "./pages/KPIPage";
 import AIPage from "./pages/AIPage";
-import { CompliancePage, MeetingsPage, CommsPage, StakeholdersPage, DocsPage, QuestionsPage, ProfilePage } from "./pages/OtherPages";
+import DocsPage from "./pages/DocsPage";
+import { CompliancePage, MeetingsPage, CommsPage, StakeholdersPage, QuestionsPage, ProfilePage } from "./pages/OtherPages";
 import NotFound from "./pages/NotFound";
 
 const App = () => (

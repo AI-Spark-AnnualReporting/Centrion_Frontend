@@ -298,28 +298,33 @@ export function ReportDetailView({ coverage }: ReportDetailViewProps) {
         </div>
       )}
 
-      {/* Three pillar sections */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 14 }}>
-        {(['E', 'S', 'G'] as const).map((pk) => {
+      {/* Pillar sections — 2-column grid: E, S in row 1; G, ESG in row 2 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14, marginBottom: 14 }}>
+        {(['E', 'S', 'G', 'ESG'] as const).map((pk) => {
           const style = PILLAR_STYLES[pk];
           const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
+          if (pk === 'ESG' && p.total === 0) return null;
           const coveragePct = coveragePercent(p.found, p.total);
           const score = coveragePct;
+          // Split into three buckets: disclosed numeric/bool metrics, disclosed
+          // narratives, and everything missing (regardless of data_type) — the
+          // missing bucket is rendered last under its own subtitle.
+          const pillarItems = coverage.indicators.filter((i) => pillarBaseKey(i.pillar) === pk);
           const pillarIndicators = sortIndicators(
-            coverage.indicators.filter(
-              (i) =>
-                pillarBaseKey(i.pillar) === pk &&
-                (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
-            ),
+            pillarItems.filter((i) => i.data_type !== 'text_block' && i.status !== 'NOT_DISCLOSED'),
           );
           const pillarNarratives = sortNarratives(
-            coverage.indicators.filter(
-              (i) =>
-                pillarBaseKey(i.pillar) === pk &&
-                i.data_type === 'text_block' &&
-                i.status !== 'NOT_DISCLOSED',
-            ),
+            pillarItems.filter((i) => i.data_type === 'text_block' && i.status !== 'NOT_DISCLOSED'),
           );
+          const pillarMissing = sortIndicators(
+            pillarItems.filter((i) => i.status === 'NOT_DISCLOSED'),
+          );
+          const metricsLabel = pk === 'ESG'
+            ? `${coverage.frameworks.join(' / ')} universal indicators`
+            : `${coverage.frameworks.join(' / ')} metrics`;
+          const emptyLabel = pk === 'ESG'
+            ? 'No universal indicators for this report.'
+            : 'No indicators for this pillar.';
           return (
             <div key={pk} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0' }}>
               <div style={{ background: style.gradient, padding: '14px 16px', color: '#fff' }}>
@@ -333,12 +338,12 @@ export function ReportDetailView({ coverage }: ReportDetailViewProps) {
                   <span style={{ flex: 2, background: 'rgba(255,255,255,.2)', borderRadius: 4, padding: '4px 0', textAlign: 'center', fontSize: 10, fontWeight: 700 }}>{coveragePct}%<br /><span style={{ fontSize: 8, opacity: .6 }}>COVERAGE</span></span>
                 </div>
               </div>
-              <div style={{ padding: '8px 14px', maxHeight: 480, overflowY: 'auto' }}>
+              <div style={{ padding: '8px 14px', maxHeight: 380, overflowY: 'auto' }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
-                  {coverage.frameworks.join(' / ')} metrics
+                  {metricsLabel}
                 </div>
-                {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
-                  <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No indicators for this pillar.</div>
+                {pillarIndicators.length === 0 && pillarNarratives.length === 0 && pillarMissing.length === 0 ? (
+                  <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>{emptyLabel}</div>
                 ) : (
                   <>
                     {pillarIndicators.map((ind) => (
@@ -354,6 +359,16 @@ export function ReportDetailView({ coverage }: ReportDetailViewProps) {
                         ))}
                       </>
                     )}
+                    {pillarMissing.length > 0 && (
+                      <>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: '#DC2626', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 14, marginBottom: 6, paddingTop: 10, borderTop: '1px solid #E2E4F0' }}>
+                          Missing disclosures
+                        </div>
+                        {pillarMissing.map((mm) => (
+                          <IndicatorRow key={mm.framework_indicator_id} ind={mm} />
+                        ))}
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -362,81 +377,75 @@ export function ReportDetailView({ coverage }: ReportDetailViewProps) {
         })}
       </div>
 
-      {/* ESG (Universal) — full-width card */}
-      {(() => {
-        const pk = 'ESG' as const;
-        const style = PILLAR_STYLES[pk];
-        const p = summary.by_pillar?.[pk] ?? { total: 0, found: 0, partial: 0, not_disclosed: 0 };
-        if (p.total === 0) return null;
-        const coveragePct = coveragePercent(p.found, p.total);
-        const score = coveragePct;
-        const pillarIndicators = sortIndicators(
-          coverage.indicators.filter(
-            (i) =>
-              pillarBaseKey(i.pillar) === pk &&
-              (i.data_type !== 'text_block' || i.status === 'NOT_DISCLOSED'),
-          ),
-        );
-        const pillarNarratives = sortNarratives(
-          coverage.indicators.filter(
-            (i) =>
-              pillarBaseKey(i.pillar) === pk &&
-              i.data_type === 'text_block' &&
-              i.status !== 'NOT_DISCLOSED',
-          ),
-        );
+      {/* Missing Metrics — Impact Analysis (driven by coverage.critical_gaps) */}
+      {coverage.critical_gaps && coverage.critical_gaps.length > 0 && (() => {
+        const gaps = coverage.critical_gaps;
+        // Build a lookup so we can render the framework chip ("GRI 304-1") even
+        // though the critical_gaps payload itself doesn't include `framework`.
+        const frameworkById = new Map<string, string>();
+        for (const ind of coverage.indicators) {
+          frameworkById.set(ind.framework_indicator_id, ind.framework);
+        }
+        const criticalCount = gaps.filter((g) => g.sector_threshold === 'critical').length;
         return (
-          <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', marginBottom: 14 }}>
-            <div style={{ background: style.gradient, padding: '18px 22px', color: '#fff', display: 'flex', alignItems: 'center', gap: 24 }}>
-              <div style={{ flex: '0 0 auto' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .7, marginBottom: 2 }}>
-                  {style.emoji} {style.label}
-                </div>
-                <div style={{ fontSize: 40, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}</div>
-                <div style={{ fontSize: 10, opacity: .6, marginTop: 2 }}>Overall coverage</div>
-              </div>
-              <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-                <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                  {p.found}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>FOUND</span>
-                </span>
-                <span style={{ flex: 1, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                  {p.not_disclosed}<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>MISSING</span>
-                </span>
-                <span style={{ flex: 2, background: 'rgba(255,255,255,.15)', borderRadius: 6, padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
-                  {coveragePct}%<br /><span style={{ fontSize: 9, fontWeight: 700, opacity: .65, letterSpacing: '.5px' }}>COVERAGE</span>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
+                <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>
+                  Missing Metrics — {coverage.sector?.name ? `${coverage.sector.name} ` : ''}Sector Impact Analysis
                 </span>
               </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#DC2626', background: 'rgba(239,68,68,.08)', padding: '4px 10px', borderRadius: 999 }}>
+                {criticalCount} critical {criticalCount === 1 ? 'gap' : 'gaps'}
+              </span>
             </div>
-            <div style={{ padding: '14px 18px' }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
-                {coverage.frameworks.join(' / ')} universal indicators
-              </div>
-              {pillarIndicators.length === 0 && pillarNarratives.length === 0 ? (
-                <div style={{ fontSize: 11, color: '#9BA3C4', padding: '10px 0' }}>No universal indicators for this report.</div>
-              ) : (
-                <>
-                  {pillarIndicators.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
-                      {pillarIndicators.map((ind) => (
-                        <IndicatorRow key={ind.framework_indicator_id} ind={ind} />
-                      ))}
+            {gaps.map((g) => {
+              const framework = frameworkById.get(g.framework_indicator_id) ?? '';
+              const code = framework ? `${framework} ${g.source_code}` : g.source_code;
+              const pillarKey = pillarBaseKey(g.pillar);
+              const pillarLabel = pillarKey === 'OTHER'
+                ? 'Other'
+                : PILLAR_STYLES[pillarKey].label;
+              const severity = (g.sector_threshold ?? '').toUpperCase() || 'GAP';
+              return (
+                <div
+                  key={g.framework_indicator_id}
+                  style={{
+                    background: 'rgba(239,68,68,.04)',
+                    border: '1px solid rgba(239,68,68,.25)',
+                    borderRadius: 12,
+                    padding: '14px 18px',
+                    marginBottom: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 4 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+                        {g.indicator_label} <span style={{ color: '#5A6080', fontWeight: 700 }}>({code})</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>
+                        {pillarLabel}
+                        {framework ? ` · ${framework}` : ''}
+                        {g.is_mandatory ? ' · Mandatory disclosure' : ''}
+                      </div>
                     </div>
-                  )}
-                  {pillarNarratives.length > 0 && (
-                    <>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: pillarIndicators.length > 0 ? 18 : 0, marginBottom: 4, paddingTop: pillarIndicators.length > 0 ? 14 : 0, borderTop: pillarIndicators.length > 0 ? '1px solid #E2E4F0' : 'none' }}>
-                        Narrative disclosures
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 0 }}>
-                        {pillarNarratives.map((nn) => (
-                          <NarrativeRow key={nn.framework_indicator_id} nn={nn} />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                      {g.is_mandatory && (
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 999, background: 'rgba(245,158,11,.12)', color: '#B45309', letterSpacing: '.4px' }}>MANDATORY</span>
+                      )}
+                      <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 999, background: 'rgba(239,68,68,.1)', color: '#DC2626', letterSpacing: '.4px' }}>{severity}</span>
+                    </div>
+                  </div>
+                  {/* Action buttons hidden until backend wires up Generate Question / View Template flows.
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button style={{ padding: '6px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: 'none', background: '#4040C8', color: '#fff', cursor: 'pointer' }}>Generate Question</button>
+                    <button style={{ padding: '6px 12px', fontSize: 10, fontWeight: 700, borderRadius: 6, border: '1px solid #E2E4F0', background: '#fff', color: '#1A1D2E', cursor: 'pointer' }}>View Template</button>
+                  </div>
+                  */}
+                </div>
+              );
+            })}
           </div>
         );
       })()}
