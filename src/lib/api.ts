@@ -229,7 +229,7 @@ export interface UploadDocumentsBody {
 export interface GenerateReportBody {
   files: File[];
   year: number;
-  sector_id: string;
+  sector_id?: string;
   scope_type: string;
   report_type?: string; // default "esg"
   framework_codes?: string[];
@@ -348,6 +348,14 @@ export const documents = {
     request<T>(
       `/api/v1/documents/${encodeURIComponent(companyId)}/${encodeURIComponent(documentId)}`,
     ),
+
+  // Document Bank — every report for the company, each with its uploaded
+  // documents and a time-limited signed download URL per document.
+  byReport: <T = unknown>(companyId: string, expiresInSeconds = 3600) =>
+    request<T>(
+      `/api/v1/documents/${encodeURIComponent(companyId)}/by-report`,
+      { query: { expires_in: expiresInSeconds } },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -463,7 +471,7 @@ export const reports = {
     const fd = new FormData();
     body.files.forEach((f) => fd.append("files", f));
     fd.append("year", String(body.year));
-    fd.append("sector_id", body.sector_id);
+    if (body.sector_id) fd.append("sector_id", body.sector_id);
     fd.append("scope_type", body.scope_type);
     if (body.report_type !== undefined) fd.append("report_type", body.report_type);
     (body.framework_codes ?? []).forEach((v) => fd.append("framework_codes", v));

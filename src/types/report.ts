@@ -62,16 +62,63 @@ export interface CoverageDocument {
   uploaded_at: string;
 }
 
+// GET /api/v1/documents/{company_id}/by-report — Document Bank shape. Each
+// document carries a time-limited signed `download_url` (null when the upload
+// failed) plus its expiry. Reports with zero documents are still returned.
+export interface DocumentBankDocument {
+  id: string;
+  filename: string;
+  file_type: string;
+  file_size_bytes: number;
+  extraction_status: string;
+  uploaded_at: string;
+  download_url: string | null;
+  download_expires_at: string | null;
+}
+
+export interface DocumentBankReport {
+  report_id: string;
+  title: string;
+  period: string;
+  status: string;
+  created_at: string;
+  documents: DocumentBankDocument[];
+}
+
+export interface DocumentBankResponse {
+  company_id: string;
+  company_name: string;
+  reports: DocumentBankReport[];
+}
+
+export interface CoverageCriticalGap {
+  framework_indicator_id: string;
+  source_code: string;
+  indicator_label: string;
+  pillar: CoveragePillar;
+  sector_threshold: string | null;
+  is_mandatory: boolean;
+  status: CoverageStatus;
+}
+
+export interface CoverageSector {
+  id: string;
+  code: string;
+  name: string;
+}
+
 export interface CoverageResponse {
   report_id: string;
   company_id?: string;
   company_name?: string;
   period: string;
+  sector?: CoverageSector | null;
   scope_type: string;
   frameworks: string[];
   documents?: CoverageDocument[];
   summary: CoverageSummary;
   indicators: CoverageIndicator[];
+  critical_gaps?: CoverageCriticalGap[];
 }
 
 // Async pipeline — 202 Accepted envelope returned by generate / addDocuments /
