@@ -4,7 +4,6 @@ const pages = {
   CommsPage: { title: 'Comms Hub', desc: 'Stakeholder communication management', content: 'Messages and communications' },
   StakeholdersPage: { title: 'Boards & Investors', desc: 'Stakeholder profiles and management', content: 'Board members and investors' },
   QuestionsPage: { title: 'Questions Bank', desc: 'Gap-closing questions for ESG metrics', content: 'Generated questions for missing data' },
-  ProfilePage: { title: 'Profile', desc: 'Account settings and preferences', content: 'User profile and settings' },
 };
 
 function PlaceholderPage({ title, desc }: { title: string; desc: string }) {
@@ -26,4 +25,3 @@ export function MeetingsPage() { return <PlaceholderPage {...pages.MeetingsPage}
 export function CommsPage() { return <PlaceholderPage {...pages.CommsPage} />; }
 export function StakeholdersPage() { return <PlaceholderPage {...pages.StakeholdersPage} />; }
 export function QuestionsPage() { return <PlaceholderPage {...pages.QuestionsPage} />; }
-export function ProfilePage() { return <PlaceholderPage {...pages.ProfilePage} />; }

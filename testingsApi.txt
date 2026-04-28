@@ -1,87 +1,43 @@
 GET
-/api/v1/documents/{company_id}/by-report
-List Documents By Report
+/api/v1/auth/me
+Get Profile
 
 
-Return every report for a company with its uploaded documents and a time-limited signed download URL per document.
-
-Documents whose storage upload had failed (no file_path) appear with download_url: null. Reports with zero documents are still included so the frontend can render an empty card. Ad-hoc documents (no report_id) are excluded — see GET /documents/{company_id} for the flat view.
+Get current user profile.
 
 Parameters
 Cancel
-Name	Description
-company_id *
-string
-(path)
-8242fd79-366a-4eaf-ab88-31a36c2b95bf
-expires_in
-integer
-(query)
-3600
+No parameters
+
 Execute
 Clear
 Responses
 Curl
 
 curl -X 'GET' \
-  'http://localhost:8000/api/v1/documents/8242fd79-366a-4eaf-ab88-31a36c2b95bf/by-report?expires_in=3600' \
+  'http://localhost:8000/api/v1/auth/me' \
   -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzI5NDc1MH0.jVBCDYodKpryT1sco11bnV8GU7h_cppu9_hR6YM-R18'
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzM4MDI5OX0.X_8znWyK7ge5b2YGhIbilB725HyaHKWovS6OSd5LZsk'
 Request URL
-http://localhost:8000/api/v1/documents/8242fd79-366a-4eaf-ab88-31a36c2b95bf/by-report?expires_in=3600
+http://localhost:8000/api/v1/auth/me
 Server response
 Code	Details
 200	
 Response body
 Download
 {
-  "company_id": "8242fd79-366a-4eaf-ab88-31a36c2b95bf",
-  "company_name": "Shell ",
-  "reports": [
-    {
-      "report_id": "0c441b0f-bc2e-4f03-abc5-22ffe8cb0970",
-      "title": "ESG Sustainability Report",
-      "period": "FY-2017",
-      "status": "draft",
-      "created_at": "2026-04-27T07:33:24.342479+00:00",
-      "documents": [
-        {
-          "id": "480ace1e-729c-4be1-851f-0623f1bbf525",
-          "filename": "TAEF-sustainability-REPORT-Dec-2025.pdf",
-          "file_type": "pdf",
-          "file_size_bytes": 7409986,
-          "extraction_status": "completed",
-          "uploaded_at": "2026-04-27T07:33:24.765295+00:00",
-          "download_url": "https://azoowludavpzyohvpxgy.supabase.co/storage/v1/object/sign/documents/8242fd79-366a-4eaf-ab88-31a36c2b95bf/480ace1e-729c-4be1-851f-0623f1bbf525.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV85ZDY5ZjVlYi00N2IyLTQ3M2ItYTNhZC00YWMyZWZmNzI3OGIiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkb2N1bWVudHMvODI0MmZkNzktMzY2YS00ZWFmLWFiODgtMzFhMzZjMmI5NWJmLzQ4MGFjZTFlLTcyOWMtNGJlMS04NTFmLTA2MjNmMWJiZjUyNS5wZGYiLCJpYXQiOjE3NzcyOTEyODQsImV4cCI6MTc3NzI5NDg4NH0.iiryyX_4mNsiNZJno_U9TfHaNoBWgd2ivyGCv74gX70",
-          "download_expires_at": "2026-04-27T13:01:24.920682+00:00"
-        }
-      ]
-    },
-    {
-      "report_id": "18b890bf-9dd0-4412-9ce1-af8efb0ca9a1",
-      "title": "ESG Sustainability Report",
-      "period": "FY-2016",
-      "status": "draft",
-      "created_at": "2026-04-27T07:09:20.454148+00:00",
-      "documents": [
-        {
-          "id": "fcbd6a7b-44d2-4b4d-9ec3-3e2bf216aa84",
-          "filename": "SCCC annual report 2023 excluding financial performance.pdf",
-          "file_type": "pdf",
-          "file_size_bytes": 3558416,
-          "extraction_status": "completed",
-          "uploaded_at": "2026-04-27T07:09:20.903983+00:00",
-          "download_url": "https://azoowludavpzyohvpxgy.supabase.co/storage/v1/object/sign/documents/8242fd79-366a-4eaf-ab88-31a36c2b95bf/fcbd6a7b-44d2-4b4d-9ec3-3e2bf216aa84.pdf?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV85ZDY5ZjVlYi00N2IyLTQ3M2ItYTNhZC00YWMyZWZmNzI3OGIiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkb2N1bWVudHMvODI0MmZkNzktMzY2YS00ZWFmLWFiODgtMzFhMzZjMmI5NWJmL2ZjYmQ2YTdiLTQ0ZDItNGI0ZC05ZWMzLTNlMmJmMjE2YWE4NC5wZGYiLCJpYXQiOjE3NzcyOTEyODQsImV4cCI6MTc3NzI5NDg4NH0.brzjiyihSRF5Z1XedRAOys_jTbpU3ui_CDQfKjRtfk0",
-          "download_expires_at": "2026-04-27T13:01:24.920682+00:00"
-        }
-      ]
-    }
-  ]
+  "user_id": "usr_f47cf46ab436",
+  "email": "ahsan@wearespark.me",
+  "full_name": "Ahsan Bilal",
+  "role": "admin",
+  "status": "active",
+  "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+  "company_name": "aramco"
 }
 Response headers
- content-length: 2061 
+ content-length: 195 
  content-type: application/json 
- date: Mon,27 Apr 2026 12:01:23 GMT 
+ date: Tue,28 Apr 2026 07:45:11 GMT 
  server: uvicorn 
 Responses
 Code	Description	Links
@@ -95,26 +51,3 @@ Controls Accept header.
 Example Value
 Schema
 "string"
-No links
-422	
-Validation Error
-
-Media type
-
-application/json
-Example Value
-Schema
-{
-  "detail": [
-    {
-      "loc": [
-        "string",
-        0
-      ],
-      "msg": "string",
-      "type": "string",
-      "input": "string",
-      "ctx": {}
-    }
-  ]
-}
