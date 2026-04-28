@@ -1,14 +1,5 @@
-import { useMemo, useState } from 'react';
-
-type Sentiment = 'pos' | 'warn' | 'neg' | 'neutral';
-
-interface Kpi {
-  name: string;
-  value: string;
-  change: string;
-  sentiment: Sentiment;
-  valueColor?: string;
-}
+import { useEffect, useMemo, useState } from 'react';
+import { lookups, ApiError, type FrameworkIndicator } from '@/lib/api';
 
 interface ExtractedRow {
   kpi: string;
@@ -27,36 +18,40 @@ interface ReportTab {
   rows: ExtractedRow[];
 }
 
-const changeColor: Record<Sentiment, string> = {
-  pos: '#16A34A',
-  warn: '#F59E0B',
-  neg: '#DC2626',
-  neutral: '#9BA3C4',
-};
-
 const PAGE_SIZE = 8;
 
-const esgKpis: Kpi[] = [
-  { name: 'Scope 1 GHG Emissions (tCO₂e)', value: '1,842', change: '-8.4%', sentiment: 'pos' },
-  { name: 'Scope 2 GHG Emissions (tCO₂e)', value: '3,210', change: '-4.2%', sentiment: 'pos' },
-  { name: 'Renewable Energy %', value: '18.4%', change: '+2.1%', sentiment: 'warn' },
-  { name: 'Water Withdrawal (m³)', value: '14,200', change: '-3.1%', sentiment: 'pos' },
-  { name: 'Saudization Rate (Nitaqat)', value: '68.4%', change: '+0.4%', sentiment: 'warn' },
-  { name: 'Gender Diversity', value: '38.2%', change: '+2.8%', sentiment: 'pos' },
-  { name: 'Lost Time Injury Rate', value: '0.42', change: '-0.12', sentiment: 'pos' },
-  { name: 'Board Independence', value: '67%', change: '—', sentiment: 'neutral' },
-];
+const categoryTextColor: Record<string, string> = {
+  Environmental: '#16A34A',
+  Social: '#0D9488',
+  Governance: '#7C3AED',
+  Economic: '#2563EB',
+  Universal: '#5A6080',
+  Filing: '#B45309',
+};
 
-const finKpis: Kpi[] = [
-  { name: 'AUM (SAR B)', value: '84.2', change: '+12.3%', sentiment: 'pos' },
-  { name: 'Total Return (gross)', value: '18.4%', change: '+7.2pp', sentiment: 'pos' },
-  { name: 'Net Profit (SAR M)', value: '412', change: '+29.6%', sentiment: 'pos' },
-  { name: 'EBITDA Margin', value: '40.5%', change: '+1.3pp', sentiment: 'pos' },
-  { name: 'Sharpe Ratio', value: '1.84', change: '+0.33', sentiment: 'pos' },
-  { name: 'Leverage Ratio', value: '1.42×', change: '-0.25', sentiment: 'pos' },
-  { name: 'Sector Concentration', value: '40.1%', change: '+5.9pp', sentiment: 'neg', valueColor: '#DC2626' },
-  { name: 'Dividend per Unit (SAR)', value: '0.84', change: '+25.4%', sentiment: 'pos' },
-];
+function categoryColor(category?: string | null): string {
+  if (!category) return '#9BA3C4';
+  return categoryTextColor[category] ?? '#5A6080';
+}
+
+function normaliseFramework(framework?: string | null): string {
+  if (!framework) return '';
+  return framework.trim().toUpperCase().replace(/[\s_]/g, '-');
+}
+
+// The framework field is sometimes omitted from the lookup response (it's
+// only returned when explicitly requested in `fields=`). Fall back to the
+// source_code prefix: "IFRS-S1-…" / "IFRS-S2-…" identify themselves; anything
+// else in this dataset is GRI.
+function resolveFramework(ind: FrameworkIndicator): string {
+  const direct = normaliseFramework(ind.framework);
+  if (direct) return direct;
+  const code = (ind.source_code ?? '').toUpperCase();
+  if (code.startsWith('IFRS-S1')) return 'IFRS-S1';
+  if (code.startsWith('IFRS-S2')) return 'IFRS-S2';
+  if (code.startsWith('IFRS')) return 'IFRS';
+  return 'GRI';
+}
 
 const reportTabs: ReportTab[] = [
   {
@@ -145,50 +140,165 @@ function confidenceBadge(c: number) {
   return 'b-rd';
 }
 
-function renderKpiRows(rows: Kpi[]) {
-  return rows.map((k, i) => (
-    <div
-      key={k.name}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '13px 0',
-        borderBottom: i < rows.length - 1 ? '1px solid #ECEEF8' : 'none',
-      }}
-    >
-      <span style={{ fontSize: 12, color: '#1A1D2E', fontWeight: 500, flex: 1 }}>{k.name}</span>
-      <span
-        style={{
-          fontSize: 13,
-          fontWeight: 800,
-          fontFamily: "'DM Mono',monospace",
-          color: k.valueColor ?? '#1A1D2E',
-          marginLeft: 12,
-        }}
-      >
-        {k.value}
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          fontFamily: "'DM Mono',monospace",
-          marginLeft: 14,
-          width: 60,
-          textAlign: 'right',
-          color: changeColor[k.sentiment],
-        }}
-      >
-        {k.change}
-      </span>
+function IndicatorList({
+  indicators,
+  loading,
+  error,
+  emptyLabel,
+}: {
+  indicators: FrameworkIndicator[];
+  loading: boolean;
+  error: string | null;
+  emptyLabel: string;
+}) {
+  if (loading) {
+    return (
+      <div style={{ padding: '32px 18px', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
+        <div className="proc-ring" style={{ margin: '0 auto 10px', width: 28, height: 28, borderWidth: 2 }} />
+        Loading indicators…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div style={{ padding: '24px 18px', color: '#DC2626', fontSize: 12, textAlign: 'center' }}>
+        {error}
+      </div>
+    );
+  }
+  if (indicators.length === 0) {
+    return (
+      <div style={{ padding: '24px 18px', color: '#9BA3C4', fontSize: 12, textAlign: 'center' }}>
+        {emptyLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '4px 18px 12px', maxHeight: 420, overflowY: 'auto' }}>
+      {indicators.map((ind, i) => {
+        const last = i === indicators.length - 1;
+        return (
+          <div
+            key={ind.id ?? `${ind.framework}-${ind.source_code}-${i}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '11px 0',
+              borderBottom: last ? 'none' : '1px solid #ECEEF8',
+              gap: 10,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: '#1A1D2E',
+                  fontWeight: 500,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+                title={ind.indicator_label}
+              >
+                {ind.indicator_label}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: '#9BA3C4',
+                  marginTop: 2,
+                  fontFamily: "'DM Mono',monospace",
+                  fontWeight: 600,
+                }}
+              >
+                {resolveFramework(ind)} · {ind.source_code}
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                fontFamily: "'DM Mono',monospace",
+                color: '#1A1D2E',
+                minWidth: 56,
+                textAlign: 'right',
+              }}
+            >
+              {ind.expected_unit ?? '—'}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: categoryColor(ind.esg_category),
+                minWidth: 92,
+                textAlign: 'right',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {ind.esg_category ?? '—'}
+            </span>
+          </div>
+        );
+      })}
     </div>
-  ));
+  );
 }
 
 export default function KPIPage() {
+  const [indicators, setIndicators] = useState<FrameworkIndicator[]>([]);
+  const [indicatorsLoading, setIndicatorsLoading] = useState(true);
+  const [indicatorsError, setIndicatorsError] = useState<string | null>(null);
+
   const [activeReportId, setActiveReportId] = useState<string>(reportTabs[0].id);
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setIndicatorsLoading(true);
+    setIndicatorsError(null);
+
+    lookups
+      .frameworkIndicators({
+        framework: ['GRI', 'IFRS-S1', 'IFRS-S2'],
+        fields: ['framework', 'source_code', 'indicator_label', 'esg_category', 'expected_unit'],
+        is_active: true,
+        signal: ctrl.signal,
+      })
+      .then((list) => {
+        setIndicators(list);
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        const msg =
+          err instanceof ApiError
+            ? `Failed to load indicators (${err.status})`
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load indicators';
+        setIndicatorsError(msg);
+      })
+      .finally(() => {
+        setIndicatorsLoading(false);
+      });
+
+    return () => ctrl.abort();
+  }, []);
+
+  const griIndicators = useMemo(
+    () => indicators.filter((i) => resolveFramework(i) === 'GRI'),
+    [indicators],
+  );
+  const ifrsIndicators = useMemo(
+    () =>
+      indicators.filter((i) => {
+        const f = resolveFramework(i);
+        return f === 'IFRS-S1' || f === 'IFRS-S2';
+      }),
+    [indicators],
+  );
 
   const activeReport = useMemo(
     () => reportTabs.find((r) => r.id === activeReportId) ?? reportTabs[0],
@@ -208,7 +318,7 @@ export default function KPIPage() {
   };
 
   return (
-    <div>
+    <div style={{ paddingBottom: 80 }}>
       <div
         style={{
           display: 'flex',
@@ -227,21 +337,45 @@ export default function KPIPage() {
         <button className="btn bp">Export</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
         <div className="card">
           <div className="ch">
-            <div className="ct">ESG Performance KPIs</div>
+            <div className="ct">
+              ESG Performance KPIs{' '}
+              {!indicatorsLoading && (
+                <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600, marginLeft: 6 }}>
+                  · {griIndicators.length}
+                </span>
+              )}
+            </div>
             <span className="badge b-gn">GRI 2021</span>
           </div>
-          <div style={{ padding: '4px 18px 12px' }}>{renderKpiRows(esgKpis)}</div>
+          <IndicatorList
+            indicators={griIndicators}
+            loading={indicatorsLoading}
+            error={indicatorsError}
+            emptyLabel="No GRI indicators returned."
+          />
         </div>
 
         <div className="card">
           <div className="ch">
-            <div className="ct">Financial Performance KPIs</div>
+            <div className="ct">
+              Financial Performance KPIs{' '}
+              {!indicatorsLoading && (
+                <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600, marginLeft: 6 }}>
+                  · {ifrsIndicators.length}
+                </span>
+              )}
+            </div>
             <span className="badge b-bl">IFRS</span>
           </div>
-          <div style={{ padding: '4px 18px 12px' }}>{renderKpiRows(finKpis)}</div>
+          <IndicatorList
+            indicators={ifrsIndicators}
+            loading={indicatorsLoading}
+            error={indicatorsError}
+            emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
+          />
         </div>
       </div>
 

@@ -578,7 +578,83 @@ export const lookups = {
 
   frameworks: <T = unknown>(scope: string = "global") =>
     request<T>("/api/v1/lookups/frameworks", { query: { scope } }),
+
+  frameworkIndicators: async (opts?: {
+    framework?: string | string[];
+    fields?: string | string[];
+    is_active?: boolean;
+    signal?: AbortSignal;
+  }): Promise<FrameworkIndicator[]> => {
+    const { framework, fields, is_active, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (framework != null) {
+      query.framework = Array.isArray(framework) ? framework.join(",") : framework;
+    }
+    if (fields != null) {
+      query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    }
+    if (is_active != null) query.is_active = is_active;
+    const raw = await request<unknown>("/api/v1/lookups/framework-indicators", {
+      query,
+      signal,
+    });
+    return extractIndicatorList(raw);
+  },
 };
+
+// The endpoint may return the array under a wrapper key (`framework_indicators`,
+// `data`, `items`, `results`) or as a bare array. Normalise to FrameworkIndicator[]
+// so callers don't have to second-guess the shape.
+function extractIndicatorList(raw: unknown): FrameworkIndicator[] {
+  if (Array.isArray(raw)) return raw as FrameworkIndicator[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of [
+      "framework_indicators",
+      "frameworkIndicators",
+      "indicators",
+      "data",
+      "items",
+      "results",
+    ]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as FrameworkIndicator[];
+      // One nested level — e.g. { data: { framework_indicators: [...] } }
+      if (v && typeof v === "object") {
+        const inner = v as Record<string, unknown>;
+        for (const k2 of ["framework_indicators", "indicators", "items", "results"]) {
+          if (Array.isArray(inner[k2])) return inner[k2] as FrameworkIndicator[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+export interface FrameworkIndicator {
+  id?: string;
+  framework: string;
+  source_code: string;
+  indicator_label: string;
+  terse_label?: string | null;
+  parent_standard?: string | null;
+  esg_pillar?: "E" | "S" | "G" | "ESG" | null;
+  esg_category?:
+    | "Environmental"
+    | "Social"
+    | "Governance"
+    | "Economic"
+    | "Universal"
+    | "Filing"
+    | null;
+  data_type?: string | null;
+  expected_unit?: string | null;
+  is_active?: boolean;
+}
+
+export interface FrameworkIndicatorsResponse {
+  framework_indicators: FrameworkIndicator[];
+}
 
 // ---------------------------------------------------------------------------
 // Root / Health
