@@ -401,10 +401,27 @@ export const esg = {
   getScores: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/scores`),
 
-  getEvidence: <T = unknown>(companyId: string, pillar?: string) =>
-    request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/evidence`, {
-      query: { pillar },
-    }),
+  getEvidence: <T = EsgEvidenceResponse>(
+    companyId: string,
+    opts?: {
+      pillar?: string;
+      document_id?: string;
+      fields?: string | string[];
+      signal?: AbortSignal;
+    },
+  ) => {
+    const { pillar, document_id, fields, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (document_id != null) query.document_id = document_id;
+    if (fields != null) query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    // The endpoint accepts an empty `pillar` to mean "all" — preserve that
+    // when it's an empty string, only drop on null/undefined.
+    if (pillar !== undefined && pillar !== null) query.pillar = pillar;
+    return request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/evidence`, {
+      query,
+      signal,
+    });
+  },
 
   getGaps: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/gaps`),
@@ -412,6 +429,38 @@ export const esg = {
   getCertifications: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/certifications`),
 };
+
+export interface EsgEvidenceItem {
+  period?: string | null;
+  pillar?: string | null;
+  status?: string | null;
+  raw_unit?: string | null;
+  data_type?: string | null;
+  framework?: string | null;
+  raw_value?: string | number | null;
+  company_id?: string;
+  confidence?: number | null;
+  document_id?: string;
+  source_code?: string | null;
+  source_page?: number | null;
+  esg_category?: string | null;
+  boolean_value?: boolean | null;
+  verbatim_quote?: string | null;
+  context_snippet?: string | null;
+  framework_codes?: string[] | null;
+  indicator_label?: string | null;
+  narrative_summary?: string | null;
+  framework_indicator_id?: string;
+}
+
+// `GET /esg/{company_id}/evidence` returns each row inside a `raw_evidence`
+// wrapper. The wrapper itself contains another nested `raw_evidence` object
+// holding the verbatim quote / context snippet — we hoist the top-level
+// fields into EsgEvidenceItem and ignore the nested duplicate.
+export interface EsgEvidenceResponse {
+  evidence: Array<{ raw_evidence: EsgEvidenceItem }>;
+  total?: number;
+}
 
 // ---------------------------------------------------------------------------
 // Compliance
