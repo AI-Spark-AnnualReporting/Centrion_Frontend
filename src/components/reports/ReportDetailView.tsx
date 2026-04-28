@@ -71,7 +71,7 @@ function narrativeBodyText(nn: CoverageIndicator): string {
   const pk = pillarBaseKey(nn.pillar);
   const pillarLabelForBody = pk !== 'OTHER' ? PILLAR_STYLES[pk].label : 'overall';
   if (nn.status === 'NOT_DISCLOSED')
-    return `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar score.`;
+    return `Not disclosed in the uploaded documents. Add evidence for this indicator to raise the ${pillarLabelForBody} pillar coverage.`;
   if (nn.text_value && nn.text_value.trim().length > 0) return nn.text_value;
   return 'Disclosed, but no narrative text was captured.';
 }

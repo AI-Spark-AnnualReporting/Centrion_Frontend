@@ -7,8 +7,8 @@ const STEPS = [
   'Uploading & reading documents',
   'Extracting ESG data points',
   'Mapping to GRI / IFRS / SAMA metrics',
-  'Calculating pillar scores & coverage',
-  'Identifying gaps & scoring impacts',
+  'Calculating pillar coverage',
+  'Identifying gaps & impacts',
 ];
 
 export type GeneratingPhase = 'running' | 'completed' | 'failed' | 'timeout';

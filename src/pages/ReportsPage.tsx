@@ -17,6 +17,7 @@ interface ReportGenerationConfig {
   scope_type?: string;
   regulator_ids?: string[];
   framework_codes?: string[];
+  gri_scope?: 'standard' | 'full' | string | null;
 }
 
 interface ReportPillarCoverage {
@@ -120,64 +121,64 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const globalFrameworks = ['GRI 2021', 'IFRS'];
+const globalFrameworks = ['GRI', 'IFRS'];
 // Only GRI is wired for generation today — IFRS is visible but disabled
 // and should not be pre-checked.
-const defaultGlobalCheckedFrameworks = ['GRI 2021'];
+const defaultGlobalCheckedFrameworks = ['GRI'];
 
 const regionData: Record<string, { countries: string[]; frameworks: Record<string, string[]> }> = {
   'Middle East': {
     countries: ['Saudi Arabia', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Kuwait', 'Jordan'],
     frameworks: {
-      'Saudi Arabia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI', 'SASB'],
-      'UAE': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ADX ESG', 'SCA Guidelines', 'SASB'],
-      'Qatar': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'QSE ESG', 'SASB'],
-      'Bahrain': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CBB ESG', 'SASB'],
-      'Oman': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Oman ESG', 'SASB'],
-      'Kuwait': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMA Kuwait', 'SASB'],
-      'Jordan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'JSC ESG', 'SASB'],
+      'Saudi Arabia': ['GRI', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI', 'SASB'],
+      'UAE': ['GRI', 'IFRS S1/S2', 'TCFD', 'ADX ESG', 'SCA Guidelines', 'SASB'],
+      'Qatar': ['GRI', 'IFRS S1/S2', 'TCFD', 'QSE ESG', 'SASB'],
+      'Bahrain': ['GRI', 'IFRS S1/S2', 'TCFD', 'CBB ESG', 'SASB'],
+      'Oman': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMA Oman ESG', 'SASB'],
+      'Kuwait': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMA Kuwait', 'SASB'],
+      'Jordan': ['GRI', 'IFRS S1/S2', 'TCFD', 'JSC ESG', 'SASB'],
     },
   },
   'Europe': {
     countries: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Sweden', 'Switzerland'],
     frameworks: {
-      'United Kingdom': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'UK SDR', 'FCA ESG', 'SASB'],
-      'Germany': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'France': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'Article 29'],
-      'Netherlands': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'Sweden': ['GRI 2021', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'Switzerland': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'Swiss CO Ordinance', 'SASB'],
+      'United Kingdom': ['GRI', 'IFRS S1/S2', 'TCFD', 'UK SDR', 'FCA ESG', 'SASB'],
+      'Germany': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'France': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'Article 29'],
+      'Netherlands': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Sweden': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
+      'Switzerland': ['GRI', 'IFRS S1/S2', 'TCFD', 'Swiss CO Ordinance', 'SASB'],
     },
   },
   'Asia Pacific': {
     countries: ['Singapore', 'Hong Kong', 'Japan', 'Australia', 'India', 'South Korea'],
     frameworks: {
-      'Singapore': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SGX Core ESG', 'SASB'],
-      'Hong Kong': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'HKEX ESG', 'SASB'],
-      'Japan': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SSBJ Standards', 'SASB'],
-      'Australia': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'ASRS Standards', 'SASB'],
-      'India': ['GRI 2021', 'IFRS S1/S2', 'BRSR', 'SEBI ESG', 'SASB'],
-      'South Korea': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'KSSB Standards', 'SASB'],
+      'Singapore': ['GRI', 'IFRS S1/S2', 'TCFD', 'SGX Core ESG', 'SASB'],
+      'Hong Kong': ['GRI', 'IFRS S1/S2', 'TCFD', 'HKEX ESG', 'SASB'],
+      'Japan': ['GRI', 'IFRS S1/S2', 'TCFD', 'SSBJ Standards', 'SASB'],
+      'Australia': ['GRI', 'IFRS S1/S2', 'TCFD', 'ASRS Standards', 'SASB'],
+      'India': ['GRI', 'IFRS S1/S2', 'BRSR', 'SEBI ESG', 'SASB'],
+      'South Korea': ['GRI', 'IFRS S1/S2', 'TCFD', 'KSSB Standards', 'SASB'],
     },
   },
   'Africa': {
     countries: ['South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco'],
     frameworks: {
-      'South Africa': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'King IV', 'JSE ESG', 'SASB'],
-      'Nigeria': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NGX ESG', 'SASB'],
-      'Kenya': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'NSE ESG', 'SASB'],
-      'Egypt': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'EGX ESG', 'SASB'],
-      'Morocco': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'AMMC ESG', 'SASB'],
+      'South Africa': ['GRI', 'IFRS S1/S2', 'TCFD', 'King IV', 'JSE ESG', 'SASB'],
+      'Nigeria': ['GRI', 'IFRS S1/S2', 'TCFD', 'NGX ESG', 'SASB'],
+      'Kenya': ['GRI', 'IFRS S1/S2', 'TCFD', 'NSE ESG', 'SASB'],
+      'Egypt': ['GRI', 'IFRS S1/S2', 'TCFD', 'EGX ESG', 'SASB'],
+      'Morocco': ['GRI', 'IFRS S1/S2', 'TCFD', 'AMMC ESG', 'SASB'],
     },
   },
   'Americas': {
     countries: ['United States', 'Canada', 'Brazil', 'Mexico', 'Chile'],
     frameworks: {
-      'United States': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'SEC Climate', 'SASB', 'CDP'],
-      'Canada': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CSSB Standards', 'SASB', 'CDP'],
-      'Brazil': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CVM ESG', 'SASB'],
-      'Mexico': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'BMV ESG', 'SASB'],
-      'Chile': ['GRI 2021', 'IFRS S1/S2', 'TCFD', 'CMF ESG', 'SASB'],
+      'United States': ['GRI', 'IFRS S1/S2', 'TCFD', 'SEC Climate', 'SASB', 'CDP'],
+      'Canada': ['GRI', 'IFRS S1/S2', 'TCFD', 'CSSB Standards', 'SASB', 'CDP'],
+      'Brazil': ['GRI', 'IFRS S1/S2', 'TCFD', 'CVM ESG', 'SASB'],
+      'Mexico': ['GRI', 'IFRS S1/S2', 'TCFD', 'BMV ESG', 'SASB'],
+      'Chile': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMF ESG', 'SASB'],
     },
   },
 };
@@ -191,6 +192,8 @@ export default function ReportsPage() {
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('');
   const [checkedFw, setCheckedFw] = useState<string[]>(defaultGlobalCheckedFrameworks);
+  // GRI indicator scope: "standard" → 85 indicators, "full" → all 128.
+  const [griScope, setGriScope] = useState<'standard' | 'full'>('standard');
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorsLoading, setSectorsLoading] = useState(true);
   const [selectedSectorId, setSelectedSectorId] = useState('');
@@ -229,6 +232,7 @@ export default function ReportsPage() {
             sector_id?: string;
             scope_type: string;
             framework_codes: string[];
+            gri_scope?: 'standard' | 'full';
             file: File;
           };
         }
@@ -253,6 +257,7 @@ export default function ReportsPage() {
         scope_type: pending.scope_type,
         report_type: 'esg',
         framework_codes: pending.framework_codes,
+        ...(pending.gri_scope ? { gri_scope: pending.gri_scope } : {}),
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -341,6 +346,10 @@ export default function ReportsPage() {
     setSelectedCountry('');
     setUploadedFile(null);
     setUploadError(null);
+    // Mirror the report's stored GRI indicator scope onto the radio. Backend
+    // values are "standard" or "full"; if it's null/undefined we treat the
+    // report as having been generated against the full 128-indicator set.
+    setGriScope(cfg.gri_scope === 'standard' ? 'standard' : 'full');
   };
 
   const resetFormForNewReport = () => {
@@ -471,6 +480,8 @@ export default function ReportsPage() {
 
     const submittedFile = uploadedFile;
 
+    const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
+
     reportsApi
       .generate(companyId, {
         files: [submittedFile],
@@ -479,6 +490,7 @@ export default function ReportsPage() {
         scope_type: scope,
         report_type: 'esg',
         framework_codes: checkedFw.map(frameworkLabelToCode),
+        ...(griSelected ? { gri_scope: griScope } : {}),
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -790,6 +802,7 @@ export default function ReportsPage() {
                   className="inp sel"
                   value={selectedSectorId}
                   onChange={(e) => setSelectedSectorId(e.target.value)}
+                  disabled={selectedReport !== null}
                 >
                   {sectorsLoading ? (
                     <option value="" disabled>Loading sectors…</option>
@@ -811,7 +824,12 @@ export default function ReportsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: scope === 'regional' ? '1fr 1fr 1fr' : '1fr', gap: 12, marginBottom: 18 }}>
               <div>
                 <label className="fl-label">Report Scope</label>
-                <select className="inp sel" value={scope} onChange={e => handleScopeChange(e.target.value as 'global' | 'regional')}>
+                <select
+                  className="inp sel"
+                  value={scope}
+                  onChange={e => handleScopeChange(e.target.value as 'global' | 'regional')}
+                  disabled={selectedReport !== null}
+                >
                   <option value="global">Global</option>
                   <option value="regional">Regional</option>
                 </select>
@@ -821,7 +839,12 @@ export default function ReportsPage() {
                   <div>
                     <label className="fl-label">Region</label>
                     {/* Selection disabled for now — options visible as preview only. */}
-                    <select className="inp sel" value={selectedRegion} onChange={e => handleRegionChange(e.target.value)}>
+                    <select
+                      className="inp sel"
+                      value={selectedRegion}
+                      onChange={e => handleRegionChange(e.target.value)}
+                      disabled={selectedReport !== null}
+                    >
                       <option value="">None</option>
                       {regions.map(r => <option key={r} value={r} disabled>{r}</option>)}
                     </select>
@@ -829,7 +852,12 @@ export default function ReportsPage() {
                   <div>
                     <label className="fl-label">Country</label>
                     {/* Selection disabled for now — options visible as preview only. */}
-                    <select className="inp sel" value={selectedCountry} onChange={e => handleCountryChange(e.target.value)}>
+                    <select
+                      className="inp sel"
+                      value={selectedCountry}
+                      onChange={e => handleCountryChange(e.target.value)}
+                      disabled={selectedReport !== null}
+                    >
                       <option value="">None</option>
                       {Object.values(regionData).flatMap(r => r.countries).map(c => (
                         <option key={c} value={c} disabled>{c}</option>
@@ -854,7 +882,9 @@ export default function ReportsPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
                   {availableFrameworks.map(fw => {
                     // In global scope, IFRS is preview-only for now.
-                    const isDisabled = scope === 'global' && fw === 'IFRS';
+                    const isPreviewOnly = scope === 'global' && fw === 'IFRS';
+                    const isLocked = selectedReport !== null;
+                    const isDisabled = isPreviewOnly || isLocked;
                     return (
                       <label
                         key={fw}
@@ -864,10 +894,16 @@ export default function ReportsPage() {
                           alignItems: 'center',
                           gap: 8,
                           padding: '10px 12px',
-                          opacity: isDisabled ? 0.5 : 1,
+                          opacity: isPreviewOnly ? 0.5 : 1,
                           cursor: isDisabled ? 'not-allowed' : 'pointer',
                         }}
-                        title={isDisabled ? 'Not available yet' : undefined}
+                        title={
+                          isPreviewOnly
+                            ? 'Not available yet'
+                            : isLocked
+                              ? 'Locked — frameworks come from the selected report'
+                              : undefined
+                        }
                       >
                         <input
                           type="checkbox"
@@ -887,6 +923,63 @@ export default function ReportsPage() {
                 </div>
               )}
             </div>
+
+            {/* GRI indicator scope — only shown when a GRI framework is selected.
+                Outer grid mirrors the framework checkbox grid so the two radios
+                sit inside the GRI column footprint instead of spanning full width. */}
+            {checkedFw.some((fw) => fw.startsWith('GRI')) && (
+              <div style={{ marginBottom: 18 }}>
+                <label className="fl-label">GRI Indicator Scope</label>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length || 2, 5)},1fr)`,
+                    gap: 8,
+                    marginTop: 5,
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {(
+                      [
+                        { value: 'standard', title: 'Standard', subtitle: '85 core indicators' },
+                        { value: 'full', title: 'Full', subtitle: 'All 128 indicators' },
+                      ] as const
+                    ).map((opt) => {
+                      const active = griScope === opt.value;
+                      const isLocked = selectedReport !== null;
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`fw-chip ${active ? 'sel' : ''}`}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '10px 12px',
+                            cursor: isLocked ? 'not-allowed' : 'pointer',
+                          }}
+                          title={isLocked ? 'Locked — scope comes from the selected report' : undefined}
+                        >
+                          <input
+                            type="radio"
+                            name="gri_scope"
+                            value={opt.value}
+                            checked={active}
+                            onChange={() => setGriScope(opt.value)}
+                            disabled={isLocked}
+                            style={{ accentColor: '#4040C8' }}
+                          />
+                          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{opt.title}</span>
+                            <span style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>{opt.subtitle}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {selectedReport && (
               <div style={{ marginBottom: 18 }}>
@@ -1185,15 +1278,15 @@ export default function ReportsPage() {
                   <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'ESG Report'}</div>
                   <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                      <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Score</span>
+                      <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
                     </div>
-                    <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}/100</div>
+                    <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
                   </div>
                   <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ width: `${score}%`, height: '100%', background: '#22C55E' }} />
                   </div>
-                  <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>OVERALL</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>OVERALL COVERAGE</div>
                 </div>
                 <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>

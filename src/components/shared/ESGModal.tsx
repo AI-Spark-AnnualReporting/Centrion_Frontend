@@ -19,8 +19,8 @@ interface ReportsListResponse {
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const GLOBAL_FRAMEWORKS = ['GRI 2021', 'IFRS'];
-const DEFAULT_GLOBAL_CHECKED = ['GRI 2021'];
+const GLOBAL_FRAMEWORKS = ['GRI', 'IFRS'];
+const DEFAULT_GLOBAL_CHECKED = ['GRI'];
 const ADD_NEW_SENTINEL = '__add_new__';
 
 function hasAcceptedExtension(name: string): boolean {
@@ -65,6 +65,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [checkedFw, setCheckedFw] = useState<string[]>(DEFAULT_GLOBAL_CHECKED);
+  const [griScope, setGriScope] = useState<'standard' | 'full'>('standard');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -181,6 +182,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
     // Close the modal and hand the payload to ReportsPage — it shows the
     // full-width GeneratingScreen and fires the API chain. sector_id is
     // optional on the backend, so omit it when no sector was picked.
+    const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
     onClose();
     navigate('/reports', {
       state: {
@@ -189,6 +191,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
           ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
           scope_type: scope,
           framework_codes: checkedFw.map(frameworkLabelToCode),
+          ...(griSelected ? { gri_scope: griScope } : {}),
           file: uploadedFile,
         },
       },
@@ -393,6 +396,47 @@ export function ESGModal({ onClose }: ESGModalProps) {
                         </label>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* GRI indicator scope — only when GRI is selected. Outer grid
+                  mirrors the GLOBAL_FRAMEWORKS 2-col layout so the radios stay
+                  under the GRI column. */}
+              {checkedFw.some((fw) => fw.startsWith('GRI')) && (
+                <div style={{ marginBottom: 16 }}>
+                  <label className="fl-label">GRI Indicator Scope</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 5 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      {(
+                        [
+                          { value: 'standard', title: 'Standard', subtitle: '85 core indicators' },
+                          { value: 'full', title: 'Full', subtitle: 'All 128 indicators' },
+                        ] as const
+                      ).map((opt) => {
+                        const active = griScope === opt.value;
+                        return (
+                          <label
+                            key={opt.value}
+                            className={`fw-chip ${active ? 'sel' : ''}`}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }}
+                          >
+                            <input
+                              type="radio"
+                              name="esgmodal_gri_scope"
+                              value={opt.value}
+                              checked={active}
+                              onChange={() => setGriScope(opt.value)}
+                              style={{ accentColor: '#4040C8' }}
+                            />
+                            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{opt.title}</span>
+                              <span style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>{opt.subtitle}</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}

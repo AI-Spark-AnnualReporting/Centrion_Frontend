@@ -226,6 +226,8 @@ export interface UploadDocumentsBody {
   frameworks?: string[]; // default ["GRI"]
 }
 
+export type GriScope = "standard" | "full";
+
 export interface GenerateReportBody {
   files: File[];
   year: number;
@@ -236,6 +238,8 @@ export interface GenerateReportBody {
   region?: string;
   country_id?: string;
   regulator_ids?: string[];
+  // "standard" → 85 GRI indicators · "full" → all 128 GRI indicators.
+  gri_scope?: GriScope;
 }
 
 export interface AddReportDocumentsBody {
@@ -478,6 +482,7 @@ export const reports = {
     if (body.region !== undefined) fd.append("region", body.region);
     if (body.country_id !== undefined) fd.append("country_id", body.country_id);
     (body.regulator_ids ?? []).forEach((v) => fd.append("regulator_ids", v));
+    if (body.gri_scope) fd.append("gri_scope", body.gri_scope);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/generate`,
       fd,
