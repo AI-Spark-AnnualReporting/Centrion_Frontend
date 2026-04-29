@@ -7,7 +7,7 @@ const NAV_ITEMS = [
     items: [
       { key: 'dashboard', label: 'Command Center', path: '/dashboard', icon: 'grid', badge: null },
       { key: 'reports', label: 'Reports', path: '/reports', icon: 'doc', badge: null },
-      { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: { text: 'New', cls: 'gn' } },
+      { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: null },
       // Hidden until the Compliance feature is wired to the backend.
       // { key: 'compliance', label: 'Compliance', path: '/compliance', icon: 'shield', badge: { text: '!', cls: 'rd' } },
       { key: 'ai', label: 'IR Copilot', path: '/ai', icon: 'chat', badge: { text: 'AI', cls: 'tl' } },
@@ -26,7 +26,7 @@ const NAV_ITEMS = [
     section: 'Workspace',
     items: [
       { key: 'docs', label: 'Document Bank', path: '/docs', icon: 'file', badge: null },
-      { key: 'questions', label: 'Questions Bank', path: '/questions', icon: 'question', badge: { text: '5', cls: 'am' } },
+      { key: 'questions', label: 'Questions Bank', path: '/questions', icon: 'question', badge: null },
       { key: 'profile', label: 'Profile', path: '/profile', icon: 'user', badge: null },
     ],
   },

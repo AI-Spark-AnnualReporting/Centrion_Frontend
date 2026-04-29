@@ -1,130 +1,80 @@
 GET
-/api/v1/lookups/regions
-List Regions
+/api/v1/companies/{company_id}/questions
+List Company Questions
 
 
-Distinct regions from the countries table.
+List every question for a company across all of its reports.
+
+Each row is enriched with the indicator metadata (so the frontend can label/group by indicator) and the report metadata (period, report_type, status — so the frontend can group by report). Optional report_id / indicator_id filters narrow the result.
 
 Parameters
 Cancel
-No parameters
-
+Name	Description
+company_id *
+string
+(path)
+425c346a-b066-451d-87b2-676008c94c2a
+report_id
+string | (string | null)
+(query)
+report_id
+indicator_id
+string | (string | null)
+(query)
+indicator_id
 Execute
 Clear
 Responses
 Curl
 
 curl -X 'GET' \
-  'http://localhost:8000/api/v1/lookups/regions' \
+  'http://localhost:8000/api/v1/companies/425c346a-b066-451d-87b2-676008c94c2a/questions' \
   -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzM4NjMyNn0.tiD2-Hp8W77Klm0leetgwY7W8z-kLFnCxajZ9CtMefo'
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzQ3ODQ5N30.9vJj_QW2Su2rDs2TAp4afkygJuuawI5mQoC2rcjgZ8g'
 Request URL
-http://localhost:8000/api/v1/lookups/regions
+http://localhost:8000/api/v1/companies/425c346a-b066-451d-87b2-676008c94c2a/questions
 Server response
 Code	Details
 200	
 Response body
 Download
 {
-  "regions": [
-    "GCC"
+  "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+  "questions": [
+    {
+      "id": "616eb1d4-2445-47e5-b36d-aaf706bb46a7",
+      "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+      "report_id": "244e76f5-0ace-495f-adc1-7bf0ed0b6579",
+      "framework_indicator_id": "66522fd8-1550-4ca0-b1cb-045e6c5b2616",
+      "question_text": "testing",
+      "created_by": "75f1a7c5-aa17-4ded-89bd-6c7f2e0a5815",
+      "created_at": "2026-04-29T10:37:15.988771+00:00",
+      "updated_at": "2026-04-29T10:37:15.988771+00:00",
+      "indicator": {
+        "id": "66522fd8-1550-4ca0-b1cb-045e6c5b2616",
+        "framework": "GRI",
+        "source_code": "305-7",
+        "indicator_label": "Nitrogen oxides (NOx), sulfur oxides (SOx), and other significant air emissions",
+        "esg_pillar": "E",
+        "esg_category": "Environmental",
+        "data_type": "text_block",
+        "tier": null
+      },
+      "report": {
+        "id": "244e76f5-0ace-495f-adc1-7bf0ed0b6579",
+        "report_type": "esg",
+        "period": "FY-2018",
+        "status": "draft",
+        "created_at": "2026-04-27T08:28:50.73436+00:00"
+      }
+    }
   ],
   "total": 1
 }
 Response headers
- content-length: 29 
+ content-length: 905 
  content-type: application/json 
- date: Tue,28 Apr 2026 13:47:58 GMT 
- server: uvicorn 
-Responses
-Code	Description	Links
-200	
-Successful Response
-
-Media type
-
-application/json
-Controls Accept header.
-Example Value
-Schema
-"string"
-No links
-
-GET
-/api/v1/lookups/countries
-List Countries
-
-
-Countries, optionally filtered by region (e.g. ?region=GCC).
-
-Parameters
-Cancel
-Name	Description
-region
-string
-(query)
-region
-Execute
-Clear
-Responses
-Curl
-
-curl -X 'GET' \
-  'http://localhost:8000/api/v1/lookups/countries' \
-  -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzM4NjMyNn0.tiD2-Hp8W77Klm0leetgwY7W8z-kLFnCxajZ9CtMefo'
-Request URL
-http://localhost:8000/api/v1/lookups/countries
-Server response
-Code	Details
-200	
-Response body
-Download
-{
-  "countries": [
-    {
-      "id": "f2894a15-b339-4cc3-a2bc-90a9eb8ed90c",
-      "code": "BHR",
-      "name": "Bahrain",
-      "region": "GCC"
-    },
-    {
-      "id": "7f046608-5b09-435d-8a2e-0b1946ad2e5c",
-      "code": "KWT",
-      "name": "Kuwait",
-      "region": "GCC"
-    },
-    {
-      "id": "71a8aa5e-354d-4dcb-8c3e-bcd121eb6dc7",
-      "code": "OMN",
-      "name": "Oman",
-      "region": "GCC"
-    },
-    {
-      "id": "ea8132b3-cd74-4e62-9139-9e9bc5e9afa1",
-      "code": "QAT",
-      "name": "Qatar",
-      "region": "GCC"
-    },
-    {
-      "id": "b71bf541-e4b4-4df8-98bd-4e59622300f9",
-      "code": "SAU",
-      "name": "Saudi Arabia",
-      "region": "GCC"
-    },
-    {
-      "id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "code": "UAE",
-      "name": "United Arab Emirates",
-      "region": "GCC"
-    }
-  ],
-  "total": 6
-}
-Response headers
- content-length: 583 
- content-type: application/json 
- date: Tue,28 Apr 2026 13:47:27 GMT 
+ date: Wed,29 Apr 2026 11:02:06 GMT 
  server: uvicorn 
 Responses
 Code	Description	Links
@@ -163,223 +113,3 @@ Schema
 }
 No links
 
-GET
-/api/v1/lookups/regulators
-List Regulators
-
-
-Active regulators, optionally filtered by country_id. Each row includes its primary_frameworks so the UI can show what frameworks that regulator enforces.
-
-Parameters
-Cancel
-Name	Description
-country_id
-string
-(query)
-country_id
-Execute
-Clear
-Responses
-Curl
-
-curl -X 'GET' \
-  'http://localhost:8000/api/v1/lookups/regulators' \
-  -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzM4NjMyNn0.tiD2-Hp8W77Klm0leetgwY7W8z-kLFnCxajZ9CtMefo'
-Request URL
-http://localhost:8000/api/v1/lookups/regulators
-Server response
-Code	Details
-200	
-Response body
-Download
-{
-  "regulators": [
-    {
-      "id": "bbdc04ff-9911-47b3-bb38-0df46780ebd5",
-      "code": "ADX",
-      "full_name": "Abu Dhabi Securities Exchange",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2020
-    },
-    {
-      "id": "44a64d03-1e95-4085-bfbc-1961b77f0713",
-      "code": "CBB",
-      "full_name": "Central Bank of Bahrain",
-      "country_id": "f2894a15-b339-4cc3-a2bc-90a9eb8ed90c",
-      "primary_frameworks": [
-        "GRI",
-        "TCFD",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2024
-    },
-    {
-      "id": "5d6f838b-3551-4220-bfac-4c906a7d1063",
-      "code": "CBK",
-      "full_name": "Central Bank of Kuwait",
-      "country_id": "7f046608-5b09-435d-8a2e-0b1946ad2e5c",
-      "primary_frameworks": [
-        "GRI",
-        "SASB",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2025
-    },
-    {
-      "id": "45d7090b-c34b-4127-a870-a4d7c03364ba",
-      "code": "CBO",
-      "full_name": "Central Bank of Oman",
-      "country_id": "71a8aa5e-354d-4dcb-8c3e-bcd121eb6dc7",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2025
-    },
-    {
-      "id": "5fc71c73-1000-421f-bdc0-31534f481f80",
-      "code": "CBUAE",
-      "full_name": "Central Bank of the UAE",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "primary_frameworks": [
-        "TCFD",
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "mandate_status": "mixed",
-      "effective_year": 2025
-    },
-    {
-      "id": "d7ef3979-cabd-4e73-a0ad-98b281783c9f",
-      "code": "CMA",
-      "full_name": "Capital Market Authority",
-      "country_id": "b71bf541-e4b4-4df8-98bd-4e59622300f9",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "mandate_status": "mixed",
-      "effective_year": 2026
-    },
-    {
-      "id": "439d69bd-c9ad-46d6-b2d7-269bb839a19c",
-      "code": "DFM",
-      "full_name": "Dubai Financial Market",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2023
-    },
-    {
-      "id": "39d29cda-aaa7-4243-93a7-dad144a9c237",
-      "code": "QFMA",
-      "full_name": "Qatar Financial Markets Authority",
-      "country_id": "ea8132b3-cd74-4e62-9139-9e9bc5e9afa1",
-      "primary_frameworks": [
-        "IFRS_S1",
-        "IFRS_S2",
-        "GRI",
-        "TCFD"
-      ],
-      "mandate_status": "mixed",
-      "effective_year": 2026
-    },
-    {
-      "id": "6abc4c3f-9200-45d9-afc5-dbe9fa5b69ea",
-      "code": "SAMA",
-      "full_name": "Saudi Central Bank",
-      "country_id": "b71bf541-e4b4-4df8-98bd-4e59622300f9",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "mandate_status": "voluntary",
-      "effective_year": 2027
-    },
-    {
-      "id": "c761a06d-f558-48be-b934-ecd1c6d4fb0a",
-      "code": "SCA",
-      "full_name": "Securities & Commodities Authority",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "mandate_status": "mandatory",
-      "effective_year": 2020
-    }
-  ],
-  "total": 10
-}
-Response headers
- content-length: 2632 
- content-type: application/json 
- date: Tue,28 Apr 2026 13:47:32 GMT 
- server: uvicorn 
-Responses
-Code	Description	Links
-200	
-Successful Response
-
-Media type
-
-application/json
-Controls Accept header.
-Example Value
-Schema
-"string"
-No links
-422	
-Validation Error
-
-Media type
-
-application/json
-Example Value
-Schema
-{
-  "detail": [
-    {
-      "loc": [
-        "string",
-        0
-      ],
-      "msg": "string",
-      "type": "string",
-      "input": "string",
-      "ctx": {}
-    }
-  ]
-}

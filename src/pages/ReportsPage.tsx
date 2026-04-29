@@ -43,12 +43,20 @@ interface ReportCoverage {
   by_pillar?: Partial<Record<'E' | 'S' | 'G' | 'ESG', ReportPillarCoverage>>;
 }
 
+interface ReportRegulatorSummary {
+  id?: string;
+  code: string;
+  full_name?: string;
+}
+
 interface ReportSummary {
   id: string;
   period: string;
   generation_config?: ReportGenerationConfig;
   title?: string;
+  scope_type?: string;
   frameworks?: string[];
+  regulators?: ReportRegulatorSummary[];
   generated_at?: string;
   coverage?: ReportCoverage;
 }
@@ -1310,7 +1318,16 @@ export default function ReportsPage() {
             const metricsDisclosed = r.coverage?.metrics_disclosed ?? 0;
             const metricsTotal = r.coverage?.metrics_total ?? 0;
             const gaps = r.coverage?.gaps ?? 0;
-            const headerLine = [formatPeriod(r.period), ...(r.frameworks ?? [])].filter(Boolean).join(' · ');
+            // Regional reports surface regulator codes (e.g. "QFMA"); other
+            // scopes keep the framework codes already returned by the API.
+            const reportScope = r.scope_type ?? r.generation_config?.scope_type;
+            const regulatorCodes = (r.regulators ?? [])
+              .map((reg) => reg.code)
+              .filter((code): code is string => Boolean(code));
+            const headerCodes = reportScope === 'regional' && regulatorCodes.length > 0
+              ? regulatorCodes
+              : (r.frameworks ?? []);
+            const headerLine = [formatPeriod(r.period), ...headerCodes].filter(Boolean).join(' · ');
             const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
             return (
               <div

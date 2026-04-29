@@ -107,6 +107,16 @@ export interface CoverageSector {
   name: string;
 }
 
+// Regulators returned alongside the coverage payload when scope_type is
+// "regional" — these carry the body-specific code (e.g. "QFMA") that should
+// be surfaced in place of generic framework codes for regional reports.
+export interface CoverageRegulator {
+  id?: string;
+  code: string;
+  full_name?: string;
+  country_id?: string;
+}
+
 export interface CoverageResponse {
   report_id: string;
   company_id?: string;
@@ -115,10 +125,52 @@ export interface CoverageResponse {
   sector?: CoverageSector | null;
   scope_type: string;
   frameworks: string[];
+  regulators?: CoverageRegulator[];
   documents?: CoverageDocument[];
   summary: CoverageSummary;
   indicators: CoverageIndicator[];
   critical_gaps?: CoverageCriticalGap[];
+}
+
+// Question Bank — GET /api/v1/companies/{company_id}/questions
+// Each question is enriched with indicator + report metadata so the page can
+// group by report and display indicator labels without an extra fetch.
+export interface QuestionIndicatorMeta {
+  id: string;
+  framework: string;
+  source_code: string;
+  indicator_label: string;
+  esg_pillar: string;
+  esg_category: string;
+  data_type: string;
+  tier: string | null;
+}
+
+export interface QuestionReportMeta {
+  id: string;
+  report_type: string;
+  period: string;
+  status: string;
+  created_at: string;
+}
+
+export interface CompanyQuestion {
+  id: string;
+  company_id: string;
+  report_id: string;
+  framework_indicator_id: string;
+  question_text: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  indicator: QuestionIndicatorMeta;
+  report: QuestionReportMeta;
+}
+
+export interface CompanyQuestionsResponse {
+  company_id: string;
+  questions: CompanyQuestion[];
+  total: number;
 }
 
 // Async pipeline — 202 Accepted envelope returned by generate / addDocuments /

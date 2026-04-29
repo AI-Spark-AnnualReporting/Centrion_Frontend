@@ -330,6 +330,16 @@ export const companies = {
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/kpis`, {
       query: { metric },
     }),
+
+  // Question Bank — every manual question raised across this company's reports,
+  // enriched with indicator + report metadata so the page can group by report.
+  listQuestions: <T = unknown>(
+    companyId: string,
+    filters: { report_id?: string; indicator_id?: string } = {},
+  ) =>
+    request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/questions`, {
+      query: filters,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -527,10 +537,14 @@ export const reports = {
     if (body.sector_id) fd.append("sector_id", body.sector_id);
     fd.append("scope_type", body.scope_type);
     if (body.report_type !== undefined) fd.append("report_type", body.report_type);
-    (body.framework_codes ?? []).forEach((v) => fd.append("framework_codes", v));
+    if (body.framework_codes && body.framework_codes.length > 0) {
+      fd.append("framework_codes", JSON.stringify(body.framework_codes));
+    }
     if (body.region !== undefined) fd.append("region", body.region);
     if (body.country_id !== undefined) fd.append("country_id", body.country_id);
-    (body.regulator_ids ?? []).forEach((v) => fd.append("regulator_ids", v));
+    if (body.regulator_ids && body.regulator_ids.length > 0) {
+      fd.append("regulator_ids", JSON.stringify(body.regulator_ids));
+    }
     if (body.gri_scope) fd.append("gri_scope", body.gri_scope);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/generate`,
@@ -560,6 +574,18 @@ export const reports = {
     request<T>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/coverage`,
       { query },
+    ),
+
+  // Logs a manual question against a missing-metric indicator on a report.
+  // Backend returns the new question id as a JSON string.
+  createQuestion: (
+    companyId: string,
+    reportId: string,
+    body: { framework_indicator_id: string; question_text: string },
+  ) =>
+    request<string>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/questions`,
+      { method: "POST", body },
     ),
 };
 

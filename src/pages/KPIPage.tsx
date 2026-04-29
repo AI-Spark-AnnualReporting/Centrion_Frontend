@@ -22,9 +22,23 @@ const categoryTextColor: Record<string, string> = {
   Filing: '#B45309',
 };
 
+const categoryBgColor: Record<string, string> = {
+  Environmental: 'rgba(22,163,74,.12)',
+  Social: 'rgba(13,148,136,.12)',
+  Governance: 'rgba(124,58,237,.12)',
+  Economic: 'rgba(37,99,235,.12)',
+  Universal: 'rgba(90,96,128,.12)',
+  Filing: 'rgba(180,83,9,.12)',
+};
+
 function categoryColor(category?: string | null): string {
   if (!category) return '#9BA3C4';
   return categoryTextColor[category] ?? '#5A6080';
+}
+
+function categoryBg(category?: string | null): string {
+  if (!category) return 'rgba(155,163,196,.12)';
+  return categoryBgColor[category] ?? 'rgba(90,96,128,.12)';
 }
 
 function normaliseFramework(framework?: string | null): string {
@@ -411,12 +425,17 @@ function IndicatorList({ indicators, loading, error, emptyLabel }: IndicatorList
             </span>
             <span
               style={{
-                fontSize: 11,
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: 10,
                 fontWeight: 700,
                 color: categoryColor(ind.esg_category),
-                minWidth: 92,
-                textAlign: 'right',
+                background: categoryBg(ind.esg_category),
+                padding: '3px 10px',
+                borderRadius: 999,
                 whiteSpace: 'nowrap',
+                letterSpacing: '.2px',
+                flexShrink: 0,
               }}
             >
               {ind.esg_category ?? '—'}
@@ -424,6 +443,151 @@ function IndicatorList({ indicators, loading, error, emptyLabel }: IndicatorList
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Framework-card header — gradient badge on the left, framework name + caption,
+// and a tinted count pill on the right. Replaces the dull plain-text title row.
+function FrameworkCardHeader({
+  badge,
+  badgeGradient,
+  title,
+  subtitle,
+  count,
+  countTone,
+}: {
+  badge: string;
+  badgeGradient: string;
+  title: string;
+  subtitle: string;
+  count: number | null;
+  countTone: 'green' | 'blue';
+}) {
+  const tone = countTone === 'green'
+    ? { color: '#16A34A', bg: 'rgba(22,163,74,.12)' }
+    : { color: '#2563EB', bg: 'rgba(37,99,235,.12)' };
+  return (
+    <div
+      style={{
+        padding: '14px 18px',
+        borderBottom: '1px solid #ECEEF8',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          background: badgeGradient,
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 800,
+          letterSpacing: '.5px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: "'DM Mono',monospace",
+          flexShrink: 0,
+          boxShadow: '0 4px 10px rgba(26,29,46,.08)',
+        }}
+      >
+        {badge}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.1px' }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{subtitle}</div>
+      </div>
+      {count !== null && (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            fontWeight: 700,
+            color: tone.color,
+            background: tone.bg,
+            padding: '4px 10px',
+            borderRadius: 999,
+            fontFamily: "'DM Mono',monospace",
+            flexShrink: 0,
+          }}
+        >
+          {count}
+          <span style={{ fontSize: 9, opacity: .75, fontFamily: 'inherit' }}>indicators</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Section-card header — icon tile on the left, title + caption, meta on the
+// right. Used for the "Extracted Values by Report" panel.
+function SectionCardHeader({
+  icon,
+  iconGradient,
+  title,
+  subtitle,
+  meta,
+}: {
+  icon: React.ReactNode;
+  iconGradient: string;
+  title: string;
+  subtitle: string;
+  meta: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: '14px 18px',
+        borderBottom: '1px solid #ECEEF8',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 9,
+          background: iconGradient,
+          color: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          boxShadow: '0 4px 10px rgba(64,64,200,.18)',
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.1px' }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{subtitle}</div>
+      </div>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: '#5A6080',
+          background: '#F1F2FA',
+          padding: '4px 10px',
+          borderRadius: 999,
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {meta}
+      </span>
     </div>
   );
 }
@@ -645,21 +809,18 @@ export default function KPIPage() {
             Financial, ESG and regulatory KPIs with AI insights
           </p>
         </div>
-        <button className="btn bp">Export</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
         <div className="card">
-          <div className="ch">
-            <div className="ct">
-              GRI{' '}
-              {!indicatorsLoading && (
-                <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600, marginLeft: 6 }}>
-                  · {griIndicators.length}
-                </span>
-              )}
-            </div>
-          </div>
+          <FrameworkCardHeader
+            badge="GRI"
+            badgeGradient="linear-gradient(135deg,#065F46,#10B981)"
+            title="GRI Standards"
+            subtitle="Global Reporting Initiative"
+            count={indicatorsLoading ? null : griIndicators.length}
+            countTone="green"
+          />
           <IndicatorList
             indicators={griIndicators}
             loading={indicatorsLoading}
@@ -669,16 +830,14 @@ export default function KPIPage() {
         </div>
 
         <div className="card">
-          <div className="ch">
-            <div className="ct">
-              IFRS{' '}
-              {!indicatorsLoading && (
-                <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600, marginLeft: 6 }}>
-                  · {ifrsIndicators.length}
-                </span>
-              )}
-            </div>
-          </div>
+          <FrameworkCardHeader
+            badge="IFRS"
+            badgeGradient="linear-gradient(135deg,#1E3A8A,#3B82F6)"
+            title="IFRS Sustainability"
+            subtitle="IFRS S1 · IFRS S2 disclosures"
+            count={indicatorsLoading ? null : ifrsIndicators.length}
+            countTone="blue"
+          />
           <IndicatorList
             indicators={ifrsIndicators}
             loading={indicatorsLoading}
@@ -689,14 +848,20 @@ export default function KPIPage() {
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="ch" style={{ flexWrap: 'nowrap' }}>
-          <div className="ct">Extracted Values by Report</div>
-          <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600 }}>
-            {evidenceLoading
-              ? 'Loading…'
-              : `${totalRows} ${totalRows === 1 ? 'metric' : 'metrics'} · ${headerFramework}`}
-          </span>
-        </div>
+        <SectionCardHeader
+          icon={
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 2.5h10v9h-10z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              <path d="M2 5.5h10M5.5 2.5v9" stroke="currentColor" strokeWidth="1.3" />
+            </svg>
+          }
+          iconGradient="linear-gradient(135deg,#4040C8,#6366F1)"
+          title="Extracted Values by Report"
+          subtitle="Evidence pulled from uploaded source documents"
+          meta={evidenceLoading
+            ? 'Loading…'
+            : `${totalRows} ${totalRows === 1 ? 'metric' : 'metrics'} · ${headerFramework}`}
+        />
 
         {/* Tabs */}
         {reportsLoading ? (
