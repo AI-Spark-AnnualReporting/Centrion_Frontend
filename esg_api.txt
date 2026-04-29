@@ -1,0 +1,1545 @@
+curl --location 'http://127.0.0.1:8000/api/v1/esg/425c346a-b066-451d-87b2-676008c94c2a/evidence?document_id=f3bba932-4532-465d-b441-241d0d22451e&fields=raw_evidence&pillar=' \
+--header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfOGRiNTFjMzFmN2FjIiwiZW1haWwiOiJ1c2VyMUBleGFtcGxlLmNvbSIsInJvbGUiOiJhZG1pbiIsImNvbXBhbnlfaWQiOiI3MTkxYTU0Yy0zZjMxLTRmY2EtOWQ2ZC04ZTU3MjQ5YWRkMzMiLCJleHAiOjE3NzczODkwMDN9.7usuLI4Jw3Q2x0dM_5N_9MhDwnqKGM1RszN6vg4eWv8'
+
+
+Response body
+
+
+{
+    "evidence": [
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "trees and shrubs",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "53000",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "304-3",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-304-3"
+                ],
+                "indicator_label": "Habitats protected or restored",
+                "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations.",
+                "framework_indicator_id": "21c5d81d-ba80-4020-822a-eca45055728a"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "G",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "201-2",
+                "source_page": 5,
+                "esg_category": "Economic",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Managing climate risk is central to “SAR”’s responsibility as a national rail operator.",
+                    "context_snippet": null,
+                    "source_page_raw": 5,
+                    "narrative_summary": "SAR manages climate risk as a central responsibility."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Managing climate risk is central to “SAR”’s responsibility as a national rail operator.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-201-2"
+                ],
+                "indicator_label": "Financial implications and other risks and opportunities due to climate change",
+                "narrative_summary": "SAR manages climate risk as a central responsibility.",
+                "framework_indicator_id": "96f25588-dc60-4b38-a789-f221e1b8ac95"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-4",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Listening & Engagement: “You Make a Difference” engagement survey.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR conducts engagement surveys to involve employees."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Listening & Engagement: “You Make a Difference” engagement survey.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-4"
+                ],
+                "indicator_label": "Worker participation, consultation, and communication on occupational health and safety",
+                "narrative_summary": "SAR conducts engagement surveys to involve employees.",
+                "framework_indicator_id": "6cdd5a8a-f9cb-4cb6-8c90-109d8e8be3a9"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "boolean",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.7,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-15",
+                "source_page": 15,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": true,
+                    "confidence_raw": 0.7,
+                    "verbatim_quote": null,
+                    "context_snippet": "employees are required to promptly disclose any actual or potential conflicts of interest",
+                    "source_page_raw": 15,
+                    "narrative_summary": null
+                },
+                "boolean_value": true,
+                "verbatim_quote": null,
+                "context_snippet": "employees are required to promptly disclose any actual or potential conflicts of interest",
+                "framework_codes": [
+                    "GRI-2-15"
+                ],
+                "indicator_label": "Conflicts of interest",
+                "narrative_summary": null,
+                "framework_indicator_id": "78f29f4d-4012-469c-914b-6e8cc8b2091a"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "trees and shrubs",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "53000",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "304-1",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-304-1"
+                ],
+                "indicator_label": "Operational sites owned, leased, managed in, or adjacent to, protected areas and areas of high biodiversity value outside protected areas",
+                "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations.",
+                "framework_indicator_id": "e3f59256-3144-49e7-824e-7d73c1981183"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "G",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "203-2",
+                "source_page": 4,
+                "esg_category": "Economic",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "SAR drives job creation and economic diversification through a 55% local content rate and SME integration, fostering sustainable economic growth while adhering to high labor and safety standards.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR fosters economic growth through local content and SME integration."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "SAR drives job creation and economic diversification through a 55% local content rate and SME integration, fostering sustainable economic growth while adhering to high labor and safety standards.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-203-2"
+                ],
+                "indicator_label": "Significant indirect economic impacts",
+                "narrative_summary": "SAR fosters economic growth through local content and SME integration.",
+                "framework_indicator_id": "3ebe11a4-c949-48e7-985d-c826c82f9c37"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-13",
+                "source_page": 16,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Oversight is provided through a structured governance model, with the Risk Management Committee (RMC) reporting to the CEO and executive leadership.",
+                    "context_snippet": null,
+                    "source_page_raw": 16,
+                    "narrative_summary": "SAR's Risk Management Committee reports to the CEO and executive leadership."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Oversight is provided through a structured governance model, with the Risk Management Committee (RMC) reporting to the CEO and executive leadership.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-13"
+                ],
+                "indicator_label": "Delegation of responsibility for managing impacts",
+                "narrative_summary": "SAR's Risk Management Committee reports to the CEO and executive leadership.",
+                "framework_indicator_id": "f16957b6-5df1-44e3-8c55-ff301b3bc558"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "302-5",
+                "source_page": 6,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Rail is 12 times more energy-efficient per passenger than air travel.",
+                    "context_snippet": null,
+                    "source_page_raw": 6,
+                    "narrative_summary": "Rail transport is significantly more energy-efficient than air travel."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Rail is 12 times more energy-efficient per passenger than air travel.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-302-5"
+                ],
+                "indicator_label": "Reductions in energy requirements of products and services",
+                "narrative_summary": "Rail transport is significantly more energy-efficient than air travel.",
+                "framework_indicator_id": "80eb6049-9672-4deb-af31-8f33e5174ab5"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-14",
+                "source_page": 19,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Published the first Sustainability Report in compliance with GRI standards.",
+                    "context_snippet": null,
+                    "source_page_raw": 19,
+                    "narrative_summary": "SAR published its first Sustainability Report in compliance with GRI standards."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Published the first Sustainability Report in compliance with GRI standards.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-14"
+                ],
+                "indicator_label": "Role of the highest governance body in sustainability reporting",
+                "narrative_summary": "SAR published its first Sustainability Report in compliance with GRI standards.",
+                "framework_indicator_id": "e4820ea9-80d5-4c18-8aba-e45af3d5a531"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-25",
+                "source_page": 15,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "To preserve transparency, employees are required to promptly disclose any actual or potential conflicts of interest to their line manager or the Human Resources function, enabling appropriate review and mitigation in line with “SAR”’s ethical standards.",
+                    "context_snippet": null,
+                    "source_page_raw": 15,
+                    "narrative_summary": "SAR has processes for employees to disclose conflicts of interest for review and mitigation."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "To preserve transparency, employees are required to promptly disclose any actual or potential conflicts of interest to their line manager or the Human Resources function, enabling appropriate review and mitigation in line with “SAR”’s ethical standards.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-25"
+                ],
+                "indicator_label": "Processes to remediate negative impacts",
+                "narrative_summary": "SAR has processes for employees to disclose conflicts of interest for review and mitigation.",
+                "framework_indicator_id": "28183181-e027-4b64-9c4d-d2a19a8dafe1"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-26",
+                "source_page": 11,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "“We Care” platform for continuous employee feedback.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR has a platform for continuous employee feedback."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "“We Care” platform for continuous employee feedback.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-26"
+                ],
+                "indicator_label": "Mechanisms for seeking advice and raising concerns",
+                "narrative_summary": "SAR has a platform for continuous employee feedback.",
+                "framework_indicator_id": "b599d812-2bb7-4ce7-a5cf-d9ed612204ac"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-12",
+                "source_page": 7,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Oversight is provided by the HSE Executive Committee, which conducts annual reviews of environmental performance, risk assessments, and incident data to inform policy updates and target setting.",
+                    "context_snippet": null,
+                    "source_page_raw": 7,
+                    "narrative_summary": "The HSE Executive Committee oversees environmental performance and risk assessments."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Oversight is provided by the HSE Executive Committee, which conducts annual reviews of environmental performance, risk assessments, and incident data to inform policy updates and target setting.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-12"
+                ],
+                "indicator_label": "Role of the highest governance body in overseeing the management of impacts",
+                "narrative_summary": "The HSE Executive Committee oversees environmental performance and risk assessments.",
+                "framework_indicator_id": "a28875df-9c81-4a98-87a6-c711ebb5f947"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-7",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "AI-driven incident forecasting model launched in September 2025.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR launched an AI-driven incident forecasting model to enhance safety."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "AI-driven incident forecasting model launched in September 2025.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-7"
+                ],
+                "indicator_label": "Prevention and mitigation of occupational health and safety impacts directly linked by business relationships",
+                "narrative_summary": "SAR launched an AI-driven incident forecasting model to enhance safety.",
+                "framework_indicator_id": "e811d719-a322-45f0-b190-7a0efaeda413"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-6",
+                "source_page": 4,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "By expanding our world-class rail network toward 8,000+ km, we strengthen regional connectivity and provide the resilient infrastructure necessary for sustainable industrial growth and trade.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR is expanding its rail network to over 8,000 km to support sustainable growth."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "By expanding our world-class rail network toward 8,000+ km, we strengthen regional connectivity and provide the resilient infrastructure necessary for sustainable industrial growth and trade.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-6"
+                ],
+                "indicator_label": "Activities, value chain and other business relationships",
+                "narrative_summary": "SAR is expanding its rail network to over 8,000 km to support sustainable growth.",
+                "framework_indicator_id": "ff7db109-b4dc-4ca6-9dcd-2bd724b7d90a"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-24",
+                "source_page": 4,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "To coordinate and advance sustainability across the organization, “SAR” operates through a dedicated Sustainability Department with a clear scope of responsibilities, ensuring focused action and measurable progress.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR has a dedicated Sustainability Department to advance sustainability."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "To coordinate and advance sustainability across the organization, “SAR” operates through a dedicated Sustainability Department with a clear scope of responsibilities, ensuring focused action and measurable progress.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-24"
+                ],
+                "indicator_label": "Embedding policy commitments",
+                "narrative_summary": "SAR has a dedicated Sustainability Department to advance sustainability.",
+                "framework_indicator_id": "dadbdad3-d1bb-4bfd-b8aa-f5a3e27a5138"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": "hours",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "4400",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "413-1",
+                "source_page": 2,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Volunteer hours dedicated to serve pilgrims during the Hajj season.",
+                    "context_snippet": null,
+                    "source_page_raw": 2,
+                    "narrative_summary": "SAR dedicated volunteer hours to serve pilgrims during Hajj."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Volunteer hours dedicated to serve pilgrims during the Hajj season.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-413-1"
+                ],
+                "indicator_label": "Operations with local community engagement, impact assessments, and development programs",
+                "narrative_summary": "SAR dedicated volunteer hours to serve pilgrims during Hajj.",
+                "framework_indicator_id": "b0d4b015-2e1a-4a35-a85a-d348c45fe9e9"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "303-5",
+                "source_page": 9,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Treated wastewater is fully reused for irrigation of green spaces.",
+                    "context_snippet": null,
+                    "source_page_raw": 9,
+                    "narrative_summary": "SAR fully reuses treated wastewater for irrigation."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Treated wastewater is fully reused for irrigation of green spaces.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-303-5"
+                ],
+                "indicator_label": "Water consumption",
+                "narrative_summary": "SAR fully reuses treated wastewater for irrigation.",
+                "framework_indicator_id": "7cbad167-b79a-482a-bc64-785b6a1e9944"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "101-1",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "These efforts contribute directly to the Saudi Green Initiative’s national afforestation goals, while supporting Vision 2030’s Quality of Life objectives.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR's afforestation initiatives support the Saudi Green Initiative and Vision 2030."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "These efforts contribute directly to the Saudi Green Initiative’s national afforestation goals, while supporting Vision 2030’s Quality of Life objectives.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-101-1"
+                ],
+                "indicator_label": "Policies to halt and reverse biodiversity loss",
+                "narrative_summary": "SAR's afforestation initiatives support the Saudi Green Initiative and Vision 2030.",
+                "framework_indicator_id": "2c0912e1-6ea0-493e-a348-54d109e987b2"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "G",
+                "status": "FOUND",
+                "raw_unit": "Mn",
+                "data_type": "numeric",
+                "framework": "GRI",
+                "raw_value": "209",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.7,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "201-1",
+                "source_page": 3,
+                "esg_category": "Economic",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.7,
+                    "verbatim_quote": null,
+                    "context_snippet": "Total value generated through “SAR” SME supply chain in 2024.",
+                    "source_page_raw": 3,
+                    "narrative_summary": null
+                },
+                "boolean_value": null,
+                "verbatim_quote": null,
+                "context_snippet": "Total value generated through “SAR” SME supply chain in 2024.",
+                "framework_codes": [
+                    "GRI-201-1"
+                ],
+                "indicator_label": "Direct economic value generated anddistributed",
+                "narrative_summary": null,
+                "framework_indicator_id": "4d281c68-d22d-4e10-bb30-ac36ca3bc9af"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-6",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Seasonal influenza vaccinations for all staff.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR provides seasonal influenza vaccinations for all staff."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Seasonal influenza vaccinations for all staff.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-6"
+                ],
+                "indicator_label": "Promotion of worker health",
+                "narrative_summary": "SAR provides seasonal influenza vaccinations for all staff.",
+                "framework_indicator_id": "d1eb20aa-26e3-42ab-afcd-94a36cb046ba"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-3",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Bupa Health Lounge: On-site medical consultations and exams.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR provides on-site medical consultations and exams through Bupa Health Lounge."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Bupa Health Lounge: On-site medical consultations and exams.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-3"
+                ],
+                "indicator_label": "Occupational health services",
+                "narrative_summary": "SAR provides on-site medical consultations and exams through Bupa Health Lounge.",
+                "framework_indicator_id": "e106c73a-7cb5-4883-9c7e-eff3fb00412c"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-22",
+                "source_page": 4,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Our strategic expansion and the shifting of transport from road to rail directly support the Kingdom’s 2060 net-zero ambition, reinforcing our commitment to national and global climate action.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR's strategic expansion supports the Kingdom's 2060 net-zero ambition."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Our strategic expansion and the shifting of transport from road to rail directly support the Kingdom’s 2060 net-zero ambition, reinforcing our commitment to national and global climate action.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-22"
+                ],
+                "indicator_label": "Statement on sustainable developmentstrategy",
+                "narrative_summary": "SAR's strategic expansion supports the Kingdom's 2060 net-zero ambition.",
+                "framework_indicator_id": "5b499805-ad10-40c2-bf9d-648aff8ea0f7"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": "hours",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "104668",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "404-2",
+                "source_page": 2,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Total training hours delivered to empower the national workforce.",
+                    "context_snippet": null,
+                    "source_page_raw": 2,
+                    "narrative_summary": "SAR delivered training hours to empower the national workforce."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Total training hours delivered to empower the national workforce.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-404-2"
+                ],
+                "indicator_label": "Programs for upgrading employee skills and transition assistance programs",
+                "narrative_summary": "SAR delivered training hours to empower the national workforce.",
+                "framework_indicator_id": "348f1c4b-a4ee-4e1c-97a9-e2df0c5a5812"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-23",
+                "source_page": 4,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "As a regional leader in transport and logistics, “SAR” aligns its operations with the UN Sustainable Development Goals (SDGs) to support the Kingdom’s ambition for global leadership in sustainable mobility.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR aligns its operations with the UN SDGs to support sustainable mobility."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "As a regional leader in transport and logistics, “SAR” aligns its operations with the UN Sustainable Development Goals (SDGs) to support the Kingdom’s ambition for global leadership in sustainable mobility.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-23"
+                ],
+                "indicator_label": "Policy commitments",
+                "narrative_summary": "SAR aligns its operations with the UN SDGs to support sustainable mobility.",
+                "framework_indicator_id": "973a37c5-e2d8-4211-a03c-a37bf9a6bbfb"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "2-29",
+                "source_page": 11,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Listening & Engagement: “You Make a Difference” engagement survey.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR conducts engagement surveys to involve employees."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Listening & Engagement: “You Make a Difference” engagement survey.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-2-29"
+                ],
+                "indicator_label": "Approach to stakeholder engagement",
+                "narrative_summary": "SAR conducts engagement surveys to involve employees.",
+                "framework_indicator_id": "b4b57d59-71c7-46ec-a2fc-ec000b8c9d53"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "401-2",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Key support initiatives include: Education allowance for children (ages 4–18), Childcare support for younger dependents, Housing loan assistance, Health insurance coverage for employees’ parents and children, Health club memberships, Flexible shifts and recreational access for remote-area staff.",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR provides various benefits including education allowance, childcare support, and health insurance."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Key support initiatives include: Education allowance for children (ages 4–18), Childcare support for younger dependents, Housing loan assistance, Health insurance coverage for employees’ parents and children, Health club memberships, Flexible shifts and recreational access for remote-area staff.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-401-2"
+                ],
+                "indicator_label": "Benefits provided to full-time employees that are not provided to temporary or part time employees",
+                "narrative_summary": "SAR provides various benefits including education allowance, childcare support, and health insurance.",
+                "framework_indicator_id": "a8126b31-a5e2-4f56-973d-da7d4072fb0d"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "304-2",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR embeds biodiversity considerations into its operations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-304-2"
+                ],
+                "indicator_label": "Significant impacts of activities, products and services on biodiversity",
+                "narrative_summary": "SAR embeds biodiversity considerations into its operations.",
+                "framework_indicator_id": "13a6f16d-5894-4a94-89f4-c1d166f94b4b"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "303-1",
+                "source_page": 4,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "We prioritize responsible water management by treating and reusing wastewater across all North Line facilities for irrigation and afforestation, significantly reducing reliance on the Kingdom’s freshwater resources.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR treats and reuses wastewater to reduce reliance on freshwater resources."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "We prioritize responsible water management by treating and reusing wastewater across all North Line facilities for irrigation and afforestation, significantly reducing reliance on the Kingdom’s freshwater resources.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-303-1"
+                ],
+                "indicator_label": "Interactions with water as a shared resource",
+                "narrative_summary": "SAR treats and reuses wastewater to reduce reliance on freshwater resources.",
+                "framework_indicator_id": "62d86876-9ad2-4ad2-bd3d-7f7b55cf44d5"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "303-2",
+                "source_page": 9,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Wastewater treatment systems are operational at all North Line stations and facilities.",
+                    "context_snippet": null,
+                    "source_page_raw": 9,
+                    "narrative_summary": "SAR has operational wastewater treatment systems at all North Line stations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Wastewater treatment systems are operational at all North Line stations and facilities.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-303-2"
+                ],
+                "indicator_label": "Management of water discharge related impacts",
+                "narrative_summary": "SAR has operational wastewater treatment systems at all North Line stations.",
+                "framework_indicator_id": "69726b9f-5b70-4275-a9fe-9c74f60d5cc4"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "101-7",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR embeds biodiversity considerations into its operations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-101-7"
+                ],
+                "indicator_label": "Changes to the state of biodiversity",
+                "narrative_summary": "SAR embeds biodiversity considerations into its operations.",
+                "framework_indicator_id": "a9a63546-a860-4298-a2c5-3cf2e3b597ba"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "%",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "15",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "302-4",
+                "source_page": 6,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Through a partnership with the National Energy Services Company (TARSHID), “SAR” is implementing energy-efficiency initiatives targeting at least a 15% carbon reduction across infrastructure assets.",
+                    "context_snippet": null,
+                    "source_page_raw": 6,
+                    "narrative_summary": "SAR targets a 15% carbon reduction through energy-efficiency initiatives."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Through a partnership with the National Energy Services Company (TARSHID), “SAR” is implementing energy-efficiency initiatives targeting at least a 15% carbon reduction across infrastructure assets.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-302-4"
+                ],
+                "indicator_label": "Reduction of energy consumption",
+                "narrative_summary": "SAR targets a 15% carbon reduction through energy-efficiency initiatives.",
+                "framework_indicator_id": "8fe4bbbb-8f9e-4495-8f46-df0b4a637daf"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "101-2",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR embeds biodiversity considerations into its operations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, “SAR” advanced from environmental protection to active ecosystem stewardship, embedding green infrastructure and biodiversity considerations into planning, construction, and operations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-101-2"
+                ],
+                "indicator_label": "Management of biodiversity impacts",
+                "narrative_summary": "SAR embeds biodiversity considerations into its operations.",
+                "framework_indicator_id": "d7f5e97b-99b9-4627-a07a-82fe8fc8c1ea"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "ESG",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "3-3",
+                "source_page": 18,
+                "esg_category": "Universal",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "SAR’s sustainability outlook is shaped by its 2035 Strategy, which aligns growth ambitions with environmental discipline, digital excellence, and national priorities.",
+                    "context_snippet": null,
+                    "source_page_raw": 18,
+                    "narrative_summary": "SAR's sustainability outlook is guided by its 2035 Strategy."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "SAR’s sustainability outlook is shaped by its 2035 Strategy, which aligns growth ambitions with environmental discipline, digital excellence, and national priorities.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-3-3"
+                ],
+                "indicator_label": "Management of material topics",
+                "narrative_summary": "SAR's sustainability outlook is guided by its 2035 Strategy.",
+                "framework_indicator_id": "8680b728-7362-4ff6-a44f-649f518e469d"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-2",
+                "source_page": 7,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Oversight is provided by the HSE Executive Committee, which conducts annual reviews of environmental performance, risk assessments, and incident data to inform policy updates and target setting.",
+                    "context_snippet": null,
+                    "source_page_raw": 7,
+                    "narrative_summary": "The HSE Executive Committee oversees environmental performance and risk assessments."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Oversight is provided by the HSE Executive Committee, which conducts annual reviews of environmental performance, risk assessments, and incident data to inform policy updates and target setting.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-2"
+                ],
+                "indicator_label": "Hazard identification, risk assessment, and incident investigation",
+                "narrative_summary": "The HSE Executive Committee oversees environmental performance and risk assessments.",
+                "framework_indicator_id": "b8016767-9136-4edf-bde9-d73e30fc28f6"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "G",
+                "status": "FOUND",
+                "raw_unit": "%",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "55",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "204-1",
+                "source_page": 3,
+                "esg_category": "Economic",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "55% of total supplier spending directed to local Saudi vendors in 2024.",
+                    "context_snippet": null,
+                    "source_page_raw": 3,
+                    "narrative_summary": "SAR directed 55% of its supplier spending to local Saudi vendors in 2024."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "55% of total supplier spending directed to local Saudi vendors in 2024.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-204-1"
+                ],
+                "indicator_label": "Proportion of spending on local suppliers",
+                "narrative_summary": "SAR directed 55% of its supplier spending to local Saudi vendors in 2024.",
+                "framework_indicator_id": "b63c2331-52d4-4f34-8aaa-6201767dc85d"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "tons",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "10216",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "306-1",
+                "source_page": 8,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                    "context_snippet": null,
+                    "source_page_raw": 8,
+                    "narrative_summary": "SAR recycled 10,216 tons of waste in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-306-1"
+                ],
+                "indicator_label": "Waste generation and significant waste-related impacts",
+                "narrative_summary": "SAR recycled 10,216 tons of waste in 2025.",
+                "framework_indicator_id": "82177542-de70-414f-9693-1c6b4c42424c"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "tons",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "10216",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "306-4",
+                "source_page": 8,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                    "context_snippet": null,
+                    "source_page_raw": 8,
+                    "narrative_summary": "SAR recycled 10,216 tons of waste in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-306-4"
+                ],
+                "indicator_label": "Waste diverted from disposal",
+                "narrative_summary": "SAR recycled 10,216 tons of waste in 2025.",
+                "framework_indicator_id": "38f3a901-154f-4f7f-a24d-1f60e5d39df9"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": "employees",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "2421",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-5",
+                "source_page": 11,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "Personal Track Safety (PTS) Training: 2,421 employees trained in 2025 (up from 1,470 in 2024).",
+                    "context_snippet": null,
+                    "source_page_raw": 11,
+                    "narrative_summary": "SAR provided Personal Track Safety training to 2,421 employees in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Personal Track Safety (PTS) Training: 2,421 employees trained in 2025 (up from 1,470 in 2024).",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-5"
+                ],
+                "indicator_label": "Worker training on occupational health and safety",
+                "narrative_summary": "SAR provided Personal Track Safety training to 2,421 employees in 2025.",
+                "framework_indicator_id": "134ae027-778b-4ce1-98ec-635ce57f51fb"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "403-1",
+                "source_page": 7,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Climate risk management is governed through “SAR”’s Environmental Management System (EMS), certified under ISO 14001:2015 and aligned with the National Center for Environmental Compliance (NCEC) and U.S. EPA guidelines.",
+                    "context_snippet": null,
+                    "source_page_raw": 7,
+                    "narrative_summary": "SAR's EMS is certified under ISO 14001:2015."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Climate risk management is governed through “SAR”’s Environmental Management System (EMS), certified under ISO 14001:2015 and aligned with the National Center for Environmental Compliance (NCEC) and U.S. EPA guidelines.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-403-1"
+                ],
+                "indicator_label": "Occupational health and safety management system",
+                "narrative_summary": "SAR's EMS is certified under ISO 14001:2015.",
+                "framework_indicator_id": "e5ca4f05-fd17-47cd-91ee-b6e5fded22f8"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "tons",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "10216",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "306-3",
+                "source_page": 8,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                    "context_snippet": null,
+                    "source_page_raw": 8,
+                    "narrative_summary": "SAR recycled 10,216 tons of waste in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-306-3"
+                ],
+                "indicator_label": "Waste generated",
+                "narrative_summary": "SAR recycled 10,216 tons of waste in 2025.",
+                "framework_indicator_id": "2a239843-e6d6-4a41-ad57-f0c4cee5827c"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "tons",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "10216",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "306-2",
+                "source_page": 8,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                    "context_snippet": null,
+                    "source_page_raw": 8,
+                    "narrative_summary": "SAR recycled 10,216 tons of waste in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "In 2025, these efforts resulted in the recycling of 10,216 tons of waste, reintegrating materials like carbon steel and aluminum back into local industrial value chains.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-306-2"
+                ],
+                "indicator_label": "Management of significant wasterelated impacts",
+                "narrative_summary": "SAR recycled 10,216 tons of waste in 2025.",
+                "framework_indicator_id": "cba8ccc1-5da7-42c2-9ad5-4c548aefbd1a"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "G",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "203-1",
+                "source_page": 4,
+                "esg_category": "Economic",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "By expanding our world-class rail network toward 8,000+ km, we strengthen regional connectivity and provide the resilient infrastructure necessary for sustainable industrial growth and trade.",
+                    "context_snippet": null,
+                    "source_page_raw": 4,
+                    "narrative_summary": "SAR is expanding its rail network to over 8,000 km to support sustainable growth."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "By expanding our world-class rail network toward 8,000+ km, we strengthen regional connectivity and provide the resilient infrastructure necessary for sustainable industrial growth and trade.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-203-1"
+                ],
+                "indicator_label": "Infrastructure investments and services supported",
+                "narrative_summary": "SAR is expanding its rail network to over 8,000 km to support sustainable growth.",
+                "framework_indicator_id": "63ac9378-7944-4728-8afc-6b355df37f69"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "S",
+                "status": "FOUND",
+                "raw_unit": null,
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": null,
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 0.9,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "416-1",
+                "source_page": 12,
+                "esg_category": "Social",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 0.9,
+                    "verbatim_quote": "Certified service standards: “SAR” maintained its certification under the International Digital Customer Experience Standard (IDCXS) and the International Customer Experience Standard (ICXS), achieving near-perfect scores of 99.13% and 98.25%, respectively, in 2025.",
+                    "context_snippet": null,
+                    "source_page_raw": 12,
+                    "narrative_summary": "SAR maintained its certification under IDCXS and ICXS with high scores."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "Certified service standards: “SAR” maintained its certification under the International Digital Customer Experience Standard (IDCXS) and the International Customer Experience Standard (ICXS), achieving near-perfect scores of 99.13% and 98.25%, respectively, in 2025.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-416-1"
+                ],
+                "indicator_label": "Assessment of the health and safety impacts of product and service categories",
+                "narrative_summary": "SAR maintained its certification under IDCXS and ICXS with high scores.",
+                "framework_indicator_id": "dc1da3fe-455f-4791-8d6b-1a2e8fce2e75"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "trees and shrubs",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "53000",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "101-5",
+                "source_page": 10,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                    "context_snippet": null,
+                    "source_page_raw": 10,
+                    "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "53,000+ trees and shrubs planted across “SAR” locations.",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-101-5"
+                ],
+                "indicator_label": "Locations with biodiversity impacts",
+                "narrative_summary": "SAR has planted over 53,000 trees and shrubs across its locations.",
+                "framework_indicator_id": "419c3b9c-176a-4ae9-bf7e-6a3482dd2cb3"
+            }
+        },
+        {
+            "raw_evidence": {
+                "period": "FY-2025",
+                "pillar": "E",
+                "status": "FOUND",
+                "raw_unit": "tons",
+                "data_type": "text_block",
+                "framework": "GRI",
+                "raw_value": "383700",
+                "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+                "confidence": 1.0,
+                "document_id": "f3bba932-4532-465d-b441-241d0d22451e",
+                "source_code": "305-5",
+                "source_page": 6,
+                "esg_category": "Environmental",
+                "raw_evidence": {
+                    "boolean_value": null,
+                    "confidence_raw": 1.0,
+                    "verbatim_quote": "383,700+ tons of CO2 avoided (+7.6% from 356,442 tons in 2024).",
+                    "context_snippet": null,
+                    "source_page_raw": 6,
+                    "narrative_summary": "SAR avoided over 383,700 tons of CO2 emissions in 2025."
+                },
+                "boolean_value": null,
+                "verbatim_quote": "383,700+ tons of CO2 avoided (+7.6% from 356,442 tons in 2024).",
+                "context_snippet": null,
+                "framework_codes": [
+                    "GRI-305-5"
+                ],
+                "indicator_label": "Reduction of GHG emissions",
+                "narrative_summary": "SAR avoided over 383,700 tons of CO2 emissions in 2025.",
+                "framework_indicator_id": "419bd05b-9e39-44c1-8f54-321fea07bbe7"
+            }
+        }
+    ],
+    "total": 45
+}
+
+
+

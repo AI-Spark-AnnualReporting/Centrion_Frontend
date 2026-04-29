@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getSectors, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   clearActivePipeline,
   loadActivePipeline,
@@ -8,6 +8,13 @@ import {
 } from '@/lib/active-pipeline';
 import { useAuth } from '@/context/AuthContext';
 import type { Sector } from '@/types/company';
+import type {
+  CountriesResponse,
+  CountryLookup,
+  RegionsResponse,
+  RegulatorLookup,
+  RegulatorsResponse,
+} from '@/types/lookups';
 import type { ProcessingPageState } from './ProcessingPage';
 
 interface ReportGenerationConfig {
@@ -36,12 +43,20 @@ interface ReportCoverage {
   by_pillar?: Partial<Record<'E' | 'S' | 'G' | 'ESG', ReportPillarCoverage>>;
 }
 
+interface ReportRegulatorSummary {
+  id?: string;
+  code: string;
+  full_name?: string;
+}
+
 interface ReportSummary {
   id: string;
   period: string;
   generation_config?: ReportGenerationConfig;
   title?: string;
+  scope_type?: string;
   frameworks?: string[];
+  regulators?: ReportRegulatorSummary[];
   generated_at?: string;
   coverage?: ReportCoverage;
 }
@@ -126,72 +141,23 @@ const globalFrameworks = ['GRI', 'IFRS'];
 // and should not be pre-checked.
 const defaultGlobalCheckedFrameworks = ['GRI'];
 
-const regionData: Record<string, { countries: string[]; frameworks: Record<string, string[]> }> = {
-  'Middle East': {
-    countries: ['Saudi Arabia', 'UAE', 'Qatar', 'Bahrain', 'Oman', 'Kuwait', 'Jordan'],
-    frameworks: {
-      'Saudi Arabia': ['GRI', 'IFRS S1/S2', 'TCFD', 'SAMA ESG', 'CMA CGR', 'SGI', 'SASB'],
-      'UAE': ['GRI', 'IFRS S1/S2', 'TCFD', 'ADX ESG', 'SCA Guidelines', 'SASB'],
-      'Qatar': ['GRI', 'IFRS S1/S2', 'TCFD', 'QSE ESG', 'SASB'],
-      'Bahrain': ['GRI', 'IFRS S1/S2', 'TCFD', 'CBB ESG', 'SASB'],
-      'Oman': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMA Oman ESG', 'SASB'],
-      'Kuwait': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMA Kuwait', 'SASB'],
-      'Jordan': ['GRI', 'IFRS S1/S2', 'TCFD', 'JSC ESG', 'SASB'],
-    },
-  },
-  'Europe': {
-    countries: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Sweden', 'Switzerland'],
-    frameworks: {
-      'United Kingdom': ['GRI', 'IFRS S1/S2', 'TCFD', 'UK SDR', 'FCA ESG', 'SASB'],
-      'Germany': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'France': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'Article 29'],
-      'Netherlands': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'Sweden': ['GRI', 'IFRS S1/S2', 'CSRD', 'EU Taxonomy', 'SFDR', 'SASB'],
-      'Switzerland': ['GRI', 'IFRS S1/S2', 'TCFD', 'Swiss CO Ordinance', 'SASB'],
-    },
-  },
-  'Asia Pacific': {
-    countries: ['Singapore', 'Hong Kong', 'Japan', 'Australia', 'India', 'South Korea'],
-    frameworks: {
-      'Singapore': ['GRI', 'IFRS S1/S2', 'TCFD', 'SGX Core ESG', 'SASB'],
-      'Hong Kong': ['GRI', 'IFRS S1/S2', 'TCFD', 'HKEX ESG', 'SASB'],
-      'Japan': ['GRI', 'IFRS S1/S2', 'TCFD', 'SSBJ Standards', 'SASB'],
-      'Australia': ['GRI', 'IFRS S1/S2', 'TCFD', 'ASRS Standards', 'SASB'],
-      'India': ['GRI', 'IFRS S1/S2', 'BRSR', 'SEBI ESG', 'SASB'],
-      'South Korea': ['GRI', 'IFRS S1/S2', 'TCFD', 'KSSB Standards', 'SASB'],
-    },
-  },
-  'Africa': {
-    countries: ['South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco'],
-    frameworks: {
-      'South Africa': ['GRI', 'IFRS S1/S2', 'TCFD', 'King IV', 'JSE ESG', 'SASB'],
-      'Nigeria': ['GRI', 'IFRS S1/S2', 'TCFD', 'NGX ESG', 'SASB'],
-      'Kenya': ['GRI', 'IFRS S1/S2', 'TCFD', 'NSE ESG', 'SASB'],
-      'Egypt': ['GRI', 'IFRS S1/S2', 'TCFD', 'EGX ESG', 'SASB'],
-      'Morocco': ['GRI', 'IFRS S1/S2', 'TCFD', 'AMMC ESG', 'SASB'],
-    },
-  },
-  'Americas': {
-    countries: ['United States', 'Canada', 'Brazil', 'Mexico', 'Chile'],
-    frameworks: {
-      'United States': ['GRI', 'IFRS S1/S2', 'TCFD', 'SEC Climate', 'SASB', 'CDP'],
-      'Canada': ['GRI', 'IFRS S1/S2', 'TCFD', 'CSSB Standards', 'SASB', 'CDP'],
-      'Brazil': ['GRI', 'IFRS S1/S2', 'TCFD', 'CVM ESG', 'SASB'],
-      'Mexico': ['GRI', 'IFRS S1/S2', 'TCFD', 'BMV ESG', 'SASB'],
-      'Chile': ['GRI', 'IFRS S1/S2', 'TCFD', 'CMF ESG', 'SASB'],
-    },
-  },
-};
-
-const regions = Object.keys(regionData);
+// Regions / countries / regulators are loaded from /api/v1/lookups/* — no
+// hard-coded region map here.
 
 
 export default function ReportsPage() {
   const [genOpen, setGenOpen] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState('');
+  const [selectedCountryId, setSelectedCountryId] = useState('');
   const [checkedFw, setCheckedFw] = useState<string[]>(defaultGlobalCheckedFrameworks);
+  // Region / country / regulator data loaded from /api/v1/lookups/*.
+  const [regions, setRegions] = useState<string[]>([]);
+  const [regionsLoading, setRegionsLoading] = useState(false);
+  const [countries, setCountries] = useState<CountryLookup[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(false);
+  const [regulators, setRegulators] = useState<RegulatorLookup[]>([]);
+  const [regulatorsLoading, setRegulatorsLoading] = useState(false);
   // GRI indicator scope: "standard" → 85 indicators, "full" → all 128.
   const [griScope, setGriScope] = useState<'standard' | 'full'>('standard');
   const [sectors, setSectors] = useState<Sector[]>([]);
@@ -342,8 +308,7 @@ export default function ReportsPage() {
     setSelectedSectorId(cfg.sector_id ?? '');
     setCheckedFw(cfg.framework_codes ?? []);
     setSelectedRegion(cfg.region ?? '');
-    // Country auto-fill skipped — our UI uses country names, API returns ids.
-    setSelectedCountry('');
+    setSelectedCountryId(cfg.country_id ?? '');
     setUploadedFile(null);
     setUploadError(null);
     // Mirror the report's stored GRI indicator scope onto the radio. Backend
@@ -359,7 +324,7 @@ export default function ReportsPage() {
     setSelectedSectorId('');
     setCheckedFw(defaultGlobalCheckedFrameworks);
     setSelectedRegion('');
-    setSelectedCountry('');
+    setSelectedCountryId('');
     // Leave uploadedFile alone — user may have uploaded before choosing a year.
   };
 
@@ -412,7 +377,7 @@ export default function ReportsPage() {
   const genRequestIdRef = useRef(0);
 
   const triggerGenerate = () => {
-    if (!companyId || scope !== 'global') return;
+    if (!companyId) return;
 
     // Branch A — existing report + "Generate report from DB": just open the
     // detail page, which fetches /coverage on its own.
@@ -482,6 +447,29 @@ export default function ReportsPage() {
 
     const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
 
+    // Forward region / country / regulator picks only when the user is on the
+    // regional flow — the global flow ignores them.
+    const regionalExtras: {
+      region?: string;
+      country_id?: string;
+      regulator_ids?: string[];
+    } =
+      scope === 'regional'
+        ? {
+            ...(selectedRegion ? { region: selectedRegion } : {}),
+            ...(selectedCountryId ? { country_id: selectedCountryId } : {}),
+            // The chip set is keyed on regulator.code, so map each checked code
+            // back to its regulator id for the API.
+            ...(checkedFw.length > 0
+              ? {
+                  regulator_ids: regulators
+                    .filter((r) => checkedFw.includes(r.code))
+                    .map((r) => r.id),
+                }
+              : {}),
+          }
+        : {};
+
     reportsApi
       .generate(companyId, {
         files: [submittedFile],
@@ -491,6 +479,7 @@ export default function ReportsPage() {
         report_type: 'esg',
         framework_codes: checkedFw.map(frameworkLabelToCode),
         ...(griSelected ? { gri_scope: griScope } : {}),
+        ...regionalExtras,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -559,6 +548,88 @@ export default function ReportsPage() {
       .finally(() => setSectorsLoading(false));
   }, []);
 
+  // Load regions once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    setRegionsLoading(true);
+    lookups
+      .regions<RegionsResponse>()
+      .then((res) => {
+        if (cancelled) return;
+        setRegions(res.regions ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRegions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRegionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load countries whenever the user picks (or clears) a region.
+  useEffect(() => {
+    if (!selectedRegion) {
+      setCountries([]);
+      return;
+    }
+    let cancelled = false;
+    setCountriesLoading(true);
+    lookups
+      .countries<CountriesResponse>(selectedRegion)
+      .then((res) => {
+        if (cancelled) return;
+        setCountries(res.countries ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCountries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCountriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegion]);
+
+  // Load regulators whenever the user picks (or clears) a country. Each
+  // regulator's `code` (ADX, CBB, CMA, …) becomes one ESG-framework chip.
+  // When an existing report is selected the chips stay locked to its saved
+  // framework_codes so we don't auto-overwrite them here.
+  useEffect(() => {
+    if (!selectedCountryId) {
+      setRegulators([]);
+      return;
+    }
+    let cancelled = false;
+    setRegulatorsLoading(true);
+    lookups
+      .regulators<RegulatorsResponse>(selectedCountryId)
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.regulators ?? [];
+        setRegulators(list);
+        if (selectedReportId === null) {
+          // Auto-check every regulator code for this country.
+          setCheckedFw(list.map((r) => r.code));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRegulators([]);
+          if (selectedReportId === null) setCheckedFw([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRegulatorsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountryId, selectedReportId]);
+
   const toggleFw = (fw: string) => setCheckedFw(prev => prev.includes(fw) ? prev.filter(f => f !== fw) : [...prev, fw]);
 
   const handleScopeChange = (newScope: 'global' | 'regional') => {
@@ -571,7 +642,7 @@ export default function ReportsPage() {
     }
     if (newScope === 'global') {
       setSelectedRegion('');
-      setSelectedCountry('');
+      setSelectedCountryId('');
       setCheckedFw(defaultGlobalCheckedFrameworks);
     } else {
       setCheckedFw([]);
@@ -580,21 +651,19 @@ export default function ReportsPage() {
 
   const handleRegionChange = (region: string) => {
     setSelectedRegion(region);
-    setSelectedCountry('');
+    setSelectedCountryId('');
     setCheckedFw([]);
   };
 
-  const handleCountryChange = (country: string) => {
-    setSelectedCountry(country);
-    if (selectedRegion && regionData[selectedRegion]?.frameworks[country]) {
-      setCheckedFw(regionData[selectedRegion].frameworks[country]);
-    }
+  const handleCountryChange = (countryId: string) => {
+    setSelectedCountryId(countryId);
+    // Frameworks are populated by the regulators useEffect once it finishes
+    // loading for the chosen country.
   };
 
-  const availableCountries = selectedRegion ? regionData[selectedRegion]?.countries || [] : [];
-  const availableFrameworks = scope === 'global'
+  const availableFrameworks: string[] = scope === 'global'
     ? globalFrameworks
-    : (selectedCountry && selectedRegion ? regionData[selectedRegion]?.frameworks[selectedCountry] || [] : []);
+    : regulators.map((r) => r.code);
 
   return (
     <div>
@@ -838,29 +907,33 @@ export default function ReportsPage() {
                 <>
                   <div>
                     <label className="fl-label">Region</label>
-                    {/* Selection disabled for now — options visible as preview only. */}
                     <select
                       className="inp sel"
                       value={selectedRegion}
                       onChange={e => handleRegionChange(e.target.value)}
-                      disabled={selectedReport !== null}
+                      disabled={selectedReport !== null || regionsLoading}
                     >
-                      <option value="">None</option>
-                      {regions.map(r => <option key={r} value={r} disabled>{r}</option>)}
+                      <option value="">{regionsLoading ? 'Loading regions…' : 'None'}</option>
+                      {regions.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="fl-label">Country</label>
-                    {/* Selection disabled for now — options visible as preview only. */}
                     <select
                       className="inp sel"
-                      value={selectedCountry}
+                      value={selectedCountryId}
                       onChange={e => handleCountryChange(e.target.value)}
-                      disabled={selectedReport !== null}
+                      disabled={selectedReport !== null || !selectedRegion || countriesLoading}
                     >
-                      <option value="">None</option>
-                      {Object.values(regionData).flatMap(r => r.countries).map(c => (
-                        <option key={c} value={c} disabled>{c}</option>
+                      <option value="">
+                        {!selectedRegion
+                          ? 'Pick a region first'
+                          : countriesLoading
+                            ? 'Loading countries…'
+                            : 'None'}
+                      </option>
+                      {countries.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                   </div>
@@ -872,9 +945,9 @@ export default function ReportsPage() {
             <div style={{ marginBottom: 18 }}>
               <label className="fl-label">
                 ESG Frameworks <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
-                {scope === 'regional' && selectedCountry && (
+                {scope === 'regional' && selectedCountryId && (
                   <span style={{ fontWeight: 400, textTransform: 'none', color: '#4040C8' }}>
-                    {' '}· {selectedCountry}
+                    {' '}· {countries.find((c) => c.id === selectedCountryId)?.name ?? ''}
                   </span>
                 )}
               </label>
@@ -919,7 +992,13 @@ export default function ReportsPage() {
                 </div>
               ) : (
                 <div style={{ padding: '14px', background: '#F2F3FA', borderRadius: 10, fontSize: 12, color: '#9BA3C4', marginTop: 5 }}>
-                  {scope === 'regional' ? 'Select a region and country to see applicable frameworks' : 'No frameworks available'}
+                  {scope === 'regional'
+                    ? regulatorsLoading
+                      ? 'Loading frameworks for this country…'
+                      : selectedCountryId
+                        ? 'No regulators registered for this country.'
+                        : 'Select a region and country to see applicable frameworks'
+                    : 'No frameworks available'}
                 </div>
               )}
             </div>
@@ -1019,7 +1098,6 @@ export default function ReportsPage() {
                 type="file"
                 accept={ACCEPTED_UPLOAD_ATTR}
                 onChange={handleFileInputChange}
-                disabled={scope !== 'global'}
                 style={{ display: 'none' }}
               />
               {uploadedFile ? (
@@ -1067,23 +1145,20 @@ export default function ReportsPage() {
               ) : (
                 <div
                   role="button"
-                  tabIndex={scope === 'global' ? 0 : -1}
-                  aria-disabled={scope !== 'global'}
-                  onClick={scope === 'global' ? openFilePicker : undefined}
+                  tabIndex={0}
+                  onClick={openFilePicker}
                   onKeyDown={(e) => {
-                    if (scope !== 'global') return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       openFilePicker();
                     }
                   }}
                   onDragOver={(e) => {
-                    if (scope !== 'global') return;
                     e.preventDefault();
                     if (!isDragging) setIsDragging(true);
                   }}
                   onDragLeave={() => setIsDragging(false)}
-                  onDrop={scope === 'global' ? handleDrop : (e) => e.preventDefault()}
+                  onDrop={handleDrop}
                   className="upload-z"
                   style={{
                     display: 'flex',
@@ -1091,18 +1166,14 @@ export default function ReportsPage() {
                     gap: 10,
                     textAlign: 'left',
                     padding: '16px 20px',
-                    cursor: scope === 'global' ? 'pointer' : 'not-allowed',
-                    opacity: scope === 'global' ? 1 : 0.55,
-                    borderColor: isDragging && scope === 'global' ? '#4040C8' : undefined,
-                    background: isDragging && scope === 'global' ? 'rgba(64,64,200,.06)' : undefined,
+                    cursor: 'pointer',
+                    borderColor: isDragging ? '#4040C8' : undefined,
+                    background: isDragging ? 'rgba(64,64,200,.06)' : undefined,
                   }}
-                  title={scope === 'global' ? undefined : 'Upload is only available in Global scope'}
                 >
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /><path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" /></svg>
                   <span style={{ fontSize: 12, color: '#5A6080' }}>
-                    {scope === 'global'
-                      ? 'Click to upload or drag & drop annual report, HR data, financial statements'
-                      : 'Upload is only available in Global scope'}
+                    Click to upload or drag &amp; drop annual report, HR data, financial statements
                   </span>
                 </div>
               )}
@@ -1152,14 +1223,15 @@ export default function ReportsPage() {
                   not the form). */}
               {(() => {
                 const hasFramework = checkedFw.length > 0;
+                const regionalReady =
+                  scope !== 'regional' || (selectedRegion !== '' && selectedCountryId !== '');
                 const canGenerateNew =
-                  scope === 'global' &&
                   selectedReport === null &&
                   customYear !== null &&
                   uploadedFile !== null &&
-                  hasFramework;
+                  hasFramework &&
+                  regionalReady;
                 const canGenerateFromDb =
-                  scope === 'global' &&
                   selectedReport !== null &&
                   existingReportSource === 'db' &&
                   hasFramework;
@@ -1167,23 +1239,24 @@ export default function ReportsPage() {
                 // generation_config, so the local hasFramework check is not
                 // required here — only a file is needed.
                 const canAddDocs =
-                  scope === 'global' &&
                   selectedReport !== null &&
                   existingReportSource === 'upload' &&
                   uploadedFile !== null;
                 const canGenerate = canGenerateNew || canGenerateFromDb || canAddDocs;
                 const disabledReason =
-                  scope !== 'global'
-                    ? 'Regional generation is not available yet'
-                    : selectedReport !== null && existingReportSource === 'upload' && uploadedFile === null
-                      ? 'Upload a document to add to this report'
-                      : !hasFramework && !(selectedReport !== null && existingReportSource === 'upload')
-                        ? 'Select at least one ESG framework to continue'
-                        : selectedReport === null && customYear === null
-                          ? 'Select a reporting year to continue'
-                          : selectedReport === null && uploadedFile === null
-                            ? 'Upload a source document to continue'
-                            : undefined;
+                  scope === 'regional' && selectedRegion === ''
+                    ? 'Select a region to continue'
+                    : scope === 'regional' && selectedCountryId === ''
+                      ? 'Select a country to continue'
+                      : selectedReport !== null && existingReportSource === 'upload' && uploadedFile === null
+                        ? 'Upload a document to add to this report'
+                        : !hasFramework && !(selectedReport !== null && existingReportSource === 'upload')
+                          ? 'Select at least one ESG framework to continue'
+                          : selectedReport === null && customYear === null
+                            ? 'Select a reporting year to continue'
+                            : selectedReport === null && uploadedFile === null
+                              ? 'Upload a source document to continue'
+                              : undefined;
                 const isBusy = isSubmittingGenerate;
                 const btnEnabled = canGenerate && !isBusy;
                 return (
@@ -1245,7 +1318,16 @@ export default function ReportsPage() {
             const metricsDisclosed = r.coverage?.metrics_disclosed ?? 0;
             const metricsTotal = r.coverage?.metrics_total ?? 0;
             const gaps = r.coverage?.gaps ?? 0;
-            const headerLine = [formatPeriod(r.period), ...(r.frameworks ?? [])].filter(Boolean).join(' · ');
+            // Regional reports surface regulator codes (e.g. "QFMA"); other
+            // scopes keep the framework codes already returned by the API.
+            const reportScope = r.scope_type ?? r.generation_config?.scope_type;
+            const regulatorCodes = (r.regulators ?? [])
+              .map((reg) => reg.code)
+              .filter((code): code is string => Boolean(code));
+            const headerCodes = reportScope === 'regional' && regulatorCodes.length > 0
+              ? regulatorCodes
+              : (r.frameworks ?? []);
+            const headerLine = [formatPeriod(r.period), ...headerCodes].filter(Boolean).join(' · ');
             const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
             return (
               <div

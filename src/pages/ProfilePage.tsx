@@ -60,8 +60,9 @@ export default function ProfilePage() {
       </div>
 
       {loading && !profile && (
-        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: 13, color: '#9BA3C4' }}>Loading profile…</div>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: '#9BA3C4', fontSize: 13 }}>
+          <div className="proc-ring" style={{ margin: '0 auto 12px', width: 32, height: 32, borderWidth: 2.5 }} />
+          Loading profile…
         </div>
       )}
 

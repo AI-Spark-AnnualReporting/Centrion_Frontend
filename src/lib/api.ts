@@ -330,6 +330,16 @@ export const companies = {
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/kpis`, {
       query: { metric },
     }),
+
+  // Question Bank — every manual question raised across this company's reports,
+  // enriched with indicator + report metadata so the page can group by report.
+  listQuestions: <T = unknown>(
+    companyId: string,
+    filters: { report_id?: string; indicator_id?: string } = {},
+  ) =>
+    request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/questions`, {
+      query: filters,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -405,10 +415,27 @@ export const esg = {
   getScores: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/scores`),
 
-  getEvidence: <T = unknown>(companyId: string, pillar?: string) =>
-    request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/evidence`, {
-      query: { pillar },
-    }),
+  getEvidence: <T = EsgEvidenceResponse>(
+    companyId: string,
+    opts?: {
+      pillar?: string;
+      document_id?: string;
+      fields?: string | string[];
+      signal?: AbortSignal;
+    },
+  ) => {
+    const { pillar, document_id, fields, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (document_id != null) query.document_id = document_id;
+    if (fields != null) query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    // The endpoint accepts an empty `pillar` to mean "all" — preserve that
+    // when it's an empty string, only drop on null/undefined.
+    if (pillar !== undefined && pillar !== null) query.pillar = pillar;
+    return request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/evidence`, {
+      query,
+      signal,
+    });
+  },
 
   getGaps: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/gaps`),
@@ -416,6 +443,38 @@ export const esg = {
   getCertifications: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/esg/${encodeURIComponent(companyId)}/certifications`),
 };
+
+export interface EsgEvidenceItem {
+  period?: string | null;
+  pillar?: string | null;
+  status?: string | null;
+  raw_unit?: string | null;
+  data_type?: string | null;
+  framework?: string | null;
+  raw_value?: string | number | null;
+  company_id?: string;
+  confidence?: number | null;
+  document_id?: string;
+  source_code?: string | null;
+  source_page?: number | null;
+  esg_category?: string | null;
+  boolean_value?: boolean | null;
+  verbatim_quote?: string | null;
+  context_snippet?: string | null;
+  framework_codes?: string[] | null;
+  indicator_label?: string | null;
+  narrative_summary?: string | null;
+  framework_indicator_id?: string;
+}
+
+// `GET /esg/{company_id}/evidence` returns each row inside a `raw_evidence`
+// wrapper. The wrapper itself contains another nested `raw_evidence` object
+// holding the verbatim quote / context snippet — we hoist the top-level
+// fields into EsgEvidenceItem and ignore the nested duplicate.
+export interface EsgEvidenceResponse {
+  evidence: Array<{ raw_evidence: EsgEvidenceItem }>;
+  total?: number;
+}
 
 // ---------------------------------------------------------------------------
 // Compliance
@@ -478,10 +537,14 @@ export const reports = {
     if (body.sector_id) fd.append("sector_id", body.sector_id);
     fd.append("scope_type", body.scope_type);
     if (body.report_type !== undefined) fd.append("report_type", body.report_type);
-    (body.framework_codes ?? []).forEach((v) => fd.append("framework_codes", v));
+    if (body.framework_codes && body.framework_codes.length > 0) {
+      fd.append("framework_codes", JSON.stringify(body.framework_codes));
+    }
     if (body.region !== undefined) fd.append("region", body.region);
     if (body.country_id !== undefined) fd.append("country_id", body.country_id);
-    (body.regulator_ids ?? []).forEach((v) => fd.append("regulator_ids", v));
+    if (body.regulator_ids && body.regulator_ids.length > 0) {
+      fd.append("regulator_ids", JSON.stringify(body.regulator_ids));
+    }
     if (body.gri_scope) fd.append("gri_scope", body.gri_scope);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/generate`,
@@ -511,6 +574,18 @@ export const reports = {
     request<T>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/coverage`,
       { query },
+    ),
+
+  // Logs a manual question against a missing-metric indicator on a report.
+  // Backend returns the new question id as a JSON string.
+  createQuestion: (
+    companyId: string,
+    reportId: string,
+    body: { framework_indicator_id: string; question_text: string },
+  ) =>
+    request<string>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/questions`,
+      { method: "POST", body },
     ),
 };
 
@@ -583,7 +658,83 @@ export const lookups = {
 
   frameworks: <T = unknown>(scope: string = "global") =>
     request<T>("/api/v1/lookups/frameworks", { query: { scope } }),
+
+  frameworkIndicators: async (opts?: {
+    framework?: string | string[];
+    fields?: string | string[];
+    is_active?: boolean;
+    signal?: AbortSignal;
+  }): Promise<FrameworkIndicator[]> => {
+    const { framework, fields, is_active, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (framework != null) {
+      query.framework = Array.isArray(framework) ? framework.join(",") : framework;
+    }
+    if (fields != null) {
+      query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    }
+    if (is_active != null) query.is_active = is_active;
+    const raw = await request<unknown>("/api/v1/lookups/framework-indicators", {
+      query,
+      signal,
+    });
+    return extractIndicatorList(raw);
+  },
 };
+
+// The endpoint may return the array under a wrapper key (`framework_indicators`,
+// `data`, `items`, `results`) or as a bare array. Normalise to FrameworkIndicator[]
+// so callers don't have to second-guess the shape.
+function extractIndicatorList(raw: unknown): FrameworkIndicator[] {
+  if (Array.isArray(raw)) return raw as FrameworkIndicator[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of [
+      "framework_indicators",
+      "frameworkIndicators",
+      "indicators",
+      "data",
+      "items",
+      "results",
+    ]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as FrameworkIndicator[];
+      // One nested level — e.g. { data: { framework_indicators: [...] } }
+      if (v && typeof v === "object") {
+        const inner = v as Record<string, unknown>;
+        for (const k2 of ["framework_indicators", "indicators", "items", "results"]) {
+          if (Array.isArray(inner[k2])) return inner[k2] as FrameworkIndicator[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+export interface FrameworkIndicator {
+  id?: string;
+  framework: string;
+  source_code: string;
+  indicator_label: string;
+  terse_label?: string | null;
+  parent_standard?: string | null;
+  esg_pillar?: "E" | "S" | "G" | "ESG" | null;
+  esg_category?:
+    | "Environmental"
+    | "Social"
+    | "Governance"
+    | "Economic"
+    | "Universal"
+    | "Filing"
+    | null;
+  data_type?: string | null;
+  expected_unit?: string | null;
+  is_active?: boolean;
+}
+
+export interface FrameworkIndicatorsResponse {
+  framework_indicators: FrameworkIndicator[];
+}
 
 // ---------------------------------------------------------------------------
 // Root / Health

@@ -1,43 +1,80 @@
 GET
-/api/v1/auth/me
-Get Profile
+/api/v1/companies/{company_id}/questions
+List Company Questions
 
 
-Get current user profile.
+List every question for a company across all of its reports.
+
+Each row is enriched with the indicator metadata (so the frontend can label/group by indicator) and the report metadata (period, report_type, status — so the frontend can group by report). Optional report_id / indicator_id filters narrow the result.
 
 Parameters
 Cancel
-No parameters
-
+Name	Description
+company_id *
+string
+(path)
+425c346a-b066-451d-87b2-676008c94c2a
+report_id
+string | (string | null)
+(query)
+report_id
+indicator_id
+string | (string | null)
+(query)
+indicator_id
 Execute
 Clear
 Responses
 Curl
 
 curl -X 'GET' \
-  'http://localhost:8000/api/v1/auth/me' \
+  'http://localhost:8000/api/v1/companies/425c346a-b066-451d-87b2-676008c94c2a/questions' \
   -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzM4MDI5OX0.X_8znWyK7ge5b2YGhIbilB725HyaHKWovS6OSd5LZsk'
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3NzQ3ODQ5N30.9vJj_QW2Su2rDs2TAp4afkygJuuawI5mQoC2rcjgZ8g'
 Request URL
-http://localhost:8000/api/v1/auth/me
+http://localhost:8000/api/v1/companies/425c346a-b066-451d-87b2-676008c94c2a/questions
 Server response
 Code	Details
 200	
 Response body
 Download
 {
-  "user_id": "usr_f47cf46ab436",
-  "email": "ahsan@wearespark.me",
-  "full_name": "Ahsan Bilal",
-  "role": "admin",
-  "status": "active",
   "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
-  "company_name": "aramco"
+  "questions": [
+    {
+      "id": "616eb1d4-2445-47e5-b36d-aaf706bb46a7",
+      "company_id": "425c346a-b066-451d-87b2-676008c94c2a",
+      "report_id": "244e76f5-0ace-495f-adc1-7bf0ed0b6579",
+      "framework_indicator_id": "66522fd8-1550-4ca0-b1cb-045e6c5b2616",
+      "question_text": "testing",
+      "created_by": "75f1a7c5-aa17-4ded-89bd-6c7f2e0a5815",
+      "created_at": "2026-04-29T10:37:15.988771+00:00",
+      "updated_at": "2026-04-29T10:37:15.988771+00:00",
+      "indicator": {
+        "id": "66522fd8-1550-4ca0-b1cb-045e6c5b2616",
+        "framework": "GRI",
+        "source_code": "305-7",
+        "indicator_label": "Nitrogen oxides (NOx), sulfur oxides (SOx), and other significant air emissions",
+        "esg_pillar": "E",
+        "esg_category": "Environmental",
+        "data_type": "text_block",
+        "tier": null
+      },
+      "report": {
+        "id": "244e76f5-0ace-495f-adc1-7bf0ed0b6579",
+        "report_type": "esg",
+        "period": "FY-2018",
+        "status": "draft",
+        "created_at": "2026-04-27T08:28:50.73436+00:00"
+      }
+    }
+  ],
+  "total": 1
 }
 Response headers
- content-length: 195 
+ content-length: 905 
  content-type: application/json 
- date: Tue,28 Apr 2026 07:45:11 GMT 
+ date: Wed,29 Apr 2026 11:02:06 GMT 
  server: uvicorn 
 Responses
 Code	Description	Links
@@ -51,3 +88,28 @@ Controls Accept header.
 Example Value
 Schema
 "string"
+No links
+422	
+Validation Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "detail": [
+    {
+      "loc": [
+        "string",
+        0
+      ],
+      "msg": "string",
+      "type": "string",
+      "input": "string",
+      "ctx": {}
+    }
+  ]
+}
+No links
+
