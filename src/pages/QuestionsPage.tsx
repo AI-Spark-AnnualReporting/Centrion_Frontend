@@ -85,25 +85,15 @@ function groupByReport(questions: CompanyQuestion[]): ReportGroup[] {
   return groups;
 }
 
-function QuestionCard({ q }: { q: CompanyQuestion }) {
+function QuestionRow({ q }: { q: CompanyQuestion }) {
   const tone = pillarTone(q.indicator.esg_pillar);
   return (
-    <div
-      style={{
-        background: '#fff',
-        border: '1px solid #ECEEF8',
-        borderRadius: 12,
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+    <tr style={{ borderBottom: '1px solid #ECEEF8', verticalAlign: 'top' }}>
+      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
         <span
           style={{
             fontFamily: "'DM Mono',monospace",
-            fontSize: 9,
+            fontSize: 10,
             fontWeight: 700,
             color: '#4040C8',
             background: 'rgba(64,64,200,.08)',
@@ -114,9 +104,14 @@ function QuestionCard({ q }: { q: CompanyQuestion }) {
         >
           {q.indicator.framework} {q.indicator.source_code}
         </span>
+      </td>
+      <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#1A1D2E', minWidth: 200 }}>
+        {q.indicator.indicator_label}
+      </td>
+      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 10,
             fontWeight: 800,
             color: tone.color,
             background: tone.bg,
@@ -127,28 +122,14 @@ function QuestionCard({ q }: { q: CompanyQuestion }) {
         >
           {tone.label}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#9BA3C4' }} title={formatDate(q.created_at)}>
-          {formatRelative(q.created_at)}
-        </span>
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', lineHeight: 1.4 }}>
-        {q.indicator.indicator_label}
-      </div>
-      <div
-        style={{
-          fontSize: 12,
-          color: '#1A1D2E',
-          lineHeight: 1.55,
-          background: '#F8F9FE',
-          border: '1px solid #ECEEF8',
-          borderRadius: 8,
-          padding: '10px 12px',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
+      </td>
+      <td style={{ padding: '10px 12px', fontSize: 12, color: '#1A1D2E', lineHeight: 1.55, whiteSpace: 'pre-wrap', minWidth: 240 }}>
         {q.question_text}
-      </div>
-    </div>
+      </td>
+      <td style={{ padding: '10px 12px', fontSize: 11, color: '#9BA3C4', whiteSpace: 'nowrap', textAlign: 'right' }} title={formatDate(q.created_at)}>
+        {formatRelative(q.created_at)}
+      </td>
+    </tr>
   );
 }
 
@@ -214,10 +195,35 @@ function ReportSection({ group }: { group: ReportGroup }) {
           {group.status}
         </span>
       </div>
-      <div style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-        {group.questions.map((q) => (
-          <QuestionCard key={q.id} q={q} />
-        ))}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #ECEEF8', background: '#F8F9FE' }}>
+              {['Framework', 'Indicator', 'Pillar', 'Question', 'Asked'].map((h, i) => (
+                <th
+                  key={h}
+                  style={{
+                    textAlign: i === 4 ? 'right' : 'left',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#5A6080',
+                    textTransform: 'uppercase',
+                    letterSpacing: '.6px',
+                    padding: '10px 12px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {group.questions.map((q) => (
+              <QuestionRow key={q.id} q={q} />
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

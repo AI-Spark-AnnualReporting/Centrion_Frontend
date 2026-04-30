@@ -25,6 +25,15 @@ export interface CoveragePillarSummary {
   not_disclosed: number;
 }
 
+export interface CoverageSectorMateriality {
+  critical_total: number;
+  critical_disclosed: number;
+  critical_missing: number;
+  high_total: number;
+  high_disclosed: number;
+  high_missing: number;
+}
+
 export interface CoverageSummary {
   total_indicators: number;
   found_count: number;
@@ -32,6 +41,25 @@ export interface CoverageSummary {
   not_disclosed_count: number;
   disclosure_rate: number;
   by_pillar: Record<string, CoveragePillarSummary>;
+  sector_materiality?: CoverageSectorMateriality;
+}
+
+// Provenance + raw-evidence fields the backend attaches to every FOUND row.
+// Optional so PARTIAL / NOT_DISCLOSED rows still parse without these blocks.
+export interface CoverageProvenance {
+  verbatim_quote: string | null;
+  narrative_summary: string | null;
+  context_snippet: string | null;
+  raw_value: string | number | null;
+  raw_unit: string | null;
+  raw_confidence: number | null;
+  raw_source_page: number | null;
+}
+
+export interface CoverageNormalizationWarning {
+  note: string;
+  type: string;
+  value: string | number | boolean | null;
 }
 
 export interface CoverageIndicator {
@@ -51,6 +79,13 @@ export interface CoverageIndicator {
   source_page: number | null;
   document_id: string | null;
   evidence_id: string | null;
+  // Present on FOUND rows; backend may also attach to PARTIAL.
+  document_filename?: string | null;
+  sector_threshold?: 'critical' | 'high' | string | null;
+  is_mandatory?: boolean;
+  provenance?: CoverageProvenance | null;
+  raw_evidence?: Record<string, unknown> | null;
+  normalization_warnings?: CoverageNormalizationWarning[];
 }
 
 export interface CoverageDocument {

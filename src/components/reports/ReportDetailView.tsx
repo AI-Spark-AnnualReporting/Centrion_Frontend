@@ -2,6 +2,25 @@ import { useEffect, useState } from 'react';
 import { reports as reportsApi, ApiError } from '@/lib/api';
 import type { CoverageCriticalGap, CoverageIndicator, CoverageResponse } from '@/types/report';
 
+// Mirrors the threshold table used by the KPI normalizer page so the FOUND
+// modal's confidence pill stays visually consistent with that table.
+function confidenceTone(pct: number): { color: string; bg: string } {
+  if (pct >= 95) return { color: '#16A34A', bg: 'rgba(34,197,94,.12)' };
+  if (pct >= 90) return { color: '#2563EB', bg: 'rgba(37,99,235,.12)' };
+  if (pct >= 85) return { color: '#B45309', bg: 'rgba(245,158,11,.14)' };
+  return { color: '#DC2626', bg: 'rgba(239,68,68,.12)' };
+}
+
+// Discoverable click hint shown next to the green tick on FOUND rows.
+function EvidenceIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path d="M1.5 6c1-2 2.7-3.5 4.5-3.5S9.5 4 10.5 6c-1 2-2.7 3.5-4.5 3.5S2.5 8 1.5 6z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+      <circle cx="6" cy="6" r="1.5" stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  );
+}
+
 interface MissingMetricInfo {
   framework_indicator_id: string;
   framework: string;
@@ -229,6 +248,327 @@ function MissingMetricModal({
   );
 }
 
+// Read-only popup surfacing every evidence field the backend attaches to a
+// FOUND indicator: filename + page, confidence, verbatim quote, narrative
+// summary, optional context snippet, normalization warnings, and the raw
+// evidence JSON behind a debug expander.
+function FoundMetricModal({ ind, onClose }: { ind: CoverageIndicator; onClose: () => void }) {
+  const [showContext, setShowContext] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  const code = ind.framework ? `${ind.framework} ${ind.source_code}` : ind.source_code;
+  const pillarKey = pillarBaseKey(ind.pillar);
+  const pillarLabel = pillarKey === 'OTHER' ? 'Other' : PILLAR_STYLES[pillarKey].label;
+  const severity = (ind.sector_threshold ?? '').toUpperCase();
+
+  const confidencePct = ind.confidence !== null && ind.confidence !== undefined
+    ? Math.round(ind.confidence * 100)
+    : null;
+  const confTone = confidencePct !== null ? confidenceTone(confidencePct) : null;
+
+  const isNarrative = ind.data_type === 'text_block';
+  const displayValue = indicatorDisplayValue(ind);
+
+  const provenance = ind.provenance ?? null;
+  const verbatim = provenance?.verbatim_quote?.trim() || null;
+  const narrative = provenance?.narrative_summary?.trim() || null;
+  const context = provenance?.context_snippet?.trim() || null;
+  const showNarrative = narrative !== null && narrative !== verbatim;
+
+  const warnings = ind.normalization_warnings ?? [];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15,18,40,.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#fff',
+          borderRadius: 14,
+          width: '100%',
+          maxWidth: 600,
+          maxHeight: 'calc(100vh - 40px)',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '0 20px 50px rgba(0,0,0,.25)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid #ECEEF8', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '3px 7px', borderRadius: 4, letterSpacing: '.3px' }}>
+                {code}
+              </span>
+              <span style={{ fontSize: 9, fontWeight: 800, color: '#16A34A', background: 'rgba(34,197,94,.12)', padding: '3px 7px', borderRadius: 999, letterSpacing: '.4px' }}>
+                FOUND
+              </span>
+              {ind.is_mandatory && (
+                <span style={{ fontSize: 9, fontWeight: 800, color: '#B45309', background: 'rgba(245,158,11,.14)', padding: '3px 7px', borderRadius: 999, letterSpacing: '.4px' }}>
+                  MANDATORY
+                </span>
+              )}
+              {severity && (
+                <span style={{ fontSize: 9, fontWeight: 800, color: '#DC2626', background: 'rgba(239,68,68,.1)', padding: '3px 7px', borderRadius: 999, letterSpacing: '.4px' }}>
+                  {severity}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E', lineHeight: 1.35 }}>
+              {ind.indicator_label}
+            </div>
+            <div style={{ fontSize: 10, color: '#5A6080', marginTop: 4 }}>
+              {pillarLabel} pillar{ind.framework ? ` · ${ind.framework}` : ''}
+              {ind.esg_category && ind.esg_category !== pillarLabel ? ` · ${ind.esg_category}` : ''}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9BA3C4', padding: 4, lineHeight: 0, flexShrink: 0 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '14px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!isNarrative && displayValue !== '—' && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Disclosed value
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 22, fontWeight: 800, color: '#1A1D2E', lineHeight: 1 }}>
+                  {displayValue}
+                </span>
+                {ind.unit && (
+                  <span style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600 }}>{ind.unit}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(ind.document_filename || ind.source_page !== null) && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Source
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {ind.document_filename && (
+                  <span
+                    title={ind.document_filename}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#1A1D2E', background: '#F8F9FE', border: '1px solid #ECEEF8', padding: '5px 10px', borderRadius: 8, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, color: '#4040C8' }}>
+                      <path d="M3 1.5h5l3 3v7a.5.5 0 0 1-.5.5h-7.5a.5.5 0 0 1-.5-.5v-9.5a.5.5 0 0 1 .5-.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                      <path d="M8 1.5v3h3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                    </svg>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ind.document_filename}</span>
+                  </span>
+                )}
+                {ind.source_page !== null && ind.source_page !== undefined && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '4px 8px', borderRadius: 999, fontFamily: "'DM Mono',monospace" }}>
+                    p. {ind.source_page}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {confidencePct !== null && confTone && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Confidence
+              </div>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: confTone.color,
+                  background: confTone.bg,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  fontFamily: "'DM Mono',monospace",
+                }}
+              >
+                {confidencePct}%
+                <span style={{ fontSize: 9, fontWeight: 700, opacity: .8, fontFamily: 'inherit' }}>
+                  confidence
+                </span>
+              </span>
+            </div>
+          )}
+
+          {verbatim && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Verbatim quote
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: '#1A1D2E',
+                  background: '#F8F9FE',
+                  border: '1px solid #ECEEF8',
+                  borderLeft: '3px solid #4040C8',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  fontStyle: 'italic',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                “{verbatim}”
+              </div>
+            </div>
+          )}
+
+          {showNarrative && narrative && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Narrative summary
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: '#1A1D2E',
+                  background: '#FAFBFF',
+                  border: '1px solid #ECEEF8',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {narrative}
+              </div>
+            </div>
+          )}
+
+          {context && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowContext((v) => !v)}
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#4040C8', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: showContext ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform .15s' }}>
+                  <path d="M3.5 2L6.5 5l-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {showContext ? 'Hide context' : 'Show context'}
+              </button>
+              {showContext && (
+                <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.55, color: '#5A6080', background: '#FAFBFF', border: '1px solid #ECEEF8', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
+                  {context}
+                </div>
+              )}
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: '#5A6080', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>
+                Normalization warnings
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {warnings.map((w, i) => (
+                  <div
+                    key={`${w.type}-${i}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      fontSize: 11,
+                      color: '#5A6080',
+                      background: 'rgba(245,158,11,.08)',
+                      border: '1px solid rgba(245,158,11,.25)',
+                      borderRadius: 8,
+                      padding: '8px 10px',
+                    }}
+                  >
+                    <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 800, color: '#B45309', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+                      {w.type}
+                    </span>
+                    <span style={{ color: '#1A1D2E', lineHeight: 1.45 }}>{w.note}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ind.raw_evidence && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#5A6080', listStyle: 'none' }}>
+                Raw evidence (debug)
+              </summary>
+              <pre
+                style={{
+                  marginTop: 8,
+                  fontSize: 10,
+                  fontFamily: "'DM Mono',monospace",
+                  color: '#1A1D2E',
+                  background: '#F8F9FE',
+                  border: '1px solid #ECEEF8',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                  maxHeight: 220,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {JSON.stringify(ind.raw_evidence, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 700, borderRadius: 8, border: '1px solid #E2E4F0', background: '#fff', color: '#1A1D2E', cursor: 'pointer' }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Normalise API period strings like "FY-2026" → "FY 2026" for display.
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
@@ -361,18 +701,25 @@ function IndicatorRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [foundOpen, setFoundOpen] = useState(false);
   const isFound = ind.status === 'FOUND';
   const isMissing = ind.status === 'NOT_DISCLOSED';
   const handleClick = () => {
     if (isMissing) setAskOpen(true);
+    else if (isFound) setFoundOpen(true);
     else setExpanded((v) => !v);
   };
+  const rowTitle = isMissing
+    ? 'Ask a question about this missing metric'
+    : isFound
+      ? 'Click to view evidence'
+      : 'Click to expand';
   return (
     <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
       <div
         onClick={handleClick}
         style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
-        title={isMissing ? 'Ask a question about this missing metric' : 'Click to expand'}
+        title={rowTitle}
       >
         <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
           {ind.framework} {ind.source_code}
@@ -389,6 +736,11 @@ function IndicatorRow({
             <AskIcon size={12} />
           </span>
         )}
+        {isFound && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', color: '#16A34A', flexShrink: 0 }} title="View evidence">
+            <EvidenceIcon size={12} />
+          </span>
+        )}
         {isFound ? (
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
         ) : isMissing ? (
@@ -397,7 +749,7 @@ function IndicatorRow({
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
         )}
       </div>
-      {expanded && !isMissing && (
+      {expanded && !isMissing && !isFound && (
         <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55 }}>
           <div style={{ fontWeight: 600, color: '#1A1D2E', marginBottom: 2 }}>{ind.indicator_label}</div>
           {ind.text_value && ind.text_value.trim().length > 0 && (
@@ -419,22 +771,31 @@ function IndicatorRow({
           onClose={() => setAskOpen(false)}
         />
       )}
+      {foundOpen && (
+        <FoundMetricModal ind={ind} onClose={() => setFoundOpen(false)} />
+      )}
     </div>
   );
 }
 
-// Narrative indicator row — body text inline (truncated), expands to full text.
+// Narrative indicator row — body text inline (truncated). FOUND rows open the
+// evidence modal; PARTIAL / NOT_DISCLOSED keep the inline expand.
 function NarrativeRow({ nn }: { nn: CoverageIndicator }) {
   const [expanded, setExpanded] = useState(false);
+  const [foundOpen, setFoundOpen] = useState(false);
   const body = narrativeBodyText(nn);
   const isFound = nn.status === 'FOUND';
   const isMissing = nn.status === 'NOT_DISCLOSED';
+  const handleClick = () => {
+    if (isFound) setFoundOpen(true);
+    else setExpanded((v) => !v);
+  };
   return (
     <div style={{ borderBottom: '1px solid #ECEEF8', minWidth: 0, overflow: 'hidden' }}>
       <div
-        onClick={() => setExpanded((v) => !v)}
+        onClick={handleClick}
         style={{ display: 'flex', alignItems: 'center', padding: '7px 0', fontSize: 11, gap: 8, cursor: 'pointer' }}
-        title="Click to expand"
+        title={isFound ? 'Click to view evidence' : 'Click to expand'}
       >
         <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 9, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' }}>
           {nn.framework} {nn.source_code}
@@ -445,6 +806,11 @@ function NarrativeRow({ nn }: { nn: CoverageIndicator }) {
         <span style={{ flex: 1, color: '#5A6080', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, fontStyle: 'italic' }}>
           {body}
         </span>
+        {isFound && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', color: '#16A34A', flexShrink: 0 }} title="View evidence">
+            <EvidenceIcon size={12} />
+          </span>
+        )}
         {isFound ? (
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#22C55E" /><path d="M4 6.5l2 2 3-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" /></svg>
         ) : isMissing ? (
@@ -453,10 +819,13 @@ function NarrativeRow({ nn }: { nn: CoverageIndicator }) {
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}><circle cx="6.5" cy="6.5" r="5.5" fill="#F59E0B" /><path d="M6.5 4v3M6.5 9v.2" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></svg>
         )}
       </div>
-      {expanded && (
+      {expanded && !isFound && (
         <div style={{ padding: '0 0 10px 0', fontSize: 11, color: '#5A6080', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
           {body}
         </div>
+      )}
+      {foundOpen && (
+        <FoundMetricModal ind={nn} onClose={() => setFoundOpen(false)} />
       )}
     </div>
   );
