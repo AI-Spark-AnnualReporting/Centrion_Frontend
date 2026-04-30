@@ -95,62 +95,69 @@ function ScheduleMeetingModal({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content"
-        style={{ width: 520, padding: 0 }}
+        style={{ width: 480, padding: 0 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ padding: '20px 24px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.2px' }}>Schedule Meeting</div>
-            <div style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>Add a board, investor, or 1-on-1 meeting to the calendar</div>
-          </div>
-          <button className="btn bs bsm" onClick={onClose} style={{ padding: '6px 9px' }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.3px' }}>Schedule Meeting</div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 30, height: 30, borderRadius: '50%',
+              border: '1.5px solid #E2E4F0', background: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: '#5A6080', transition: '.15s',
+            }}
+          >
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
           </button>
         </div>
-        <div style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="fl" style={{ marginBottom: 0 }}>
-            <span className="fl-label">Title</span>
-            <input className="inp" placeholder="e.g. Q2 Earnings Call" />
+        <div style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <span className="fl-label">Meeting Title</span>
+            <input className="inp" placeholder="e.g. Q2 Investor Call" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="fl" style={{ marginBottom: 0 }}>
+            <div>
               <span className="fl-label">Date</span>
               <input className="inp" type="date" />
             </div>
-            <div className="fl" style={{ marginBottom: 0 }}>
+            <div>
               <span className="fl-label">Time</span>
               <input className="inp" type="time" />
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="fl" style={{ marginBottom: 0 }}>
-              <span className="fl-label">Type</span>
-              <select className="inp sel">
-                <option>Earnings call</option>
-                <option>Investor briefing</option>
-                <option>Investor day</option>
-                <option>1-on-1 due diligence</option>
-                <option>Board meeting</option>
-                <option>AGM</option>
-              </select>
-            </div>
-            <div className="fl" style={{ marginBottom: 0 }}>
-              <span className="fl-label">Channel</span>
-              <select className="inp sel">
-                <option>Zoom</option>
-                <option>Teams</option>
-                <option>In-person</option>
-              </select>
-            </div>
+          <div>
+            <span className="fl-label">Type</span>
+            <select className="inp sel" defaultValue="Investor Call">
+              <option>Investor Call</option>
+              <option>ESG Briefing</option>
+              <option>1-on-1</option>
+              <option>Board Meeting</option>
+            </select>
           </div>
-          <div className="fl" style={{ marginBottom: 0 }}>
-            <span className="fl-label">Notes</span>
-            <textarea className="inp" rows={3} placeholder="Agenda, attendees, materials to circulate…" style={{ resize: 'vertical' }} />
+          <div>
+            <span className="fl-label">Platform</span>
+            <select className="inp sel" defaultValue="Zoom">
+              <option>Zoom</option>
+              <option>Microsoft Teams</option>
+              <option>Google Meet</option>
+              <option>In-person</option>
+            </select>
+          </div>
+          <div>
+            <span className="fl-label">Participants</span>
+            <input className="inp" placeholder="Comma-separated emails or names" />
+          </div>
+          <div>
+            <span className="fl-label">Agenda</span>
+            <textarea className="inp" rows={3} placeholder="Meeting agenda items..." style={{ resize: 'vertical' }} />
           </div>
         </div>
-        <div style={{ padding: '14px 24px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn bs bsm" onClick={onClose}>Cancel</button>
-          <button className="btn bp bsm" onClick={onClose}>Schedule</button>
+        <div style={{ padding: '14px 24px 18px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Cancel</button>
+          <button className="btn bp" onClick={onClose} style={{ padding: '9px 20px' }}>Schedule</button>
         </div>
       </div>
     </div>
