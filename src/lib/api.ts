@@ -22,6 +22,12 @@ import type {
   PipelineConflictBody,
   PipelineHandle,
 } from "@/types/report";
+import type {
+  CreateMeetingBody,
+  MeetingListResponse,
+  MeetingResponse,
+  UpdateMeetingBody,
+} from "@/types/meeting";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -618,6 +624,28 @@ export const agentRuns = {
 };
 
 // ---------------------------------------------------------------------------
+// Meetings
+// ---------------------------------------------------------------------------
+
+export const meetings = {
+  list: () => request<MeetingListResponse>("/api/v1/meetings"),
+
+  get: (meetingId: string) =>
+    request<MeetingResponse>(
+      `/api/v1/meetings/${encodeURIComponent(meetingId)}`,
+    ),
+
+  create: (body: CreateMeetingBody) =>
+    request<MeetingResponse>("/api/v1/meetings", { method: "POST", body }),
+
+  update: (meetingId: string, body: UpdateMeetingBody) =>
+    request<MeetingResponse>(
+      `/api/v1/meetings/${encodeURIComponent(meetingId)}`,
+      { method: "PATCH", body },
+    ),
+};
+
+// ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------
 
@@ -942,6 +970,7 @@ export const api = {
   esg,
   compliance,
   reports,
+  meetings,
   admin,
   lookups,
   system,
