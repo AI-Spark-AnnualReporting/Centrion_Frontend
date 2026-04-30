@@ -11,7 +11,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import type { DocumentBankReport, DocumentBankResponse } from '@/types/report';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 20;
 
 const categoryTextColor: Record<string, string> = {
   Environmental: '#16A34A',
@@ -811,43 +811,7 @@ export default function KPIPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
-        <div className="card">
-          <FrameworkCardHeader
-            badge="GRI"
-            badgeGradient="linear-gradient(135deg,#065F46,#10B981)"
-            title="GRI Standards"
-            subtitle="Global Reporting Initiative"
-            count={indicatorsLoading ? null : griIndicators.length}
-            countTone="green"
-          />
-          <IndicatorList
-            indicators={griIndicators}
-            loading={indicatorsLoading}
-            error={indicatorsError}
-            emptyLabel="No GRI indicators returned."
-          />
-        </div>
-
-        <div className="card">
-          <FrameworkCardHeader
-            badge="IFRS"
-            badgeGradient="linear-gradient(135deg,#1E3A8A,#3B82F6)"
-            title="IFRS Sustainability"
-            subtitle="IFRS S1 · IFRS S2 disclosures"
-            count={indicatorsLoading ? null : ifrsIndicators.length}
-            countTone="blue"
-          />
-          <IndicatorList
-            indicators={ifrsIndicators}
-            loading={indicatorsLoading}
-            error={indicatorsError}
-            emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
-          />
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 14 }}>
+      <div className="card">
         <SectionCardHeader
           icon={
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -1113,6 +1077,42 @@ export default function KPIPage() {
             </div>
           </>
         )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14, marginTop: 14 }}>
+        <div className="card">
+          <FrameworkCardHeader
+            badge="GRI"
+            badgeGradient="linear-gradient(135deg,#065F46,#10B981)"
+            title="GRI Standards"
+            subtitle="Global Reporting Initiative"
+            count={indicatorsLoading ? null : griIndicators.length}
+            countTone="green"
+          />
+          <IndicatorList
+            indicators={griIndicators}
+            loading={indicatorsLoading}
+            error={indicatorsError}
+            emptyLabel="No GRI indicators returned."
+          />
+        </div>
+
+        <div className="card">
+          <FrameworkCardHeader
+            badge="IFRS"
+            badgeGradient="linear-gradient(135deg,#1E3A8A,#3B82F6)"
+            title="IFRS Sustainability"
+            subtitle="IFRS S1 · IFRS S2 disclosures"
+            count={indicatorsLoading ? null : ifrsIndicators.length}
+            countTone="blue"
+          />
+          <IndicatorList
+            indicators={ifrsIndicators}
+            loading={indicatorsLoading}
+            error={indicatorsError}
+            emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
+          />
+        </div>
       </div>
     </div>
   );
