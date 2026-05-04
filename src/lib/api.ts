@@ -624,6 +624,94 @@ export const agentRuns = {
 };
 
 // ---------------------------------------------------------------------------
+// Chat — streaming IR Copilot endpoint.
+//
+// `chat.stream()` POSTs the conversation to /api/v1/chat/stream and yields one
+// parsed SSE event per `data: {...}\n\n` block. The endpoint surfaces tool
+// usage (`tool_start` / `tool_end`), then a sequence of `token` events whose
+// `content` should be concatenated into the assistant bubble, and finishes
+// with `{ "type": "done" }`.
+// ---------------------------------------------------------------------------
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatStreamBody {
+  messages: ChatMessage[];
+  // Optional — backend defaults to the JWT's company_id.
+  company_id?: string;
+}
+
+export type ChatStreamEvent =
+  | { type: "tool_start"; name: string; args?: Record<string, unknown> }
+  | { type: "tool_end"; name: string }
+  | { type: "token"; content: string }
+  | { type: "done" }
+  | { type: string; [key: string]: unknown };
+
+export const chat = {
+  // Async generator: `for await (const ev of chat.stream(...)) { ... }`.
+  // Pass an AbortSignal to cancel the request mid-stream.
+  stream: async function* (
+    body: ChatStreamBody,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamEvent, void, void> {
+    const res = await fetchWithAuth("/api/v1/chat/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(
+        res.status,
+        res.statusText,
+        text,
+        "/api/v1/chat/stream",
+      );
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE events are delimited by a blank line. An event may carry one or
+        // more `data:` lines that should be joined with `\n` before parsing.
+        let idx: number;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const dataLines = block
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).replace(/^\s/, ""));
+          if (dataLines.length === 0) continue;
+          const payload = dataLines.join("\n");
+          try {
+            yield JSON.parse(payload) as ChatStreamEvent;
+          } catch {
+            // Backend may emit a non-JSON heartbeat — surface as a raw token
+            // so the caller can decide whether to render or ignore it.
+            yield { type: "token", content: payload };
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Meetings
 // ---------------------------------------------------------------------------
 
@@ -970,6 +1058,7 @@ export const api = {
   esg,
   compliance,
   reports,
+  chat,
   meetings,
   admin,
   lookups,
