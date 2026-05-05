@@ -100,6 +100,31 @@ export default function AIPage() {
     abortRef.current = null;
   };
 
+  // Edit a previous user turn: stop any in-flight stream, drop that message
+  // and everything after it from the *local* UI, and load the original text
+  // into the composer. The original turn stays in the server-owned history
+  // (v2 persists user messages before the stream opens), so on reload both
+  // the original and the edited message will be visible. For in-session
+  // correction — "I forgot to mention X, let me add it" — this is fine.
+  const editUserMessage = (id: number) => {
+    const target = messages.find((m) => m.id === id);
+    if (!target || target.role !== 'user') return;
+    stopStreaming();
+    setIsStreaming(false);
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === id);
+      return idx === -1 ? prev : prev.slice(0, idx);
+    });
+    setInput(target.content);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(target.content.length, target.content.length);
+      }
+    });
+  };
+
   const sendMessage = async (textOverride?: string) => {
     if (isStreaming) return;
     const text = (textOverride ?? input).trim();
@@ -459,8 +484,45 @@ export default function AIPage() {
                       )}
                     </div>
                   ) : (
-                    <div className="msg-bub" style={{ whiteSpace: 'pre-wrap' }}>
-                      {m.content}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        flexDirection: 'row-reverse',
+                      }}
+                    >
+                      <div className="msg-bub" style={{ whiteSpace: 'pre-wrap' }}>
+                        {m.content}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => editUserMessage(m.id)}
+                        aria-label="Edit message"
+                        title="Edit and resend"
+                        style={{
+                          width: 22,
+                          height: 22,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'transparent',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          color: '#9BA3C4',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                          <path
+                            d="M9.5 2.2l2.3 2.3-7 7H2.5V9.2l7-7z"
+                            stroke="currentColor"
+                            strokeWidth="1.3"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   )}
                 </div>
