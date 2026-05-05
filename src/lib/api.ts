@@ -285,6 +285,15 @@ export interface LoginParams {
   password: string;
 }
 
+export interface ChangePasswordParams {
+  old_password: string;
+  new_password: string;
+}
+
+export interface ChangePasswordResponse {
+  changed: boolean;
+}
+
 export const auth = {
   register: <T = unknown>(params: RegisterParams) =>
     request<T>("/api/v1/auth/register", {
@@ -298,6 +307,14 @@ export const auth = {
       method: "POST",
       query: params,
       auth: false,
+    }),
+
+  // Forced rotation after first-login. Same query-param style as login —
+  // backend reads `old_password` + `new_password` from the URL, not the body.
+  changePassword: (params: ChangePasswordParams) =>
+    request<ChangePasswordResponse>("/api/v1/auth/change-password", {
+      method: "POST",
+      query: params,
     }),
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
@@ -376,6 +393,116 @@ export const documents = {
       `/api/v1/documents/${encodeURIComponent(companyId)}/by-report`,
       { query: { expires_in: expiresInSeconds } },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Team — login-capable users attached to a company. Backs the Leadership
+// page (/stakeholders). Admin/PM can create + edit; any company member can
+// read; delete is a soft archive (status flips to 'inactive').
+// ---------------------------------------------------------------------------
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  full_name: string;
+  title?: string | null;
+  position_type?: string | null;
+  role?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  department?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+}
+
+export interface CreateTeamMemberBody {
+  email: string;
+  full_name: string;
+  // Backend forces a password rotation on first login (must_change_password=TRUE),
+  // so this is just an opaque starter — generate it on the client and surface
+  // the value back to the admin so they can share it with the new user.
+  temp_password: string;
+  title?: string;
+  position_type?: string;
+  role?: string;
+  bio?: string;
+  phone?: string;
+  department?: string;
+}
+
+export interface UpdateTeamMemberBody {
+  full_name?: string;
+  title?: string;
+  position_type?: string;
+  role?: string;
+  bio?: string;
+  phone?: string;
+  department?: string;
+  status?: string;
+}
+
+export interface ListTeamQuery {
+  position_type?: string;
+  role?: string;
+  include_inactive?: boolean;
+}
+
+// The list endpoint is loosely typed on the server side (returns "string" in
+// OpenAPI). Normalise it to a flat array regardless of whether the response is
+// already a bare array or wrapped under `team` / `users` / `data` / `items`.
+function unwrapTeamList(raw: unknown): TeamMember[] {
+  if (Array.isArray(raw)) return raw as TeamMember[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of ["team", "users", "members", "data", "items", "results"]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as TeamMember[];
+    }
+  }
+  return [];
+}
+
+export const team = {
+  list: async (companyId: string, opts?: ListTeamQuery): Promise<TeamMember[]> => {
+    const raw = await request<unknown>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team`,
+      { query: opts ?? {} },
+    );
+    return unwrapTeamList(raw);
+  },
+
+  create: <T = TeamMember | string>(companyId: string, body: CreateTeamMemberBody) =>
+    request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/team`, {
+      method: "POST",
+      body,
+    }),
+
+  get: <T = TeamMember>(companyId: string, userId: string) =>
+    request<T>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`,
+    ),
+
+  update: <T = TeamMember>(
+    companyId: string,
+    userId: string,
+    body: UpdateTeamMemberBody,
+  ) =>
+    request<T>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body },
+    ),
+
+  // 204 No Content — `request<void>` would still try to parse, so use the raw
+  // helper. Caller should optimistically remove the row from local state and
+  // refetch on error if it matters.
+  remove: async (companyId: string, userId: string): Promise<void> => {
+    const path = `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`;
+    const res = await fetchWithAuth(path, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(res.status, res.statusText, text, path);
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1100,6 +1227,7 @@ export const api = {
   auth,
   companies,
   documents,
+  team,
   agents,
   esg,
   compliance,

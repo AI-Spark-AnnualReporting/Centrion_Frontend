@@ -5,6 +5,9 @@ export interface AuthUser {
   role: "admin" | "user";
   company_id?: string | null;
   company_name?: string | null;
+  // Set TRUE for users created via /companies/{id}/team — backend flags
+  // the row with must_change_password until they hit /auth/change-password.
+  must_change_password?: boolean | null;
 }
 
 export interface LoginResponse {
@@ -29,4 +32,5 @@ export interface UserProfile {
   status: string;
   company_id: string | null;
   company_name: string | null;
+  must_change_password?: boolean | null;
 }

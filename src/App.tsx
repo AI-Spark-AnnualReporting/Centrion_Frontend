@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
+import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
@@ -11,7 +12,8 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import MeetingsPage from "./pages/MeetingsPage";
-import { CompliancePage, CommsPage, StakeholdersPage } from "./pages/OtherPages";
+import { CompliancePage, CommsPage } from "./pages/OtherPages";
+import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
 
@@ -22,6 +24,9 @@ const App = () => (
       <Route path="/register" element={<SignupPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route element={<ProtectedRoute />}>
+        {/* Forced password rotation lives outside AppLayout so there's no
+            sidebar / topbar / chatbot to distract from the required step. */}
+        <Route path="/change-password" element={<ChangePasswordPage />} />
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />

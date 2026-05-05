@@ -45,8 +45,16 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate('/');
+      const loggedIn = await login(email, password);
+      // Users created via /companies/{id}/team are flagged with
+      // must_change_password — divert them to the rotation screen before
+      // they can hit the dashboard. ProtectedRoute would catch this on its
+      // own, but explicit navigation avoids the visible bounce.
+      if (loggedIn.must_change_password) {
+        navigate('/change-password', { replace: true });
+      } else {
+        navigate('/');
+      }
     } catch {
       setError('Invalid email or password');
     } finally {
