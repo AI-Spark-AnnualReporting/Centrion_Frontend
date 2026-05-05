@@ -11,7 +11,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/ai': 'IR Copilot',
   '/meetings': 'Board & Meetings',
   '/comms': 'Comms Hub',
-  '/stakeholders': 'Boards & Investors',
+  '/stakeholders': 'Leadership',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',

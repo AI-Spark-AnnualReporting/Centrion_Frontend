@@ -20,6 +20,16 @@ export default defineConfig(({ mode }) => {
       hmr: {
         overlay: false,
       },
+      // Allow this dev server to be reached through ngrok / Cloudflare / etc.
+      // Vite's host check blocks unknown Host headers by default; the leading
+      // dot is Vite syntax for "any subdomain of this base".
+      allowedHosts: [
+        "localhost",
+        ".ngrok-free.dev",
+        ".ngrok-free.app",
+        ".ngrok.io",
+        ".trycloudflare.com",
+      ],
       proxy: {
         "/api": {
           target: apiTarget,

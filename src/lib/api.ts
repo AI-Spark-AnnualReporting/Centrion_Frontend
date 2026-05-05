@@ -285,6 +285,15 @@ export interface LoginParams {
   password: string;
 }
 
+export interface ChangePasswordParams {
+  old_password: string;
+  new_password: string;
+}
+
+export interface ChangePasswordResponse {
+  changed: boolean;
+}
+
 export const auth = {
   register: <T = unknown>(params: RegisterParams) =>
     request<T>("/api/v1/auth/register", {
@@ -298,6 +307,14 @@ export const auth = {
       method: "POST",
       query: params,
       auth: false,
+    }),
+
+  // Forced rotation after first-login. Same query-param style as login —
+  // backend reads `old_password` + `new_password` from the URL, not the body.
+  changePassword: (params: ChangePasswordParams) =>
+    request<ChangePasswordResponse>("/api/v1/auth/change-password", {
+      method: "POST",
+      query: params,
     }),
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
@@ -376,6 +393,116 @@ export const documents = {
       `/api/v1/documents/${encodeURIComponent(companyId)}/by-report`,
       { query: { expires_in: expiresInSeconds } },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Team — login-capable users attached to a company. Backs the Leadership
+// page (/stakeholders). Admin/PM can create + edit; any company member can
+// read; delete is a soft archive (status flips to 'inactive').
+// ---------------------------------------------------------------------------
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  full_name: string;
+  title?: string | null;
+  position_type?: string | null;
+  role?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  department?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+}
+
+export interface CreateTeamMemberBody {
+  email: string;
+  full_name: string;
+  // Backend forces a password rotation on first login (must_change_password=TRUE),
+  // so this is just an opaque starter — generate it on the client and surface
+  // the value back to the admin so they can share it with the new user.
+  temp_password: string;
+  title?: string;
+  position_type?: string;
+  role?: string;
+  bio?: string;
+  phone?: string;
+  department?: string;
+}
+
+export interface UpdateTeamMemberBody {
+  full_name?: string;
+  title?: string;
+  position_type?: string;
+  role?: string;
+  bio?: string;
+  phone?: string;
+  department?: string;
+  status?: string;
+}
+
+export interface ListTeamQuery {
+  position_type?: string;
+  role?: string;
+  include_inactive?: boolean;
+}
+
+// The list endpoint is loosely typed on the server side (returns "string" in
+// OpenAPI). Normalise it to a flat array regardless of whether the response is
+// already a bare array or wrapped under `team` / `users` / `data` / `items`.
+function unwrapTeamList(raw: unknown): TeamMember[] {
+  if (Array.isArray(raw)) return raw as TeamMember[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of ["team", "users", "members", "data", "items", "results"]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as TeamMember[];
+    }
+  }
+  return [];
+}
+
+export const team = {
+  list: async (companyId: string, opts?: ListTeamQuery): Promise<TeamMember[]> => {
+    const raw = await request<unknown>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team`,
+      { query: opts ?? {} },
+    );
+    return unwrapTeamList(raw);
+  },
+
+  create: <T = TeamMember | string>(companyId: string, body: CreateTeamMemberBody) =>
+    request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/team`, {
+      method: "POST",
+      body,
+    }),
+
+  get: <T = TeamMember>(companyId: string, userId: string) =>
+    request<T>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`,
+    ),
+
+  update: <T = TeamMember>(
+    companyId: string,
+    userId: string,
+    body: UpdateTeamMemberBody,
+  ) =>
+    request<T>(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body },
+    ),
+
+  // 204 No Content — `request<void>` would still try to parse, so use the raw
+  // helper. Caller should optimistically remove the row from local state and
+  // refetch on error if it matters.
+  remove: async (companyId: string, userId: string): Promise<void> => {
+    const path = `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`;
+    const res = await fetchWithAuth(path, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(res.status, res.statusText, text, path);
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -621,6 +748,140 @@ export const agentRuns = {
       `/api/v1/agent_runs/${encodeURIComponent(runId)}/nodes`,
       { signal },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Chat — IR Copilot (server-stateful, multi-turn).
+//
+// The backend owns conversation history. Three endpoints:
+//   • GET  /api/v1/chat/session       → hydrate the chat on page load.
+//   • POST /api/v1/chat/               → send the next user message; replies
+//                                        as SSE. Server persists the user
+//                                        message before the stream opens and
+//                                        the assistant message after `done`.
+//   • POST /api/v1/chat/session/clear  → soft-archive the active session
+//                                        (204). Caller refetches /session.
+// Don't pass company_id from the frontend — the server reads it from the JWT.
+// ---------------------------------------------------------------------------
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// Single tool usage record attached to an assistant turn in the persisted
+// history. `args` is a free-form param object — it may contain UUIDs, so the
+// UI shouldn't render it verbatim.
+export interface ChatToolCall {
+  name: string;
+  args?: Record<string, unknown> | null;
+}
+
+export interface ChatHistoryMessage extends ChatMessage {
+  created_at?: string;
+  // Only present on assistant turns; omitted (or null) on user turns.
+  tool_calls?: ChatToolCall[] | null;
+}
+
+export interface ChatSessionResponse {
+  conversation_id: string;
+  status: string;
+  created_at: string;
+  messages: ChatHistoryMessage[];
+}
+
+export interface ChatSendBody {
+  message: string;
+}
+
+export type ChatStreamEvent =
+  | { type: "tool_start"; name: string; args?: Record<string, unknown> }
+  | { type: "tool_end"; name: string }
+  | { type: "token"; content: string }
+  | { type: "error"; message: string }
+  | { type: "done" }
+  | { type: string; [key: string]: unknown };
+
+// Internal: shared SSE consumer. Splits the response stream on `\n\n` and
+// yields one parsed event per `data: …` block.
+async function* consumeSse(
+  res: Response,
+  url: string,
+): AsyncGenerator<ChatStreamEvent, void, void> {
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, res.statusText, text, url);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const dataLines = block
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).replace(/^\s/, ""));
+        if (dataLines.length === 0) continue;
+        const payload = dataLines.join("\n");
+        try {
+          yield JSON.parse(payload) as ChatStreamEvent;
+        } catch {
+          // Non-JSON heartbeat — surface as a raw token so the caller can
+          // ignore or render.
+          yield { type: "token", content: payload };
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+}
+
+export const chat = {
+  // Hydrate the active conversation (auto-creates one if none exists).
+  getSession: (signal?: AbortSignal) =>
+    request<ChatSessionResponse>("/api/v1/chat/session", { signal }),
+
+  // Send a user message; yields SSE events until {type:"done"}.
+  send: async function* (
+    body: ChatSendBody,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamEvent, void, void> {
+    const res = await fetchWithAuth("/api/v1/chat/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    yield* consumeSse(res, "/api/v1/chat/");
+  },
+
+  // Soft-archive the current session. Caller should refetch getSession()
+  // afterwards to pick up the fresh empty conversation the backend creates.
+  clearSession: async (): Promise<void> => {
+    const res = await fetchWithAuth("/api/v1/chat/session/clear", {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(
+        res.status,
+        res.statusText,
+        text,
+        "/api/v1/chat/session/clear",
+      );
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -966,10 +1227,12 @@ export const api = {
   auth,
   companies,
   documents,
+  team,
   agents,
   esg,
   compliance,
   reports,
+  chat,
   meetings,
   admin,
   lookups,

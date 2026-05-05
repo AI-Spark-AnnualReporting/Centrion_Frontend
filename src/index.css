@@ -448,6 +448,21 @@ body {
 @keyframes dpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes bpulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0; } }
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+
+/* Skeleton placeholder — used in place of spinners while content loads */
+.skel {
+  background: linear-gradient(90deg, #ECEEF8 0%, #F5F6FB 50%, #ECEEF8 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+.skel-dark {
+  background: linear-gradient(90deg, rgba(255,255,255,.12) 0%, rgba(255,255,255,.22) 50%, rgba(255,255,255,.12) 100%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
 
 /* ═══════════════════════════════════════════
    CHAT
@@ -473,6 +488,56 @@ body {
   box-shadow: 0 3px 10px rgba(64,64,200,.25);
 }
 .msg-time { font-size: 9px; color: #9BA3C4; margin-top: 2px; text-align: right; }
+
+/* Markdown-rendered assistant bubble. Tightens default tag spacing so a
+   short reply doesn't blow out the bubble height. */
+.md-bub > :first-child { margin-top: 0; }
+.md-bub > :last-child { margin-bottom: 0; }
+.md-bub p { margin: 0 0 8px 0; line-height: 1.55; }
+.md-bub p:last-child { margin-bottom: 0; }
+.md-bub h1, .md-bub h2, .md-bub h3, .md-bub h4, .md-bub h5, .md-bub h6 {
+  margin: 12px 0 6px 0; font-weight: 800; color: #1A1D2E; line-height: 1.3;
+}
+.md-bub h1 { font-size: 16px; }
+.md-bub h2 { font-size: 14px; }
+.md-bub h3 { font-size: 13px; }
+.md-bub h4, .md-bub h5, .md-bub h6 { font-size: 12px; }
+.md-bub strong { font-weight: 700; color: #1A1D2E; }
+.md-bub em { font-style: italic; }
+.md-bub ul, .md-bub ol { margin: 4px 0 8px 0; padding-left: 20px; }
+.md-bub ul:last-child, .md-bub ol:last-child { margin-bottom: 0; }
+.md-bub li { margin: 2px 0; line-height: 1.55; }
+.md-bub li > p { margin: 0; }
+.md-bub li > ul, .md-bub li > ol { margin: 2px 0 2px 0; }
+.md-bub a { color: #4040C8; text-decoration: underline; word-break: break-word; }
+.md-bub code {
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 11px; background: #F2F3FA;
+  padding: 1px 5px; border-radius: 4px;
+  border: 1px solid #ECEEF8;
+}
+.md-bub pre {
+  margin: 6px 0; padding: 10px 12px;
+  background: #F2F3FA; border: 1px solid #ECEEF8;
+  border-radius: 8px; overflow-x: auto;
+}
+.md-bub pre code {
+  background: transparent; border: none; padding: 0;
+  font-size: 11px; line-height: 1.5;
+}
+.md-bub blockquote {
+  margin: 6px 0; padding: 4px 10px;
+  border-left: 3px solid #E2E4F0; color: #5A6080;
+}
+.md-bub hr { border: 0; border-top: 1px solid #ECEEF8; margin: 10px 0; }
+.md-bub table {
+  border-collapse: collapse; margin: 6px 0;
+  font-size: 11px;
+}
+.md-bub th, .md-bub td {
+  border: 1px solid #E2E4F0; padding: 4px 8px; text-align: left;
+}
+.md-bub th { background: #F2F3FA; font-weight: 700; }
 
 /* Comms */
 .comm-wrap {
