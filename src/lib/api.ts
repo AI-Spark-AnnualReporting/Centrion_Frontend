@@ -624,13 +624,17 @@ export const agentRuns = {
 };
 
 // ---------------------------------------------------------------------------
-// Chat — streaming IR Copilot endpoint.
+// Chat — IR Copilot (server-stateful, multi-turn).
 //
-// `chat.stream()` POSTs the conversation to /api/v1/chat/stream and yields one
-// parsed SSE event per `data: {...}\n\n` block. The endpoint surfaces tool
-// usage (`tool_start` / `tool_end`), then a sequence of `token` events whose
-// `content` should be concatenated into the assistant bubble, and finishes
-// with `{ "type": "done" }`.
+// The backend owns conversation history. Three endpoints:
+//   • GET  /api/v1/chat/session       → hydrate the chat on page load.
+//   • POST /api/v1/chat/               → send the next user message; replies
+//                                        as SSE. Server persists the user
+//                                        message before the stream opens and
+//                                        the assistant message after `done`.
+//   • POST /api/v1/chat/session/clear  → soft-archive the active session
+//                                        (204). Caller refetches /session.
+// Don't pass company_id from the frontend — the server reads it from the JWT.
 // ---------------------------------------------------------------------------
 
 export interface ChatMessage {
@@ -638,27 +642,92 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface ChatStreamBody {
-  messages: ChatMessage[];
-  // Optional — backend defaults to the JWT's company_id.
-  company_id?: string;
+// Single tool usage record attached to an assistant turn in the persisted
+// history. `args` is a free-form param object — it may contain UUIDs, so the
+// UI shouldn't render it verbatim.
+export interface ChatToolCall {
+  name: string;
+  args?: Record<string, unknown> | null;
+}
+
+export interface ChatHistoryMessage extends ChatMessage {
+  created_at?: string;
+  // Only present on assistant turns; omitted (or null) on user turns.
+  tool_calls?: ChatToolCall[] | null;
+}
+
+export interface ChatSessionResponse {
+  conversation_id: string;
+  status: string;
+  created_at: string;
+  messages: ChatHistoryMessage[];
+}
+
+export interface ChatSendBody {
+  message: string;
 }
 
 export type ChatStreamEvent =
   | { type: "tool_start"; name: string; args?: Record<string, unknown> }
   | { type: "tool_end"; name: string }
   | { type: "token"; content: string }
+  | { type: "error"; message: string }
   | { type: "done" }
   | { type: string; [key: string]: unknown };
 
+// Internal: shared SSE consumer. Splits the response stream on `\n\n` and
+// yields one parsed event per `data: …` block.
+async function* consumeSse(
+  res: Response,
+  url: string,
+): AsyncGenerator<ChatStreamEvent, void, void> {
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, res.statusText, text, url);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const dataLines = block
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).replace(/^\s/, ""));
+        if (dataLines.length === 0) continue;
+        const payload = dataLines.join("\n");
+        try {
+          yield JSON.parse(payload) as ChatStreamEvent;
+        } catch {
+          // Non-JSON heartbeat — surface as a raw token so the caller can
+          // ignore or render.
+          yield { type: "token", content: payload };
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+}
+
 export const chat = {
-  // Async generator: `for await (const ev of chat.stream(...)) { ... }`.
-  // Pass an AbortSignal to cancel the request mid-stream.
-  stream: async function* (
-    body: ChatStreamBody,
+  // Hydrate the active conversation (auto-creates one if none exists).
+  getSession: (signal?: AbortSignal) =>
+    request<ChatSessionResponse>("/api/v1/chat/session", { signal }),
+
+  // Send a user message; yields SSE events until {type:"done"}.
+  send: async function* (
+    body: ChatSendBody,
     signal?: AbortSignal,
   ): AsyncGenerator<ChatStreamEvent, void, void> {
-    const res = await fetchWithAuth("/api/v1/chat/stream", {
+    const res = await fetchWithAuth("/api/v1/chat/", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -667,46 +736,23 @@ export const chat = {
       body: JSON.stringify(body),
       signal,
     });
-    if (!res.ok || !res.body) {
+    yield* consumeSse(res, "/api/v1/chat/");
+  },
+
+  // Soft-archive the current session. Caller should refetch getSession()
+  // afterwards to pick up the fresh empty conversation the backend creates.
+  clearSession: async (): Promise<void> => {
+    const res = await fetchWithAuth("/api/v1/chat/session/clear", {
+      method: "POST",
+    });
+    if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new ApiError(
         res.status,
         res.statusText,
         text,
-        "/api/v1/chat/stream",
+        "/api/v1/chat/session/clear",
       );
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // SSE events are delimited by a blank line. An event may carry one or
-        // more `data:` lines that should be joined with `\n` before parsing.
-        let idx: number;
-        while ((idx = buffer.indexOf("\n\n")) >= 0) {
-          const block = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
-          const dataLines = block
-            .split("\n")
-            .filter((l) => l.startsWith("data:"))
-            .map((l) => l.slice(5).replace(/^\s/, ""));
-          if (dataLines.length === 0) continue;
-          const payload = dataLines.join("\n");
-          try {
-            yield JSON.parse(payload) as ChatStreamEvent;
-          } catch {
-            // Backend may emit a non-JSON heartbeat — surface as a raw token
-            // so the caller can decide whether to render or ignore it.
-            yield { type: "token", content: payload };
-          }
-        }
-      }
-    } finally {
-      reader.releaseLock?.();
     }
   },
 };

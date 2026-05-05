@@ -1,31 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { chat, type ChatMessage } from '@/lib/api';
+import { chat, type ChatHistoryMessage, type ChatToolCall } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
-// One row in the message list. Mirrors the backend's `role` so the array can
-// be sent straight back as the next request's `messages` payload.
+// One row in the message list. v2 backend owns the persisted history; this
+// shape mirrors what GET /chat/session returns plus a few UI-only flags
+// (`streaming`, `error`, locally-assigned `id`, in-flight `tools`).
 interface UiMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
-  // Only populated on assistant messages — `tool_start` events push a name
-  // here with done=false, and the matching `tool_end` flips it.
+  // Live tool activity (mid-stream) AND historical tool_calls hydrated from
+  // the session — historical ones come back already `done`.
   tools?: Array<{ name: string; done: boolean }>;
-  // True while the assistant message is still receiving tokens.
   streaming?: boolean;
   error?: string;
 }
 
-// Backend tool names → friendlier display labels. Falls back to a humanised
-// version of the snake_case name when we don't have a hand-tuned label.
 const TOOL_LABELS: Record<string, string> = {
   list_reports: 'Looking up reports',
   get_report_overview: 'Reading report overview',
   get_report_coverage: 'Reading coverage data',
   get_indicator_evidence: 'Pulling indicator evidence',
   get_company_kpis: 'Pulling KPI history',
+  get_esg_evidence: 'Pulling ESG evidence',
 };
 function toolLabel(name: string): string {
   return (
@@ -34,68 +33,71 @@ function toolLabel(name: string): string {
   );
 }
 
+// Convert a persisted assistant turn's tool_calls into the same UI shape
+// `tool_start` / `tool_end` events build during a live stream — all done.
+function hydrateTools(calls: ChatToolCall[] | null | undefined) {
+  if (!calls || calls.length === 0) return undefined;
+  return calls.map((c) => ({ name: c.name, done: true }));
+}
+
 export default function AIPage() {
   const { user } = useAuth();
-  const [messages, setMessages] = useState<UiMessage[]>([
-    {
-      id: 0,
-      role: 'assistant',
-      content:
-        `Hi ${user?.full_name?.split(' ')[0] ?? 'there'} 👋 I'm **IR Copilot** — ask me anything about your ESG reports, coverage, or indicators.`,
-    },
-  ]);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [isClearing, setIsClearing] = useState(false);
 
   // Auto-scroll the chat to the bottom when new content arrives.
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, sessionLoading]);
 
-  // Allow the user to cancel an in-flight stream. Stored in a ref so a
-  // re-render mid-stream doesn't drop the controller.
   const abortRef = useRef<AbortController | null>(null);
-
-  // Used by the per-message Edit button to refocus the composer after it
-  // pops the message text back into the input.
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Monotonic id source so each new message gets a stable React key even if
-  // the user sends faster than `Date.now()` resolution.
+  // Monotonic id source so each new message gets a stable React key.
   const idRef = useRef(1);
   const nextId = () => idRef.current++;
+
+  // Hydrate the chat from the server on first mount and after a successful
+  // /session/clear. The empty-deps effect runs once; clearChat() calls
+  // hydrateSession() directly afterwards, so we don't need to watch a key.
+  const hydrateSession = async () => {
+    setSessionLoading(true);
+    setSessionError(null);
+    try {
+      const data = await chat.getSession();
+      const hydrated: UiMessage[] = (data.messages ?? []).map(
+        (m: ChatHistoryMessage) => ({
+          id: nextId(),
+          role: m.role,
+          content: m.content,
+          tools: m.role === 'assistant' ? hydrateTools(m.tool_calls) : undefined,
+        }),
+      );
+      setMessages(hydrated);
+    } catch (err) {
+      setSessionError(
+        err instanceof Error ? err.message : 'Failed to load conversation.',
+      );
+      setMessages([]);
+    } finally {
+      setSessionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void hydrateSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stopStreaming = () => {
     abortRef.current?.abort();
     abortRef.current = null;
-  };
-
-  // Edit a previous user turn: stop any in-flight stream, drop that message
-  // and everything after it, and load the original text back into the
-  // composer so the user can tweak and resend. Wiring this up means a user
-  // who pressed Enter too early can hit Stop, click the pencil on their
-  // message, add the missing detail, and continue without retyping.
-  const editUserMessage = (id: number) => {
-    const target = messages.find((m) => m.id === id);
-    if (!target || target.role !== 'user') return;
-    stopStreaming();
-    setIsStreaming(false);
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === id);
-      return idx === -1 ? prev : prev.slice(0, idx);
-    });
-    setInput(target.content);
-    // Defer focus until React has flushed the DOM update so caret lands at
-    // the end of the restored text.
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(target.content.length, target.content.length);
-      }
-    });
   };
 
   const sendMessage = async (textOverride?: string) => {
@@ -104,9 +106,8 @@ export default function AIPage() {
     if (!text) return;
     setInput('');
 
-    // Snapshot the conversation that will be sent to the backend (everything
-    // visible plus this turn). Drop any in-flight `streaming` flags / tool
-    // metadata — backend only wants role + content.
+    // Optimistic render — server will persist this user message before the
+    // first SSE event arrives, so we don't need to re-fetch on completion.
     const userMsg: UiMessage = { id: nextId(), role: 'user', content: text };
     const assistantMsg: UiMessage = {
       id: nextId(),
@@ -115,33 +116,20 @@ export default function AIPage() {
       tools: [],
       streaming: true,
     };
-    const wireMessages: ChatMessage[] = [
-      ...messages.map(({ role, content }) => ({ role, content })),
-      { role: 'user', content: text },
-    ];
-
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Helper: mutate just this assistant turn in place. Closing over the
-    // assistantMsg id avoids index-juggling if more messages get appended
-    // (e.g. errors) before this stream closes.
-    const updateAssistant = (
-      patch: (m: UiMessage) => UiMessage,
-    ) => {
+    const updateAssistant = (patch: (m: UiMessage) => UiMessage) => {
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantMsg.id ? patch(m) : m)),
       );
     };
 
     try {
-      for await (const ev of chat.stream(
-        { messages: wireMessages },
-        controller.signal,
-      )) {
+      for await (const ev of chat.send({ message: text }, controller.signal)) {
         if (ev.type === 'token') {
           const piece = (ev as { content?: string }).content ?? '';
           if (!piece) continue;
@@ -160,14 +148,17 @@ export default function AIPage() {
               t.name === name && !t.done ? { ...t, done: true } : t,
             ),
           }));
+        } else if (ev.type === 'error') {
+          const message =
+            (ev as { message?: string }).message ?? 'The assistant ran into an error.';
+          updateAssistant((m) => ({ ...m, error: message }));
         } else if (ev.type === 'done') {
           break;
         }
       }
       updateAssistant((m) => ({ ...m, streaming: false }));
     } catch (err) {
-      const aborted =
-        err instanceof DOMException && err.name === 'AbortError';
+      const aborted = err instanceof DOMException && err.name === 'AbortError';
       updateAssistant((m) => ({
         ...m,
         streaming: false,
@@ -188,15 +179,167 @@ export default function AIPage() {
     else void sendMessage();
   };
 
+  const clearChat = async () => {
+    if (isClearing || isStreaming) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Clear this conversation? This cannot be undone.')
+    ) {
+      return;
+    }
+    setIsClearing(true);
+    try {
+      await chat.clearSession();
+      await hydrateSession();
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (err) {
+      setSessionError(
+        err instanceof Error ? err.message : 'Failed to clear conversation.',
+      );
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  // Static greeting shown only when the server-owned conversation is empty.
+  // Not persisted — purely a UX placeholder so the chat doesn't open blank.
+  const showGreeting = !sessionLoading && messages.length === 0 && !sessionError;
+  const greetingText = `Hi ${user?.full_name?.split(' ')[0] ?? 'there'} 👋 I'm **IR Copilot** — ask me anything about your ESG reports, coverage, or indicators.`;
+
+  const userInitials =
+    user?.full_name
+      ?.split(' ')
+      .map((p) => p[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || 'U';
+
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>IR Copilot</h2>
-        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>AI-powered ESG &amp; IR assistant</p>
+      <div
+        style={{
+          marginBottom: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>IR Copilot</h2>
+          <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
+            AI-powered ESG &amp; IR assistant
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void clearChat()}
+          disabled={
+            isClearing ||
+            isStreaming ||
+            sessionLoading ||
+            messages.length === 0
+          }
+          title="Clear conversation"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#5A6080',
+            background: '#fff',
+            border: '1px solid #E2E4F0',
+            borderRadius: 8,
+            cursor:
+              isClearing ||
+              isStreaming ||
+              sessionLoading ||
+              messages.length === 0
+                ? 'not-allowed'
+                : 'pointer',
+            opacity:
+              isClearing ||
+              isStreaming ||
+              sessionLoading ||
+              messages.length === 0
+                ? 0.55
+                : 1,
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <path
+              d="M2 3h8M4.5 3V2a1 1 0 011-1h1a1 1 0 011 1v1M3 3l.6 7a1 1 0 001 .9h2.8a1 1 0 001-.9L9 3"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          {isClearing ? 'Clearing…' : 'Clear chat'}
+        </button>
       </div>
       <div className="card" style={{ overflow: 'hidden' }}>
         <div className="chat-area" style={{ height: 500 }}>
           <div className="chat-msgs" ref={scrollRef}>
+            {sessionLoading && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '100%',
+                  color: '#9BA3C4',
+                  fontSize: 11,
+                }}
+              >
+                <div className="proc-ring" style={{ width: 22, height: 22, borderWidth: 2, marginRight: 10 }} />
+                Loading conversation…
+              </div>
+            )}
+            {sessionError && !sessionLoading && (
+              <div
+                role="alert"
+                style={{
+                  margin: 12,
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(229,72,77,.08)',
+                  border: '1px solid rgba(229,72,77,.25)',
+                  color: '#B33A3E',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {sessionError}
+              </div>
+            )}
+            {showGreeting && (
+              <div className="msg ai">
+                <div
+                  className="av"
+                  style={{
+                    background: 'linear-gradient(135deg,#4040C8,#7C3AED)',
+                    width: 24,
+                    height: 24,
+                    fontSize: 8,
+                    flexShrink: 0,
+                    marginTop: 2,
+                  }}
+                >
+                  AI
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="msg-bub md-bub">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {greetingText}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            )}
             {messages.map((m) => (
               <div key={m.id} className={`msg ${m.role === 'user' ? 'u' : 'ai'}`}>
                 {m.role === 'assistant' && (
@@ -244,7 +387,12 @@ export default function AIPage() {
                         >
                           {t.done ? (
                             <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-                              <path d="M2 4.5l1.8 1.8 3.2-3.2" stroke="#16A34A" strokeWidth="1.4" strokeLinecap="round" />
+                              <path
+                                d="M2 4.5l1.8 1.8 3.2-3.2"
+                                stroke="#16A34A"
+                                strokeWidth="1.4"
+                                strokeLinecap="round"
+                              />
                             </svg>
                           ) : (
                             <span
@@ -272,7 +420,11 @@ export default function AIPage() {
                       ) : m.streaming ? (
                         <span
                           aria-label="Generating response"
-                          style={{ display: 'inline-flex', gap: 4, padding: '2px 0' }}
+                          style={{
+                            display: 'inline-flex',
+                            gap: 4,
+                            padding: '2px 0',
+                          }}
                         >
                           {[0, 1, 2].map((i) => (
                             <span
@@ -288,13 +440,17 @@ export default function AIPage() {
                             />
                           ))}
                         </span>
+                      ) : !m.error ? (
+                        <span style={{ color: '#9BA3C4', fontStyle: 'italic' }}>
+                          (no response)
+                        </span>
                       ) : null}
                       {m.error && (
                         <div
                           style={{
                             fontSize: 11,
                             color: '#B33A3E',
-                            marginTop: 6,
+                            marginTop: m.content ? 6 : 0,
                             fontWeight: 600,
                           }}
                         >
@@ -303,45 +459,8 @@ export default function AIPage() {
                       )}
                     </div>
                   ) : (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        flexDirection: 'row-reverse',
-                      }}
-                    >
-                      <div className="msg-bub" style={{ whiteSpace: 'pre-wrap' }}>
-                        {m.content}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => editUserMessage(m.id)}
-                        aria-label="Edit message"
-                        title="Edit and resend"
-                        style={{
-                          width: 22,
-                          height: 22,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: 'transparent',
-                          border: 'none',
-                          padding: 0,
-                          cursor: 'pointer',
-                          color: '#9BA3C4',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                          <path
-                            d="M9.5 2.2l2.3 2.3-7 7H2.5V9.2l7-7z"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
+                    <div className="msg-bub" style={{ whiteSpace: 'pre-wrap' }}>
+                      {m.content}
                     </div>
                   )}
                 </div>
@@ -350,13 +469,7 @@ export default function AIPage() {
                     className="av"
                     style={{ background: '#3535B5', width: 24, height: 24, fontSize: 8 }}
                   >
-                    {user?.full_name
-                      ?.split(' ')
-                      .map((p) => p[0])
-                      .filter(Boolean)
-                      .slice(0, 2)
-                      .join('')
-                      .toUpperCase() || 'U'}
+                    {userInitials}
                   </div>
                 )}
               </div>
@@ -377,7 +490,7 @@ export default function AIPage() {
               style={{ flex: 1, borderRadius: 22, padding: '9px 13px' }}
               placeholder="Ask about ESG, reports, compliance..."
               value={input}
-              disabled={isStreaming}
+              disabled={isStreaming || sessionLoading}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -389,6 +502,7 @@ export default function AIPage() {
             <button
               type="button"
               onClick={handleSendClick}
+              disabled={sessionLoading}
               aria-label={isStreaming ? 'Stop generating' : 'Send'}
               title={isStreaming ? 'Stop generating' : 'Send'}
               style={{
@@ -397,7 +511,8 @@ export default function AIPage() {
                 borderRadius: '50%',
                 border: 'none',
                 background: isStreaming ? '#E5484D' : '#4040C8',
-                cursor: 'pointer',
+                cursor: sessionLoading ? 'not-allowed' : 'pointer',
+                opacity: sessionLoading ? 0.5 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
