@@ -954,35 +954,38 @@ export default function ReportsPage() {
               {availableFrameworks.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`, gap: 8, marginTop: 5 }}>
                   {availableFrameworks.map(fw => {
-                    // In global scope, IFRS is preview-only for now.
-                    const isPreviewOnly = scope === 'global' && fw === 'IFRS';
+                    // Global scope is single-select (GRI or IFRS, exactly one);
+                    // regional keeps multi-select since a country can apply
+                    // several regulator frameworks at once.
+                    const isGlobal = scope === 'global';
                     const isLocked = selectedReport !== null;
-                    const isDisabled = isPreviewOnly || isLocked;
+                    const isSelected = checkedFw.includes(fw);
                     return (
                       <label
                         key={fw}
-                        className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`}
+                        className={`fw-chip ${isSelected ? 'sel' : ''}`}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: 8,
                           padding: '10px 12px',
-                          opacity: isPreviewOnly ? 0.5 : 1,
-                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          cursor: isLocked ? 'not-allowed' : 'pointer',
                         }}
                         title={
-                          isPreviewOnly
-                            ? 'Not available yet'
-                            : isLocked
-                              ? 'Locked — frameworks come from the selected report'
-                              : undefined
+                          isLocked
+                            ? 'Locked — frameworks come from the selected report'
+                            : undefined
                         }
                       >
                         <input
-                          type="checkbox"
-                          checked={checkedFw.includes(fw)}
-                          onChange={() => toggleFw(fw)}
-                          disabled={isDisabled}
+                          type={isGlobal ? 'radio' : 'checkbox'}
+                          name={isGlobal ? 'global_framework' : undefined}
+                          checked={isSelected}
+                          onChange={() => {
+                            if (isGlobal) setCheckedFw([fw]);
+                            else toggleFw(fw);
+                          }}
+                          disabled={isLocked}
                           style={{ accentColor: '#4040C8' }}
                         />
                         <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
