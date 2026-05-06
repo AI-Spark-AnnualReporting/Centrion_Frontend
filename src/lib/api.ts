@@ -948,6 +948,11 @@ export const lookups = {
   frameworks: <T = unknown>(scope: string = "global") =>
     request<T>("/api/v1/lookups/frameworks", { query: { scope } }),
 
+  // Combined catalogue used by both the Reports form picker and the
+  // dashboard Framework Compliance card — universal standards (GRI, IFRS-S1,
+  // IFRS-S2) plus every regulator with at least one active indicator.
+  scopes: <T = unknown>() => request<T>("/api/v1/lookups/scopes"),
+
   frameworkIndicators: async (opts?: {
     framework?: string | string[];
     fields?: string | string[];

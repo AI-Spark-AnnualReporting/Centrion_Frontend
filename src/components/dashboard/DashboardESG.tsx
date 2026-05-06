@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reports as reportsApi } from '@/lib/api';
+import { lookups, reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
   CoverageCriticalGap,
@@ -9,6 +9,7 @@ import type {
   CoveragePillarSummary,
   CoverageResponse,
 } from '@/types/report';
+import type { ScopesResponse } from '@/types/lookups';
 
 // "FY-2025" → "FY 2025" for display. Lifted from ReportsPage's formatter.
 function formatPeriod(period: string): string {
@@ -119,6 +120,10 @@ export function DashboardESG() {
   // Full list kept around so the "Coverage by Report" chart can plot every
   // report's percentage in one go without re-fetching.
   const [allReports, setAllReports] = useState<ReportListItem[]>([]);
+  // Framework / regulator catalogue powering the Framework Compliance card.
+  // Fetched once in parallel with the reports list — independent of which
+  // report is "latest", so we don't re-fetch when the latest changes.
+  const [scopes, setScopes] = useState<ScopesResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(!!companyId);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,6 +138,17 @@ export function DashboardESG() {
     setCoverage(null);
     setLatestReport(null);
     setAllReports([]);
+    // Scopes is independent of any company state — fetch in the background
+    // and surface failures silently (the framework card just falls back to a
+    // placeholder if it never resolves).
+    lookups
+      .scopes<ScopesResponse>()
+      .then((res) => {
+        if (!cancelled) setScopes(res);
+      })
+      .catch(() => {
+        if (!cancelled) setScopes(null);
+      });
     (async () => {
       try {
         const list = await reportsApi.list<{ reports: ReportListItem[] }>(
@@ -861,7 +877,7 @@ export function DashboardESG() {
           marginBottom: 16,
         }}
       >
-        <FrameworkCompliancePlaceholder />
+        <FrameworkCatalogue scopes={scopes} />
         <SectorCriticalGaps coverage={coverage} reportId={latestReport.id} />
         <CoverageByReportChart reports={allReports} />
       </div>
@@ -1018,79 +1034,188 @@ function EmptyHero({
   );
 }
 
-function FrameworkCompliancePlaceholder() {
+// Framework Catalogue — straight render of /lookups/scopes. Universal
+// standards (GRI / IFRS-S1 / IFRS-S2) plus every regional regulator with
+// at least one active indicator. Bar length is proportional to the
+// largest indicator_count in the list so the eye can compare scope sizes
+// without any cross-referencing against the latest report.
+interface FrameworkCatalogueProps {
+  scopes: ScopesResponse | null;
+}
+
+interface FrameworkRow {
+  key: string;
+  label: string;
+  indicatorCount: number;
+  kind: 'universal' | 'regional';
+}
+
+function FrameworkCatalogue({ scopes }: FrameworkCatalogueProps) {
+  // Loading skeleton — held until /lookups/scopes resolves.
+  if (!scopes) {
+    return (
+      <div className="card">
+        <div className="ch">
+          <div className="ct">Framework Catalogue</div>
+        </div>
+        <div style={{ padding: '10px 16px' }}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 0',
+                borderBottom: i < 5 ? '1px solid #ECEEF8' : 'none',
+              }}
+            >
+              <div className="skel" style={{ width: 8, height: 8, borderRadius: '50%' }} />
+              <div className="skel" style={{ height: 11, flex: 1 }} />
+              <div className="skel" style={{ height: 5, flex: 1, borderRadius: 3 }} />
+              <div className="skel" style={{ height: 11, width: 26 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const rows: FrameworkRow[] = [
+    ...(scopes.universal ?? []).map((u) => ({
+      key: `u-${u.code}`,
+      label: u.label,
+      indicatorCount: u.indicator_count,
+      kind: 'universal' as const,
+    })),
+    ...(scopes.regional ?? []).map((r) => ({
+      key: `r-${r.regulator_id}`,
+      label: `${r.code} — ${r.label}`,
+      indicatorCount: r.indicator_count,
+      kind: 'regional' as const,
+    })),
+  ];
+
+  if (rows.length === 0) {
+    return (
+      <div className="card">
+        <div className="ch">
+          <div className="ct">Framework Catalogue</div>
+        </div>
+        <div
+          style={{
+            padding: '24px 18px',
+            textAlign: 'center',
+            fontSize: 11,
+            color: '#9BA3C4',
+          }}
+        >
+          No frameworks available in the catalogue.
+        </div>
+      </div>
+    );
+  }
+
+  // Bar length is proportional to the row with the most indicators so that
+  // GRI's 128 reads as a full bar and smaller regulators (e.g. CBUAE = 6)
+  // read as proportionally short.
+  const maxIndicatorCount = Math.max(1, ...rows.map((r) => r.indicatorCount));
+
+  // Universal standards get the brand purple; regional regulators get a
+  // distinguishing teal so the eye can separate the two groups even when
+  // they're interleaved.
+  const colourFor = (kind: FrameworkRow['kind']) =>
+    kind === 'universal'
+      ? { bar: '#4040C8', text: '#3535B5' }
+      : { bar: '#0891B2', text: '#0E7490' };
+
   return (
     <div className="card">
       <div className="ch">
-        <div className="ct">Framework Compliance</div>
-        <button className="btn bs bsm">Full →</button>
+        <div>
+          <div className="ct">Framework Catalogue</div>
+          <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
+            {scopes.totals.universal_options} universal ·{' '}
+            {scopes.totals.regional_options} regional
+          </div>
+        </div>
       </div>
-      <div style={{ padding: '10px 16px' }}>
-        {[
-          { name: 'GRI Universal 2021', pct: 92, color: '#22C55E' },
-          { name: 'IFRS S1/S2 (ISSB)', pct: 88, color: '#4040C8' },
-          { name: 'TCFD Framework', pct: 61, color: '#F59E0B' },
-          { name: 'SAMA ESG', pct: 88, color: '#22C55E' },
-          { name: 'CMA CGR', pct: 93, color: '#7C3AED' },
-          { name: 'Saudi Green Initiative', pct: 81, color: '#22C55E' },
-        ].map((fw, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '8px 0',
-              borderBottom: i < 5 ? '1px solid #ECEEF8' : 'none',
-            }}
-          >
+      <div style={{ padding: '6px 16px 10px', maxHeight: 280, overflowY: 'auto' }}>
+        {rows.map((row, i) => {
+          const colour = colourFor(row.kind);
+          const fillPct = Math.round(
+            (row.indicatorCount / maxIndicatorCount) * 100,
+          );
+          return (
             <div
+              key={row.key}
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: fw.color,
-                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 0',
+                borderBottom:
+                  i < rows.length - 1 ? '1px solid #ECEEF8' : 'none',
               }}
-            />
-            <span style={{ fontSize: 11, color: '#5A6080', flex: 1 }}>{fw.name}</span>
-            <div
-              style={{
-                flex: 1,
-                height: 5,
-                background: '#E8EAF5',
-                borderRadius: 3,
-                overflow: 'hidden',
-              }}
+              title={`${row.indicatorCount} indicators`}
             >
               <div
                 style={{
-                  width: `${fw.pct}%`,
-                  height: '100%',
-                  background: fw.color,
-                  borderRadius: 3,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: colour.bar,
+                  flexShrink: 0,
                 }}
               />
+              <span
+                style={{
+                  fontSize: 11,
+                  color: '#5A6080',
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                }}
+              >
+                {row.label}
+              </span>
+              <div
+                style={{
+                  flex: 1,
+                  height: 5,
+                  background: '#E8EAF5',
+                  borderRadius: 3,
+                  overflow: 'hidden',
+                  maxWidth: 110,
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(2, fillPct)}%`,
+                    height: '100%',
+                    background: colour.bar,
+                    borderRadius: 3,
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  fontFamily: "'DM Mono',monospace",
+                  color: colour.text,
+                  width: 38,
+                  textAlign: 'right',
+                  flexShrink: 0,
+                }}
+              >
+                {row.indicatorCount}
+              </span>
             </div>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 800,
-                fontFamily: "'DM Mono',monospace",
-                color:
-                  fw.color === '#F59E0B'
-                    ? '#B45309'
-                    : fw.color === '#7C3AED'
-                      ? '#7C3AED'
-                      : '#16A34A',
-                width: 26,
-                textAlign: 'right',
-              }}
-            >
-              {fw.pct}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
