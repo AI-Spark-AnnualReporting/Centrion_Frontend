@@ -107,12 +107,12 @@ function yearPickerOptions(): number[] {
 const ADD_NEW_SENTINEL = '__add_new__';
 
 // UI labels → backend framework codes for POST /api/v1/reports/{id}/generate.
-// IFRS currently maps to a single "IFRS" code — the option is disabled for
-// generation today, so this mapping only matters when it's eventually wired up.
-function frameworkLabelToCode(label: string): string {
-  if (label.startsWith('GRI')) return 'GRI';
-  if (label === 'IFRS') return 'IFRS';
-  return label;
+// IFRS expands into the two backend-recognised IFRS sustainability standards
+// (IFRS-S1 and IFRS-S2) so a single UI option ships both codes.
+function frameworkLabelToCodes(label: string): string[] {
+  if (label.startsWith('GRI')) return ['GRI'];
+  if (label === 'IFRS') return ['IFRS-S1', 'IFRS-S2'];
+  return [label];
 }
 
 // Extract the 4-digit year from a period string like "FY-2026".
@@ -477,7 +477,9 @@ export default function ReportsPage() {
         ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
         scope_type: scope,
         report_type: 'esg',
-        framework_codes: checkedFw.map(frameworkLabelToCode),
+        framework_codes: Array.from(
+          new Set(checkedFw.flatMap(frameworkLabelToCodes)),
+        ),
         ...(griSelected ? { gri_scope: griScope } : {}),
         ...regionalExtras,
       })

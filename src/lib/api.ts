@@ -671,12 +671,12 @@ export const reports = {
     fd.append("scope_type", body.scope_type);
     if (body.report_type !== undefined) fd.append("report_type", body.report_type);
     if (body.framework_codes && body.framework_codes.length > 0) {
-      fd.append("framework_codes", JSON.stringify(body.framework_codes));
+      body.framework_codes.forEach((v) => fd.append("framework_codes", v));
     }
     if (body.region !== undefined) fd.append("region", body.region);
     if (body.country_id !== undefined) fd.append("country_id", body.country_id);
     if (body.regulator_ids && body.regulator_ids.length > 0) {
-      fd.append("regulator_ids", JSON.stringify(body.regulator_ids));
+      body.regulator_ids.forEach((v) => fd.append("regulator_ids", v));
     }
     if (body.gri_scope) fd.append("gri_scope", body.gri_scope);
     return postPipeline(

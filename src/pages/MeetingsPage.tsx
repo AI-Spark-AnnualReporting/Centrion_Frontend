@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { meetings as meetingsApi, ApiError } from '@/lib/api';
+import { meetings as meetingsApi, team, ApiError, type TeamMember } from '@/lib/api';
 import type {
   CreateMeetingBody,
   Meeting,
   MeetingPlatform,
   MeetingType,
 } from '@/types/meeting';
+import { useAuth } from '@/context/AuthContext';
+import AddPersonDialog from '@/components/AddPersonDialog';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -116,8 +118,9 @@ interface ModalState {
   time: string;
   type: MeetingType;
   platform: MeetingPlatform;
-  participants: string;
+  participants: string[];
   agenda: string;
+  linkOrLocation: string;
 }
 
 const EMPTY_FORM: ModalState = {
@@ -126,8 +129,9 @@ const EMPTY_FORM: ModalState = {
   time: '',
   type: 'investor_call',
   platform: 'zoom',
-  participants: '',
+  participants: [],
   agenda: '',
+  linkOrLocation: '',
 };
 
 function toIsoDate(d: Date): string {
@@ -141,10 +145,14 @@ function ScheduleMeetingModal({
   onClose,
   onCreated,
   initialDate,
+  companyId,
+  companyName,
 }: {
   onClose: () => void;
   onCreated: (meeting: Meeting) => void;
   initialDate?: Date | null;
+  companyId: string | null;
+  companyName: string;
 }) {
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const [form, setForm] = useState<ModalState>(() => {
@@ -155,9 +163,82 @@ function ScheduleMeetingModal({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [teamList, setTeamList] = useState<TeamMember[]>([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [participantQuery, setParticipantQuery] = useState('');
+  const [participantFocus, setParticipantFocus] = useState(false);
 
   const update = <K extends keyof ModalState>(key: K, value: ModalState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const fetchTeam = async () => {
+    if (!companyId) return;
+    setTeamLoading(true);
+    setTeamError(null);
+    try {
+      const data = await team.list(companyId);
+      setTeamList(data);
+    } catch (e) {
+      setTeamError(e instanceof Error ? e.message : 'Failed to load team.');
+    } finally {
+      setTeamLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchTeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  const addParticipant = (email: string) => {
+    if (!email) return;
+    setForm((f) =>
+      f.participants.includes(email)
+        ? f
+        : { ...f, participants: [...f.participants, email] },
+    );
+    setParticipantQuery('');
+  };
+
+  const removeParticipant = (email: string) => {
+    setForm((f) => ({
+      ...f,
+      participants: f.participants.filter((p) => p !== email),
+    }));
+  };
+
+  const teamByEmail = useMemo(() => {
+    const map = new Map<string, TeamMember>();
+    for (const m of teamList) if (m.email) map.set(m.email, m);
+    return map;
+  }, [teamList]);
+
+  const participantSuggestions = useMemo(() => {
+    const q = participantQuery.trim().toLowerCase();
+    return teamList
+      .filter((m) => !!m.email && !form.participants.includes(m.email))
+      .filter((m) => {
+        if (!q) return true;
+        return (
+          (m.full_name ?? '').toLowerCase().includes(q) ||
+          (m.email ?? '').toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 6);
+  }, [teamList, form.participants, participantQuery]);
+
+  const initialsFor = (m: TeamMember | undefined, email: string): string => {
+    const name = m?.full_name?.trim();
+    if (name) {
+      const parts = name.split(/\s+/).filter(Boolean);
+      const first = parts[0]?.[0] ?? '';
+      const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+      return (first + last).toUpperCase() || '?';
+    }
+    return (email[0] ?? '?').toUpperCase();
+  };
 
   const submit = async () => {
     if (!form.title.trim() || !form.date || !form.time) {
@@ -175,11 +256,9 @@ function ScheduleMeetingModal({
       meeting_time: form.time.length === 5 ? `${form.time}:00` : form.time,
       meeting_type: form.type,
       platform: form.platform,
-      participants: form.participants
-        .split(',')
-        .map((p) => p.trim())
-        .filter(Boolean),
+      participants: form.participants,
       agenda: form.agenda.trim(),
+      link_or_location: form.linkOrLocation.trim() || undefined,
     };
     setSubmitting(true);
     setError(null);
@@ -268,12 +347,351 @@ function ScheduleMeetingModal({
             </select>
           </div>
           <div>
-            <span className="fl-label">Participants</span>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 6,
+              }}
+            >
+              <span className="fl-label" style={{ marginBottom: 0 }}>
+                Participants
+              </span>
+              <button
+                type="button"
+                onClick={() => setAddPersonOpen(true)}
+                disabled={!companyId}
+                title="Add new person"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#4040C8',
+                  background: 'rgba(64,64,200,.08)',
+                  border: '1px solid rgba(64,64,200,.2)',
+                  borderRadius: 8,
+                  padding: '3px 9px',
+                  cursor: companyId ? 'pointer' : 'not-allowed',
+                  opacity: companyId ? 1 : 0.5,
+                }}
+              >
+                <svg width="9" height="9" viewBox="0 0 11 11" fill="none">
+                  <path
+                    d="M5.5 1v9M1 5.5h9"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Add Person
+              </button>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <div
+                onClick={(e) => {
+                  const input = (e.currentTarget as HTMLDivElement).querySelector(
+                    'input',
+                  ) as HTMLInputElement | null;
+                  input?.focus();
+                }}
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 6,
+                  minHeight: 38,
+                  padding: '6px 8px',
+                  border: '1px solid #E2E4F0',
+                  borderRadius: 10,
+                  background: '#fff',
+                  cursor: 'text',
+                }}
+              >
+                {form.participants.map((email) => {
+                  const m = teamByEmail.get(email);
+                  const label = m?.full_name || email;
+                  const org = m?.title || m?.position_type || '';
+                  return (
+                    <span
+                      key={email}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '3px 8px 3px 3px',
+                        borderRadius: 999,
+                        border: '1px solid #DEE0EE',
+                        background: '#F5F6FB',
+                        fontSize: 12,
+                        color: '#1A1D2E',
+                        maxWidth: '100%',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: '50%',
+                          background: '#1F4936',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {initialsFor(m, email)}
+                      </span>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: 200,
+                        }}
+                      >
+                        {label}
+                        {org ? (
+                          <span style={{ color: '#5A6080', fontWeight: 500 }}>
+                            {' '}
+                            ({org})
+                          </span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          removeParticipant(email);
+                        }}
+                        aria-label={`Remove ${label}`}
+                        style={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: '50%',
+                          border: 'none',
+                          background: 'transparent',
+                          color: '#5A6080',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <svg width="8" height="8" viewBox="0 0 11 11" fill="none">
+                          <path
+                            d="M2 2l7 7M9 2l-7 7"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </button>
+                    </span>
+                  );
+                })}
+                <input
+                  value={participantQuery}
+                  onChange={(e) => setParticipantQuery(e.target.value)}
+                  onFocus={() => setParticipantFocus(true)}
+                  onBlur={() => {
+                    // Delay to allow click on suggestion to register before
+                    // the dropdown unmounts.
+                    setTimeout(() => setParticipantFocus(false), 150);
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === 'Backspace' &&
+                      participantQuery === '' &&
+                      form.participants.length > 0
+                    ) {
+                      removeParticipant(
+                        form.participants[form.participants.length - 1],
+                      );
+                      return;
+                    }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (participantSuggestions[0]?.email) {
+                        addParticipant(participantSuggestions[0].email);
+                      } else {
+                        const trimmed = participantQuery.trim();
+                        if (/\S+@\S+\.\S+/.test(trimmed)) {
+                          addParticipant(trimmed);
+                        }
+                      }
+                    }
+                  }}
+                  placeholder={
+                    form.participants.length === 0 ? 'Type a name or email…' : ''
+                  }
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    border: 'none',
+                    outline: 'none',
+                    fontSize: 12,
+                    background: 'transparent',
+                    padding: '4px 2px',
+                    fontFamily: 'inherit',
+                    color: '#1A1D2E',
+                  }}
+                />
+              </div>
+              {participantFocus &&
+                (teamLoading ||
+                  teamError ||
+                  participantSuggestions.length > 0 ||
+                  participantQuery.trim().length > 0) && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      right: 0,
+                      maxHeight: 240,
+                      overflowY: 'auto',
+                      background: '#fff',
+                      border: '1px solid #E2E4F0',
+                      borderRadius: 10,
+                      boxShadow: '0 8px 24px rgba(20,24,60,.12)',
+                      zIndex: 50,
+                      padding: 4,
+                    }}
+                  >
+                    {teamLoading ? (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: '#9BA3C4',
+                          padding: '10px 12px',
+                        }}
+                      >
+                        Loading team…
+                      </div>
+                    ) : teamError ? (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: '#DC2626',
+                          padding: '10px 12px',
+                        }}
+                      >
+                        {teamError}
+                      </div>
+                    ) : participantSuggestions.length === 0 ? (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: '#9BA3C4',
+                          padding: '10px 12px',
+                        }}
+                      >
+                        {participantQuery.trim()
+                          ? 'No matches.'
+                          : 'No more people to add.'}
+                      </div>
+                    ) : (
+                      participantSuggestions.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            addParticipant(m.email);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background = '#F5F6FB')
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.background = 'transparent')
+                          }
+                        >
+                          <span
+                            style={{
+                              width: 30,
+                              height: 30,
+                              borderRadius: '50%',
+                              background: '#1F4936',
+                              color: '#fff',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {initialsFor(m, m.email)}
+                          </span>
+                          <span
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              minWidth: 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: '#1A1D2E',
+                                lineHeight: 1.2,
+                              }}
+                            >
+                              {m.full_name || m.email}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: '#5A6080',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {m.email}
+                            </span>
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+            </div>
+          </div>
+          <div>
+            <span className="fl-label">
+              {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}
+            </span>
             <input
               className="inp"
-              placeholder="Comma-separated emails or names"
-              value={form.participants}
-              onChange={(e) => update('participants', e.target.value)}
+              type={form.platform === 'in_person' ? 'text' : 'url'}
+              placeholder={
+                form.platform === 'in_person'
+                  ? 'Venue / address'
+                  : 'https://zoom.us/j/…'
+              }
+              value={form.linkOrLocation}
+              onChange={(e) => update('linkOrLocation', e.target.value)}
             />
           </div>
           <div>
@@ -300,6 +718,23 @@ function ScheduleMeetingModal({
           </button>
         </div>
       </div>
+      {addPersonOpen && companyId && (
+        <AddPersonDialog
+          companyId={companyId}
+          companyName={companyName}
+          onClose={() => setAddPersonOpen(false)}
+          onAdded={(member) => {
+            void fetchTeam();
+            if (member.email) {
+              setForm((f) =>
+                f.participants.includes(member.email)
+                  ? f
+                  : { ...f, participants: [...f.participants, member.email] },
+              );
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -350,8 +785,9 @@ function MeetingDetailModal({
     time: meeting.meeting_time.slice(0, 5),
     type: meeting.meeting_type as MeetingType,
     platform: meeting.platform as MeetingPlatform,
-    participants: meeting.participants.join(', '),
+    participants: meeting.participants,
     agenda: meeting.agenda ?? '',
+    linkOrLocation: meeting.link_or_location ?? '',
   }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -370,8 +806,9 @@ function MeetingDetailModal({
           time: res.meeting.meeting_time.slice(0, 5),
           type: res.meeting.meeting_type as MeetingType,
           platform: res.meeting.platform as MeetingPlatform,
-          participants: res.meeting.participants.join(', '),
+          participants: res.meeting.participants,
           agenda: res.meeting.agenda ?? '',
+          linkOrLocation: res.meeting.link_or_location ?? '',
         });
         onUpdated(res.meeting);
       })
@@ -401,8 +838,9 @@ function MeetingDetailModal({
         meeting_time: form.time.length === 5 ? `${form.time}:00` : form.time,
         meeting_type: form.type,
         platform: form.platform,
-        participants: form.participants.split(',').map((p) => p.trim()).filter(Boolean),
+        participants: form.participants,
         agenda: form.agenda.trim(),
+        link_or_location: form.linkOrLocation.trim() || null,
       });
       setCurrent(res.meeting);
       onUpdated(res.meeting);
@@ -515,7 +953,36 @@ function MeetingDetailModal({
               </div>
               <div>
                 <span className="fl-label">Participants</span>
-                <input className="inp" value={form.participants} onChange={(e) => update('participants', e.target.value)} placeholder="Comma-separated emails or names" />
+                <input
+                  className="inp"
+                  value={form.participants.join(', ')}
+                  onChange={(e) =>
+                    update(
+                      'participants',
+                      e.target.value
+                        .split(',')
+                        .map((p) => p.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  placeholder="Comma-separated emails or names"
+                />
+              </div>
+              <div>
+                <span className="fl-label">
+                  {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}
+                </span>
+                <input
+                  className="inp"
+                  type={form.platform === 'in_person' ? 'text' : 'url'}
+                  placeholder={
+                    form.platform === 'in_person'
+                      ? 'Venue / address'
+                      : 'https://zoom.us/j/…'
+                  }
+                  value={form.linkOrLocation}
+                  onChange={(e) => update('linkOrLocation', e.target.value)}
+                />
               </div>
               <div>
                 <span className="fl-label">Agenda</span>
@@ -530,6 +997,16 @@ function MeetingDetailModal({
                 {current.participants.length === 0
                   ? <span style={{ color: '#9BA3C4' }}>None</span>
                   : `${current.participants.length} · ${current.participants.join(', ')}`}
+              </DetailRow>
+              <DetailRow
+                icon={ICON_DOC}
+                label={current.platform === 'in_person' ? 'Location' : 'Meeting URL'}
+              >
+                {current.link_or_location
+                  ? current.platform === 'in_person'
+                    ? <span style={{ wordBreak: 'break-word' }}>{current.link_or_location}</span>
+                    : <a href={current.link_or_location} target="_blank" rel="noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>{current.link_or_location}</a>
+                  : <span style={{ color: '#9BA3C4' }}>None</span>}
               </DetailRow>
               <DetailRow icon={ICON_DOC} label="Agenda">
                 {current.agenda
@@ -580,6 +1057,9 @@ function MeetingDetailModal({
 }
 
 export default function MeetingsPage() {
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? null;
+  const companyName = user?.company_name ?? '';
   const today = useMemo(() => new Date(), []);
   const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -848,6 +1328,8 @@ export default function MeetingsPage() {
           onClose={() => setScheduleOpen(false)}
           onCreated={(m) => setData((prev) => [...prev, m])}
           initialDate={selectedDate}
+          companyId={companyId}
+          companyName={companyName}
         />
       )}
 

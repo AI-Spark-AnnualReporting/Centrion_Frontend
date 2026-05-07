@@ -11,6 +11,8 @@ type PositionType =
   | 'esg_lead'
   | 'finance'
   | 'operations'
+  | 'CTO'
+  | 'CEO'
   | 'other';
 
 const POSITION_LABELS: Record<PositionType, string> = {
@@ -20,6 +22,8 @@ const POSITION_LABELS: Record<PositionType, string> = {
   esg_lead: 'ESG Lead',
   finance: 'Finance',
   operations: 'Operations',
+  CTO: 'CTO',
+  CEO: 'CEO',
   other: 'Other',
 };
 
@@ -32,48 +36,48 @@ const POSITION_BADGE_CLASS: Record<PositionType, string> = {
   esg_lead: 'b-gn',
   finance: 'b-am',
   operations: 'b-bl',
+  CTO: 'b-pp',
+  CEO: 'b-pp',
   other: 'b-gy',
 };
 
-// Full Type dropdown shown in the Add Person form, in the order the user
-// asked for. Order matters because the first item is the implicit fallback
-// when the active tab doesn't pin a default (it shouldn't, but defensively).
 const POSITION_OPTIONS: Array<{ value: PositionType; label: string }> = [
   { value: 'executive', label: POSITION_LABELS.executive },
   { value: 'board_member', label: POSITION_LABELS.board_member },
   { value: 'investor', label: POSITION_LABELS.investor },
-  { value: 'esg_lead', label: POSITION_LABELS.esg_lead },
-  { value: 'finance', label: POSITION_LABELS.finance },
-  { value: 'operations', label: POSITION_LABELS.operations },
+  { value: 'CTO', label: POSITION_LABELS.CTO },
+  { value: 'CEO', label: POSITION_LABELS.CEO },
   { value: 'other', label: POSITION_LABELS.other },
 ];
 
-// UI tab keys. `board` and `investor` map straight onto a single position
-// type; `management` is the catch-all bucket for the remaining five.
-type TabKey = 'board' | 'investor' | 'management';
+type TabKey = 'board' | 'investor' | 'executive' | 'other';
 
 const TAB_LABELS: Record<TabKey, string> = {
   board: 'Board Members',
   investor: 'Investors',
-  management: 'Management',
+  executive: 'Executives',
+  other: 'Other',
 };
 
 const PLACEHOLDER_LABELS: Record<TabKey, string> = {
   board: 'Add Board Member',
   investor: 'Add Investor',
-  management: 'Add Team Member',
+  executive: 'Add Executive',
+  other: 'Add Person',
 };
 
 const TAB_POSITIONS: Record<TabKey, PositionType[]> = {
   board: ['board_member'],
   investor: ['investor'],
-  management: ['executive', 'esg_lead', 'finance', 'operations', 'other'],
+  executive: ['executive', 'CTO', 'CEO'],
+  other: ['esg_lead', 'finance', 'operations', 'other'],
 };
 
 const TAB_DEFAULT_POSITION: Record<TabKey, PositionType> = {
   board: 'board_member',
   investor: 'investor',
-  management: 'executive',
+  executive: 'executive',
+  other: 'other',
 };
 
 interface Person {
@@ -84,7 +88,7 @@ interface Person {
   email: string;
   positionType: PositionType;
   bio: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'pending';
 }
 
 const AVATAR_GRADIENTS = [
@@ -148,7 +152,12 @@ function teamMemberToPerson(m: TeamMember): Person {
     email: m.email ?? '',
     positionType: toPositionType(m.position_type),
     bio: m.bio ?? '',
-    status: m.status === 'inactive' ? 'inactive' : 'active',
+    status:
+      m.status === 'inactive'
+        ? 'inactive'
+        : m.status === 'pending'
+          ? 'pending'
+          : 'active',
   };
 }
 
@@ -157,7 +166,8 @@ function teamMemberToPerson(m: TeamMember): Person {
 function tabForPosition(p: PositionType): TabKey {
   if (p === 'board_member') return 'board';
   if (p === 'investor') return 'investor';
-  return 'management';
+  if (p === 'executive' || p === 'CTO' || p === 'CEO') return 'executive';
+  return 'other';
 }
 
 // 12-char password using the browser CSPRNG. Backend forces rotation on
@@ -279,7 +289,8 @@ export default function StakeholdersPage() {
 
   const canSubmit =
     form.firstName.trim().length > 0 &&
-    form.lastName.trim().length > 0 &&
+    form.organisation.trim().length > 0 &&
+    form.positionType.length > 0 &&
     /\S+@\S+\.\S+/.test(form.email.trim());
 
   const handleSubmit = async () => {
@@ -386,7 +397,7 @@ export default function StakeholdersPage() {
       )}
 
       <div className="tabs">
-        {(['board', 'investor', 'management'] as const).map((t) => (
+        {(['board', 'investor', 'executive', 'other'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -483,7 +494,13 @@ export default function StakeholdersPage() {
                   </div>
                 </div>
                 <span
-                  className={p.status === 'active' ? 'b-gn' : 'b-gy'}
+                  className={
+                    p.status === 'active'
+                      ? 'b-gn'
+                      : p.status === 'pending'
+                        ? 'b-am'
+                        : 'b-gy'
+                  }
                   style={{
                     fontSize: 10,
                     fontWeight: 700,
@@ -492,7 +509,11 @@ export default function StakeholdersPage() {
                     flexShrink: 0,
                   }}
                 >
-                  {p.status === 'active' ? 'Active' : 'Inactive'}
+                  {p.status === 'active'
+                    ? 'Active'
+                    : p.status === 'pending'
+                      ? 'Pending'
+                      : 'Inactive'}
                 </span>
               </div>
               <div
@@ -824,7 +845,7 @@ function AddPersonModal({
         >
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <span className="fl-label">First Name</span>
+              <span className="fl-label">First Name <span style={{ color: '#E5484D' }}>*</span></span>
               <input
                 className="inp"
                 placeholder="Ahmad"
@@ -846,43 +867,7 @@ function AddPersonModal({
             </div>
           </div>
           <div>
-            <span className="fl-label">Role / Title</span>
-            <input
-              className="inp"
-              placeholder="e.g. Independent Director"
-              value={form.role}
-              onChange={(e) => onChange('role', e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-          <div>
-            <span className="fl-label">Organisation</span>
-            <input
-              className="inp"
-              value={form.organisation}
-              readOnly
-              tabIndex={-1}
-              title="Locked to your company"
-              style={{
-                background: '#F5F6FB',
-                color: '#5A6080',
-                cursor: 'not-allowed',
-              }}
-            />
-          </div>
-          <div>
-            <span className="fl-label">Email</span>
-            <input
-              className="inp"
-              type="email"
-              placeholder="name@example.com"
-              value={form.email}
-              onChange={(e) => onChange('email', e.target.value)}
-              disabled={submitting}
-            />
-          </div>
-          <div>
-            <span className="fl-label">Type</span>
+            <span className="fl-label">Role / Title <span style={{ color: '#E5484D' }}>*</span></span>
             <select
               className="inp sel"
               value={form.positionType}
@@ -897,6 +882,32 @@ function AddPersonModal({
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <span className="fl-label">Organisation <span style={{ color: '#E5484D' }}>*</span></span>
+            <input
+              className="inp"
+              value={form.organisation}
+              readOnly
+              tabIndex={-1}
+              title="Locked to your company"
+              style={{
+                background: '#F5F6FB',
+                color: '#5A6080',
+                cursor: 'not-allowed',
+              }}
+            />
+          </div>
+          <div>
+            <span className="fl-label">Email <span style={{ color: '#E5484D' }}>*</span></span>
+            <input
+              className="inp"
+              type="email"
+              placeholder="name@example.com"
+              value={form.email}
+              onChange={(e) => onChange('email', e.target.value)}
+              disabled={submitting}
+            />
           </div>
           <div>
             <span className="fl-label">Bio / Notes</span>

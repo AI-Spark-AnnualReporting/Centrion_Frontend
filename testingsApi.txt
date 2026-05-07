@@ -1,226 +1,34 @@
-GET
-/api/v1/lookups/scopes
-List Scopes
+POST
+/api/v1/meetings
+Create Meeting
 
 
-Combined catalogue of every framework option the user can pick when generating a report — both scope_type=global (GRI / IFRS-S1 / IFRS-S2) and scope_type=regional (each regulator with at least one linked indicator).
+Schedule a new meeting on the current user's personal calendar.
 
-Each row carries an indicator_count so the frontend can show e.g. "GRI Standards (128 indicators)" or "SAMA (42 indicators)" in a single picker.
+link_or_location is dual-purpose: a join URL for online platforms (zoom/teams/google_meet) or a venue/address when platform is in_person. The frontend picks which to ask for based on platform.
 
-Returns: { "universal": [{code, label, indicator_count}], "regional": [{regulator_id, code, label, country_id, country_code, country_name, primary_frameworks, indicator_count}], "totals": {universal_options, regional_options} }
-
-Filtering:
-
-Universal: any framework with >= 1 active indicator.
-Regional: any regulator with is_active=TRUE AND at least one active regulator_metrics row pointing at a real framework_indicator_id. Empty regulators are hidden — they wouldn't narrow the harvester to anything useful.
 Parameters
-Cancel
+Try it out
 No parameters
 
-Execute
-Clear
-Responses
-Curl
+Request body
 
-curl -X 'GET' \
-  'http://localhost:8000/api/v1/lookups/scopes' \
-  -H 'accept: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZjQ3Y2Y0NmFiNDM2IiwiZW1haWwiOiJhaHNhbkB3ZWFyZXNwYXJrLm1lIiwicm9sZSI6ImFkbWluIiwiY29tcGFueV9pZCI6IjQyNWMzNDZhLWIwNjYtNDUxZC04N2IyLTY3NjAwOGM5NGMyYSIsImV4cCI6MTc3ODAwNjY5Mn0.C6oEKt5RMhbmuuG77lpqwDVOqA-WE-FwCmL7NeGVRuU'
-Request URL
-http://localhost:8000/api/v1/lookups/scopes
-Server response
-Code	Details
-200	
-Response body
-Download
+application/json
+Example Value
+Schema
 {
-  "universal": [
-    {
-      "code": "GRI",
-      "label": "Global Reporting Initiative (GRI)",
-      "indicator_count": 128
-    },
-    {
-      "code": "IFRS-S1",
-      "label": "IFRS S1 — General Sustainability",
-      "indicator_count": 42
-    },
-    {
-      "code": "IFRS-S2",
-      "label": "IFRS S2 — Climate-Related",
-      "indicator_count": 67
-    }
-  ],
-  "regional": [
-    {
-      "regulator_id": "bbdc04ff-9911-47b3-bb38-0df46780ebd5",
-      "code": "ADX",
-      "label": "Abu Dhabi Securities Exchange",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "country_code": "UAE",
-      "country_name": "United Arab Emirates",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "indicator_count": 19
-    },
-    {
-      "regulator_id": "44a64d03-1e95-4085-bfbc-1961b77f0713",
-      "code": "CBB",
-      "label": "Central Bank of Bahrain",
-      "country_id": "f2894a15-b339-4cc3-a2bc-90a9eb8ed90c",
-      "country_code": "BHR",
-      "country_name": "Bahrain",
-      "primary_frameworks": [
-        "GRI",
-        "TCFD",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "indicator_count": 14
-    },
-    {
-      "regulator_id": "5d6f838b-3551-4220-bfac-4c906a7d1063",
-      "code": "CBK",
-      "label": "Central Bank of Kuwait",
-      "country_id": "7f046608-5b09-435d-8a2e-0b1946ad2e5c",
-      "country_code": "KWT",
-      "country_name": "Kuwait",
-      "primary_frameworks": [
-        "GRI",
-        "SASB",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "indicator_count": 12
-    },
-    {
-      "regulator_id": "45d7090b-c34b-4127-a870-a4d7c03364ba",
-      "code": "CBO",
-      "label": "Central Bank of Oman",
-      "country_id": "71a8aa5e-354d-4dcb-8c3e-bcd121eb6dc7",
-      "country_code": "OMN",
-      "country_name": "Oman",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD"
-      ],
-      "indicator_count": 12
-    },
-    {
-      "regulator_id": "5fc71c73-1000-421f-bdc0-31534f481f80",
-      "code": "CBUAE",
-      "label": "Central Bank of the UAE",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "country_code": "UAE",
-      "country_name": "United Arab Emirates",
-      "primary_frameworks": [
-        "TCFD",
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2"
-      ],
-      "indicator_count": 6
-    },
-    {
-      "regulator_id": "d7ef3979-cabd-4e73-a0ad-98b281783c9f",
-      "code": "CMA",
-      "label": "Capital Market Authority",
-      "country_id": "b71bf541-e4b4-4df8-98bd-4e59622300f9",
-      "country_code": "SAU",
-      "country_name": "Saudi Arabia",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "indicator_count": 19
-    },
-    {
-      "regulator_id": "439d69bd-c9ad-46d6-b2d7-269bb839a19c",
-      "code": "DFM",
-      "label": "Dubai Financial Market",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "country_code": "UAE",
-      "country_name": "United Arab Emirates",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "indicator_count": 17
-    },
-    {
-      "regulator_id": "39d29cda-aaa7-4243-93a7-dad144a9c237",
-      "code": "QFMA",
-      "label": "Qatar Financial Markets Authority",
-      "country_id": "ea8132b3-cd74-4e62-9139-9e9bc5e9afa1",
-      "country_code": "QAT",
-      "country_name": "Qatar",
-      "primary_frameworks": [
-        "IFRS_S1",
-        "IFRS_S2",
-        "GRI",
-        "TCFD"
-      ],
-      "indicator_count": 12
-    },
-    {
-      "regulator_id": "6abc4c3f-9200-45d9-afc5-dbe9fa5b69ea",
-      "code": "SAMA",
-      "label": "Saudi Central Bank",
-      "country_id": "b71bf541-e4b4-4df8-98bd-4e59622300f9",
-      "country_code": "SAU",
-      "country_name": "Saudi Arabia",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "indicator_count": 24
-    },
-    {
-      "regulator_id": "c761a06d-f558-48be-b934-ecd1c6d4fb0a",
-      "code": "SCA",
-      "label": "Securities & Commodities Authority",
-      "country_id": "124710f2-3715-4077-bbd2-eeb7dbbd2865",
-      "country_code": "UAE",
-      "country_name": "United Arab Emirates",
-      "primary_frameworks": [
-        "GRI",
-        "IFRS_S1",
-        "IFRS_S2",
-        "TCFD",
-        "SASB"
-      ],
-      "indicator_count": 23
-    }
-  ],
-  "totals": {
-    "universal_options": 3,
-    "regional_options": 10
-  }
+  "title": "string",
+  "meeting_date": "string",
+  "meeting_time": "string",
+  "meeting_type": "string",
+  "platform": "string",
+  "participants": [],
+  "agenda": "string",
+  "link_or_location": "string"
 }
-Response headers
- content-length: 3219 
- content-type: application/json 
- date: Tue,05 May 2026 13:45:06 GMT 
- server: uvicorn 
 Responses
 Code	Description	Links
-200	
+201	
 Successful Response
 
 Media type
@@ -230,3 +38,28 @@ Controls Accept header.
 Example Value
 Schema
 "string"
+No links
+422	
+Validation Error
+
+Media type
+
+application/json
+Example Value
+Schema
+{
+  "detail": [
+    {
+      "loc": [
+        "string",
+        0
+      ],
+      "msg": "string",
+      "type": "string",
+      "input": "string",
+      "ctx": {}
+    }
+  ]
+}
+No links
+
