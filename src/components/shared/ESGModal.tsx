@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getSectors, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import type { Sector } from '@/types/company';
+import type {
+  CountriesResponse,
+  CountryLookup,
+  RegionsResponse,
+  RegulatorLookup,
+  RegulatorsResponse,
+} from '@/types/lookups';
 
 interface ESGModalProps {
   onClose: () => void;
@@ -20,8 +27,8 @@ interface ReportsListResponse {
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
 const GLOBAL_FRAMEWORKS = ['GRI', 'IFRS'];
+// Pre-select GRI on the global scope (matches the Reports page default).
 const DEFAULT_GLOBAL_CHECKED = ['GRI'];
-const ADD_NEW_SENTINEL = '__add_new__';
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -52,6 +59,10 @@ function frameworkLabelToCode(label: string): string {
   return label;
 }
 
+// Mirrors the Reports page's Validate Report form 1:1, but locked to creating
+// a brand-new report — no existing-report dropdown, no DB-vs-upload source
+// selector. On submit it hands off to ReportsPage via `pendingGenerate` so the
+// full-width GeneratingScreen and post-generation report view show up there.
 export function ESGModal({ onClose }: ESGModalProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -59,10 +70,10 @@ export function ESGModal({ onClose }: ESGModalProps) {
 
   // ---- Form state -----------------------------------------------------------
   const [sectors, setSectors] = useState<Sector[]>([]);
+  const [sectorsLoading, setSectorsLoading] = useState(true);
   const [selectedSectorId, setSelectedSectorId] = useState('');
   const [existingPeriods, setExistingPeriods] = useState<string[]>([]);
   const [customYear, setCustomYear] = useState<number | null>(null);
-  const [isAddingNewPeriod, setIsAddingNewPeriod] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [checkedFw, setCheckedFw] = useState<string[]>(DEFAULT_GLOBAL_CHECKED);
   const [griScope, setGriScope] = useState<'standard' | 'full'>('standard');
@@ -71,14 +82,23 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ---- Generation state -----------------------------------------------------
-  // The generate + coverage API chain actually runs on ReportsPage so the
-  // full-width loading screen and subsequent report view are visible there.
-  const [genError] = useState<string | null>(null);
+  // Regional lookups — loaded lazily once the user switches to regional scope
+  // and picks a region / country.
+  const [regions, setRegions] = useState<string[]>([]);
+  const [regionsLoading, setRegionsLoading] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState('');
+  const [countries, setCountries] = useState<CountryLookup[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(false);
+  const [selectedCountryId, setSelectedCountryId] = useState('');
+  const [regulators, setRegulators] = useState<RegulatorLookup[]>([]);
+  const [regulatorsLoading, setRegulatorsLoading] = useState(false);
 
   // ---- Load sectors + existing report periods (for used-year filtering) -----
   useEffect(() => {
-    getSectors().then(setSectors).catch(() => setSectors([]));
+    getSectors()
+      .then((data) => setSectors(data))
+      .catch(() => setSectors([]))
+      .finally(() => setSectorsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -94,6 +114,84 @@ export function ESGModal({ onClose }: ESGModalProps) {
       .catch(() => setExistingPeriods([]));
   }, [companyId]);
 
+  // Regions load once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    setRegionsLoading(true);
+    lookups
+      .regions<RegionsResponse>()
+      .then((res) => {
+        if (cancelled) return;
+        setRegions(res.regions ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRegions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRegionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Countries reload whenever the user picks (or clears) a region.
+  useEffect(() => {
+    if (!selectedRegion) {
+      setCountries([]);
+      return;
+    }
+    let cancelled = false;
+    setCountriesLoading(true);
+    lookups
+      .countries<CountriesResponse>(selectedRegion)
+      .then((res) => {
+        if (cancelled) return;
+        setCountries(res.countries ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCountries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCountriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegion]);
+
+  // Regulators reload whenever the user picks (or clears) a country. Each
+  // regulator's `code` becomes one ESG framework chip; we auto-check all of
+  // them so the user doesn't have to opt in to every one.
+  useEffect(() => {
+    if (!selectedCountryId) {
+      setRegulators([]);
+      return;
+    }
+    let cancelled = false;
+    setRegulatorsLoading(true);
+    lookups
+      .regulators<RegulatorsResponse>(selectedCountryId)
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.regulators ?? [];
+        setRegulators(list);
+        setCheckedFw(list.map((r) => r.code));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRegulators([]);
+          setCheckedFw([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRegulatorsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountryId]);
+
   const usedYears = new Set<number>(
     existingPeriods
       .map((p) => yearFromPeriod(p))
@@ -101,37 +199,54 @@ export function ESGModal({ onClose }: ESGModalProps) {
   );
 
   // ---- Handlers -------------------------------------------------------------
+  // Multi-toggle used by regional regulator chips — global scope uses radios
+  // and bypasses this.
   const toggleFw = (fw: string) =>
-    setCheckedFw((prev) => (prev.includes(fw) ? prev.filter((f) => f !== fw) : [...prev, fw]));
+    setCheckedFw((prev) =>
+      prev.includes(fw) ? prev.filter((f) => f !== fw) : [...prev, fw],
+    );
 
   const handleScopeChange = (newScope: 'global' | 'regional') => {
     setScope(newScope);
     if (newScope === 'global') {
+      setSelectedRegion('');
+      setSelectedCountryId('');
       setCheckedFw(DEFAULT_GLOBAL_CHECKED);
     } else {
+      // Regional mode is built from regulator chips that are populated by the
+      // country effect — clear any global selection so we don't leak GRI /
+      // IFRS into the request payload.
       setCheckedFw([]);
-      setUploadedFile(null);
-      setUploadError(null);
-      setIsDragging(false);
     }
+  };
+
+  const handleRegionChange = (region: string) => {
+    setSelectedRegion(region);
+    setSelectedCountryId('');
+    setCheckedFw([]);
+  };
+
+  const handleCountryChange = (countryId: string) => {
+    setSelectedCountryId(countryId);
+    // The regulators effect populates `checkedFw` once it resolves.
   };
 
   const pickCustomYear = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const year = Number(e.target.value);
     if (!year) return;
     setCustomYear(year);
-    setIsAddingNewPeriod(false);
   };
 
   const clearCustomYear = () => {
     setCustomYear(null);
-    setIsAddingNewPeriod(true);
   };
 
   const acceptFile = (file: File | undefined) => {
     if (!file) return;
     if (!hasAcceptedExtension(file.name)) {
-      setUploadError(`Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`);
+      setUploadError(
+        `Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`,
+      );
       return;
     }
     setUploadError(null);
@@ -155,19 +270,25 @@ export function ESGModal({ onClose }: ESGModalProps) {
     setUploadError(null);
   };
 
+  const availableFrameworks: string[] =
+    scope === 'global' ? GLOBAL_FRAMEWORKS : regulators.map((r) => r.code);
+
   const hasFramework = checkedFw.length > 0;
+  const regionalReady =
+    scope !== 'regional' || (selectedRegion !== '' && selectedCountryId !== '');
   const canGenerate =
     !!companyId &&
-    scope === 'global' &&
     customYear !== null &&
     uploadedFile !== null &&
-    hasFramework;
+    hasFramework &&
+    regionalReady;
 
-  const disabledReason =
-    !companyId
-      ? 'You must be signed in with a company to generate a report'
-      : scope !== 'global'
-        ? 'Regional generation is not available yet'
+  const disabledReason = !companyId
+    ? 'You must be signed in with a company to generate a report'
+    : scope === 'regional' && selectedRegion === ''
+      ? 'Select a region to continue'
+      : scope === 'regional' && selectedCountryId === ''
+        ? 'Select a country to continue'
         : !hasFramework
           ? 'Select at least one ESG framework to continue'
           : customYear === null
@@ -179,10 +300,29 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const triggerGenerate = () => {
     if (!canGenerate || !companyId || !uploadedFile || customYear == null) return;
 
-    // Close the modal and hand the payload to ReportsPage — it shows the
-    // full-width GeneratingScreen and fires the API chain. sector_id is
-    // optional on the backend, so omit it when no sector was picked.
     const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
+
+    // Regional flow needs the region/country/regulator_ids passed through;
+    // global ignores them. Mirrors ReportsPage.triggerGenerate exactly.
+    const regionalExtras: {
+      region?: string;
+      country_id?: string;
+      regulator_ids?: string[];
+    } =
+      scope === 'regional'
+        ? {
+            ...(selectedRegion ? { region: selectedRegion } : {}),
+            ...(selectedCountryId ? { country_id: selectedCountryId } : {}),
+            ...(checkedFw.length > 0
+              ? {
+                  regulator_ids: regulators
+                    .filter((r) => checkedFw.includes(r.code))
+                    .map((r) => r.id),
+                }
+              : {}),
+          }
+        : {};
+
     onClose();
     navigate('/reports', {
       state: {
@@ -192,6 +332,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
           scope_type: scope,
           framework_codes: checkedFw.map(frameworkLabelToCode),
           ...(griSelected ? { gri_scope: griScope } : {}),
+          ...regionalExtras,
           file: uploadedFile,
         },
       },
@@ -205,439 +346,569 @@ export function ESGModal({ onClose }: ESGModalProps) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="modal-content" style={{ width: 720 }}>
-        <>
-          <div
+        <div
+          style={{
+            padding: '22px 26px 18px',
+            borderBottom: '1px solid #ECEEF8',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 800,
+                color: '#1A1D2E',
+                marginBottom: 2,
+              }}
+            >
+              Generate ESG Report
+            </div>
+            <div style={{ fontSize: 11, color: '#5A6080' }}>
+              Configure parameters &amp; upload source documents
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
             style={{
-              padding: '22px 26px 18px',
-              borderBottom: '1px solid #ECEEF8',
+              width: 30,
+              height: 30,
+              borderRadius: '50%',
+              border: '1.5px solid #E2E4F0',
+              background: '#fff',
+              cursor: 'pointer',
               display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E', marginBottom: 2 }}>
-                  Generate ESG Report
-                </div>
-                <div style={{ fontSize: 11, color: '#5A6080' }}>
-                  Configure parameters &amp; upload source documents
-                </div>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="Close"
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: '50%',
-                  border: '1.5px solid #E2E4F0',
-                  background: '#fff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M2 2l8 8M10 2l-8 8" stroke="#5A6080" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M2 2l8 8M10 2l-8 8"
+                stroke="#5A6080"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
 
-            <div style={{ padding: '22px 26px', maxHeight: '70vh', overflowY: 'auto' }}>
-              {/* Row 1: Reporting Year + Industry Sector (display only) */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div>
-                  <label className="fl-label">Reporting Year</label>
-                  {customYear != null ? (
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-                      <div
-                        className="inp sel"
-                        style={{
-                          flex: 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, color: '#1A1D2E' }}>FY {customYear}</span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: '#4040C8',
-                            textTransform: 'uppercase',
-                            letterSpacing: '.5px',
-                          }}
-                        >
-                          New report
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={clearCustomYear}
-                        aria-label="Change year"
-                        title="Change year"
-                        style={{
-                          width: 38,
-                          border: '1px solid #E5E7EF',
-                          background: '#fff',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          color: '#5A6080',
-                          fontSize: 16,
-                          lineHeight: 1,
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : isAddingNewPeriod ? (
-                    <select
-                      className="inp sel"
-                      value=""
-                      onChange={pickCustomYear}
-                    >
-                      <option value="" disabled>
-                        Select year…
-                      </option>
-                      {yearPickerOptions().map((y) => {
-                        const taken = usedYears.has(y);
-                        return (
-                          <option key={y} value={y} disabled={taken}>
-                            {taken ? `${y} — already has a report` : y}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : (
-                    <select
-                      className="inp sel"
-                      value=""
-                      onChange={(e) => {
-                        if (e.target.value === ADD_NEW_SENTINEL) setIsAddingNewPeriod(true);
+        <div style={{ padding: '22px 26px', maxHeight: '70vh', overflowY: 'auto' }}>
+          {/* Row 1: Reporting Year + Industry Sector */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <div>
+              <label className="fl-label">Reporting Year</label>
+              {customYear != null ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                  <div
+                    className="inp sel"
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: '#1A1D2E' }}>
+                      FY {customYear}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#4040C8',
+                        textTransform: 'uppercase',
+                        letterSpacing: '.5px',
                       }}
                     >
-                      <option value="" disabled>
-                        Select a reporting year…
-                      </option>
-                      <option value={ADD_NEW_SENTINEL}>+ Add new…</option>
-                    </select>
-                  )}
-                </div>
-                <div>
-                  <label className="fl-label">Industry Sector</label>
-                  <select
-                    className="inp sel"
-                    value={selectedSectorId}
-                    onChange={(e) => setSelectedSectorId(e.target.value)}
+                      New report
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearCustomYear}
+                    aria-label="Change year"
+                    title="Change year"
+                    style={{
+                      width: 38,
+                      border: '1px solid #E5E7EF',
+                      background: '#fff',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      color: '#5A6080',
+                      fontSize: 16,
+                      lineHeight: 1,
+                    }}
                   >
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <select className="inp sel" value="" onChange={pickCustomYear}>
+                  <option value="" disabled>
+                    Select year…
+                  </option>
+                  {yearPickerOptions().map((y) => {
+                    const taken = usedYears.has(y);
+                    return (
+                      <option key={y} value={y} disabled={taken}>
+                        {taken ? `${y} — already has a report` : y}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="fl-label">Industry Sector</label>
+              <select
+                className="inp sel"
+                value={selectedSectorId}
+                onChange={(e) => setSelectedSectorId(e.target.value)}
+              >
+                {sectorsLoading ? (
+                  <option value="" disabled>
+                    Loading sectors…
+                  </option>
+                ) : (
+                  <>
                     <option value="">None</option>
                     {sectors.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
                       </option>
                     ))}
+                  </>
+                )}
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Scope + conditional Region / Country */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: scope === 'regional' ? '1fr 1fr 1fr' : '1fr',
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <div>
+              <label className="fl-label">Report Scope</label>
+              <select
+                className="inp sel"
+                value={scope}
+                onChange={(e) =>
+                  handleScopeChange(e.target.value as 'global' | 'regional')
+                }
+              >
+                <option value="global">Global</option>
+                <option value="regional">Regional</option>
+              </select>
+            </div>
+            {scope === 'regional' && (
+              <>
+                <div>
+                  <label className="fl-label">Region</label>
+                  <select
+                    className="inp sel"
+                    value={selectedRegion}
+                    onChange={(e) => handleRegionChange(e.target.value)}
+                    disabled={regionsLoading}
+                  >
+                    <option value="">
+                      {regionsLoading ? 'Loading regions…' : 'None'}
+                    </option>
+                    {regions.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
                   </select>
                 </div>
-              </div>
-
-              {/* Report Scope */}
-              <div style={{ marginBottom: 16 }}>
-                <label className="fl-label">Report Scope</label>
-                <select
-                  className="inp sel"
-                  value={scope}
-                  onChange={(e) => handleScopeChange(e.target.value as 'global' | 'regional')}
-                >
-                  <option value="global">Global</option>
-                  <option value="regional">Regional</option>
-                </select>
-              </div>
-
-              {/* ESG Frameworks (global scope) */}
-              {scope === 'global' && (
-                <div style={{ marginBottom: 16 }}>
-                  <label className="fl-label">
-                    ESG Frameworks <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
-                  </label>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2,1fr)',
-                      gap: 8,
-                      marginTop: 5,
-                    }}
+                <div>
+                  <label className="fl-label">Country</label>
+                  <select
+                    className="inp sel"
+                    value={selectedCountryId}
+                    onChange={(e) => handleCountryChange(e.target.value)}
+                    disabled={!selectedRegion || countriesLoading}
                   >
-                    {GLOBAL_FRAMEWORKS.map((fw) => {
-                      const isDisabled = fw === 'IFRS';
-                      return (
-                        <label
-                          key={fw}
-                          className={`fw-chip ${checkedFw.includes(fw) ? 'sel' : ''}`}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '10px 12px',
-                            opacity: isDisabled ? 0.5 : 1,
-                            cursor: isDisabled ? 'not-allowed' : 'pointer',
-                          }}
-                          title={isDisabled ? 'Not available yet' : undefined}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checkedFw.includes(fw)}
-                            onChange={() => toggleFw(fw)}
-                            disabled={isDisabled}
-                            style={{ accentColor: '#4040C8' }}
-                          />
-                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>{fw}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                    <option value="">
+                      {!selectedRegion
+                        ? 'Pick a region first'
+                        : countriesLoading
+                          ? 'Loading countries…'
+                          : 'None'}
+                    </option>
+                    {countries.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              )}
+              </>
+            )}
+          </div>
 
-              {/* GRI indicator scope — only when GRI is selected. Outer grid
-                  mirrors the GLOBAL_FRAMEWORKS 2-col layout so the radios stay
-                  under the GRI column. */}
-              {checkedFw.some((fw) => fw.startsWith('GRI')) && (
-                <div style={{ marginBottom: 16 }}>
-                  <label className="fl-label">GRI Indicator Scope</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 5 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      {(
-                        [
-                          { value: 'standard', title: 'Standard', subtitle: '85 core indicators' },
-                          { value: 'full', title: 'Full', subtitle: 'All 128 indicators' },
-                        ] as const
-                      ).map((opt) => {
-                        const active = griScope === opt.value;
-                        return (
-                          <label
-                            key={opt.value}
-                            className={`fw-chip ${active ? 'sel' : ''}`}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }}
-                          >
-                            <input
-                              type="radio"
-                              name="esgmodal_gri_scope"
-                              value={opt.value}
-                              checked={active}
-                              onChange={() => setGriScope(opt.value)}
-                              style={{ accentColor: '#4040C8' }}
-                            />
-                            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{opt.title}</span>
-                              <span style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>{opt.subtitle}</span>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Upload Source Document */}
-              <div style={{ marginBottom: 4 }}>
-                <label className="fl-label">
-                  Upload Source Document <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
-                  <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
-                    (PDF, DOCX, TXT, CSV, XLSX — one file)
-                  </span>
-                </label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={ACCEPTED_UPLOAD_ATTR}
-                  onChange={handleFileInputChange}
-                  disabled={scope !== 'global'}
-                  style={{ display: 'none' }}
-                />
-                {uploadedFile ? (
-                  <div
-                    className="upload-z"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      textAlign: 'left',
-                      padding: '14px 16px',
-                      borderColor: '#4040C8',
-                      background: 'rgba(64,64,200,.04)',
-                    }}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                      <path
-                        d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
-                        stroke="#4040C8"
-                        strokeWidth="1.5"
-                        strokeLinejoin="round"
-                      />
-                      <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
-                    </svg>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: '#1A1D2E',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {uploadedFile.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-                        {formatBytes(uploadedFile.size)}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openFilePicker}
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: '#4040C8',
-                        background: 'transparent',
-                        border: 0,
-                        padding: '4px 8px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Replace
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearUploadedFile}
-                      aria-label="Remove file"
-                      title="Remove file"
-                      style={{
-                        width: 22,
-                        height: 22,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'transparent',
-                        border: 0,
-                        padding: 0,
-                        cursor: 'pointer',
-                        color: '#9BA3C4',
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    role="button"
-                    tabIndex={scope === 'global' ? 0 : -1}
-                    aria-disabled={scope !== 'global'}
-                    onClick={scope === 'global' ? openFilePicker : undefined}
-                    onKeyDown={(e) => {
-                      if (scope !== 'global') return;
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openFilePicker();
-                      }
-                    }}
-                    onDragOver={(e) => {
-                      if (scope !== 'global') return;
-                      e.preventDefault();
-                      if (!isDragging) setIsDragging(true);
-                    }}
-                    onDragLeave={() => setIsDragging(false)}
-                    onDrop={scope === 'global' ? handleDrop : (e) => e.preventDefault()}
-                    className="upload-z"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      textAlign: 'left',
-                      padding: '16px 20px',
-                      cursor: scope === 'global' ? 'pointer' : 'not-allowed',
-                      opacity: scope === 'global' ? 1 : 0.55,
-                      borderColor: isDragging && scope === 'global' ? '#4040C8' : undefined,
-                      background: isDragging && scope === 'global' ? 'rgba(64,64,200,.06)' : undefined,
-                    }}
-                    title={scope === 'global' ? undefined : 'Upload is only available in Global scope'}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                      <path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
-                      <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                    <span style={{ fontSize: 12, color: '#5A6080' }}>
-                      {scope === 'global'
-                        ? 'Click to upload or drag & drop annual report, HR data, financial statements'
-                        : 'Upload is only available in Global scope'}
-                    </span>
-                  </div>
-                )}
-                {uploadError && (
-                  <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">
-                    {uploadError}
-                  </div>
-                )}
-              </div>
-
-              {genError && (
-                <div
-                  role="alert"
+          {/* ESG Frameworks — single-select for global, multi-select for regional. */}
+          <div style={{ marginBottom: 16 }}>
+            <label className="fl-label">
+              ESG Frameworks{' '}
+              <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
+              {scope === 'regional' && selectedCountryId && (
+                <span
                   style={{
-                    marginTop: 12,
-                    padding: '10px 14px',
-                    borderRadius: 8,
-                    background: 'rgba(229,72,77,.08)',
-                    border: '1px solid rgba(229,72,77,.25)',
-                    color: '#B33A3E',
-                    fontSize: 12,
-                    fontWeight: 600,
+                    fontWeight: 400,
+                    textTransform: 'none',
+                    color: '#4040C8',
                   }}
                 >
-                  {genError}
-                </div>
+                  {' '}
+                  ·{' '}
+                  {countries.find((c) => c.id === selectedCountryId)?.name ?? ''}
+                </span>
               )}
-            </div>
-
-            <div
-              style={{
-                padding: '14px 26px',
-                borderTop: '1px solid #ECEEF8',
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 9,
-              }}
-            >
-              <button className="btn bs" onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={triggerGenerate}
-                disabled={!canGenerate}
-                title={disabledReason}
+            </label>
+            {availableFrameworks.length > 0 ? (
+              <div
                 style={{
-                  cursor: canGenerate ? 'pointer' : 'not-allowed',
-                  opacity: canGenerate ? 1 : 0.55,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length, 5)},1fr)`,
+                  gap: 8,
+                  marginTop: 5,
                 }}
               >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" />
-                </svg>
-                Generate ESG Report
-              </button>
+                {availableFrameworks.map((fw) => {
+                  const isGlobal = scope === 'global';
+                  const isSelected = checkedFw.includes(fw);
+                  return (
+                    <label
+                      key={fw}
+                      className={`fw-chip ${isSelected ? 'sel' : ''}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type={isGlobal ? 'radio' : 'checkbox'}
+                        name={isGlobal ? 'esgmodal_global_framework' : undefined}
+                        checked={isSelected}
+                        onChange={() => {
+                          if (isGlobal) setCheckedFw([fw]);
+                          else toggleFw(fw);
+                        }}
+                        style={{ accentColor: '#4040C8' }}
+                      />
+                      <span
+                        style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}
+                      >
+                        {fw}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: '14px',
+                  background: '#F2F3FA',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  color: '#9BA3C4',
+                  marginTop: 5,
+                }}
+              >
+                {scope === 'regional'
+                  ? regulatorsLoading
+                    ? 'Loading frameworks for this country…'
+                    : selectedCountryId
+                      ? 'No regulators registered for this country.'
+                      : 'Select a region and country to see applicable frameworks'
+                  : 'No frameworks available'}
+              </div>
+            )}
+          </div>
+
+          {/* GRI indicator scope — only when GRI is selected. Outer grid mirrors
+              the framework chip grid so the radios sit under the GRI column. */}
+          {checkedFw.some((fw) => fw.startsWith('GRI')) && (
+            <div style={{ marginBottom: 16 }}>
+              <label className="fl-label">GRI Indicator Scope</label>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${Math.min(availableFrameworks.length || 2, 5)},1fr)`,
+                  gap: 8,
+                  marginTop: 5,
+                }}
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {(
+                    [
+                      { value: 'standard', title: 'Standard', subtitle: '85 core indicators' },
+                      { value: 'full', title: 'Full', subtitle: 'All 128 indicators' },
+                    ] as const
+                  ).map((opt) => {
+                    const active = griScope === opt.value;
+                    return (
+                      <label
+                        key={opt.value}
+                        className={`fw-chip ${active ? 'sel' : ''}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="esgmodal_gri_scope"
+                          value={opt.value}
+                          checked={active}
+                          onChange={() => setGriScope(opt.value)}
+                          style={{ accentColor: '#4040C8' }}
+                        />
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            lineHeight: 1.2,
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>
+                            {opt.title}
+                          </span>
+                          <span style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>
+                            {opt.subtitle}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-        </>
+          )}
+
+          {/* Upload Source Document */}
+          <div style={{ marginBottom: 4 }}>
+            <label className="fl-label">
+              Upload Source Document{' '}
+              <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
+              <span
+                style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}
+              >
+                (PDF, DOCX, TXT, CSV, XLSX — one file)
+              </span>
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_UPLOAD_ATTR}
+              onChange={handleFileInputChange}
+              style={{ display: 'none' }}
+            />
+            {uploadedFile ? (
+              <div
+                className="upload-z"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  textAlign: 'left',
+                  padding: '14px 16px',
+                  borderColor: '#4040C8',
+                  background: 'rgba(64,64,200,.04)',
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
+                    stroke="#4040C8"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M12 2v4h4"
+                    stroke="#4040C8"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#1A1D2E',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {uploadedFile.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
+                    {formatBytes(uploadedFile.size)}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={openFilePicker}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#4040C8',
+                    background: 'transparent',
+                    border: 0,
+                    padding: '4px 8px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={clearUploadedFile}
+                  aria-label="Remove file"
+                  title="Remove file"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'transparent',
+                    border: 0,
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: '#9BA3C4',
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M2 2l8 8M10 2l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={openFilePicker}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openFilePicker();
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!isDragging) setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                className="upload-z"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  textAlign: 'left',
+                  padding: '16px 20px',
+                  cursor: 'pointer',
+                  borderColor: isDragging ? '#4040C8' : undefined,
+                  background: isDragging ? 'rgba(64,64,200,.06)' : undefined,
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M10 3v10M6 7l4-4 4 4"
+                    stroke="#9BA3C4"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2"
+                    stroke="#9BA3C4"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span style={{ fontSize: 12, color: '#5A6080' }}>
+                  Click to upload or drag &amp; drop annual report, HR data,
+                  financial statements
+                </span>
+              </div>
+            )}
+            {uploadError && (
+              <div
+                style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }}
+                role="alert"
+              >
+                {uploadError}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '14px 26px',
+            borderTop: '1px solid #ECEEF8',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 9,
+          }}
+        >
+          <button className="btn bs" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn bp"
+            onClick={triggerGenerate}
+            disabled={!canGenerate}
+            title={disabledReason}
+            style={{
+              cursor: canGenerate ? 'pointer' : 'not-allowed',
+              opacity: canGenerate ? 1 : 0.55,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z"
+                fill="white"
+              />
+            </svg>
+            Generate ESG Report
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ export interface Meeting {
   platform: MeetingPlatform;
   participants: string[];
   agenda: string;
+  link_or_location?: string | null;
   status: MeetingStatus;
   created_at: string;
   updated_at: string;
@@ -47,6 +48,7 @@ export interface CreateMeetingBody {
   platform: MeetingPlatform;
   participants: string[];
   agenda: string;
+  link_or_location?: string;
 }
 
 export type UpdateMeetingBody = Partial<Omit<Meeting, 'created_at' | 'updated_at'>>;

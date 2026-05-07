@@ -33,3 +33,31 @@ export interface RegulatorsResponse {
   regulators: RegulatorLookup[];
   total: number;
 }
+
+// /api/v1/lookups/scopes — combined catalogue used by the Reports form picker
+// AND by the dashboard's framework compliance card.
+export interface ScopeUniversal {
+  code: string;
+  label: string;
+  indicator_count: number;
+}
+
+export interface ScopeRegional {
+  regulator_id: string;
+  code: string;
+  label: string;
+  country_id: string;
+  country_code: string;
+  country_name: string;
+  primary_frameworks: string[];
+  indicator_count: number;
+}
+
+export interface ScopesResponse {
+  universal: ScopeUniversal[];
+  regional: ScopeRegional[];
+  totals: {
+    universal_options: number;
+    regional_options: number;
+  };
+}
