@@ -2,13 +2,19 @@ import { useState } from 'react';
 import { DashboardESG } from '@/components/dashboard/DashboardESG';
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard';
 import { ESGModal } from '@/components/shared/ESGModal';
+import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'esg' | 'brd'>('esg');
   const [esgModalOpen, setEsgModalOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  // Bumped on every successful schedule so the Board dashboard re-fetches its
+  // meetings list and the new meeting shows up in the cards immediately.
+  const [meetingsRefresh, setMeetingsRefresh] = useState(0);
   const { user } = useAuth();
   const company = user?.company_name ?? 'Your company';
+  const companyId = user?.company_id ?? null;
 
   return (
     <div>
@@ -24,17 +30,45 @@ export default function DashboardPage() {
             {/* Financial tab hidden until the financial dashboard is wired up. */}
             <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
           </div>
-          <button className="btn bp bsm" onClick={() => setEsgModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-            Generate Report
-          </button>
+          {activeTab === 'brd' ? (
+            <button
+              className="btn bp bsm"
+              onClick={() => setScheduleOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              Schedule Meeting
+            </button>
+          ) : (
+            <button
+              className="btn bp bsm"
+              onClick={() => setEsgModalOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              Generate Report
+            </button>
+          )}
         </div>
       </div>
 
       {activeTab === 'esg' && <DashboardESG />}
-      {activeTab === 'brd' && <DashboardBoard />}
+      {activeTab === 'brd' && <DashboardBoard refreshKey={meetingsRefresh} />}
 
       {esgModalOpen && <ESGModal onClose={() => setEsgModalOpen(false)} />}
+
+      {scheduleOpen && (
+        <ScheduleMeetingModal
+          companyId={companyId}
+          companyName={company}
+          onClose={() => setScheduleOpen(false)}
+          onCreated={() => setMeetingsRefresh((n) => n + 1)}
+        />
+      )}
     </div>
   );
 }
