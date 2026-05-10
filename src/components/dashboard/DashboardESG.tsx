@@ -289,7 +289,7 @@ export function DashboardESG() {
           padding: '24px 28px',
           marginBottom: 16,
           display: 'grid',
-          gridTemplateColumns: 'auto 1fr auto',
+          gridTemplateColumns: 'auto 1fr',
           gap: 24,
           alignItems: 'center',
           position: 'relative',
@@ -482,94 +482,6 @@ export function DashboardESG() {
           </div>
         </div>
 
-        {/* Disclosure Timeline — kept static for now; no backend feed yet */}
-        <div style={{ minWidth: 240, flexShrink: 0 }}>
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              color: 'rgba(255,255,255,.28)',
-              textTransform: 'uppercase',
-              letterSpacing: '.6px',
-              marginBottom: 9,
-            }}
-          >
-            Disclosure Timeline
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {[
-              {
-                dot: '#4ADE80',
-                text: 'Q3 Report filed — Tadawul',
-                badge: 'Done',
-                badgeBg: 'rgba(74,222,128,.15)',
-                badgeColor: '#86EFAC',
-              },
-              {
-                dot: '#F87171',
-                text: 'Board pack Q4',
-                date: 'Dec 11',
-                badge: 'Urgent',
-                badgeBg: 'rgba(248,113,113,.18)',
-                badgeColor: '#FCA5A5',
-              },
-              { dot: '#818CF8', text: 'Annual report submission', date: 'Mar 31' },
-              { dot: '#FCD34D', text: 'AGM notice deadline', date: 'Mar 25' },
-              {
-                dot: 'rgba(255,255,255,.2)',
-                text: 'Sustainability report',
-                date: 'May 30',
-                dim: true,
-              },
-            ].map((item, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <div
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    background: item.dot,
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{
-                    fontSize: 10.5,
-                    color: item.dim ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.6)',
-                  }}
-                >
-                  {item.text}
-                </span>
-                {item.date && (
-                  <span
-                    style={{
-                      fontSize: 9,
-                      color: item.dim ? 'rgba(255,255,255,.2)' : 'rgba(255,255,255,.28)',
-                      marginLeft: 'auto',
-                    }}
-                  >
-                    {item.date}
-                  </span>
-                )}
-                {item.badge && (
-                  <span
-                    style={{
-                      fontSize: 9,
-                      background: item.badgeBg,
-                      color: item.badgeColor,
-                      padding: '1px 7px',
-                      borderRadius: 3,
-                      fontWeight: 700,
-                      marginLeft: item.date ? 4 : 'auto',
-                    }}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Pillar Cards */}

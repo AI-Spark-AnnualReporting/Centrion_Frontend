@@ -87,10 +87,7 @@ export function Sidebar() {
           </div>
         </div>
       </div>
-      <div className="sb-search">
-        <svg viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.2" /><path d="M8 8l2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
-        <input type="text" placeholder="Search..." />
-      </div>
+      {/* Sidebar search hidden until it's wired up. */}
       <div style={{ height: 10 }} />
       {NAV_ITEMS.map((section) => (
         <div key={section.section}>
