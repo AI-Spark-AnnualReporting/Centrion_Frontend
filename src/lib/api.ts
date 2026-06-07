@@ -22,6 +22,7 @@ import type {
   PipelineConflictBody,
   PipelineHandle,
 } from "@/types/report";
+import type { QuarterlyCoverageResponse } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
   MeetingListResponse,
@@ -744,6 +745,28 @@ export const reports = {
   ) =>
     request<string>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/questions`,
+      { method: "POST", body },
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Quarterly reports — coverage map and figure driver endpoints.
+// ---------------------------------------------------------------------------
+
+export const quarterlyReports = {
+  getCoverage: (companyId: string, reportId: string) =>
+    request<QuarterlyCoverageResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/coverage`,
+    ),
+
+  addDriver: (
+    companyId: string,
+    reportId: string,
+    figureId: string,
+    body: { text: string; source: "user_provided" },
+  ) =>
+    request<{ figure: import("@/types/quarterly").CoverageFigure }>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}/driver`,
       { method: "POST", body },
     ),
 };

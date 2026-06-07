@@ -71,6 +71,11 @@ function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
 }
 
+function isQuarterlyReport(r: ReportSummary): boolean {
+  if (r.title?.toLowerCase().includes('quarterly')) return true;
+  return /^Q[1-4][\s-]/i.test(r.period);
+}
+
 // "2026-04-26T07:47:38..." → "Apr 26, 2026" for the gallery card footer.
 function formatGenDate(iso?: string): string {
   if (!iso) return '';
@@ -514,7 +519,11 @@ export default function ReportsPage() {
   // Click on a Recent Report card → open the dedicated detail page, which
   // handles its own coverage fetch and back-navigation.
   const handleReportCardClick = (report: ReportSummary) => {
-    navigate(`/reports/${report.id}`);
+    if (isQuarterlyReport(report)) {
+      navigate(`/quarterly-report/${report.id}/coverage`);
+    } else {
+      navigate(`/reports/${report.id}`);
+    }
   };
 
   const acceptFile = (file: File | undefined) => {
@@ -748,6 +757,8 @@ export default function ReportsPage() {
                   estimatedDurationSeconds: resumableRun.estimatedDurationSeconds,
                   fileName: resumableRun.fileName,
                   isExisting: true,
+                  reportType: resumableRun.reportType,
+                  period: resumableRun.period,
                 },
               });
             }}
@@ -767,9 +778,70 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {activeTab === 'quarterly' && (
-        <QuarterlyReportForm companyId={companyId} />
-      )}
+      {activeTab === 'quarterly' && (() => {
+        const quarterlyReportsList = existingReports.filter(isQuarterlyReport);
+        return (
+          <>
+            <QuarterlyReportForm companyId={companyId} />
+
+            {quarterlyReportsList.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 12 }}>
+                  Past quarterly reports
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                  {quarterlyReportsList.map((r, idx) => {
+                    const score = Math.round(r.coverage?.percentage ?? 0);
+                    const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => handleReportCardClick(r)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleReportCardClick(r); }
+                        }}
+                        title="Continue this quarterly report"
+                        style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', display: 'flex', flexDirection: 'column', cursor: 'pointer', transition: 'transform .15s ease, box-shadow .15s ease' }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 22px rgba(26,29,46,.08)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
+                      >
+                        <div style={{ background: gradient, padding: '16px 18px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
+                            {formatPeriod(r.period)}
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'Quarterly Report'}</div>
+                          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                              <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
+                            </div>
+                            <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                          </div>
+                          <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
+                            <div style={{ width: `${score}%`, height: '100%', background: '#22C55E' }} />
+                          </div>
+                          <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>DRIVER COVERAGE</div>
+                        </div>
+                        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '4px 10px', borderRadius: 999 }}>
+                            Continue →
+                          </span>
+                          <span style={{ fontSize: 10, color: '#9BA3C4' }}>
+                            {r.generated_at ? `Generated ${formatGenDate(r.generated_at)}` : 'In progress'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {activeTab === 'esg' && (
       <>
@@ -1381,9 +1453,9 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {existingReports.length > 0 && (
+      {existingReports.filter((r) => !isQuarterlyReport(r)).length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
-          {existingReports.map((r, idx) => {
+          {existingReports.filter((r) => !isQuarterlyReport(r)).map((r, idx) => {
             const score = Math.round(r.coverage?.percentage ?? 0);
             const env = r.coverage?.by_pillar?.E?.found ?? 0;
             const soc = r.coverage?.by_pillar?.S?.found ?? 0;

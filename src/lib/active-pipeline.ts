@@ -12,6 +12,8 @@ export interface ActivePipelineRecord {
   fileName: string | null;
   estimatedDurationSeconds: number | null;
   savedAt: number;
+  reportType?: string;
+  period?: string;
 }
 
 export function saveActivePipeline(record: Omit<ActivePipelineRecord, "savedAt">): void {

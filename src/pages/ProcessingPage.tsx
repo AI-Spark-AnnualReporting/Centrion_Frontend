@@ -52,6 +52,8 @@ export default function ProcessingPage() {
       companyId: state.companyId,
       fileName: state.fileName,
       estimatedDurationSeconds: state.estimatedDurationSeconds,
+      reportType: state.reportType,
+      period: state.period,
     });
   }, [state]);
 
@@ -76,6 +78,14 @@ export default function ProcessingPage() {
     }
 
     handedOffRef.current = true;
+
+    // Quarterly reports go to the Coverage Map page (step 4); it fetches its own data.
+    if (state.reportType === "quarterly") {
+      clearActivePipeline();
+      navigate(`/quarterly-report/${resolvedReportId}/coverage`, { replace: true });
+      return;
+    }
+
     reportsApi
       .getCoverage<CoverageResponse>(state.companyId, resolvedReportId)
       .then((cov) => {
