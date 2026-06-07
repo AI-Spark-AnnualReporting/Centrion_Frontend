@@ -16,6 +16,7 @@ import type {
   RegulatorsResponse,
 } from '@/types/lookups';
 import type { ProcessingPageState } from './ProcessingPage';
+import QuarterlyReportForm from '@/components/reports/QuarterlyReportForm';
 
 interface ReportGenerationConfig {
   region?: string | null;
@@ -146,6 +147,7 @@ const defaultGlobalCheckedFrameworks = ['GRI'];
 
 
 export default function ReportsPage() {
+  const [activeTab, setActiveTab] = useState<'esg' | 'quarterly'>('esg');
   const [genOpen, setGenOpen] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
@@ -672,10 +674,20 @@ export default function ReportsPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div><h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Reports</h2><p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>ESG, Annual, Quarterly & Sustainability</p></div>
         <div className="tabs" style={{ marginBottom: 0 }}>
-          <button className="tab act">ESG & Sustainability</button>
+          <button
+            className={`tab ${activeTab === 'esg' ? 'act' : ''}`}
+            onClick={() => setActiveTab('esg')}
+          >
+            ESG & Sustainability
+          </button>
+          <button
+            className={`tab ${activeTab === 'quarterly' ? 'act' : ''}`}
+            onClick={() => setActiveTab('quarterly')}
+          >
+            Quarterly
+          </button>
           {/* Other report types hidden until they're wired up.
           <button className="tab">Annual</button>
-          <button className="tab">Quarterly</button>
           <button className="tab">Sustainability</button>
           */}
         </div>
@@ -755,6 +767,12 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {activeTab === 'quarterly' && (
+        <QuarterlyReportForm companyId={companyId} />
+      )}
+
+      {activeTab === 'esg' && (
+      <>
       {/* Generate New ESG Report — collapsible */}
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer', borderBottom: genOpen ? '1px solid #ECEEF8' : 'none' }} onClick={() => setGenOpen(!genOpen)}>
@@ -1450,6 +1468,8 @@ export default function ReportsPage() {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

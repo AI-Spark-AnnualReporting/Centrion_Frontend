@@ -7,6 +7,8 @@ import {
 } from "@/lib/active-pipeline";
 import { reports as reportsApi } from "@/lib/api";
 import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
+import { QuarterlyGeneratingScreen } from "@/components/reports/QuarterlyGeneratingScreen";
+import { useAuth } from "@/context/AuthContext";
 import type { CoverageResponse } from "@/types/report";
 
 export interface ProcessingPageState {
@@ -18,11 +20,17 @@ export interface ProcessingPageState {
   fileName: string | null;
   isExisting: boolean;
   conflictMessage?: string;
+  // Drives which processing UI we render. "quarterly" → financial extraction
+  // screen; anything else (incl. undefined) → the default ESG screen.
+  reportType?: string;
+  // Display-only label for the quarterly hero, e.g. "Q1 2025".
+  period?: string;
 }
 
 export default function ProcessingPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const state = location.state as ProcessingPageState | null;
 
   const pollUrl = state?.pollUrl ?? null;
@@ -116,11 +124,31 @@ export default function ProcessingPage() {
     );
   }
 
+  const phase = poll.phase === "idle" ? "running" : poll.phase;
+
+  // Quarterly reports get the financial-extraction screen (progress ring +
+  // figures/drivers/comparatives + step checklist). Same poll, different skin.
+  if (state.reportType === "quarterly") {
+    return (
+      <QuarterlyGeneratingScreen
+        phase={phase}
+        errorMessage={phase === "failed" ? poll.run.error_message : null}
+        onCancel={() => navigate("/reports", { replace: true })}
+        onRetry={() => navigate("/reports", { replace: true })}
+        onKeepWaiting={restart}
+        period={state.period ?? null}
+        companyName={user?.company_name ?? null}
+        nodes={poll.nodes}
+        outputSummary={poll.run?.output_summary ?? null}
+      />
+    );
+  }
+
   // Happy path — delegate the full visual state to GeneratingScreen.
   return (
     <GeneratingScreen
-      phase={poll.phase === "idle" ? "running" : poll.phase}
-      errorMessage={poll.phase === "failed" ? poll.run.error_message : null}
+      phase={phase}
+      errorMessage={phase === "failed" ? poll.run.error_message : null}
       onCancel={() => navigate("/reports", { replace: true })}
       onRetry={() => navigate("/reports", { replace: true })}
       onKeepWaiting={restart}

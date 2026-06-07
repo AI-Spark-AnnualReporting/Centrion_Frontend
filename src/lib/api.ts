@@ -252,6 +252,13 @@ export interface AddReportDocumentsBody {
   files: File[];
 }
 
+export interface GenerateQuarterlyBody {
+  files: File[];
+  year: number;
+  quarter: string; // "Q1".."Q4"
+  areas?: string[]; // snake_case slugs; omit/empty when none selected
+}
+
 // Loose aliases for values sourced from API lookups.
 export type Jurisdiction = string;
 export type AgentClass =
@@ -695,6 +702,25 @@ export const reports = {
     body.files.forEach((f) => fd.append("files", f));
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/documents`,
+      fd,
+    );
+  },
+
+  // Async: see generate(). Stamps report_type='quarterly' server-side so the
+  // worker routes to the financial parser instead of the ESG harvester.
+  generateQuarterly: (
+    companyId: string,
+    body: GenerateQuarterlyBody,
+  ): Promise<PipelineHandle> => {
+    const fd = new FormData();
+    body.files.forEach((f) => fd.append("files", f));
+    fd.append("year", String(body.year));
+    fd.append("quarter", body.quarter);
+    if (body.areas && body.areas.length > 0) {
+      body.areas.forEach((v) => fd.append("areas", v));
+    }
+    return postPipeline(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
     );
   },
