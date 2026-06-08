@@ -323,7 +323,7 @@ export default function QuarterlyReportForm({
           </div>
           <div>
             <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>
-              Validate Quarterly Report
+              Generate Quarterly Report
             </div>
             <div style={{ fontSize: 11, color: '#5A6080' }}>
               Configure parameters &amp; upload source documents
@@ -360,7 +360,7 @@ export default function QuarterlyReportForm({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1.4fr',
+            gridTemplateColumns: '1fr 1fr',
             gap: 12,
             marginBottom: 18,
           }}
@@ -864,7 +864,7 @@ export default function QuarterlyReportForm({
                 />
               </svg>
             )}
-            {isSubmittingGenerate ? 'Starting…' : 'Validate Report'}
+            {isSubmittingGenerate ? 'Starting…' : 'Generate Report'}
           </button>
         </div>
       </div>
