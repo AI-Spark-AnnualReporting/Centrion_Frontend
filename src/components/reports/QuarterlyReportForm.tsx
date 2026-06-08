@@ -290,35 +290,17 @@ export default function QuarterlyReportForm({
 
           <div>
             <label className="fl-label">Quarter</label>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4,1fr)',
-                gap: 8,
-              }}
+            <select
+              className="inp sel"
+              value={quarter}
+              onChange={(e) => setQuarter(e.target.value as Quarter)}
             >
-              {QUARTERS.map((q) => {
-                const active = quarter === q;
-                return (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setQuarter(q)}
-                    className={`fw-chip ${active ? 'sel' : ''}`}
-                    style={{
-                      justifyContent: 'center',
-                      padding: '10px 12px',
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: active ? '#4040C8' : '#5A6080',
-                      background: active ? '#EEEEFF' : '#fff',
-                    }}
-                  >
-                    {q}
-                  </button>
-                );
-              })}
-            </div>
+              {QUARTERS.map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

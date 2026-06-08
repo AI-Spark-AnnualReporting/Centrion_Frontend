@@ -41,3 +41,32 @@ export interface QuarterlyCoverageResponse {
   needs_reason: CoverageFigure[];
   reason_found: CoverageFigure[];
 }
+
+export interface GapItem {
+  figure_id: string;
+  code: string;
+  metric: string;
+  label: string;
+  statement: string;
+  current_value: number;
+  current_display: string;
+  prior_value: number | null;
+  prior_display: string | null;
+  change_pct: number | null;
+  change_direction: "up" | "down" | null;
+  change_display?: string | null;
+  question: string;
+  placeholder: string;
+  answered: boolean;
+  current_answer: string | null;
+}
+
+export interface GapsResponse {
+  report_id: string;
+  company_id: string;
+  period_label: string;
+  prior_period_label: string;
+  total_gaps: number;
+  answered_count: number;
+  gaps: GapItem[];
+}

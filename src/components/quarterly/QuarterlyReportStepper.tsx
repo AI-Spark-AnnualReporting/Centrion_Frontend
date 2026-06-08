@@ -85,13 +85,12 @@ export function QuarterlyReportStepper({ activeStep, reportId }: QuarterlyReport
   return (
     <div
       style={{
-        background: '#fff',
         borderBottom: '1px solid #E5E7EF',
-        padding: '14px 24px',
+        padding: '14px 28px',
         marginBottom: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 0, maxWidth: 860 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
         {STEPS.map((step, i) => {
           const state: 'done' | 'active' | 'inactive' =
             i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'inactive';

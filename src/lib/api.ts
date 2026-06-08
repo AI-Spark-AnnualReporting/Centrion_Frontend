@@ -22,7 +22,7 @@ import type {
   PipelineConflictBody,
   PipelineHandle,
 } from "@/types/report";
-import type { QuarterlyCoverageResponse } from "@/types/quarterly";
+import type { QuarterlyCoverageResponse, GapsResponse } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
   MeetingListResponse,
@@ -757,6 +757,11 @@ export const quarterlyReports = {
   getCoverage: (companyId: string, reportId: string) =>
     request<QuarterlyCoverageResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/coverage`,
+    ),
+
+  getGaps: (companyId: string, reportId: string) =>
+    request<GapsResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
     ),
 
   addDriver: (
