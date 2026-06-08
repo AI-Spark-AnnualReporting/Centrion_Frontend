@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { reports as reportsApi } from '@/lib/api';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
@@ -71,19 +71,50 @@ function yearPickerOptions(): number[] {
   return years;
 }
 
+// Normalise API period strings like "Q1-2026" → "Q1 2026" for display.
+function formatPeriod(period: string): string {
+  return period.replace(/-/g, ' ').trim();
+}
+
+// Extract the 4-digit year from a period string like "Q1-2026".
+function yearFromPeriod(period: string): number | null {
+  const m = period.match(/(\d{4})/);
+  return m ? Number(m[1]) : null;
+}
+
+// Sentinel value for the "+ Add new…" option in the reporting-year select.
+const ADD_NEW_SENTINEL = '__add_new__';
+
+// Minimal shape of an existing quarterly report needed by the year dropdown.
+interface QuarterlyReportOption {
+  id: string;
+  period: string;
+}
+
 interface QuarterlyReportFormProps {
   companyId: string | null;
+  // Existing quarterly reports — populate the year dropdown like ESG.
+  existingReports?: QuarterlyReportOption[];
+  // True while the parent is still loading the reports list.
+  periodsLoading?: boolean;
 }
 
 export default function QuarterlyReportForm({
   companyId,
+  existingReports = [],
+  periodsLoading = false,
 }: QuarterlyReportFormProps) {
   const navigate = useNavigate();
 
   // Collapsible card — mirrors the ESG "Validate Report" card, open by default.
   const [genOpen, setGenOpen] = useState(true);
 
-  const [year, setYear] = useState<number | null>(null);
+  // Reporting-year dropdown state — mirrors the ESG flow: pick an existing
+  // report (jumps to its coverage) or "+ Add new…" → year picker.
+  const [customYear, setCustomYear] = useState<number | null>(null);
+  const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
+    existingReports.length === 0,
+  );
   const [quarter, setQuarter] = useState<Quarter>('Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
@@ -96,6 +127,44 @@ export default function QuarterlyReportForm({
   const genRequestIdRef = useRef(0);
 
   const allSelected = selectedAreas.length === QUARTERLY_AREAS.length;
+
+  // When the parent finishes loading the reports list, jump straight to the
+  // year picker if there are no existing quarterly reports yet. Runs once.
+  const didInitPeriod = useRef(false);
+  useEffect(() => {
+    if (periodsLoading || didInitPeriod.current) return;
+    didInitPeriod.current = true;
+    if (existingReports.length === 0) setIsAddingNewPeriod(true);
+  }, [periodsLoading, existingReports.length]);
+
+  // --- Reporting-year dropdown handlers (mirror ESG) -----------------------
+  const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === ADD_NEW_SENTINEL) {
+      setIsAddingNewPeriod(true);
+      return;
+    }
+    // Picking an existing quarterly report opens its coverage page.
+    if (value) navigate(`/quarterly-report/${value}/coverage`);
+  };
+
+  const pickCustomYear = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const picked = Number(e.target.value);
+    if (!picked) return;
+    setCustomYear(picked);
+    setIsAddingNewPeriod(false);
+  };
+
+  const cancelAddNewPeriod = () => setIsAddingNewPeriod(false);
+  const clearCustomYear = () => setCustomYear(null);
+
+  // Years already taken by an existing quarterly report — greyed out in the
+  // year picker, mirroring the ESG dropdown.
+  const usedYears = new Set<number>(
+    existingReports
+      .map((r) => yearFromPeriod(r.period))
+      .filter((y): y is number => y != null),
+  );
 
   const toggleArea = (key: string) => {
     setSelectedAreas((prev) =>
@@ -163,10 +232,14 @@ export default function QuarterlyReportForm({
   const hasFiles = files.length > 0;
   const hasAreas = selectedAreas.length > 0;
   const canGenerate =
-    !!companyId && year != null && hasFiles && hasAreas && !isSubmittingGenerate;
+    !!companyId &&
+    customYear != null &&
+    hasFiles &&
+    hasAreas &&
+    !isSubmittingGenerate;
 
   const disabledReason =
-    year == null
+    customYear == null
       ? 'Select a reporting year to continue'
       : !hasAreas
         ? 'Select at least one report area to continue'
@@ -175,7 +248,7 @@ export default function QuarterlyReportForm({
           : undefined;
 
   const triggerGenerate = () => {
-    if (!canGenerate || !companyId || year == null) return;
+    if (!canGenerate || !companyId || customYear == null) return;
 
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
@@ -184,7 +257,7 @@ export default function QuarterlyReportForm({
     reportsApi
       .generateQuarterly(companyId, {
         files,
-        year,
+        year: customYear,
         quarter,
         areas: selectedAreas,
       })
@@ -200,7 +273,7 @@ export default function QuarterlyReportForm({
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
           reportType: 'quarterly',
-          period: `${quarter} ${year}`,
+          period: `${quarter} ${customYear}`,
         };
         navigate('/reports/processing', { state: processingState });
       })
@@ -294,22 +367,113 @@ export default function QuarterlyReportForm({
         >
           <div>
             <label className="fl-label">Reporting Year</label>
-            <select
-              className="inp sel"
-              value={year ?? ''}
-              onChange={(e) =>
-                setYear(e.target.value ? Number(e.target.value) : null)
-              }
-            >
-              <option value="" disabled>
-                Select year…
-              </option>
-              {yearPickerOptions().map((y) => (
-                <option key={y} value={y}>
-                  {y}
+            {periodsLoading ? (
+              <select className="inp sel" disabled>
+                <option>Loading reporting years…</option>
+              </select>
+            ) : customYear != null ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <div
+                  className="inp sel"
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: '#1A1D2E' }}>
+                    {customYear}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#4040C8',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.5px',
+                    }}
+                  >
+                    New report
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearCustomYear}
+                  aria-label="Change year"
+                  title="Change year"
+                  style={{
+                    width: 38,
+                    border: '1px solid #E5E7EF',
+                    background: '#fff',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    color: '#5A6080',
+                    fontSize: 16,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ) : isAddingNewPeriod ? (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <select
+                  className="inp sel"
+                  value=""
+                  onChange={pickCustomYear}
+                  style={{ flex: 1 }}
+                >
+                  <option value="" disabled>
+                    Select year…
+                  </option>
+                  {yearPickerOptions().map((y) => {
+                    const taken = usedYears.has(y);
+                    return (
+                      <option key={y} value={y} disabled={taken}>
+                        {taken ? `${y} — already has a report` : y}
+                      </option>
+                    );
+                  })}
+                </select>
+                {existingReports.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={cancelAddNewPeriod}
+                    aria-label="Cancel"
+                    title="Cancel"
+                    style={{
+                      width: 38,
+                      border: '1px solid #E5E7EF',
+                      background: '#fff',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      color: '#5A6080',
+                      fontSize: 16,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select
+                className="inp sel"
+                value=""
+                onChange={handlePeriodChange}
+              >
+                <option value="" disabled>
+                  Select a reporting year…
                 </option>
-              ))}
-            </select>
+                {existingReports.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {formatPeriod(r.period)}
+                  </option>
+                ))}
+                <option value={ADD_NEW_SENTINEL}>+ Add new…</option>
+              </select>
+            )}
           </div>
 
           <div>

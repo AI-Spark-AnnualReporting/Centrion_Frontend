@@ -292,8 +292,9 @@ export default function ReportsPage() {
         const list = (data?.reports ?? []).filter((r) => r && r.period);
         list.sort((a, b) => b.period.localeCompare(a.period));
         setExistingReports(list);
-        // If the company has no reports yet, jump straight to the year picker.
-        setIsAddingNewPeriod(list.length === 0);
+        // If the company has no ESG reports yet, jump straight to the year
+        // picker (quarterly reports live in their own tab/dropdown).
+        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r)));
       })
       .catch(() => {
         if (!cancelled) {
@@ -367,10 +368,14 @@ export default function ReportsPage() {
     setCustomYear(null);
   };
 
-  // Years already taken by an existing report — blocked in the year picker
+  // ESG reports only — the ESG year dropdown and gallery must not surface
+  // quarterly reports (those have their own tab and dropdown).
+  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r));
+
+  // Years already taken by an existing ESG report — blocked in the year picker
   // so one ESG report per year is enforced.
   const usedYears = new Set<number>(
-    existingReports
+    esgReports
       .map((r) => yearFromPeriod(r.period))
       .filter((y): y is number => y != null),
   );
@@ -782,7 +787,11 @@ export default function ReportsPage() {
         const quarterlyReportsList = existingReports.filter(isQuarterlyReport);
         return (
           <>
-            <QuarterlyReportForm companyId={companyId} />
+            <QuarterlyReportForm
+              companyId={companyId}
+              existingReports={quarterlyReportsList}
+              periodsLoading={periodsLoading}
+            />
 
             {quarterlyReportsList.length > 0 && (
               <div style={{ marginTop: 24 }}>
@@ -947,7 +956,7 @@ export default function ReportsPage() {
                     onChange={handlePeriodChange}
                   >
                     <option value="" disabled>Select a reporting year…</option>
-                    {existingReports.map((r) => (
+                    {esgReports.map((r) => (
                       <option key={r.id} value={r.id}>{formatPeriod(r.period)}</option>
                     ))}
                     <option value={ADD_NEW_SENTINEL}>+ Add new…</option>
