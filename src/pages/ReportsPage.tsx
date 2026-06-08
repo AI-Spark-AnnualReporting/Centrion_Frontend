@@ -786,9 +786,6 @@ export default function ReportsPage() {
 
             {quarterlyReportsList.length > 0 && (
               <div style={{ marginTop: 24 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 12 }}>
-                  Past quarterly reports
-                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
                     const score = Math.round(r.coverage?.percentage ?? 0);

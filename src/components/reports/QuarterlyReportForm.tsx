@@ -80,6 +80,9 @@ export default function QuarterlyReportForm({
 }: QuarterlyReportFormProps) {
   const navigate = useNavigate();
 
+  // Collapsible card — mirrors the ESG "Validate Report" card, open by default.
+  const [genOpen, setGenOpen] = useState(true);
+
   const [year, setYear] = useState<number | null>(null);
   const [quarter, setQuarter] = useState<Quarter>('Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
@@ -214,15 +217,17 @@ export default function QuarterlyReportForm({
 
   return (
     <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
-      {/* Header — matches the ESG "Validate Report" card */}
+      {/* Header — matches the ESG "Validate Report" card (collapsible) */}
       <div
         style={{
           padding: '16px 20px',
           display: 'flex',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
-          borderBottom: '1px solid #ECEEF8',
+          cursor: 'pointer',
+          borderBottom: genOpen ? '1px solid #ECEEF8' : 'none',
         }}
+        onClick={() => setGenOpen(!genOpen)}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
@@ -245,19 +250,38 @@ export default function QuarterlyReportForm({
           </div>
           <div>
             <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>
-              New Quarterly Report
+              Validate Quarterly Report
             </div>
             <div style={{ fontSize: 11, color: '#5A6080' }}>
-              Select the reporting period and the areas to generate. We compare
-              year-over-year and year-to-date.
+              Configure parameters &amp; upload source documents
             </div>
           </div>
         </div>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
-          AI Powered
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
+            AI Powered
+          </span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            style={{
+              transform: genOpen ? 'rotate(180deg)' : 'rotate(0)',
+              transition: '.2s',
+            }}
+          >
+            <path
+              d="M3 5l4 4 4-4"
+              stroke="#5A6080"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
       </div>
 
+      {genOpen && (
       <div style={{ padding: '18px 20px' }}>
         {/* Reporting period */}
         <div
@@ -477,38 +501,34 @@ export default function QuarterlyReportForm({
             onDrop={handleDrop}
             className="upload-z"
             style={{
-              padding: '26px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              textAlign: 'left',
+              padding: '16px 20px',
+              cursor: 'pointer',
               borderColor: isDragging ? '#4040C8' : undefined,
               background: isDragging ? 'rgba(64,64,200,.06)' : undefined,
             }}
           >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 20 20"
-              fill="none"
-              style={{ display: 'block', margin: '0 auto 8px' }}
-            >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path
                 d="M10 3v10M6 7l4-4 4 4"
-                stroke="#4040C8"
+                stroke="#9BA3C4"
                 strokeWidth="1.5"
                 strokeLinecap="round"
               />
               <path
                 d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2"
-                stroke="#4040C8"
+                stroke="#9BA3C4"
                 strokeWidth="1.5"
                 strokeLinecap="round"
               />
             </svg>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#4040C8' }}>
-              Drag &amp; drop files here, or browse
-            </div>
-            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 4 }}>
-              PDF, DOCX, XLSX, CSV · financial statements · prior-year report ·
-              management notes
-            </div>
+            <span style={{ fontSize: 12, color: '#5A6080' }}>
+              Click to upload or drag &amp; drop financial statements, prior-year
+              report, management notes
+            </span>
           </div>
 
           {files.length > 0 && (
@@ -684,6 +704,7 @@ export default function QuarterlyReportForm({
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }
