@@ -1,52 +1,53 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { reports as reportsApi } from '@/lib/api';
+import type { QuarterlyReportArea } from '@/lib/api';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
 // Quarter options for the reporting-period selector.
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
 type Quarter = (typeof QUARTERS)[number];
 
-// Report areas — `key` is the snake_case slug sent to the backend in `areas[]`.
-// If the backend enum differs, this is the only place to adjust.
-const QUARTERLY_AREAS = [
-  {
-    key: 'key_highlights',
-    title: 'Key Highlights',
-    desc: "Executive summary of the quarter's results and narrative.",
-    meta: '6 METRICS',
-  },
-  {
-    key: 'income_statement',
-    title: 'Income Statement Review',
-    desc: 'Revenue, costs, operating & net income performance.',
-    meta: '9 METRICS',
-  },
-  {
-    key: 'balance_sheet',
-    title: 'Balance Sheet Review',
-    desc: 'Assets, liabilities, equity and liquidity position.',
-    meta: '7 METRICS',
-  },
-  {
-    key: 'shareholder_returns',
-    title: 'Shareholder Returns',
-    desc: 'Dividends, gearing, ROACE and capital allocation.',
-    meta: '5 METRICS',
-  },
-  {
-    key: 'outlook',
-    title: 'Outlook',
-    desc: 'Forward guidance and management commentary.',
-    meta: '3 METRICS',
-  },
-  {
-    key: 'financial_tables',
-    title: 'Financial Tables',
-    desc: 'YoY + YTD comparative statements, fully tabulated.',
-    meta: 'TABULAR · YOY + YTD',
-  },
-] as const;
+// The list of report areas comes from the API (source of truth) — see
+// reportsApi.getQuarterlyReportAreas. The API does NOT return per-area
+// descriptions, so this code → subtitle map supplies the gray copy. Codes
+// without an entry simply render no subtitle.
+const AREA_DESCRIPTIONS: Record<string, string> = {
+  highlights: "Executive summary of the quarter's results and narrative.",
+  income_review: 'Revenue, costs, operating & net income performance.',
+  balance_sheet_review: 'Assets, liabilities, equity and liquidity position.',
+};
+
+// A card as rendered in the grid — API area joined with frontend copy.
+interface AreaCard {
+  key: string;
+  title: string;
+  desc: string;
+  meta: string;
+  metricCount: number;
+  metrics: string[];
+}
+
+function toAreaCard(area: QuarterlyReportArea): AreaCard {
+  return {
+    key: area.code,
+    title: area.title,
+    desc: AREA_DESCRIPTIONS[area.code] ?? '',
+    meta: `${area.metric_count} ${area.metric_count === 1 ? 'METRIC' : 'METRICS'}`,
+    metricCount: area.metric_count,
+    metrics: area.metrics ?? [],
+  };
+}
+
+// Humanise a snake_case metric slug for display, e.g.
+// "cash_and_equivalents" → "Cash And Equivalents".
+function humaniseMetric(slug: string): string {
+  return slug
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 // Accepted upload types for quarterly financial documents.
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.xlsx', '.csv'] as const;
@@ -118,6 +119,13 @@ export default function QuarterlyReportForm({
   const [quarter, setQuarter] = useState<Quarter>('Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
+  // Report areas come from the API — the source of truth for which cards show.
+  const [areas, setAreas] = useState<AreaCard[]>([]);
+  const [areasLoading, setAreasLoading] = useState(true);
+  const [areasError, setAreasError] = useState<string | null>(null);
+  // Area whose full metric list is shown in the popup (null = closed).
+  const [metricsModal, setMetricsModal] = useState<AreaCard | null>(null);
+
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +134,52 @@ export default function QuarterlyReportForm({
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
-  const allSelected = selectedAreas.length === QUARTERLY_AREAS.length;
+  const allSelected =
+    areas.length > 0 && selectedAreas.length === areas.length;
+
+  // Fetch the report-area cards once on mount. The list is company-agnostic.
+  useEffect(() => {
+    let cancelled = false;
+    setAreasLoading(true);
+    setAreasError(null);
+    reportsApi
+      .getQuarterlyReportAreas()
+      .then((res) => {
+        if (cancelled) return;
+        setAreas((res.areas ?? []).map(toAreaCard));
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setAreasError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load report areas. Please retry.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setAreasLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Close the metrics popup on Escape.
+  useEffect(() => {
+    if (!metricsModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMetricsModal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [metricsModal]);
+
+  // Drop any selected codes that the API no longer returns (defensive — keeps
+  // the generate payload in sync with the rendered cards).
+  const areaKeys = useMemo(() => new Set(areas.map((a) => a.key)), [areas]);
+  useEffect(() => {
+    setSelectedAreas((prev) => prev.filter((k) => areaKeys.has(k)));
+  }, [areaKeys]);
 
   // When the parent finishes loading the reports list, jump straight to the
   // year picker if there are no existing quarterly reports yet. Runs once.
@@ -173,7 +226,7 @@ export default function QuarterlyReportForm({
   };
 
   const toggleSelectAll = () => {
-    setSelectedAreas(allSelected ? [] : QUARTERLY_AREAS.map((a) => a.key));
+    setSelectedAreas(allSelected ? [] : areas.map((a) => a.key));
   };
 
   // --- File handling (multiple) -------------------------------------------
@@ -506,23 +559,49 @@ export default function QuarterlyReportForm({
               Report Areas{' '}
               <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
             </label>
-            <button
-              type="button"
-              onClick={toggleSelectAll}
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#4040C8',
-                background: 'transparent',
-                border: 0,
-                cursor: 'pointer',
-                padding: 0,
-              }}
-            >
-              {allSelected ? 'Clear all' : 'Select all'}
-            </button>
+            {areas.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleSelectAll}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#4040C8',
+                  background: 'transparent',
+                  border: 0,
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                {allSelected ? 'Clear all' : 'Select all'}
+              </button>
+            )}
           </div>
 
+          {areasLoading ? (
+            <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
+              Loading report areas…
+            </div>
+          ) : areasError ? (
+            <div
+              role="alert"
+              style={{
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: 'rgba(229,72,77,.08)',
+                border: '1px solid rgba(229,72,77,.25)',
+                color: '#B33A3E',
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {areasError}
+            </div>
+          ) : areas.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
+              No report areas available.
+            </div>
+          ) : (
           <div
             style={{
               display: 'grid',
@@ -530,13 +609,21 @@ export default function QuarterlyReportForm({
               gap: 10,
             }}
           >
-            {QUARTERLY_AREAS.map((area) => {
+            {areas.map((area) => {
               const active = selectedAreas.includes(area.key);
               return (
-                <button
+                <div
                   key={area.key}
-                  type="button"
-                  onClick={() => toggleArea(area.key)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setMetricsModal(area)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMetricsModal(area);
+                    }
+                  }}
+                  title="View metrics"
                   className={`fw-chip ${active ? 'sel' : ''}`}
                   style={{
                     flexDirection: 'column',
@@ -544,6 +631,7 @@ export default function QuarterlyReportForm({
                     gap: 6,
                     padding: '12px 14px',
                     textAlign: 'left',
+                    cursor: 'pointer',
                     background: active ? '#EEEEFF' : '#fff',
                   }}
                 >
@@ -564,13 +652,26 @@ export default function QuarterlyReportForm({
                     >
                       {area.title}
                     </span>
-                    <span
-                      aria-hidden
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={active}
+                      aria-label={
+                        active
+                          ? `Deselect ${area.title}`
+                          : `Select ${area.title}`
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleArea(area.key);
+                      }}
                       style={{
                         width: 18,
                         height: 18,
+                        padding: 0,
                         borderRadius: 5,
                         flexShrink: 0,
+                        cursor: 'pointer',
                         border: active ? 'none' : '1.5px solid #C9CDE4',
                         background: active ? '#4040C8' : '#fff',
                         display: 'flex',
@@ -594,17 +695,19 @@ export default function QuarterlyReportForm({
                           />
                         </svg>
                       )}
-                    </span>
+                    </button>
                   </div>
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      color: '#5A6080',
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {area.desc}
-                  </span>
+                  {area.desc && (
+                    <span
+                      style={{
+                        fontSize: 11.5,
+                        color: '#5A6080',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {area.desc}
+                    </span>
+                  )}
                   <span
                     style={{
                       fontSize: 10,
@@ -616,10 +719,11 @@ export default function QuarterlyReportForm({
                   >
                     {area.meta}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>
+          )}
         </div>
 
         {/* Upload */}
@@ -868,6 +972,136 @@ export default function QuarterlyReportForm({
           </button>
         </div>
       </div>
+      )}
+
+      {/* Metrics popup — opened by clicking a report-area card. */}
+      {metricsModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${metricsModal.title} metrics`}
+          onClick={() => setMetricsModal(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(560px, 100%)',
+              maxHeight: '80vh',
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#fff',
+              borderRadius: 14,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '18px 20px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div>
+                <div
+                  style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}
+                >
+                  {metricsModal.title}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '.5px',
+                    color: '#9BA3C4',
+                    marginTop: 3,
+                  }}
+                >
+                  {metricsModal.meta}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMetricsModal(null)}
+                aria-label="Close"
+                title="Close"
+                style={{
+                  width: 30,
+                  height: 30,
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid #E5E7EF',
+                  background: '#fff',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  color: '#5A6080',
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M2 2l8 8M10 2l-8 8"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body — metric pills */}
+            <div style={{ padding: '16px 20px', overflowY: 'auto' }}>
+              {metricsModal.metrics.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#9BA3C4' }}>
+                  No metrics listed for this area.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  {metricsModal.metrics.map((m) => (
+                    <span
+                      key={m}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '6px 12px',
+                        borderRadius: 999,
+                        background: '#F4F5FB',
+                        border: '1px solid #ECEEF8',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#3A3F5C',
+                      }}
+                    >
+                      {humaniseMetric(m)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

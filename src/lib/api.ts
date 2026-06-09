@@ -260,6 +260,20 @@ export interface GenerateQuarterlyBody {
   areas?: string[]; // snake_case slugs; omit/empty when none selected
 }
 
+// One selectable "Report Area" card on the Generate Quarterly Report screen.
+// The API is the source of truth for which areas exist — render cards from it,
+// never hardcode. `code` is the value submitted in `areas[]`.
+export interface QuarterlyReportArea {
+  code: string;
+  title: string;
+  metric_count: number;
+  metrics: string[];
+}
+
+export interface QuarterlyReportAreasResponse {
+  areas: QuarterlyReportArea[];
+}
+
 // Loose aliases for values sourced from API lookups.
 export type Jurisdiction = string;
 export type AgentClass =
@@ -706,6 +720,13 @@ export const reports = {
       fd,
     );
   },
+
+  // Source of truth for the Report Area cards. Company-agnostic; render the
+  // returned `areas` dynamically (do NOT hardcode the card list).
+  getQuarterlyReportAreas: () =>
+    request<QuarterlyReportAreasResponse>(
+      `/api/v1/reports/quarterly/report-areas`,
+    ),
 
   // Async: see generate(). Stamps report_type='quarterly' server-side so the
   // worker routes to the financial parser instead of the ESG harvester.
