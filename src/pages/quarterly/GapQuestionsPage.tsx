@@ -186,7 +186,9 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
+        // Slightly shorter than the content area so a gray gap sits below the
+        // card — the fixed chat button floats there, clear of the footer CTA.
+        height: 'calc(100% - 48px)',
         background: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
@@ -343,7 +345,7 @@ export default function GapQuestionsPage() {
           <p style={{ fontSize: 13, color: MUTED, marginBottom: 24 }}>
             The Coverage Map found drivers for all extracted figures.
           </p>
-          <button className="bp" onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
+          <button className="btn bp" style={{ padding: '10px 20px' }} onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
             Continue to preview →
           </button>
         </div>
@@ -517,10 +519,10 @@ export default function GapQuestionsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span style={{ fontSize: 11, color: MUTED }}>⌘+Enter to save &amp; continue</span>
                   <button
-                    className="bp"
+                    className="btn bp"
                     onClick={handleSave}
                     disabled={saving || !gap.answer.trim()}
-                    style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, opacity: saving || !gap.answer.trim() ? 0.55 : 1 }}
+                    style={{ fontSize: 13, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 8, opacity: saving || !gap.answer.trim() ? 0.55 : 1 }}
                   >
                     {saving && (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
@@ -543,8 +545,8 @@ export default function GapQuestionsPage() {
       </div>
 
       {/* Footer bar — fixed at bottom */}
-      <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #E5E7EF', padding: '10px 200px 10px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <button className="bs" style={{ fontSize: 13 }} onClick={() => navigate(`/quarterly-report/${reportId}/coverage`)}>
+      <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #E5E7EF', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+        <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/coverage`)}>
           ← Back to coverage
         </button>
 

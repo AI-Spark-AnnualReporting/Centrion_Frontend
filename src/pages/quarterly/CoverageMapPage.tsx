@@ -609,7 +609,7 @@ export default function CoverageMapPage() {
   const allCovered = data != null && needsCount === 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: '#fff', borderRadius: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', background: '#fff', borderRadius: 12, marginBottom: 48 }}>
       {reportId && <QuarterlyReportStepper activeStep={4} reportId={reportId} />}
 
       <div style={{ flex: 1, padding: '22px 28px 16px' }}>
@@ -705,7 +705,7 @@ export default function CoverageMapPage() {
             <p style={{ fontSize: 13, color: MUTED, marginBottom: 20 }}>
               No figures were extracted from these documents.
             </p>
-            <button className="bs" onClick={() => navigate('/reports')}>
+            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports')}>
               ← Back to Reports
             </button>
           </div>
@@ -849,23 +849,29 @@ export default function CoverageMapPage() {
         )}
       </div>
 
-      {/* Footer bar */}
+      {/* Footer bar — the bottom of the white card (not pinned). It scrolls
+          with the page and appears once you reach the bottom. The card's
+          bottom margin leaves a gray gap below it so the fixed chat button
+          floats clear of this bar. */}
       {data && data.summary.figures_extracted > 0 && (
         <div
           style={{
-            position: 'sticky',
-            bottom: 0,
             background: '#fff',
             borderTop: '1px solid #E5E7EF',
-            padding: '10px 200px 10px 28px',
+            borderBottomLeftRadius: 12,
+            borderBottomRightRadius: 12,
+            padding: '12px 28px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 16,
-            zIndex: 10,
           }}
         >
-          <button className="bs" style={{ fontSize: 13 }} onClick={() => navigate('/reports')}>
+          <button
+            className="btn bs"
+            style={{ fontSize: 13, padding: '10px 18px' }}
+            onClick={() => navigate('/reports')}
+          >
             ← Back
           </button>
 
