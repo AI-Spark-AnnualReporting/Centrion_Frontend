@@ -22,7 +22,13 @@ import type {
   PipelineConflictBody,
   PipelineHandle,
 } from "@/types/report";
-import type { QuarterlyCoverageResponse, GapsResponse } from "@/types/quarterly";
+import type {
+  QuarterlyCoverageResponse,
+  GapsResponse,
+  QuarterlyPreviewReport,
+  QuarterlyPreviewResponse,
+  PreviewSentenceUpdateResponse,
+} from "@/types/quarterly";
 import type {
   CreateMeetingBody,
   MeetingListResponse,
@@ -794,6 +800,36 @@ export const quarterlyReports = {
     request<{ figure: import("@/types/quarterly").CoverageFigure }>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}/driver`,
       { method: "POST", body },
+    ),
+
+  // ── Preview (step 6) ──
+  // Compose the report with the AI agent. Runs synchronously (~30–60s) and
+  // persists the result server-side, returning the full payload. Re-calling
+  // regenerates and OVERWRITES (discards inline edits) — use for "Regenerate".
+  generatePreview: (companyId: string, reportId: string) =>
+    request<QuarterlyPreviewReport>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview/generate`,
+      { method: "POST" },
+    ),
+
+  // Cheap read of the saved report. Returns { generated: false, sections: null }
+  // if never generated — call generatePreview() in that case.
+  getPreview: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<QuarterlyPreviewResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview`,
+      { signal },
+    ),
+
+  // Save one inline sentence edit. 422 if text empty; 404 if the ids don't
+  // exist. Returns the updated sentence and the report's new word_count.
+  updatePreviewSentence: (
+    companyId: string,
+    reportId: string,
+    body: { section_id: string; sentence_id: string; text: string },
+  ) =>
+    request<PreviewSentenceUpdateResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview/sentence`,
+      { method: "PATCH", body },
     ),
 };
 
