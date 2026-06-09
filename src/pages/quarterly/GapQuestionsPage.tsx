@@ -431,19 +431,14 @@ export default function GapQuestionsPage() {
         <div style={{ minHeight: 0, overflowY: 'auto' }}>
           {gap && (
             <div className="card" style={{ padding: '22px 24px' }}>
-              {/* Top row: statement pill + counter + code */}
+              {/* Top row: statement pill + counter */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: 'rgba(64,64,200,.08)', color: ACCENT, textTransform: 'capitalize' }}>
                   • {gap.statement.replace(/_/g, ' ')}
                 </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, color: MUTED }}>
-                    Question {currentIndex + 1} of {total}
-                  </span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: ACCENT }}>
-                    {gap.code}
-                  </span>
-                </div>
+                <span style={{ fontSize: 12, color: MUTED }}>
+                  Question {currentIndex + 1} of {total}
+                </span>
               </div>
 
               {/* Figure block */}

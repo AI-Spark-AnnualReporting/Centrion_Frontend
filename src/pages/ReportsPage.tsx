@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
 import {
-  clearActivePipeline,
   loadActivePipeline,
   type ActivePipelineRecord,
 } from '@/lib/active-pipeline';
@@ -256,8 +255,24 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
 
+  // A hand-off can request a specific tab (e.g. "Run in background" on a
+  // quarterly run returns here and wants the Quarterly tab active). Clear the
+  // hint afterwards so a refresh / back doesn't re-pin the tab.
+  useEffect(() => {
+    const tab = (location.state as { tab?: 'esg' | 'quarterly' } | null)?.tab;
+    if (tab === 'quarterly' || tab === 'esg') {
+      setActiveTab(tab);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
+  // Per-quarterly-report driver coverage % (the list endpoint doesn't carry it;
+  // it lives in the quarterly coverage endpoint). Keyed by report id.
+  const [quarterlyCoverage, setQuarterlyCoverage] = useState<Record<string, number>>({});
+  const [quarterlyCoverageLoading, setQuarterlyCoverageLoading] = useState(false);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
   // picking "+ Add new…" + a year puts the form into create-new mode.
@@ -309,6 +324,40 @@ export default function ReportsPage() {
       cancelled = true;
     };
   }, [companyId]);
+
+  // Load real driver coverage for each quarterly report so the cards aren't all
+  // stuck at 0% (the list endpoint omits it). One coverage call per report.
+  useEffect(() => {
+    if (!companyId) {
+      setQuarterlyCoverage({});
+      return;
+    }
+    const quarterlies = existingReports.filter(isQuarterlyReport);
+    if (quarterlies.length === 0) {
+      setQuarterlyCoverage({});
+      return;
+    }
+    let cancelled = false;
+    setQuarterlyCoverageLoading(true);
+    Promise.allSettled(
+      quarterlies.map((r) =>
+        quarterlyReports
+          .getCoverage(companyId, r.id)
+          .then((cov) => ({ id: r.id, pct: cov.summary.driver_coverage_pct })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const res of results) {
+        if (res.status === 'fulfilled') next[res.value.id] = res.value.pct;
+      }
+      setQuarterlyCoverage(next);
+      setQuarterlyCoverageLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, existingReports]);
 
   const applyReportToForm = (report: ReportSummary) => {
     const cfg = report.generation_config ?? {};
@@ -734,25 +783,6 @@ export default function ReportsPage() {
           <button
             type="button"
             onClick={() => {
-              clearActivePipeline();
-              setResumableRun(null);
-            }}
-            style={{
-              padding: '6px 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#5A6080',
-              background: 'transparent',
-              border: '1px solid #E2E4F0',
-              borderRadius: 6,
-              cursor: 'pointer',
-            }}
-          >
-            Dismiss
-          </button>
-          <button
-            type="button"
-            onClick={() => {
               navigate('/reports/processing', {
                 state: {
                   runId: resumableRun.runId,
@@ -797,7 +827,13 @@ export default function ReportsPage() {
               <div style={{ marginTop: 24 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
-                    const score = Math.round(r.coverage?.percentage ?? 0);
+                    // Coverage % is fetched per report; show a shimmer until it
+                    // resolves rather than flashing a misleading 0%.
+                    const coveragePending =
+                      quarterlyCoverageLoading && quarterlyCoverage[r.id] === undefined;
+                    const score = Math.round(
+                      quarterlyCoverage[r.id] ?? r.coverage?.percentage ?? 0,
+                    );
                     const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
                     return (
                       <div
@@ -821,13 +857,19 @@ export default function ReportsPage() {
                           <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'Quarterly Report'}</div>
                           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                              <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
+                              {coveragePending ? (
+                                <span className="skel-dark" style={{ display: 'inline-block', width: 52, height: 26, borderRadius: 6 }} />
+                              ) : (
+                                <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
+                              )}
                               <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
                             </div>
-                            <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                            {!coveragePending && (
+                              <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                            )}
                           </div>
                           <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
-                            <div style={{ width: `${score}%`, height: '100%', background: '#22C55E' }} />
+                            <div style={{ width: coveragePending ? '0%' : `${score}%`, height: '100%', background: '#22C55E', transition: 'width .3s ease' }} />
                           </div>
                           <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>DRIVER COVERAGE</div>
                         </div>

@@ -1,5 +1,3 @@
-import { useNavigate } from 'react-router-dom';
-
 interface QuarterlyReportStepperProps {
   activeStep: number; // 1-based
   reportId: string;
@@ -70,16 +68,7 @@ function StepCircle({
   );
 }
 
-function stepRouteFor(index: number, reportId: string): string | null {
-  // Steps 1-3 (Period/Documents/Extraction) all live in the report form page.
-  if (index < 3) return '/reports';
-  if (index === 3) return `/quarterly-report/${reportId}/coverage`;
-  if (index === 4) return `/quarterly-report/${reportId}/gaps`;
-  return null; // Preview, Export not yet implemented
-}
-
-export function QuarterlyReportStepper({ activeStep, reportId }: QuarterlyReportStepperProps) {
-  const navigate = useNavigate();
+export function QuarterlyReportStepper({ activeStep }: QuarterlyReportStepperProps) {
   const activeIndex = activeStep - 1; // convert to 0-based
 
   return (
@@ -94,24 +83,19 @@ export function QuarterlyReportStepper({ activeStep, reportId }: QuarterlyReport
         {STEPS.map((step, i) => {
           const state: 'done' | 'active' | 'inactive' =
             i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'inactive';
-          const isClickable = state === 'done';
-          const route = stepRouteFor(i, reportId);
 
           return (
             <div key={step.label} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 'none' }}>
-              {/* Step node */}
+              {/* Step node — display only, not interactive */}
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 4,
-                  cursor: isClickable && route ? 'pointer' : 'default',
+                  cursor: 'default',
                   opacity: state === 'inactive' ? 0.45 : 1,
                   transition: 'opacity 0.15s',
-                }}
-                onClick={() => {
-                  if (isClickable && route) navigate(route);
                 }}
               >
                 <StepCircle state={state} index={i} />

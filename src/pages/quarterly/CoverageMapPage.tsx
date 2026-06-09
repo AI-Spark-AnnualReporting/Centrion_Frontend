@@ -705,7 +705,7 @@ export default function CoverageMapPage() {
             <p style={{ fontSize: 13, color: MUTED, marginBottom: 20 }}>
               No figures were extracted from these documents.
             </p>
-            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports')}>
+            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}>
               ← Back to Reports
             </button>
           </div>
@@ -718,7 +718,7 @@ export default function CoverageMapPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridTemplateColumns: 'repeat(3, 1fr)',
                 gap: 14,
                 marginBottom: 18,
               }}
@@ -742,12 +742,15 @@ export default function CoverageMapPage() {
                 sub="Needs input"
                 highlight={data.summary.reason_missing > 0}
               />
+              {/* Hidden for now — restore (and set the grid back to 4 columns)
+                  to bring the "Comparatives matched" card back.
               <SummaryCard
                 icon={<ChartIcon />}
                 title="Comparatives matched"
                 value={`${data.summary.comparatives_matched}/${data.summary.comparatives_total}`}
                 sub={`${data.summary.comparatives_missing_prior} missing prior year`}
               />
+              */}
             </div>
 
             {/* Driver coverage bar */}
@@ -870,7 +873,7 @@ export default function CoverageMapPage() {
           <button
             className="btn bs"
             style={{ fontSize: 13, padding: '10px 18px' }}
-            onClick={() => navigate('/reports')}
+            onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}
           >
             ← Back
           </button>
