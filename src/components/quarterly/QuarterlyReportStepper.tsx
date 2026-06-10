@@ -10,7 +10,6 @@ const STEPS = [
   { label: 'Coverage' },
   { label: 'Gaps' },
   { label: 'Preview' },
-  { label: 'Export' },
 ];
 
 const ACCENT = '#4040C8';

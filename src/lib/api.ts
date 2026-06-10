@@ -820,6 +820,44 @@ export const quarterlyReports = {
       { signal },
     ),
 
+  // ── Export (step 7) ──
+  // Download the rendered report as a pdf or docx file. Auth-required and returns
+  // a binary attachment, so we use fetchWithAuth (raw Response) + a blob download
+  // rather than the JSON-parsing request<T>(). Requires the preview to exist.
+  downloadExport: async (
+    companyId: string,
+    reportId: string,
+    format: "pdf" | "docx",
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(
+        reportId,
+      )}/export?format=${format}`,
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(filename || "quarterly-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   // Save one inline sentence edit. 422 if text empty; 404 if the ids don't
   // exist. Returns the updated sentence and the report's new word_count.
   updatePreviewSentence: (
