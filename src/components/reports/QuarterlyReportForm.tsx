@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reports as reportsApi } from '@/lib/api';
+import { reports as reportsApi, ApiError } from '@/lib/api';
 import type { QuarterlyReportArea } from '@/lib/api';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
@@ -52,6 +52,7 @@ function humaniseMetric(slug: string): string {
 // Accepted upload types for quarterly financial documents.
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.xlsx', '.csv'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
+const MAX_DOCUMENTS = 5;
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -128,6 +129,7 @@ export default function QuarterlyReportForm({
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [genError, setGenError] = useState<string | null>(null);
@@ -163,6 +165,13 @@ export default function QuarterlyReportForm({
       cancelled = true;
     };
   }, []);
+
+  // Auto-dismiss the file-cap warning after 3 s.
+  useEffect(() => {
+    if (!showFileCapWarning) return;
+    const t = setTimeout(() => setShowFileCapWarning(false), 3000);
+    return () => clearTimeout(t);
+  }, [showFileCapWarning]);
 
   // Close the metrics popup on Escape.
   useEffect(() => {
@@ -258,6 +267,10 @@ export default function QuarterlyReportForm({
             merged.push(f);
           }
         });
+        if (merged.length > MAX_DOCUMENTS) {
+          setShowFileCapWarning(true);
+          return merged.slice(0, MAX_DOCUMENTS);
+        }
         return merged;
       });
     }
@@ -279,6 +292,7 @@ export default function QuarterlyReportForm({
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+    setGenError(null);
   };
 
   // --- Submit --------------------------------------------------------------
@@ -333,11 +347,15 @@ export default function QuarterlyReportForm({
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        setGenError(
-          err instanceof Error
-            ? err.message
-            : 'Generation failed. Please try again.',
-        );
+        let msg = 'Generation failed. Please try again.';
+        if (err instanceof ApiError) {
+          const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
+          if (typeof body?.detail === 'string') msg = body.detail;
+          else if (Array.isArray(body?.detail) && body.detail[0]?.msg) msg = body.detail[0].msg;
+        } else if (err instanceof Error) {
+          msg = err.message;
+        }
+        setGenError(msg);
       });
   };
 
@@ -738,7 +756,7 @@ export default function QuarterlyReportForm({
                 color: '#9BA3C4',
               }}
             >
-              (PDF, DOCX, XLSX, CSV — one or more)
+              (PDF, DOCX, XLSX, CSV — up to {MAX_DOCUMENTS})
             </span>
           </label>
 
@@ -802,8 +820,8 @@ export default function QuarterlyReportForm({
           {files.length > 0 && (
             <div
               style={{
-                display: 'flex',
-                flexDirection: 'column',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
                 gap: 8,
                 marginTop: 12,
               }}
@@ -811,20 +829,18 @@ export default function QuarterlyReportForm({
               {files.map((file, index) => (
                 <div
                   key={`${file.name}:${file.size}:${index}`}
-                  className="upload-z"
                   style={{
+                    position: 'relative',
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    cursor: 'default',
-                    borderStyle: 'solid',
-                    borderColor: '#4040C8',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: '10px 10px 8px',
+                    borderRadius: 8,
+                    border: '1px solid #4040C8',
                     background: 'rgba(64,64,200,.04)',
                   }}
                 >
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
                     <path
                       d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
                       stroke="#4040C8"
@@ -838,10 +854,10 @@ export default function QuarterlyReportForm({
                       strokeLinejoin="round"
                     />
                   </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ minWidth: 0, paddingRight: 16 }}>
                     <div
                       style={{
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: 700,
                         color: '#1A1D2E',
                         overflow: 'hidden',
@@ -851,9 +867,7 @@ export default function QuarterlyReportForm({
                     >
                       {file.name}
                     </div>
-                    <div
-                      style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}
-                    >
+                    <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
                       {formatBytes(file.size)}
                     </div>
                   </div>
@@ -863,8 +877,11 @@ export default function QuarterlyReportForm({
                     aria-label="Remove file"
                     title="Remove file"
                     style={{
-                      width: 22,
-                      height: 22,
+                      position: 'absolute',
+                      top: 6,
+                      right: 6,
+                      width: 16,
+                      height: 16,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -875,12 +892,7 @@ export default function QuarterlyReportForm({
                       color: '#9BA3C4',
                     }}
                   >
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 12 12"
-                      fill="none"
-                    >
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
                       <path
                         d="M2 2l8 8M10 2l-8 8"
                         stroke="currentColor"
@@ -972,6 +984,75 @@ export default function QuarterlyReportForm({
           </button>
         </div>
       </div>
+      )}
+
+      {/* File cap warning — auto-dismisses after 3 s */}
+      {showFileCapWarning && (
+        <div
+          onClick={() => setShowFileCapWarning(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1100,
+            background: 'rgba(20,22,40,.35)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(400px, 100%)',
+              background: '#fff',
+              borderRadius: 14,
+              boxShadow: '0 24px 60px rgba(20,22,40,.18)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '16px 20px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  background: 'rgba(229,72,77,.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#E5484D" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#E5484D" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>
+                File limit reached
+              </div>
+            </div>
+            {/* Body */}
+            <div style={{ padding: '14px 20px 18px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                A quarterly report accepts at most{' '}
+                <strong style={{ color: '#1A1D2E' }}>{MAX_DOCUMENTS} documents</strong>.
+                Only the first {MAX_DOCUMENTS} files have been kept.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Metrics popup — opened by clicking a report-area card. */}
