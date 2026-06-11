@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reports as reportsApi, ApiError } from '@/lib/api';
+import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
 import type { QuarterlyReportArea } from '@/lib/api';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
@@ -112,13 +112,21 @@ export default function QuarterlyReportForm({
   const [genOpen, setGenOpen] = useState(true);
 
   // Reporting-year dropdown state — mirrors the ESG flow: pick an existing
-  // report (jumps to its coverage) or "+ Add new…" → year picker.
+  // report or "+ Add new…" → year picker.
   const [customYear, setCustomYear] = useState<number | null>(null);
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
     existingReports.length === 0,
   );
   const [quarter, setQuarter] = useState<Quarter>('Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
+
+  // Existing-report mode — set when user picks an existing report from the dropdown.
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [existingSource, setExistingSource] = useState<'open' | 'upload'>('open');
+  // Coverage summary for the selected existing report (doc count + period label).
+  const [existingDocCount, setExistingDocCount] = useState<number | null>(null);
+  const [existingPeriodLabel, setExistingPeriodLabel] = useState<string | null>(null);
+  const [existingCoverageLoading, setExistingCoverageLoading] = useState(false);
 
   // Report areas come from the API — the source of truth for which cards show.
   const [areas, setAreas] = useState<AreaCard[]>([]);
@@ -138,6 +146,13 @@ export default function QuarterlyReportForm({
 
   const allSelected =
     areas.length > 0 && selectedAreas.length === areas.length;
+
+  // How many more documents can be added to the selected existing report.
+  const remainingSlots =
+    existingDocCount != null ? MAX_DOCUMENTS - existingDocCount : MAX_DOCUMENTS;
+
+  const isUploadMode = !!selectedReportId && existingSource === 'upload';
+  const isOpenMode = !!selectedReportId && existingSource === 'open';
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
   useEffect(() => {
@@ -165,6 +180,31 @@ export default function QuarterlyReportForm({
       cancelled = true;
     };
   }, []);
+
+  // Fetch coverage for the selected existing report to get doc count + period label.
+  useEffect(() => {
+    if (!selectedReportId || !companyId) return;
+    let cancelled = false;
+    setExistingCoverageLoading(true);
+    setExistingDocCount(null);
+    setExistingPeriodLabel(null);
+    quarterlyReportsApi
+      .getCoverage(companyId, selectedReportId)
+      .then((res) => {
+        if (cancelled) return;
+        setExistingDocCount(res.summary.documents_count);
+        setExistingPeriodLabel(res.period_label);
+      })
+      .catch(() => {
+        // Graceful fallback — backend 422 will surface on submit if needed.
+      })
+      .finally(() => {
+        if (!cancelled) setExistingCoverageLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedReportId, companyId]);
 
   // Auto-dismiss the file-cap warning after 3 s.
   useEffect(() => {
@@ -199,15 +239,20 @@ export default function QuarterlyReportForm({
     if (existingReports.length === 0) setIsAddingNewPeriod(true);
   }, [periodsLoading, existingReports.length]);
 
-  // --- Reporting-year dropdown handlers (mirror ESG) -----------------------
+  // --- Reporting-year dropdown handlers ------------------------------------
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     if (value === ADD_NEW_SENTINEL) {
       setIsAddingNewPeriod(true);
+      setSelectedReportId(null);
       return;
     }
-    // Picking an existing quarterly report opens its coverage page.
-    if (value) navigate(`/quarterly-report/${value}/coverage`);
+    if (value) {
+      setSelectedReportId(value);
+      setExistingSource('open');
+      setFiles([]);
+      setGenError(null);
+    }
   };
 
   const pickCustomYear = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -219,6 +264,15 @@ export default function QuarterlyReportForm({
 
   const cancelAddNewPeriod = () => setIsAddingNewPeriod(false);
   const clearCustomYear = () => setCustomYear(null);
+
+  const clearSelectedReport = () => {
+    setSelectedReportId(null);
+    setExistingSource('open');
+    setExistingDocCount(null);
+    setExistingPeriodLabel(null);
+    setFiles([]);
+    setGenError(null);
+  };
 
   // Years already taken by an existing quarterly report — greyed out in the
   // year picker, mirroring the ESG dropdown.
@@ -242,6 +296,7 @@ export default function QuarterlyReportForm({
   const openFilePicker = () => fileInputRef.current?.click();
 
   const acceptFiles = (incoming: FileList | File[]) => {
+    const capLimit = MAX_DOCUMENTS;
     const accepted: File[] = [];
     let rejected = false;
     Array.from(incoming).forEach((f) => {
@@ -267,9 +322,9 @@ export default function QuarterlyReportForm({
             merged.push(f);
           }
         });
-        if (merged.length > MAX_DOCUMENTS) {
+        if (merged.length > capLimit) {
           setShowFileCapWarning(true);
-          return merged.slice(0, MAX_DOCUMENTS);
+          return merged.slice(0, capLimit);
         }
         return merged;
       });
@@ -298,25 +353,81 @@ export default function QuarterlyReportForm({
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
   const hasAreas = selectedAreas.length > 0;
+
   const canGenerate =
     !!companyId &&
-    customYear != null &&
-    hasFiles &&
-    hasAreas &&
-    !isSubmittingGenerate;
+    !isSubmittingGenerate &&
+    (isOpenMode ||
+      (isUploadMode && hasFiles) ||
+      (!selectedReportId && customYear != null && hasFiles && hasAreas));
 
-  const disabledReason =
-    customYear == null
-      ? 'Select a reporting year to continue'
-      : !hasAreas
-        ? 'Select at least one report area to continue'
-        : !hasFiles
-          ? 'Upload at least one source document to continue'
-          : undefined;
+  const disabledReason = isOpenMode
+    ? undefined
+    : isUploadMode
+      ? !hasFiles
+        ? 'Upload at least one source document to continue'
+        : undefined
+      : customYear == null
+        ? 'Select a reporting year to continue'
+        : !hasAreas
+          ? 'Select at least one report area to continue'
+          : !hasFiles
+            ? 'Upload at least one source document to continue'
+            : undefined;
+
+  const extractApiError = (err: unknown): string => {
+    if (err instanceof ApiError) {
+      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
+      if (typeof body?.detail === 'string') return body.detail;
+      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
+    }
+    if (err instanceof Error) return err.message;
+    return 'Something went wrong. Please try again.';
+  };
 
   const triggerGenerate = () => {
-    if (!canGenerate || !companyId || customYear == null) return;
+    if (!canGenerate || !companyId) return;
 
+    // Branch A — open existing report: navigate straight to coverage.
+    if (isOpenMode && selectedReportId) {
+      navigate(`/quarterly-report/${selectedReportId}/coverage`);
+      return;
+    }
+
+    // Branch B — upload new documents to an existing report.
+    if (isUploadMode && selectedReportId) {
+      const requestId = ++genRequestIdRef.current;
+      setGenError(null);
+      setIsSubmittingGenerate(true);
+      const targetReportId = selectedReportId;
+      reportsApi
+        .addDocuments(companyId, targetReportId, { files })
+        .then((handle) => {
+          if (requestId !== genRequestIdRef.current) return;
+          const processingState: ProcessingPageState = {
+            runId: handle.runId,
+            pollUrl: handle.pollUrl,
+            reportId: handle.reportId ?? targetReportId,
+            companyId,
+            estimatedDurationSeconds: handle.estimatedDurationSeconds,
+            fileName: files.length === 1 ? files[0].name : `${files.length} files`,
+            isExisting: handle.isExisting,
+            conflictMessage: handle.message,
+            reportType: 'quarterly',
+            period: existingPeriodLabel ?? undefined,
+          };
+          navigate('/reports/processing', { state: processingState });
+        })
+        .catch((err: unknown) => {
+          if (requestId !== genRequestIdRef.current) return;
+          setIsSubmittingGenerate(false);
+          setGenError(extractApiError(err));
+        });
+      return;
+    }
+
+    // Branch C — new report.
+    if (customYear == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
@@ -347,17 +458,12 @@ export default function QuarterlyReportForm({
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        let msg = 'Generation failed. Please try again.';
-        if (err instanceof ApiError) {
-          const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
-          if (typeof body?.detail === 'string') msg = body.detail;
-          else if (Array.isArray(body?.detail) && body.detail[0]?.msg) msg = body.detail[0].msg;
-        } else if (err instanceof Error) {
-          msg = err.message;
-        }
-        setGenError(msg);
+        setGenError(extractApiError(err));
       });
   };
+
+  // Friendly label for the submit button.
+  const submitLabel = 'Generate Report';
 
   return (
     <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
@@ -431,7 +537,7 @@ export default function QuarterlyReportForm({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: selectedReportId ? '1fr' : '1fr 1fr',
             gap: 12,
             marginBottom: 18,
           }}
@@ -442,6 +548,54 @@ export default function QuarterlyReportForm({
               <select className="inp sel" disabled>
                 <option>Loading reporting years…</option>
               </select>
+            ) : selectedReportId != null ? (
+              /* Existing report selected — show label + × */
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                <div
+                  className="inp sel"
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: '#1A1D2E' }}>
+                    {formatPeriod(
+                      existingReports.find((r) => r.id === selectedReportId)?.period ?? '',
+                    )}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#5A6080',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.5px',
+                    }}
+                  >
+                    Existing
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearSelectedReport}
+                  aria-label="Change report"
+                  title="Change report"
+                  style={{
+                    width: 38,
+                    border: '1px solid #E5E7EF',
+                    background: '#fff',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    color: '#5A6080',
+                    fontSize: 16,
+                    lineHeight: 1,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             ) : customYear != null ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
                 <div
@@ -547,365 +701,395 @@ export default function QuarterlyReportForm({
             )}
           </div>
 
-          <div>
-            <label className="fl-label">Quarter</label>
-            <select
-              className="inp sel"
-              value={quarter}
-              onChange={(e) => setQuarter(e.target.value as Quarter)}
-            >
-              {QUARTERS.map((q) => (
-                <option key={q} value={q}>
-                  {q}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Report areas */}
-        <div style={{ marginBottom: 18 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 8,
-            }}
-          >
-            <label className="fl-label" style={{ marginBottom: 0 }}>
-              Report Areas{' '}
-              <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
-            </label>
-            {areas.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleSelectAll}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#4040C8',
-                  background: 'transparent',
-                  border: 0,
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
+          {/* Quarter selector — hidden when an existing report is selected */}
+          {!selectedReportId && (
+            <div>
+              <label className="fl-label">Quarter</label>
+              <select
+                className="inp sel"
+                value={quarter}
+                onChange={(e) => setQuarter(e.target.value as Quarter)}
               >
-                {allSelected ? 'Clear all' : 'Select all'}
-              </button>
-            )}
-          </div>
-
-          {areasLoading ? (
-            <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-              Loading report areas…
+                {QUARTERS.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : areasError ? (
-            <div
-              role="alert"
-              style={{
-                padding: '10px 14px',
-                borderRadius: 8,
-                background: 'rgba(229,72,77,.08)',
-                border: '1px solid rgba(229,72,77,.25)',
-                color: '#B33A3E',
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {areasError}
-            </div>
-          ) : areas.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-              No report areas available.
-            </div>
-          ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3,1fr)',
-              gap: 10,
-            }}
-          >
-            {areas.map((area) => {
-              const active = selectedAreas.includes(area.key);
-              return (
-                <div
-                  key={area.key}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setMetricsModal(area)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setMetricsModal(area);
-                    }
-                  }}
-                  title="View metrics"
-                  className={`fw-chip ${active ? 'sel' : ''}`}
-                  style={{
-                    flexDirection: 'column',
-                    alignItems: 'stretch',
-                    gap: 6,
-                    padding: '12px 14px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    background: active ? '#EEEEFF' : '#fff',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: '#1A1D2E',
-                      }}
-                    >
-                      {area.title}
-                    </span>
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={active}
-                      aria-label={
-                        active
-                          ? `Deselect ${area.title}`
-                          : `Select ${area.title}`
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleArea(area.key);
-                      }}
-                      style={{
-                        width: 18,
-                        height: 18,
-                        padding: 0,
-                        borderRadius: 5,
-                        flexShrink: 0,
-                        cursor: 'pointer',
-                        border: active ? 'none' : '1.5px solid #C9CDE4',
-                        background: active ? '#4040C8' : '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      {active && (
-                        <svg
-                          width="11"
-                          height="11"
-                          viewBox="0 0 12 12"
-                          fill="none"
-                        >
-                          <path
-                            d="M2.5 6.2l2.2 2.2L9.5 3.6"
-                            stroke="#fff"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  {area.desc && (
-                    <span
-                      style={{
-                        fontSize: 11.5,
-                        color: '#5A6080',
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {area.desc}
-                    </span>
-                  )}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '.5px',
-                      color: active ? '#4040C8' : '#9BA3C4',
-                      marginTop: 2,
-                    }}
-                  >
-                    {area.meta}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
           )}
         </div>
 
-        {/* Upload */}
-        <div style={{ marginBottom: 18 }}>
-          <label className="fl-label">
-            Source Documents{' '}
-            <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
-            <span
-              style={{
-                fontWeight: 400,
-                textTransform: 'none',
-                color: '#9BA3C4',
+        {/* Source dropdown — shown only when an existing report is selected */}
+        {selectedReportId && (
+          <div style={{ marginBottom: 18 }}>
+            <label className="fl-label">Source</label>
+            <select
+              className="inp sel"
+              value={existingSource}
+              onChange={(e) => {
+                setExistingSource(e.target.value as 'open' | 'upload');
+                setFiles([]);
+                setGenError(null);
               }}
             >
-              (PDF, DOCX, XLSX, CSV — up to {MAX_DOCUMENTS})
-            </span>
-          </label>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_UPLOAD_ATTR}
-            onChange={handleFileInputChange}
-            style={{ display: 'none' }}
-          />
-
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={openFilePicker}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                openFilePicker();
-              }
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!isDragging) setIsDragging(true);
-            }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-            className="upload-z"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              textAlign: 'left',
-              padding: '16px 20px',
-              cursor: 'pointer',
-              borderColor: isDragging ? '#4040C8' : undefined,
-              background: isDragging ? 'rgba(64,64,200,.06)' : undefined,
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path
-                d="M10 3v10M6 7l4-4 4 4"
-                stroke="#9BA3C4"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <path
-                d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2"
-                stroke="#9BA3C4"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span style={{ fontSize: 12, color: '#5A6080' }}>
-              Click to upload or drag &amp; drop financial statements, prior-year
-              report, management notes
-            </span>
+              <option value="open">Generate report from DB</option>
+              <option value="upload">Upload new documents</option>
+            </select>
           </div>
+        )}
 
-          {files.length > 0 && (
+        {/* Report areas — hidden when an existing report is selected */}
+        {!selectedReportId && (
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 8,
+              }}
+            >
+              <label className="fl-label" style={{ marginBottom: 0 }}>
+                Report Areas{' '}
+                <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
+              </label>
+              {areas.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#4040C8',
+                    background: 'transparent',
+                    border: 0,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  {allSelected ? 'Clear all' : 'Select all'}
+                </button>
+              )}
+            </div>
+
+            {areasLoading ? (
+              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
+                Loading report areas…
+              </div>
+            ) : areasError ? (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(229,72,77,.08)',
+                  border: '1px solid rgba(229,72,77,.25)',
+                  color: '#B33A3E',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {areasError}
+              </div>
+            ) : areas.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
+                No report areas available.
+              </div>
+            ) : (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 8,
-                marginTop: 12,
+                gridTemplateColumns: 'repeat(3,1fr)',
+                gap: 10,
               }}
             >
-              {files.map((file, index) => (
-                <div
-                  key={`${file.name}:${file.size}:${index}`}
-                  style={{
-                    position: 'relative',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                    padding: '10px 10px 8px',
-                    borderRadius: 8,
-                    border: '1px solid #4040C8',
-                    background: 'rgba(64,64,200,.04)',
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
-                    <path
-                      d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
-                      stroke="#4040C8"
-                      strokeWidth="1.5"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M12 2v4h4"
-                      stroke="#4040C8"
-                      strokeWidth="1.5"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <div style={{ minWidth: 0, paddingRight: 16 }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: '#1A1D2E',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {file.name}
-                    </div>
-                    <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-                      {formatBytes(file.size)}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(index)}
-                    aria-label="Remove file"
-                    title="Remove file"
+              {areas.map((area) => {
+                const active = selectedAreas.includes(area.key);
+                return (
+                  <div
+                    key={area.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setMetricsModal(area)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setMetricsModal(area);
+                      }
+                    }}
+                    title="View metrics"
+                    className={`fw-chip ${active ? 'sel' : ''}`}
                     style={{
-                      position: 'absolute',
-                      top: 6,
-                      right: 6,
-                      width: 16,
-                      height: 16,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'transparent',
-                      border: 0,
-                      padding: 0,
+                      flexDirection: 'column',
+                      alignItems: 'stretch',
+                      gap: 6,
+                      padding: '12px 14px',
+                      textAlign: 'left',
                       cursor: 'pointer',
-                      color: '#9BA3C4',
+                      background: active ? '#EEEEFF' : '#fff',
                     }}
                   >
-                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: '#1A1D2E',
+                        }}
+                      >
+                        {area.title}
+                      </span>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={active}
+                        aria-label={
+                          active
+                            ? `Deselect ${area.title}`
+                            : `Select ${area.title}`
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleArea(area.key);
+                        }}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          padding: 0,
+                          borderRadius: 5,
+                          flexShrink: 0,
+                          cursor: 'pointer',
+                          border: active ? 'none' : '1.5px solid #C9CDE4',
+                          background: active ? '#4040C8' : '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {active && (
+                          <svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                          >
+                            <path
+                              d="M2.5 6.2l2.2 2.2L9.5 3.6"
+                              stroke="#fff"
+                              strokeWidth="1.6"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    {area.desc && (
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: '#5A6080',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {area.desc}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '.5px',
+                        color: active ? '#4040C8' : '#9BA3C4',
+                        marginTop: 2,
+                      }}
+                    >
+                      {area.meta}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            )}
+          </div>
+        )}
+
+        {/* Upload — shown for new reports and upload-to-existing mode */}
+        {!isOpenMode && (
+          <div style={{ marginBottom: 18 }}>
+            <label className="fl-label">
+              Source Documents{' '}
+              {!isOpenMode && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}{' '}
+              <span
+                style={{
+                  fontWeight: 400,
+                  textTransform: 'none',
+                  color: '#9BA3C4',
+                }}
+              >
+                {isUploadMode
+                  ? existingCoverageLoading
+                    ? '(loading…)'
+                    : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`
+                  : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`}
+              </span>
+            </label>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_UPLOAD_ATTR}
+              onChange={handleFileInputChange}
+              style={{ display: 'none' }}
+            />
+
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={openFilePicker}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openFilePicker();
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!isDragging) setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              className="upload-z"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                textAlign: 'left',
+                padding: '16px 20px',
+                cursor: 'pointer',
+                borderColor: isDragging ? '#4040C8' : undefined,
+                background: isDragging ? 'rgba(64,64,200,.06)' : undefined,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path
+                  d="M10 3v10M6 7l4-4 4 4"
+                  stroke="#9BA3C4"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2"
+                  stroke="#9BA3C4"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span style={{ fontSize: 12, color: '#5A6080' }}>
+                Click to upload or drag &amp; drop financial statements, prior-year
+                report, management notes
+              </span>
+            </div>
+
+            {files.length > 0 && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 8,
+                  marginTop: 12,
+                }}
+              >
+                {files.map((file, index) => (
+                  <div
+                    key={`${file.name}:${file.size}:${index}`}
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      padding: '10px 10px 8px',
+                      borderRadius: 8,
+                      border: '1px solid #4040C8',
+                      background: 'rgba(64,64,200,.04)',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
                       <path
-                        d="M2 2l8 8M10 2l-8 8"
-                        stroke="currentColor"
+                        d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
+                        stroke="#4040C8"
                         strokeWidth="1.5"
-                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M12 2v4h4"
+                        stroke="#4040C8"
+                        strokeWidth="1.5"
+                        strokeLinejoin="round"
                       />
                     </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <div style={{ minWidth: 0, paddingRight: 16 }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#1A1D2E',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {file.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
+                        {formatBytes(file.size)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(index)}
+                      aria-label="Remove file"
+                      title="Remove file"
+                      style={{
+                        position: 'absolute',
+                        top: 6,
+                        right: 6,
+                        width: 16,
+                        height: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        cursor: 'pointer',
+                        color: '#9BA3C4',
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                        <path
+                          d="M2 2l8 8M10 2l-8 8"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Error banner */}
         {genError && (
@@ -980,7 +1164,7 @@ export default function QuarterlyReportForm({
                 />
               </svg>
             )}
-            {isSubmittingGenerate ? 'Starting…' : 'Generate Report'}
+            {isSubmittingGenerate ? 'Starting…' : submitLabel}
           </button>
         </div>
       </div>
@@ -1012,7 +1196,6 @@ export default function QuarterlyReportForm({
               overflow: 'hidden',
             }}
           >
-            {/* Header */}
             <div
               style={{
                 display: 'flex',
@@ -1043,12 +1226,21 @@ export default function QuarterlyReportForm({
                 File limit reached
               </div>
             </div>
-            {/* Body */}
             <div style={{ padding: '14px 20px 18px' }}>
               <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
-                A quarterly report accepts at most{' '}
-                <strong style={{ color: '#1A1D2E' }}>{MAX_DOCUMENTS} documents</strong>.
-                Only the first {MAX_DOCUMENTS} files have been kept.
+                {isUploadMode && existingDocCount != null ? (
+                  <>
+                    This report already has{' '}
+                    <strong style={{ color: '#1A1D2E' }}>{existingDocCount} documents</strong>.
+                    You can add at most {remainingSlots} more.
+                  </>
+                ) : (
+                  <>
+                    A quarterly report accepts at most{' '}
+                    <strong style={{ color: '#1A1D2E' }}>{MAX_DOCUMENTS} documents</strong>.
+                    Only the first {MAX_DOCUMENTS} files have been kept.
+                  </>
+                )}
               </p>
             </div>
           </div>
