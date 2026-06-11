@@ -64,6 +64,7 @@ export interface GapItem {
 export interface GapsResponse {
   report_id: string;
   company_id: string;
+  content_language?: 'english' | 'arabic';
   period_label: string;
   prior_period_label: string;
   total_gaps: number;
