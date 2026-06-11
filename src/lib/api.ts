@@ -28,6 +28,8 @@ import type {
   QuarterlyPreviewReport,
   QuarterlyPreviewResponse,
   PreviewSentenceUpdateResponse,
+  ChatHistoryResponse,
+  ChatStreamEvent,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -856,6 +858,67 @@ export const quarterlyReports = {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  },
+
+  // ── Chat agent ──
+  getChatHistory: (companyId: string, reportId: string) =>
+    request<ChatHistoryResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat/history`,
+    ),
+
+  streamChatMessage: async (
+    companyId: string,
+    reportId: string,
+    message: string,
+    onEvent: (event: ChatStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+        signal,
+      },
+    );
+    if (!res.ok) {
+      let msg = `Chat request failed (${res.status})`;
+      try {
+        const j = await res.json();
+        if (typeof j?.detail === "string") msg = j.detail;
+      } catch { /* non-JSON body */ }
+      throw new Error(msg);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const json = line.slice(6).trim();
+          if (json) {
+            try { onEvent(JSON.parse(json) as ChatStreamEvent); }
+            catch { /* skip malformed line */ }
+          }
+        }
+      }
+    }
+  },
+
+  clearChatHistory: async (companyId: string, reportId: string): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat/history`,
+      { method: "DELETE" },
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`Clear chat failed (${res.status})`);
+    }
   },
 
   // Save one inline sentence edit. 422 if text empty; 404 if the ids don't

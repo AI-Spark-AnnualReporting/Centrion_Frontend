@@ -164,3 +164,27 @@ export interface PreviewSentenceUpdateResponse {
   sentence: PreviewSentence;
   word_count: number;
 }
+
+// ─── Chat agent (Preview step 6) ─────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface ChatHistoryResponse {
+  conversation_id: string;
+  report_id: string;
+  messages: ChatMessage[];
+}
+
+export type ChatEventType = 'token' | 'tool_start' | 'tool_end' | 'error' | 'done';
+
+export interface ChatStreamEvent {
+  type: ChatEventType;
+  content?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+  message?: string;
+}

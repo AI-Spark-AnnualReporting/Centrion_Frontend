@@ -151,8 +151,8 @@ export default function QuarterlyReportForm({
   const remainingSlots =
     existingDocCount != null ? MAX_DOCUMENTS - existingDocCount : MAX_DOCUMENTS;
 
-  const isUploadMode = !!selectedReportId && existingSource === 'upload';
-  const isOpenMode = !!selectedReportId && existingSource === 'open';
+  const isUploadMode = !!selectedReportId;
+  const isOpenMode = false;
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
   useEffect(() => {
@@ -720,20 +720,12 @@ export default function QuarterlyReportForm({
           )}
         </div>
 
+
         {/* Source dropdown — shown only when an existing report is selected */}
         {selectedReportId && (
           <div style={{ marginBottom: 18 }}>
             <label className="fl-label">Source</label>
-            <select
-              className="inp sel"
-              value={existingSource}
-              onChange={(e) => {
-                setExistingSource(e.target.value as 'open' | 'upload');
-                setFiles([]);
-                setGenError(null);
-              }}
-            >
-              <option value="open">Generate report from DB</option>
+            <select className="inp sel" value="upload" onChange={() => {}}>
               <option value="upload">Upload new documents</option>
             </select>
           </div>
