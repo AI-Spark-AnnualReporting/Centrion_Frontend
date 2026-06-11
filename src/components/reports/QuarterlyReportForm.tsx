@@ -39,6 +39,28 @@ function toAreaCard(area: QuarterlyReportArea): AreaCard {
   };
 }
 
+// Per-file language-check status shown in the upload list.
+type FileLangStatus = 'checking' | 'ok' | 'bad';
+interface FileLangInfo {
+  status: FileLangStatus;
+  detected?: string;
+}
+
+const fileKey = (f: File) => `${f.name}:${f.size}`;
+const langName = (l: string) => (l === 'arabic' ? 'Arabic' : 'English');
+
+// Banner copy when a selected file is the wrong language (ported from the
+// Annual Reporting frontend's documentLanguageWarning).
+function documentLanguageWarning(expected: string, detected?: string): string {
+  const want = langName(expected);
+  const got =
+    detected === 'arabic' || detected === 'english' ? langName(detected) : null;
+  const lead = got
+    ? `This document looks like it's in ${got}, not ${want}.`
+    : `This document doesn't look like it's in ${want}.`;
+  return `${lead} This report is set to ${want} — please upload a ${want} document instead.`;
+}
+
 // Humanise a snake_case metric slug for display, e.g.
 // "cash_and_equivalents" → "Cash And Equivalents".
 function humaniseMetric(slug: string): string {
@@ -119,6 +141,10 @@ export default function QuarterlyReportForm({
   const [quarter, setQuarter] = useState<Quarter>('Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
+  // Language the generated report is written in. UI stays English/LTR — this
+  // only drives the backend narrative, gap questions, and RTL export.
+  const [language, setLanguage] = useState<'english' | 'arabic'>('english');
+
   // Report areas come from the API — the source of truth for which cards show.
   const [areas, setAreas] = useState<AreaCard[]>([]);
   const [areasLoading, setAreasLoading] = useState(true);
@@ -129,6 +155,12 @@ export default function QuarterlyReportForm({
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
+  // checked the moment they're added and re-checked when the language toggles.
+  const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
+  const languageRef = useRef(language);
+  const filesRef = useRef(files);
 
   const [genError, setGenError] = useState<string | null>(null);
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
@@ -232,6 +264,49 @@ export default function QuarterlyReportForm({
   // --- File handling (multiple) -------------------------------------------
   const openFilePicker = () => fileInputRef.current?.click();
 
+  // Keep refs current so the language-change effect can re-check the live file
+  // list, and async check results can tell if the language changed mid-flight.
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  // Ask the backend whether each file is in `lang`. Fail-open: a network/check
+  // error resolves the file to "ok" (the submit-time gate is the real backstop).
+  // Stale results (language toggled while a check was in flight) are dropped.
+  const runCheck = (list: File[], lang: 'english' | 'arabic') => {
+    list.forEach((file) => {
+      const id = fileKey(file);
+      setFileLang((prev) => ({ ...prev, [id]: { status: 'checking' } }));
+      reportsApi
+        .checkLanguage(file, lang)
+        .then((res) => {
+          if (languageRef.current !== lang) return; // stale — a newer check owns it
+          const detected =
+            res.detected_language === 'arabic' || res.detected_language === 'english'
+              ? res.detected_language
+              : undefined;
+          setFileLang((prev) => ({
+            ...prev,
+            [id]: { status: res.matches ? 'ok' : 'bad', detected },
+          }));
+        })
+        .catch(() => {
+          if (languageRef.current !== lang) return;
+          setFileLang((prev) => ({ ...prev, [id]: { status: 'ok' } }));
+        });
+    });
+  };
+
+  // Re-check every selected file whenever the report language toggles, since a
+  // file's correctness depends on the chosen language.
+  useEffect(() => {
+    languageRef.current = language;
+    if (filesRef.current.length > 0) runCheck(filesRef.current, language);
+    // runCheck is intentionally omitted — it is recreated each render and only
+    // the language change should drive a re-check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
+
   const acceptFiles = (incoming: FileList | File[]) => {
     const accepted: File[] = [];
     let rejected = false;
@@ -247,12 +322,15 @@ export default function QuarterlyReportForm({
       setGenError(null);
     }
     if (accepted.length > 0) {
+      // Genuinely-new files (not already in the list) get language-checked.
+      const existing = new Set(files.map(fileKey));
+      const fresh = accepted.filter((f) => !existing.has(fileKey(f)));
       setFiles((prev) => {
         // De-dupe by name + size so re-dropping the same file is a no-op.
-        const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+        const seen = new Set(prev.map(fileKey));
         const merged = [...prev];
         accepted.forEach((f) => {
-          const id = `${f.name}:${f.size}`;
+          const id = fileKey(f);
           if (!seen.has(id)) {
             seen.add(id);
             merged.push(f);
@@ -260,6 +338,7 @@ export default function QuarterlyReportForm({
         });
         return merged;
       });
+      if (fresh.length > 0) runCheck(fresh, language);
     }
   };
 
@@ -278,8 +357,24 @@ export default function QuarterlyReportForm({
   };
 
   const removeFile = (index: number) => {
+    const removed = files[index];
     setFiles((prev) => prev.filter((_, i) => i !== index));
+    if (removed) {
+      setFileLang((prev) => {
+        const { [fileKey(removed)]: _drop, ...rest } = prev;
+        return rest;
+      });
+    }
   };
+
+  // --- Upload-time language check (blocks Generate) ------------------------
+  const anyChecking = files.some((f) => fileLang[fileKey(f)]?.status === 'checking');
+  const badFiles = files.filter((f) => fileLang[fileKey(f)]?.status === 'bad');
+  const langBlocked = anyChecking || badFiles.length > 0;
+  const languageWarning =
+    badFiles.length > 0
+      ? documentLanguageWarning(language, fileLang[fileKey(badFiles[0])]?.detected)
+      : null;
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
@@ -289,6 +384,7 @@ export default function QuarterlyReportForm({
     customYear != null &&
     hasFiles &&
     hasAreas &&
+    !langBlocked &&
     !isSubmittingGenerate;
 
   const disabledReason =
@@ -298,7 +394,11 @@ export default function QuarterlyReportForm({
         ? 'Select at least one report area to continue'
         : !hasFiles
           ? 'Upload at least one source document to continue'
-          : undefined;
+          : anyChecking
+            ? 'Checking document language…'
+            : badFiles.length > 0
+              ? 'Remove the wrong-language document to continue'
+              : undefined;
 
   const triggerGenerate = () => {
     if (!canGenerate || !companyId || customYear == null) return;
@@ -313,6 +413,7 @@ export default function QuarterlyReportForm({
         year: customYear,
         quarter,
         areas: selectedAreas,
+        content_language: language,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -409,6 +510,28 @@ export default function QuarterlyReportForm({
 
       {genOpen && (
       <div style={{ padding: '18px 20px' }}>
+        {/* Report language — English (default) or Arabic. Drives the generated
+            report content + export only; the app UI stays English/LTR. */}
+        <div style={{ marginBottom: 18 }}>
+          <label className="fl-label">Report Language</label>
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            <button
+              type="button"
+              className={`tab ${language === 'english' ? 'act' : ''}`}
+              onClick={() => setLanguage('english')}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              className={`tab ${language === 'arabic' ? 'act' : ''}`}
+              onClick={() => setLanguage('arabic')}
+            >
+              العربية
+            </button>
+          </div>
+        </div>
+
         {/* Reporting period */}
         <div
           style={{
@@ -808,7 +931,11 @@ export default function QuarterlyReportForm({
                 marginTop: 12,
               }}
             >
-              {files.map((file, index) => (
+              {files.map((file, index) => {
+                const st = fileLang[fileKey(file)]?.status;
+                const isChecking = st === 'checking';
+                const isBad = st === 'bad';
+                return (
                 <div
                   key={`${file.name}:${file.size}:${index}`}
                   className="upload-z"
@@ -820,8 +947,8 @@ export default function QuarterlyReportForm({
                     padding: '12px 14px',
                     cursor: 'default',
                     borderStyle: 'solid',
-                    borderColor: '#4040C8',
-                    background: 'rgba(64,64,200,.04)',
+                    borderColor: isBad ? 'rgba(229,72,77,.45)' : '#4040C8',
+                    background: isBad ? 'rgba(229,72,77,.06)' : 'rgba(64,64,200,.04)',
                   }}
                 >
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -852,11 +979,44 @@ export default function QuarterlyReportForm({
                       {file.name}
                     </div>
                     <div
-                      style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}
+                      style={{
+                        fontSize: 10,
+                        marginTop: 2,
+                        color: isBad ? '#B33A3E' : '#9BA3C4',
+                        fontWeight: isBad ? 700 : 400,
+                      }}
                     >
-                      {formatBytes(file.size)}
+                      {isChecking
+                        ? 'Checking language…'
+                        : isBad
+                          ? 'Wrong language'
+                          : formatBytes(file.size)}
                     </div>
                   </div>
+                  {st && (
+                    <span
+                      aria-hidden
+                      title={
+                        isChecking
+                          ? 'Checking language'
+                          : isBad
+                            ? 'Wrong language'
+                            : 'Language OK'
+                      }
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        lineHeight: 1,
+                        color: isChecking
+                          ? '#9BA3C4'
+                          : isBad
+                            ? '#E5484D'
+                            : '#2E9B57',
+                      }}
+                    >
+                      {isChecking ? '⋯' : isBad ? '⚠' : '✓'}
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeFile(index)}
@@ -890,10 +1050,30 @@ export default function QuarterlyReportForm({
                     </svg>
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* Wrong-language banner (upload-time check) */}
+        {languageWarning && (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 12,
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'rgba(229,72,77,.08)',
+              border: '1px solid rgba(229,72,77,.25)',
+              color: '#B33A3E',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {languageWarning}
+          </div>
+        )}
 
         {/* Error banner */}
         {genError && (
