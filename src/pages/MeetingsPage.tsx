@@ -435,7 +435,6 @@ function MeetingDetailModal({
               <span />
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Close</button>
-                <button className="btn bp" onClick={() => alert(`Join link for "${current.title}" would be sent here.`)} style={{ padding: '9px 20px' }}>Join Meeting</button>
                 <button className="btn bs" onClick={() => setEditing(true)} style={{ padding: '9px 18px' }}>Edit</button>
               </div>
             </>
