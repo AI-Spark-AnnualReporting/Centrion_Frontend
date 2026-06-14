@@ -45,9 +45,23 @@ import type {
   SavePermissionsPayload,
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
+import type {
+  Cycle,
+  CreateCyclePayload,
+  CycleOverview,
+  CycleSection,
+  SARUser,
+} from "@/types/cycles";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
+).replace(/\/+$/, "");
+
+// The SAR service (Annual Report cycles) is a SEPARATE backend from Centriton,
+// running locally on :8010. Calls go through `sarRequest()` below, which reuses
+// the Centriton JWT for token passthrough.
+const SAR_BASE_URL = (
+  import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
 
 const TOKEN_STORAGE_KEY = "centriton_token";
@@ -138,10 +152,13 @@ interface RequestOptions {
   auth?: boolean;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  // Override the host the call targets (defaults to API_BASE_URL). Used by
+  // sarRequest() to hit the separate SAR backend while reusing all this logic.
+  baseUrl?: string;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = `${API_BASE_URL}${path}${buildQuery(opts.query)}`;
+  const url = `${opts.baseUrl ?? API_BASE_URL}${path}${buildQuery(opts.query)}`;
   const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS, ...(opts.headers ?? {}) };
 
   let body: BodyInit | undefined;
@@ -1013,6 +1030,86 @@ export const adminConsole = {
 };
 
 // ---------------------------------------------------------------------------
+// SAR — Annual Report (Cycles). Separate backend (VITE_SAR_URL, :8010 local).
+// `sarRequest` is just `request` pinned to the SAR host; the Centriton JWT is
+// still attached for token passthrough.
+// ---------------------------------------------------------------------------
+
+function sarRequest<T>(
+  path: string,
+  opts: Omit<RequestOptions, "baseUrl"> = {},
+): Promise<T> {
+  return request<T>(path, { ...opts, baseUrl: SAR_BASE_URL });
+}
+
+// Unwrap a `{ key: T }` envelope or return the value as-is. SAR wraps most
+// responses (e.g. `{ cycle }`, `{ cycles }`); be tolerant of bare bodies too.
+function unwrap<T>(raw: unknown, key: string): T {
+  if (raw && typeof raw === "object" && key in (raw as Record<string, unknown>)) {
+    return (raw as Record<string, T>)[key];
+  }
+  return raw as T;
+}
+
+export const sarCycles = {
+  list: async (): Promise<Cycle[]> => {
+    const raw = await sarRequest<unknown>("/api/v1/admin/cycles");
+    const list = unwrap<Cycle[]>(raw, "cycles");
+    return Array.isArray(list) ? list : [];
+  },
+
+  get: async (id: string): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}`,
+    );
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  create: async (body: CreateCyclePayload): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>("/api/v1/admin/cycles", {
+      method: "POST",
+      body,
+    });
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  update: async (
+    id: string,
+    body: Partial<CreateCyclePayload>,
+  ): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}`,
+      { method: "PUT", body },
+    );
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  overview: (id: string): Promise<CycleOverview> =>
+    sarRequest<CycleOverview>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/overview`,
+    ),
+
+  sections: async (id: string): Promise<CycleSection[]> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/sections`,
+    );
+    const list = unwrap<CycleSection[]>(raw, "sections");
+    return Array.isArray(list) ? list : [];
+  },
+};
+
+export const sarUsers = {
+  listProjectManagers: async (): Promise<SARUser[]> => {
+    const raw = await sarRequest<unknown>(
+      "/api/v1/admin/users",
+      { query: { role: "project_manager" } },
+    );
+    const list = unwrap<SARUser[]>(raw, "users");
+    return Array.isArray(list) ? list : [];
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Lookups
 // ---------------------------------------------------------------------------
 
@@ -1341,6 +1438,8 @@ export const api = {
   meetings,
   admin,
   adminConsole,
+  sarCycles,
+  sarUsers,
   lookups,
   system,
 };

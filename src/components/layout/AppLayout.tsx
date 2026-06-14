@@ -19,11 +19,16 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin-console': 'Admin Console',
   '/admin-console/users': 'Users & Roles',
   '/admin-console/departments': 'Departments',
+  '/annual-report': 'Annual Report',
+  '/annual-report/cycles/new': 'New Cycle',
 };
 
 export function AppLayout() {
   const location = useLocation();
-  const pageName = PAGE_NAMES[location.pathname] || 'Command Center';
+  // Annual-report detail uses a dynamic :cycleId, so fall back by prefix.
+  const pageName =
+    PAGE_NAMES[location.pathname] ||
+    (location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
 
   return (
     <div className="app-shell">

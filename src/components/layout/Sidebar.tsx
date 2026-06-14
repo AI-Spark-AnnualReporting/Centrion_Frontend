@@ -7,7 +7,9 @@ import { useAuth } from '@/context/AuthContext';
 // the separate workspace app and is routed by role.
 const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: boolean }[] = [
   { key: 'esg', label: 'ESG Validator', path: '/reports' },
-  { key: 'annual', label: 'Annual', external: true },
+  // Annual: admins manage cycles in-app at /annual-report; PMs/departments
+  // still go to the external workspace app (routed by role in goAnnual()).
+  { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
 ];
 
 // Admin Console sub-sections — mirror the pages under /admin-console. Shown only
@@ -159,9 +161,18 @@ export function Sidebar() {
                         key={child.key}
                         className={`sb-item ${child.path && location.pathname.startsWith(child.path) ? 'act' : ''}`}
                         style={{ paddingLeft: 34, fontSize: 11 }}
-                        onClick={() =>
-                          child.external ? goAnnual() : child.path && handleNav(child.path)
-                        }
+                        onClick={() => {
+                          // Admins manage Annual cycles in-app; everyone else
+                          // is sent to the external workspace app.
+                          if (child.key === 'annual') {
+                            if (user?.role === 'admin') handleNav('/annual-report');
+                            else goAnnual();
+                          } else if (child.external) {
+                            goAnnual();
+                          } else if (child.path) {
+                            handleNav(child.path);
+                          }
+                        }}
                       >
                         <span
                           style={{

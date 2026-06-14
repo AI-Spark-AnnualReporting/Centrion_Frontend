@@ -17,6 +17,7 @@ import type {
   UserStatus,
 } from '@/types/admin';
 import { relativeTime } from '@/lib/time';
+import { initialsOf, gradientFor } from '@/lib/avatar';
 
 const PRIMARY = '#4040C8';
 type View = 'users' | 'matrix';
@@ -28,28 +29,6 @@ const STATUS_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'invited', label: 'Invited' },
   { key: 'suspended', label: 'Suspended' },
 ];
-
-function initialsOf(name: string) {
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}
-
-function gradientFor(seed: string) {
-  const palettes = [
-    'linear-gradient(135deg,#4040C8,#6E6EE8)',
-    'linear-gradient(135deg,#0D9488,#22C3A6)',
-    'linear-gradient(135deg,#7C3AED,#A06BF5)',
-    'linear-gradient(135deg,#E0792B,#F2A65A)',
-    'linear-gradient(135deg,#2563EB,#5B8DEF)',
-  ];
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return palettes[h % palettes.length];
-}
 
 const STATUS_META: Record<UserStatus, { label: string; cls: string }> = {
   active: { label: 'Active', cls: 'b-gn' },
