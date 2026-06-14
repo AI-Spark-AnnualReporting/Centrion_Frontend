@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
+import { ApiError, getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
@@ -129,6 +129,7 @@ function yearFromPeriod(period: string): number | null {
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
+const MAX_ESG_DOCUMENTS = 3;
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -169,8 +170,9 @@ export default function ReportsPage() {
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorsLoading, setSectorsLoading] = useState(true);
   const [selectedSectorId, setSelectedSectorId] = useState('');
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // When an existing report is selected, user chooses between reloading from
@@ -205,7 +207,7 @@ export default function ReportsPage() {
             scope_type: string;
             framework_codes: string[];
             gri_scope?: 'standard' | 'full';
-            file: File;
+            files: File[];
           };
         }
       | null;
@@ -223,7 +225,7 @@ export default function ReportsPage() {
 
     reportsApi
       .generate(companyId, {
-        files: [pending.file],
+        files: pending.files,
         year: pending.year,
         ...(pending.sector_id ? { sector_id: pending.sector_id } : {}),
         scope_type: pending.scope_type,
@@ -239,7 +241,7 @@ export default function ReportsPage() {
           reportId: handle.reportId,
           companyId,
           estimatedDurationSeconds: handle.estimatedDurationSeconds,
-          fileName: pending.file.name,
+          fileName: pending.files.length === 1 ? pending.files[0].name : `${pending.files.length} files`,
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
         };
@@ -248,9 +250,7 @@ export default function ReportsPage() {
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        setGenError(
-          err instanceof Error ? err.message : 'Generation failed. Please try again.',
-        );
+        setGenError(extractApiError(err));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
@@ -366,7 +366,7 @@ export default function ReportsPage() {
     setCheckedFw(cfg.framework_codes ?? []);
     setSelectedRegion(cfg.region ?? '');
     setSelectedCountryId(cfg.country_id ?? '');
-    setUploadedFile(null);
+    setUploadedFiles([]);
     setUploadError(null);
     // Mirror the report's stored GRI indicator scope onto the radio. Backend
     // values are "standard" or "full"; if it's null/undefined we treat the
@@ -382,7 +382,7 @@ export default function ReportsPage() {
     setCheckedFw(defaultGlobalCheckedFrameworks);
     setSelectedRegion('');
     setSelectedCountryId('');
-    // Leave uploadedFile alone — user may have uploaded before choosing a year.
+    // Leave uploadedFiles alone — user may have uploaded before choosing a year.
   };
 
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -437,6 +437,16 @@ export default function ReportsPage() {
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
+  const extractApiError = (err: unknown): string => {
+    if (err instanceof ApiError) {
+      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
+      if (typeof body?.detail === 'string') return body.detail;
+      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
+    }
+    if (err instanceof Error) return err.message;
+    return 'Something went wrong. Please try again.';
+  };
+
   const triggerGenerate = () => {
     if (!companyId) return;
 
@@ -456,18 +466,18 @@ export default function ReportsPage() {
     if (
       selectedReport &&
       existingReportSource === 'upload' &&
-      uploadedFile
+      uploadedFiles.length > 0
     ) {
       const requestId = ++genRequestIdRef.current;
       setGenError(null);
       setGenWarning(null);
       setIsSubmittingGenerate(true);
-      const submittedFile = uploadedFile;
+      const submittedFiles = uploadedFiles;
       const targetReportId = selectedReport.id;
 
       reportsApi
         .addDocuments(companyId, targetReportId, {
-          files: [submittedFile],
+          files: submittedFiles,
         })
         .then((handle) => {
           if (requestId !== genRequestIdRef.current) return;
@@ -480,7 +490,7 @@ export default function ReportsPage() {
             reportId: handle.reportId ?? targetReportId,
             companyId,
             estimatedDurationSeconds: handle.estimatedDurationSeconds,
-            fileName: submittedFile.name,
+            fileName: submittedFiles.length === 1 ? submittedFiles[0].name : `${submittedFiles.length} files`,
             isExisting: handle.isExisting,
             conflictMessage: handle.message,
           };
@@ -489,22 +499,20 @@ export default function ReportsPage() {
         .catch((err: unknown) => {
           if (requestId !== genRequestIdRef.current) return;
           setIsSubmittingGenerate(false);
-          setGenError(
-            err instanceof Error ? err.message : 'Upload failed. Please try again.',
-          );
+          setGenError(extractApiError(err));
         });
       return;
     }
 
-    // Branch B — new report: requires a year picked via "+ Add new…" + a file.
-    if (customYear == null || selectedReport !== null || !uploadedFile) return;
+    // Branch B — new report: requires a year picked via "+ Add new…" + files.
+    if (customYear == null || selectedReport !== null || uploadedFiles.length === 0) return;
 
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setGenWarning(null);
     setIsSubmittingGenerate(true);
 
-    const submittedFile = uploadedFile;
+    const submittedFiles = uploadedFiles;
 
     const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
 
@@ -533,7 +541,7 @@ export default function ReportsPage() {
 
     reportsApi
       .generate(companyId, {
-        files: [submittedFile],
+        files: submittedFiles,
         year: customYear,
         ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
         scope_type: scope,
@@ -552,7 +560,7 @@ export default function ReportsPage() {
           reportId: handle.reportId,
           companyId,
           estimatedDurationSeconds: handle.estimatedDurationSeconds,
-          fileName: submittedFile.name,
+          fileName: submittedFiles.length === 1 ? submittedFiles[0].name : `${submittedFiles.length} files`,
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
         };
@@ -564,9 +572,7 @@ export default function ReportsPage() {
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        setGenError(
-          err instanceof Error ? err.message : 'Generation failed. Please try again.',
-        );
+        setGenError(extractApiError(err));
       });
   };
 
@@ -580,33 +586,62 @@ export default function ReportsPage() {
     }
   };
 
-  const acceptFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!hasAcceptedExtension(file.name)) {
+  const acceptFiles = (incoming: FileList | File[]) => {
+    const list = Array.from(incoming);
+    const accepted: File[] = [];
+    let rejected = false;
+    list.forEach((f) => {
+      if (hasAcceptedExtension(f.name)) accepted.push(f);
+      else rejected = true;
+    });
+    if (rejected) {
       setUploadError(`Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`);
-      return;
+    } else {
+      setUploadError(null);
     }
-    setUploadError(null);
-    setUploadedFile(file);
+    if (accepted.length > 0) {
+      setUploadedFiles((prev) => {
+        const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+        const merged = [...prev];
+        accepted.forEach((f) => {
+          const id = `${f.name}:${f.size}`;
+          if (!seen.has(id)) { seen.add(id); merged.push(f); }
+        });
+        if (merged.length > MAX_ESG_DOCUMENTS) {
+          setShowFileCapWarning(true);
+          return merged.slice(0, MAX_ESG_DOCUMENTS);
+        }
+        return merged;
+      });
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    acceptFile(e.target.files?.[0] ?? undefined);
-    // Reset so selecting the same file again re-fires onChange.
+    if (e.target.files && e.target.files.length > 0) acceptFiles(e.target.files);
     e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    acceptFile(e.dataTransfer.files?.[0] ?? undefined);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) acceptFiles(e.dataTransfer.files);
   };
 
   const openFilePicker = () => fileInputRef.current?.click();
-  const clearUploadedFile = () => {
-    setUploadedFile(null);
+  const removeUploadedFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     setUploadError(null);
   };
+  const clearUploadedFiles = () => {
+    setUploadedFiles([]);
+    setUploadError(null);
+  };
+
+  useEffect(() => {
+    if (!showFileCapWarning) return;
+    const t = setTimeout(() => setShowFileCapWarning(false), 3000);
+    return () => clearTimeout(t);
+  }, [showFileCapWarning]);
 
   useEffect(() => {
     getSectors()
@@ -703,7 +738,7 @@ export default function ReportsPage() {
     setScope(newScope);
     // Upload is only allowed in global scope — clear any prior file on switch.
     if (newScope !== 'global') {
-      setUploadedFile(null);
+      setUploadedFiles([]);
       setUploadError(null);
       setIsDragging(false);
     }
@@ -1226,64 +1261,72 @@ export default function ReportsPage() {
               }}
             >
               <label className="fl-label">
-                Upload Source Document{!selectedReport && (
+                Upload Source Documents{!selectedReport && (
                   <>
                     {' '}
                     <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
                   </>
                 )}{' '}
                 <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
-                  (PDF, DOCX, TXT, CSV, XLSX — one file)
+                  (PDF, DOCX, TXT, CSV, XLSX — up to {MAX_ESG_DOCUMENTS} files)
                 </span>
               </label>
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept={ACCEPTED_UPLOAD_ATTR}
                 onChange={handleFileInputChange}
                 style={{ display: 'none' }}
               />
-              {uploadedFile ? (
-                <div
-                  className="upload-z"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    textAlign: 'left',
-                    padding: '14px 16px',
-                    borderColor: '#4040C8',
-                    background: 'rgba(64,64,200,.04)',
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                    <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
-                    <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
-                  </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {uploadedFile.name}
+              {uploadedFiles.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {uploadedFiles.map((f, i) => (
+                    <div
+                      key={`${f.name}:${f.size}`}
+                      className="upload-z"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        borderColor: '#4040C8',
+                        background: 'rgba(64,64,200,.04)',
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                        <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                        <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                      </svg>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {f.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 1 }}>{formatBytes(f.size)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeUploadedFile(i)}
+                        aria-label={`Remove ${f.name}`}
+                        title="Remove file"
+                        style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
                     </div>
-                    <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(uploadedFile.size)}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={openFilePicker}
-                    style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: 0, padding: '4px 8px', cursor: 'pointer' }}
-                  >
-                    Replace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearUploadedFile}
-                    aria-label="Remove file"
-                    title="Remove file"
-                    style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </button>
+                  ))}
+                  {uploadedFiles.length < MAX_ESG_DOCUMENTS && (
+                    <button
+                      type="button"
+                      onClick={openFilePicker}
+                      style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: '1px dashed #C5C9E0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      + Add more files ({uploadedFiles.length}/{MAX_ESG_DOCUMENTS})
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div
@@ -1318,6 +1361,11 @@ export default function ReportsPage() {
                   <span style={{ fontSize: 12, color: '#5A6080' }}>
                     Click to upload or drag &amp; drop annual report, HR data, financial statements
                   </span>
+                </div>
+              )}
+              {showFileCapWarning && (
+                <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">
+                  You can upload a maximum of {MAX_ESG_DOCUMENTS} documents at a time. Please split your files into smaller batches.
                 </div>
               )}
               {uploadError && (
@@ -1371,7 +1419,7 @@ export default function ReportsPage() {
                 const canGenerateNew =
                   selectedReport === null &&
                   customYear !== null &&
-                  uploadedFile !== null &&
+                  uploadedFiles.length > 0 &&
                   hasFramework &&
                   regionalReady;
                 const canGenerateFromDb =
@@ -1380,24 +1428,24 @@ export default function ReportsPage() {
                   hasFramework;
                 // Backend pulls year/sector/frameworks from the report's stored
                 // generation_config, so the local hasFramework check is not
-                // required here — only a file is needed.
+                // required here — only files are needed.
                 const canAddDocs =
                   selectedReport !== null &&
                   existingReportSource === 'upload' &&
-                  uploadedFile !== null;
+                  uploadedFiles.length > 0;
                 const canGenerate = canGenerateNew || canGenerateFromDb || canAddDocs;
                 const disabledReason =
                   scope === 'regional' && selectedRegion === ''
                     ? 'Select a region to continue'
                     : scope === 'regional' && selectedCountryId === ''
                       ? 'Select a country to continue'
-                      : selectedReport !== null && existingReportSource === 'upload' && uploadedFile === null
+                      : selectedReport !== null && existingReportSource === 'upload' && uploadedFiles.length === 0
                         ? 'Upload a document to add to this report'
                         : !hasFramework && !(selectedReport !== null && existingReportSource === 'upload')
                           ? 'Select at least one ESG framework to continue'
                           : selectedReport === null && customYear === null
                             ? 'Select a reporting year to continue'
-                            : selectedReport === null && uploadedFile === null
+                            : selectedReport === null && uploadedFiles.length === 0
                               ? 'Upload a source document to continue'
                               : undefined;
                 const isBusy = isSubmittingGenerate;
