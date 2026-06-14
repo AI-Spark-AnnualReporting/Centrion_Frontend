@@ -449,6 +449,10 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes bpulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0; } }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes sheen { 0% { background-position: 220% 0; } 100% { background-position: -220% 0; } }
+@keyframes slide-in-right { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes section-flash { 0% { background: rgba(64,64,200,.12); } 100% { background: transparent; } }
 
 /* Skeleton placeholder — used in place of spinners while content loads */
 .skel {

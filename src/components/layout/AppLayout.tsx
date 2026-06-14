@@ -19,7 +19,9 @@ const PAGE_NAMES: Record<string, string> = {
 
 export function AppLayout() {
   const location = useLocation();
-  const pageName = PAGE_NAMES[location.pathname] || 'Command Center';
+  const pageName =
+    PAGE_NAMES[location.pathname] ??
+    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' : 'Command Center');
 
   return (
     <div className="app-shell">

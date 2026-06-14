@@ -23,6 +23,15 @@ import type {
   PipelineHandle,
 } from "@/types/report";
 import type {
+  QuarterlyCoverageResponse,
+  GapsResponse,
+  QuarterlyPreviewReport,
+  QuarterlyPreviewResponse,
+  PreviewSentenceUpdateResponse,
+  ChatHistoryResponse,
+  ChatStreamEvent,
+} from "@/types/quarterly";
+import type {
   CreateMeetingBody,
   MeetingListResponse,
   MeetingResponse,
@@ -157,6 +166,25 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return parsed as T;
 }
 
+// POST a FormData to a JSON endpoint with auth. Like `request`, but multipart:
+// the browser must set the multipart boundary, so we never set Content-Type.
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const token = getAuthToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: "POST", headers, body: form });
+  const ct = res.headers.get("content-type") ?? "";
+  const parsed: unknown = ct.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => null);
+
+  if (res.status === 401) handleUnauthorized();
+  if (!res.ok) throw new ApiError(res.status, res.statusText, parsed, url);
+  return parsed as T;
+}
+
 // POST a FormData to an endpoint that returns either 202 Accepted (new run) or
 // 409 Conflict (existing run) and normalise both into a PipelineHandle.
 // FastAPI may wrap HTTPException bodies under `detail`, so we unwrap defensively.
@@ -250,6 +278,28 @@ export interface GenerateReportBody {
 
 export interface AddReportDocumentsBody {
   files: File[];
+}
+
+export interface GenerateQuarterlyBody {
+  files: File[];
+  year: number;
+  quarter: string; // "Q1".."Q4"
+  areas?: string[]; // snake_case slugs; omit/empty when none selected
+  content_language?: "english" | "arabic"; // report language; defaults to english
+}
+
+// One selectable "Report Area" card on the Generate Quarterly Report screen.
+// The API is the source of truth for which areas exist — render cards from it,
+// never hardcode. `code` is the value submitted in `areas[]`.
+export interface QuarterlyReportArea {
+  code: string;
+  title: string;
+  metric_count: number;
+  metrics: string[];
+}
+
+export interface QuarterlyReportAreasResponse {
+  areas: QuarterlyReportArea[];
 }
 
 // Loose aliases for values sourced from API lookups.
@@ -699,6 +749,51 @@ export const reports = {
     );
   },
 
+  // Source of truth for the Report Area cards. Company-agnostic; render the
+  // returned `areas` dynamically (do NOT hardcode the card list).
+  getQuarterlyReportAreas: () =>
+    request<QuarterlyReportAreasResponse>(
+      `/api/v1/reports/quarterly/report-areas`,
+    ),
+
+  // Async: see generate(). Stamps report_type='quarterly' server-side so the
+  // worker routes to the financial parser instead of the ESG harvester.
+  generateQuarterly: (
+    companyId: string,
+    body: GenerateQuarterlyBody,
+  ): Promise<PipelineHandle> => {
+    const fd = new FormData();
+    body.files.forEach((f) => fd.append("files", f));
+    fd.append("year", String(body.year));
+    fd.append("quarter", body.quarter);
+    if (body.areas && body.areas.length > 0) {
+      body.areas.forEach((v) => fd.append("areas", v));
+    }
+    if (body.content_language) fd.append("content_language", body.content_language);
+    return postPipeline(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
+      fd,
+    );
+  },
+
+  // Detect one uploaded file's language for the upload-time UI check. Returns
+  // matches=true when the file is in (or can't be distinguished from) the
+  // expected language — fail-open, so it never wrongly flags a document.
+  checkLanguage: (
+    file: File,
+    contentLanguage: "english" | "arabic",
+  ): Promise<{
+    success: boolean;
+    matches: boolean;
+    detected_language: string;
+    expected_language: string;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("content_language", contentLanguage);
+    return postForm("/api/v1/reports/quarterly/check-language", fd);
+  },
+
   getCoverage: <T = unknown>(
     companyId: string,
     reportId: string,
@@ -719,6 +814,167 @@ export const reports = {
     request<string>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/${encodeURIComponent(reportId)}/questions`,
       { method: "POST", body },
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Quarterly reports — coverage map and figure driver endpoints.
+// ---------------------------------------------------------------------------
+
+export const quarterlyReports = {
+  getCoverage: (companyId: string, reportId: string) =>
+    request<QuarterlyCoverageResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/coverage`,
+    ),
+
+  getGaps: (companyId: string, reportId: string) =>
+    request<GapsResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
+    ),
+
+  addDriver: (
+    companyId: string,
+    reportId: string,
+    figureId: string,
+    body: { text: string; source: "user_provided" },
+  ) =>
+    request<{ figure: import("@/types/quarterly").CoverageFigure }>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}/driver`,
+      { method: "POST", body },
+    ),
+
+  // ── Preview (step 6) ──
+  // Compose the report with the AI agent. Runs synchronously (~30–60s) and
+  // persists the result server-side, returning the full payload. Re-calling
+  // regenerates and OVERWRITES (discards inline edits) — use for "Regenerate".
+  generatePreview: (companyId: string, reportId: string) =>
+    request<QuarterlyPreviewReport>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview/generate`,
+      { method: "POST" },
+    ),
+
+  // Cheap read of the saved report. Returns { generated: false, sections: null }
+  // if never generated — call generatePreview() in that case.
+  getPreview: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<QuarterlyPreviewResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview`,
+      { signal },
+    ),
+
+  // ── Export (step 7) ──
+  // Download the rendered report as a pdf or docx file. Auth-required and returns
+  // a binary attachment, so we use fetchWithAuth (raw Response) + a blob download
+  // rather than the JSON-parsing request<T>(). Requires the preview to exist.
+  downloadExport: async (
+    companyId: string,
+    reportId: string,
+    format: "pdf" | "docx",
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(
+        reportId,
+      )}/export?format=${format}`,
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(filename || "quarterly-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // ── Chat agent ──
+  getChatHistory: (companyId: string, reportId: string) =>
+    request<ChatHistoryResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat/history`,
+    ),
+
+  streamChatMessage: async (
+    companyId: string,
+    reportId: string,
+    message: string,
+    onEvent: (event: ChatStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+        signal,
+      },
+    );
+    if (!res.ok) {
+      let msg = `Chat request failed (${res.status})`;
+      try {
+        const j = await res.json();
+        if (typeof j?.detail === "string") msg = j.detail;
+      } catch { /* non-JSON body */ }
+      throw new Error(msg);
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    const emit = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      const json = line.slice(6).trim();
+      if (!json) return;
+      try { onEvent(JSON.parse(json) as ChatStreamEvent); }
+      catch { /* skip malformed line */ }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) emit(line);
+    }
+    // Flush a final frame that arrived without a trailing newline — otherwise a
+    // closing `data: {"type":"done"}` can be stranded in the buffer and the
+    // preview never re-fetches.
+    if (buf) emit(buf);
+  },
+
+  clearChatHistory: async (companyId: string, reportId: string): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/chat/history`,
+      { method: "DELETE" },
+    );
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`Clear chat failed (${res.status})`);
+    }
+  },
+
+  // Save one inline sentence edit. 422 if text empty; 404 if the ids don't
+  // exist. Returns the updated sentence and the report's new word_count.
+  updatePreviewSentence: (
+    companyId: string,
+    reportId: string,
+    body: { section_id: string; sentence_id: string; text: string },
+  ) =>
+    request<PreviewSentenceUpdateResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview/sentence`,
+      { method: "PATCH", body },
     ),
 };
 
