@@ -3,6 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import type { GapItem, GapsResponse } from '@/types/quarterly';
+import {
+  isLanguageAcceptable,
+  languageMismatchWarning,
+  type ContentLanguage,
+} from '@/lib/lang';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 
 // ─── colours (matches CoverageMapPage conventions) ────────────────────────────
@@ -210,6 +215,8 @@ export default function GapQuestionsPage() {
   // ── fetch state
   const [gaps, setGaps] = useState<GapState[]>([]);
   const [meta, setMeta] = useState<Pick<GapsResponse, 'period_label' | 'prior_period_label' | 'total_gaps'> | null>(null);
+  // Report content language — answers must be written in it (≥70%).
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('english');
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -236,6 +243,7 @@ export default function GapQuestionsPage() {
         const seeded = seedGaps(res.gaps);
         setGaps(seeded);
         setMeta({ period_label: res.period_label, prior_period_label: res.prior_period_label, total_gaps: res.total_gaps });
+        setContentLanguage(res.content_language === 'arabic' ? 'arabic' : 'english');
         setCurrentIndex(firstUnanswered(seeded));
       })
       .catch((err: unknown) => {
@@ -254,6 +262,12 @@ export default function GapQuestionsPage() {
   const total = gaps.length;
   const gap = gaps[currentIndex] ?? null;
 
+  // Answer must be written in the report's content language (≥70%). Short or
+  // empty answers pass (grace); a wrong-language answer blocks Save & next.
+  const answerText = gap?.answer ?? '';
+  const langOk = isLanguageAcceptable(answerText, contentLanguage);
+  const langWarning = languageMismatchWarning(answerText, contentLanguage);
+
   // ── update answer text for current gap
   const setAnswer = useCallback((text: string) => {
     setGaps((prev) => prev.map((g, i) => i === currentIndex ? { ...g, answer: text } : g));
@@ -265,6 +279,7 @@ export default function GapQuestionsPage() {
     if (!gap || !companyId || !reportId) return;
     const text = gap.answer.trim();
     if (!text) return;
+    if (!isLanguageAcceptable(text, contentLanguage)) return; // wrong language — block
     setSaving(true);
     setSaveError(null);
     try {
@@ -284,7 +299,7 @@ export default function GapQuestionsPage() {
     } finally {
       setSaving(false);
     }
-  }, [gap, companyId, reportId, currentIndex]);
+  }, [gap, companyId, reportId, currentIndex, contentLanguage]);
 
   // ── skip (no POST)
   const handleSkip = useCallback(() => {
@@ -503,6 +518,13 @@ export default function GapQuestionsPage() {
                 </div>
               )}
 
+              {/* Wrong-language warning (client-side, ≥70% content language) */}
+              {langWarning && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#B45309' }}>
+                  {langWarning}
+                </div>
+              )}
+
               {/* Actions row */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, gap: 12, flexWrap: 'wrap' }}>
                 <button
@@ -516,8 +538,9 @@ export default function GapQuestionsPage() {
                   <button
                     className="btn bp"
                     onClick={handleSave}
-                    disabled={saving || !gap.answer.trim()}
-                    style={{ fontSize: 13, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 8, opacity: saving || !gap.answer.trim() ? 0.55 : 1 }}
+                    disabled={saving || !gap.answer.trim() || !langOk}
+                    title={!langOk && langWarning ? langWarning : undefined}
+                    style={{ fontSize: 13, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 8, opacity: saving || !gap.answer.trim() || !langOk ? 0.55 : 1 }}
                   >
                     {saving && (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>

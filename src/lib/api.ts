@@ -166,6 +166,25 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return parsed as T;
 }
 
+// POST a FormData to a JSON endpoint with auth. Like `request`, but multipart:
+// the browser must set the multipart boundary, so we never set Content-Type.
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const token = getAuthToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: "POST", headers, body: form });
+  const ct = res.headers.get("content-type") ?? "";
+  const parsed: unknown = ct.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => null);
+
+  if (res.status === 401) handleUnauthorized();
+  if (!res.ok) throw new ApiError(res.status, res.statusText, parsed, url);
+  return parsed as T;
+}
+
 // POST a FormData to an endpoint that returns either 202 Accepted (new run) or
 // 409 Conflict (existing run) and normalise both into a PipelineHandle.
 // FastAPI may wrap HTTPException bodies under `detail`, so we unwrap defensively.
@@ -266,6 +285,7 @@ export interface GenerateQuarterlyBody {
   year: number;
   quarter: string; // "Q1".."Q4"
   areas?: string[]; // snake_case slugs; omit/empty when none selected
+  content_language?: "english" | "arabic"; // report language; defaults to english
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -749,10 +769,29 @@ export const reports = {
     if (body.areas && body.areas.length > 0) {
       body.areas.forEach((v) => fd.append("areas", v));
     }
+    if (body.content_language) fd.append("content_language", body.content_language);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
     );
+  },
+
+  // Detect one uploaded file's language for the upload-time UI check. Returns
+  // matches=true when the file is in (or can't be distinguished from) the
+  // expected language — fail-open, so it never wrongly flags a document.
+  checkLanguage: (
+    file: File,
+    contentLanguage: "english" | "arabic",
+  ): Promise<{
+    success: boolean;
+    matches: boolean;
+    detected_language: string;
+    expected_language: string;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("content_language", contentLanguage);
+    return postForm("/api/v1/reports/quarterly/check-language", fd);
   },
 
   getCoverage: <T = unknown>(
