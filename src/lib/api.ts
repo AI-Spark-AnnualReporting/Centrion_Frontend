@@ -7,7 +7,12 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
-import type { AuthUser, LoginResponse } from "@/types/auth";
+import type {
+  AuthUser,
+  LoginResponse,
+  OnboardingPayload,
+  OnboardingResponse,
+} from "@/types/auth";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   CreateCompanyRequest,
@@ -28,6 +33,18 @@ import type {
   MeetingResponse,
   UpdateMeetingBody,
 } from "@/types/meeting";
+import type {
+  AdminOverview,
+  AdminUserRow,
+  Department,
+  DepartmentPayload,
+  InviteUserPayload,
+  InviteUserResponse,
+  PermissionMatrix,
+  RawAdminOverview,
+  SavePermissionsPayload,
+} from "@/types/admin";
+import { normalizeOverview } from "@/types/admin";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -318,6 +335,15 @@ export const auth = {
     }),
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
+
+  // First-login onboarding for self-registered admins. Unlike the other auth
+  // calls this sends a JSON body, and returns a freshly-issued token whose JWT
+  // now carries onboarding_completed = true.
+  onboarding: (payload: OnboardingPayload) =>
+    request<OnboardingResponse>("/api/v1/auth/onboarding", {
+      method: "POST",
+      body: payload,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -929,6 +955,64 @@ export const admin = {
 };
 
 // ---------------------------------------------------------------------------
+// Admin Console (Part 5) — the dedicated /admin-console section. Lives
+// alongside `admin` above; role/status changes reuse `admin.updateUserRole`
+// and `admin.updateUserStatus` (already query-based and live).
+// ---------------------------------------------------------------------------
+
+export const adminConsole = {
+  // Backend returns a nested shape (stats{}, reports_chart[], …); normalise it
+  // to the flat AdminOverview the page renders.
+  overview: (): Promise<AdminOverview> =>
+    request<RawAdminOverview>("/api/v1/admin/overview").then(normalizeOverview),
+
+  listUsers: (params?: { role?: string; status?: string; search?: string }) =>
+    request<AdminUserRow[]>("/api/v1/admin/users", { query: params }),
+
+  inviteUser: (body: InviteUserPayload) =>
+    request<InviteUserResponse>("/api/v1/admin/users/invite", {
+      method: "POST",
+      body,
+    }),
+
+  // Reassign a user's department (department_user role only). Pass null to clear.
+  updateUserDepartment: (userId: string, departmentId: string | null) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/department`,
+      { method: "PATCH", body: { department_id: departmentId } },
+    ),
+
+  getPermissions: () => request<PermissionMatrix>("/api/v1/admin/permissions"),
+
+  savePermissions: (body: SavePermissionsPayload) =>
+    request<unknown>("/api/v1/admin/permissions", { method: "PUT", body }),
+
+  // Backend may return a raw array or a `{ departments: [...] }` wrapper —
+  // both are handled by the caller.
+  listDepartments: () =>
+    request<Department[] | { departments: Department[] }>(
+      "/api/v1/admin/departments",
+    ),
+
+  createDepartment: (body: DepartmentPayload) =>
+    request<Department>("/api/v1/admin/departments", { method: "POST", body }),
+
+  updateDepartment: (
+    id: string,
+    body: Partial<DepartmentPayload> & { is_active?: boolean },
+  ) =>
+    request<Department>(
+      `/api/v1/admin/departments/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
+
+  deleteDepartment: (id: string) =>
+    request<unknown>(`/api/v1/admin/departments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+};
+
+// ---------------------------------------------------------------------------
 // Lookups
 // ---------------------------------------------------------------------------
 
@@ -1052,14 +1136,19 @@ export async function login(
 
   // Every user belongs to a company. If the login payload's user object didn't
   // surface company_id, read it from the JWT claims so the rest of the app can
-  // rely on `useAuth().user.company_id`.
+  // rely on `useAuth().user.company_id`. The same claims also carry the
+  // onboarding flag, which we mirror onto the user (preferring the explicit
+  // top-level field) so ProtectedRoute can gate on it.
   const user: AuthUser = { ...res.user };
-  if (user.company_id == null) {
-    const claims = parseJwtPayload<{ company_id?: string | null }>(
-      res.access_token,
-    );
-    if (claims && "company_id" in claims) user.company_id = claims.company_id;
+  const claims = parseJwtPayload<{
+    company_id?: string | null;
+    onboarding_completed?: boolean | null;
+  }>(res.access_token);
+  if (user.company_id == null && claims && "company_id" in claims) {
+    user.company_id = claims.company_id;
   }
+  user.onboarding_completed =
+    res.onboarding_completed ?? claims?.onboarding_completed ?? null;
 
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -1090,18 +1179,29 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
   try {
     const user = JSON.parse(raw) as AuthUser;
-    if (user.company_id != null) return user;
+    // Nothing to backfill if both already present.
+    if (user.company_id != null && user.onboarding_completed != null) {
+      return user;
+    }
 
-    // Backfill from the JWT for sessions saved before company_id was captured.
+    // Backfill from the JWT for sessions saved before these fields were
+    // captured, so the onboarding gate still resolves on a page reload.
     const token = getAuthToken();
     if (!token) return user;
-    const claims = parseJwtPayload<{ company_id?: string | null }>(token);
-    if (claims && "company_id" in claims) {
-      const merged = { ...user, company_id: claims.company_id };
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
-      return merged;
+    const claims = parseJwtPayload<{
+      company_id?: string | null;
+      onboarding_completed?: boolean | null;
+    }>(token);
+    if (!claims) return user;
+    const merged: AuthUser = { ...user };
+    if (merged.company_id == null && "company_id" in claims) {
+      merged.company_id = claims.company_id;
     }
-    return user;
+    if (merged.onboarding_completed == null && "onboarding_completed" in claims) {
+      merged.onboarding_completed = claims.onboarding_completed;
+    }
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
+    return merged;
   } catch {
     return null;
   }
@@ -1240,6 +1340,7 @@ export const api = {
   chat,
   meetings,
   admin,
+  adminConsole,
   lookups,
   system,
 };

@@ -1,19 +1,27 @@
+import type { CompanyRecord } from "@/types/company";
+
 export interface AuthUser {
   user_id: string;
   email: string;
   full_name: string;
-  role: "admin" | "user";
+  // `ir` users come from the Admin Console invite flow — read-only.
+  role: "admin" | "project_manager" | "department_user" | "ir";
   company_id?: string | null;
   company_name?: string | null;
   // Set TRUE for users created via /companies/{id}/team — backend flags
   // the row with must_change_password until they hit /auth/change-password.
   must_change_password?: boolean | null;
+  // FALSE for a freshly-registered admin until they finish /auth/onboarding.
+  // Invited users (project_manager / department_user) are never gated on this.
+  onboarding_completed?: boolean | null;
 }
 
 export interface LoginResponse {
   access_token: string;
   token_type: "bearer";
   user: AuthUser;
+  // Explicit top-level mirror of the user's onboarding state.
+  onboarding_completed: boolean;
 }
 
 export interface AuthState {
@@ -33,4 +41,28 @@ export interface UserProfile {
   company_id: string | null;
   company_name: string | null;
   must_change_password?: boolean | null;
+  onboarding_completed?: boolean | null;
+}
+
+// POST /api/v1/auth/onboarding — collects company details on the admin's
+// first login. Sent as a JSON body. (The user-profile step was removed, so
+// title / position_type / phone are no longer sent.)
+export interface OnboardingPayload {
+  // Mandatory
+  description: string;
+  employee_count: number;
+  fiscal_year_end_month: number;
+  reporting_currency: "SAR" | "AED" | "BHD" | "KWD" | "OMR" | "QAR" | "USD";
+  primary_language: "en" | "ar";
+  // Optional
+  founded_year?: number | null;
+  website_url?: string | null;
+  headquarter_city?: string | null;
+  listed_exchange?: string | null;
+}
+
+export interface OnboardingResponse {
+  access_token: string;
+  company: CompanyRecord;
+  user: AuthUser;
 }

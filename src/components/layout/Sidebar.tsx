@@ -1,5 +1,23 @@
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+
+// Sub-sections shown when the "Reports" item is expanded — mirrors the report
+// types offered on the Reports page. ESG opens the in-app page; Annual lives in
+// the separate workspace app and is routed by role.
+const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: boolean }[] = [
+  { key: 'esg', label: 'ESG Validator', path: '/reports' },
+  { key: 'annual', label: 'Annual', external: true },
+];
+
+// Admin Console sub-sections — mirror the pages under /admin-console. Shown only
+// to admins as an expandable nav item (same pattern as Reports). `end` marks the
+// index route so it's only "active" on an exact match.
+// Overview isn't listed — clicking the "Admin Console" parent lands on it.
+const ADMIN_CHILDREN: { key: string; label: string; path: string; end?: boolean }[] = [
+  { key: 'users', label: 'Users & Roles', path: '/admin-console/users' },
+  { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
+];
 
 const NAV_ITEMS = [
   {
@@ -10,7 +28,7 @@ const NAV_ITEMS = [
       { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: null },
       // Hidden until the Compliance feature is wired to the backend.
       // { key: 'compliance', label: 'Compliance', path: '/compliance', icon: 'shield', badge: { text: '!', cls: 'rd' } },
-      { key: 'ai', label: 'IR Copilot', path: '/ai', icon: 'chat', badge: { text: 'AI', cls: 'tl' } },
+      { key: 'ai', label: 'AI Copilot', path: '/ai', icon: 'chat', badge: null },
     ],
   },
   {
@@ -51,8 +69,25 @@ export function Sidebar() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
+  const reportsActive = location.pathname.startsWith('/reports');
+  const [reportsOpen, setReportsOpen] = useState(reportsActive);
+
+  const adminActive = location.pathname.startsWith('/admin-console');
+  const [adminOpen, setAdminOpen] = useState(adminActive);
+
   const handleNav = (path: string) => {
     navigate(path);
+  };
+
+  // Annual reports live in the separate workspace app, routed by role.
+  const goAnnual = () => {
+    const seg =
+      user?.role === 'project_manager'
+        ? '/pm'
+        : user?.role === 'department_user'
+          ? '/department'
+          : '/admin';
+    window.location.href = `http://localhost:3000${seg}`;
   };
 
   const handleLogout = () => {
@@ -91,20 +126,151 @@ export function Sidebar() {
       {NAV_ITEMS.map((section) => (
         <div key={section.section}>
           <div className="sb-sec">{section.section}</div>
-          {section.items.map((item) => (
-            <button
-              key={item.key}
-              className={`sb-item ${location.pathname === item.path ? 'act' : ''}`}
-              onClick={() => handleNav(item.path)}
-            >
-              {icons[item.icon]}
-              {item.label}
-              {item.badge && <span className={`sb-badge ${item.badge.cls}`}>{item.badge.text}</span>}
-            </button>
-          ))}
+          {section.items.map((item) =>
+            item.key === 'reports' ? (
+              <div key={item.key}>
+                <button
+                  className={`sb-item ${reportsActive && !reportsOpen ? 'act' : ''}`}
+                  onClick={() => setReportsOpen((o) => !o)}
+                  aria-expanded={reportsOpen}
+                >
+                  {icons[item.icon]}
+                  {item.label}
+                  <svg
+                    viewBox="0 0 12 12"
+                    width="11"
+                    height="11"
+                    fill="none"
+                    style={{
+                      marginLeft: 'auto',
+                      flexShrink: 0,
+                      opacity: 0.6,
+                      transition: '.15s',
+                      transform: reportsOpen ? 'rotate(180deg)' : 'none',
+                    }}
+                  >
+                    <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                {reportsOpen && (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {REPORT_CHILDREN.map((child) => (
+                      <button
+                        key={child.key}
+                        className={`sb-item ${child.path && location.pathname.startsWith(child.path) ? 'act' : ''}`}
+                        style={{ paddingLeft: 34, fontSize: 11 }}
+                        onClick={() =>
+                          child.external ? goAnnual() : child.path && handleNav(child.path)
+                        }
+                      >
+                        <span
+                          style={{
+                            width: 5,
+                            height: 5,
+                            borderRadius: '50%',
+                            background: 'currentColor',
+                            opacity: 0.45,
+                            flexShrink: 0,
+                          }}
+                        />
+                        {child.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                key={item.key}
+                className={`sb-item ${location.pathname === item.path ? 'act' : ''}`}
+                onClick={() => handleNav(item.path)}
+              >
+                {icons[item.icon]}
+                {item.label}
+                {item.badge && <span className={`sb-badge ${item.badge.cls}`}>{item.badge.text}</span>}
+              </button>
+            ),
+          )}
           {section.section !== 'Workspace' && <div className="sb-div" />}
         </div>
       ))}
+      {user?.role === 'admin' && (
+        <div>
+          <div className="sb-div" />
+          <div className="sb-sec">Admin</div>
+          <button
+            className={`sb-item ${
+              location.pathname === '/admin-console' || (adminActive && !adminOpen)
+                ? 'act'
+                : ''
+            }`}
+            onClick={() => {
+              handleNav('/admin-console');
+              setAdminOpen(true);
+            }}
+            aria-expanded={adminOpen}
+          >
+            <svg viewBox="0 0 13 13" fill="none">
+              <circle cx="6.5" cy="6.5" r="2" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M6.5 1v1.5M6.5 10.5V12M1 6.5h1.5M10.5 6.5H12M2.6 2.6l1.05 1.05M9.35 9.35l1.05 1.05M10.4 2.6L9.35 3.65M3.65 9.35L2.6 10.4"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
+            </svg>
+            Admin Console
+            <svg
+              viewBox="0 0 12 12"
+              width="11"
+              height="11"
+              fill="none"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAdminOpen((o) => !o);
+              }}
+              style={{
+                marginLeft: 'auto',
+                flexShrink: 0,
+                opacity: 0.6,
+                transition: '.15s',
+                transform: adminOpen ? 'rotate(180deg)' : 'none',
+              }}
+            >
+              <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {adminOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {ADMIN_CHILDREN.map((child) => {
+                const childActive = child.end
+                  ? location.pathname === child.path
+                  : location.pathname.startsWith(child.path);
+                return (
+                  <button
+                    key={child.key}
+                    className={`sb-item ${childActive ? 'act' : ''}`}
+                    style={{ paddingLeft: 34, fontSize: 11 }}
+                    onClick={() => handleNav(child.path)}
+                  >
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: 'currentColor',
+                        opacity: 0.45,
+                        flexShrink: 0,
+                      }}
+                    />
+                    {child.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ flex: 1 }} />
       <div className="sb-div" />
       <div className="sb-user">

@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -8,13 +9,16 @@ const PAGE_NAMES: Record<string, string> = {
   '/reports': 'Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance',
-  '/ai': 'IR Copilot',
+  '/ai': 'AI Copilot',
   '/meetings': 'Board & Meetings',
   '/comms': 'Comms Hub',
   '/stakeholders': 'Leadership',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',
+  '/admin-console': 'Admin Console',
+  '/admin-console/users': 'Users & Roles',
+  '/admin-console/departments': 'Departments',
 };
 
 export function AppLayout() {
@@ -27,7 +31,15 @@ export function AppLayout() {
       <div className="main">
         <Topbar pageName={pageName} />
         <div className="content">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-full text-[13px] text-[#5A6080]">
+                Loading…
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </div>
       <FloatingChatbot />

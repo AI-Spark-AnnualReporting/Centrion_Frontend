@@ -1,6 +1,8 @@
+import { lazy } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
+import OnboardingPage from "./pages/OnboardingPage";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
@@ -17,6 +19,14 @@ import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
 
+// Admin Console pages — code-split (recharts etc. stay off the main bundle).
+// They render inside AppLayout so the main sidebar drives navigation.
+const AdminOverviewPage = lazy(() => import("./pages/admin/AdminOverviewPage"));
+const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
+const AdminDepartmentsPage = lazy(
+  () => import("./pages/admin/AdminDepartmentsPage"),
+);
+
 const App = () => (
   <BrowserRouter>
     <Routes>
@@ -27,6 +37,8 @@ const App = () => (
         {/* Forced password rotation lives outside AppLayout so there's no
             sidebar / topbar / chatbot to distract from the required step. */}
         <Route path="/change-password" element={<ChangePasswordPage />} />
+        {/* First-login onboarding — also shell-less, same as change-password. */}
+        <Route path="/onboarding" element={<OnboardingPage />} />
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
@@ -42,6 +54,16 @@ const App = () => (
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/questions" element={<QuestionsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          {/* Admin Console — admin-only, rendered inside the main shell so the
+              sidebar's expandable Admin section drives navigation. */}
+          <Route element={<ProtectedRoute requiredRole="admin" />}>
+            <Route path="/admin-console" element={<AdminOverviewPage />} />
+            <Route path="/admin-console/users" element={<AdminUsersPage />} />
+            <Route
+              path="/admin-console/departments"
+              element={<AdminDepartmentsPage />}
+            />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<NotFound />} />

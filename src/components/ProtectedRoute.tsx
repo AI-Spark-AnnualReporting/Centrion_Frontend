@@ -1,10 +1,18 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "@/context/AuthContext";
+import type { AuthUser } from "@/types/auth";
 
 const CHANGE_PASSWORD_PATH = "/change-password";
+const ONBOARDING_PATH = "/onboarding";
 
-export function ProtectedRoute({ children }: { children?: ReactNode }) {
+export function ProtectedRoute({
+  children,
+  requiredRole,
+}: {
+  children?: ReactNode;
+  requiredRole?: AuthUser["role"];
+}) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -28,6 +36,26 @@ export function ProtectedRoute({ children }: { children?: ReactNode }) {
   // Conversely, a user who's already rotated their password shouldn't be
   // able to revisit the rotation screen by URL — bounce them to the app.
   if (!user.must_change_password && onChangePasswordPage) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Onboarding gate — only self-registered admins who haven't finished it.
+  // Strict === checks so older sessions (field absent/undefined) are never
+  // bounced; invited users (project_manager / department_user) skip it.
+  const onOnboardingPage = location.pathname === ONBOARDING_PATH;
+  if (
+    user.role === "admin" &&
+    user.onboarding_completed === false &&
+    !onOnboardingPage
+  ) {
+    return <Navigate to={ONBOARDING_PATH} replace />;
+  }
+  if (onOnboardingPage && user.onboarding_completed === true) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Role gate (e.g. the Admin Console). Non-matching roles bounce to the app.
+  if (requiredRole && user.role !== requiredRole) {
     return <Navigate to="/dashboard" replace />;
   }
 

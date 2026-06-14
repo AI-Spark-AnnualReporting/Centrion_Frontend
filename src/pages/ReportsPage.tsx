@@ -669,16 +669,9 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div><h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Reports</h2><p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>ESG, Annual, Quarterly & Sustainability</p></div>
-        <div className="tabs" style={{ marginBottom: 0 }}>
-          <button className="tab act">ESG & Sustainability</button>
-          {/* Other report types hidden until they're wired up.
-          <button className="tab">Annual</button>
-          <button className="tab">Quarterly</button>
-          <button className="tab">Sustainability</button>
-          */}
-        </div>
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>ESG Validator</h2>
+        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>Configure parameters & run the ESG & sustainability validator</p>
       </div>
 
       {resumableRun && (
@@ -697,7 +690,7 @@ export default function ReportsPage() {
         >
           <div style={{ flex: 1, fontSize: 12, color: '#1A1D2E' }}>
             <div style={{ fontWeight: 700, marginBottom: 2 }}>
-              A report is still processing
+              A validator is still processing
             </div>
             <div style={{ color: '#5A6080' }}>
               {resumableRun.fileName
@@ -763,7 +756,7 @@ export default function ReportsPage() {
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>Validate ESG Report</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>ESG Validator</div>
               <div style={{ fontSize: 11, color: '#5A6080' }}>Configure parameters & upload source documents</div>
             </div>
           </div>
@@ -792,7 +785,7 @@ export default function ReportsPage() {
                         {formatPeriod(`FY-${customYear}`)}
                       </span>
                       <span style={{ fontSize: 10, fontWeight: 700, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.5px' }}>
-                        New report
+                        New validator
                       </span>
                     </div>
                     <button
@@ -894,7 +887,7 @@ export default function ReportsPage() {
             {/* Row 2: Scope + conditional Region/Country */}
             <div style={{ display: 'grid', gridTemplateColumns: scope === 'regional' ? '1fr 1fr 1fr' : '1fr', gap: 12, marginBottom: 18 }}>
               <div>
-                <label className="fl-label">Report Scope</label>
+                <label className="fl-label">Validation Scope</label>
                 <select
                   className="inp sel"
                   value={scope}
@@ -1075,7 +1068,7 @@ export default function ReportsPage() {
                     setExistingReportSource(e.target.value as 'db' | 'upload')
                   }
                 >
-                  <option value="db">Generate report from DB</option>
+                  <option value="db">Run validator from DB</option>
                   <option value="upload">Upload new documents</option>
                 </select>
               </div>
@@ -1303,7 +1296,7 @@ export default function ReportsPage() {
                     ) : (
                       <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" /></svg>
                     )}
-                    {isBusy ? 'Starting…' : 'Validate Report'}
+                    {isBusy ? 'Starting…' : 'Run Validator'}
                   </button>
                 );
               })()}
@@ -1412,7 +1405,7 @@ export default function ReportsPage() {
                   <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
                     {headerLine}
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'ESG Report'}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'ESG Validator'}</div>
                   <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                       <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>

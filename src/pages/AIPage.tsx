@@ -229,7 +229,7 @@ export default function AIPage() {
   // Static greeting shown only when the server-owned conversation is empty.
   // Not persisted — purely a UX placeholder so the chat doesn't open blank.
   const showGreeting = !sessionLoading && messages.length === 0 && !sessionError;
-  const greetingText = `Hi ${user?.full_name?.split(' ')[0] ?? 'there'} 👋 I'm **IR Copilot** — ask me anything about your ESG reports, coverage, or indicators.`;
+  const greetingText = `Hi ${user?.full_name?.split(' ')[0] ?? 'there'} 👋 I'm **AI Copilot** — ask me anything about your ESG reports, coverage, or indicators.`;
 
   const userInitials =
     user?.full_name
@@ -252,7 +252,7 @@ export default function AIPage() {
         }}
       >
         <div>
-          <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>IR Copilot</h2>
+          <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>AI Copilot</h2>
           <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
             AI-powered ESG &amp; IR assistant
           </p>
