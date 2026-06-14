@@ -88,6 +88,7 @@ const PILLAR_STYLE: Record<
 interface ReportListItem {
   id: string;
   period: string;
+  report_type?: string | null;
   generated_at?: string | null;
   title?: string | null;
   // Inline coverage block returned by GET /api/v1/reports/{company_id}.
@@ -154,7 +155,9 @@ export function DashboardESG() {
         const list = await reportsApi.list<{ reports: ReportListItem[] }>(
           companyId,
         );
-        const reports = (list?.reports ?? []).filter((r) => r && r.period);
+        const reports = (list?.reports ?? []).filter(
+          (r) => r && r.period && r.report_type === 'esg',
+        );
         if (!cancelled) setAllReports(reports);
         if (reports.length === 0) {
           if (!cancelled) {
