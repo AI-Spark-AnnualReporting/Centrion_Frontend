@@ -83,7 +83,6 @@ export function Sidebar() {
           </div>
           <div>
             <div className="sb-lname">Centriyon</div>
-            <div className="sb-lsub">Investor Portal</div>
           </div>
         </div>
       </div>

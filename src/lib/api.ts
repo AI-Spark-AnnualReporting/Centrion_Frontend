@@ -893,22 +893,27 @@ export const quarterlyReports = {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+
+    const emit = (line: string) => {
+      if (!line.startsWith("data: ")) return;
+      const json = line.slice(6).trim();
+      if (!json) return;
+      try { onEvent(JSON.parse(json) as ChatStreamEvent); }
+      catch { /* skip malformed line */ }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const json = line.slice(6).trim();
-          if (json) {
-            try { onEvent(JSON.parse(json) as ChatStreamEvent); }
-            catch { /* skip malformed line */ }
-          }
-        }
-      }
+      for (const line of lines) emit(line);
     }
+    // Flush a final frame that arrived without a trailing newline — otherwise a
+    // closing `data: {"type":"done"}` can be stranded in the buffer and the
+    // preview never re-fetches.
+    if (buf) emit(buf);
   },
 
   clearChatHistory: async (companyId: string, reportId: string): Promise<void> => {

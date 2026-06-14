@@ -233,6 +233,7 @@ function SentenceView({
   editing,
   saving,
   error,
+  bullet,
   onStartEdit,
   onCancel,
   onSave,
@@ -241,10 +242,12 @@ function SentenceView({
   editing: boolean;
   saving: boolean;
   error: string | null;
+  bullet?: boolean;
   onStartEdit: () => void;
   onCancel: () => void;
   onSave: (text: string) => void;
 }) {
+  const Wrapper = (bullet ? 'li' : 'div') as 'li' | 'div';
   const [draft, setDraft] = useState(sentence.text);
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Esc cancels without saving; the resulting blur must then be a no-op.
@@ -268,7 +271,7 @@ function SentenceView({
 
   if (editing) {
     return (
-      <div style={{ marginBottom: 18 }}>
+      <Wrapper style={{ marginBottom: bullet ? 8 : 18 }}>
         <textarea
           ref={taRef}
           value={draft}
@@ -324,12 +327,12 @@ function SentenceView({
           )}
         </div>
         {error && <div style={{ marginTop: 4, fontSize: 12, color: RED }}>{error}</div>}
-      </div>
+      </Wrapper>
     );
   }
 
   return (
-    <div style={{ marginBottom: 18 }}>
+    <Wrapper style={{ marginBottom: bullet ? 8 : 18 }}>
       <p
         onClick={onStartEdit}
         title="Click to edit"
@@ -377,7 +380,7 @@ function SentenceView({
           <span style={{ fontSize: 10, color: MUTED, fontStyle: 'italic' }}>· edited</span>
         )}
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -500,20 +503,26 @@ function SectionView({
 
       {section.type === 'tables' ? (
         <TablesSection section={section} />
-      ) : (
-        section.sentences.map((s) => (
+      ) : (() => {
+        const items = section.sentences.map((s) => (
           <SentenceView
             key={s.id}
             sentence={s}
             editing={editingId === s.id}
             saving={savingId === s.id}
             error={editingId === s.id ? sentenceError : null}
+            bullet={section.display === 'bullets'}
             onStartEdit={() => onStartEdit(s.id)}
             onCancel={onCancelEdit}
             onSave={(text) => onSaveSentence(section, s, text)}
           />
-        ))
-      )}
+        ));
+        return section.display === 'bullets' ? (
+          <ul style={{ margin: 0, paddingLeft: 22, listStyleType: 'disc', listStylePosition: 'outside' }}>{items}</ul>
+        ) : (
+          <>{items}</>
+        );
+      })()}
     </section>
   );
 }
@@ -923,7 +932,6 @@ export default function QuarterlyPreviewPage() {
           <ReportChatPanel
             companyId={companyId}
             reportId={reportId}
-            onRegenerate={handleRegenerate}
             onDone={handlePreviewRefresh}
           />
         )}
@@ -942,6 +950,7 @@ export default function QuarterlyPreviewPage() {
           Click any sentence to edit inline
         </span>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div ref={downloadRef} style={{ position: 'relative' }}>
           {downloadError && (
             <div
@@ -1000,6 +1009,36 @@ export default function QuarterlyPreviewPage() {
               ))}
             </div>
           )}
+        </div>
+
+        <button
+          onClick={handleRegenerate}
+          disabled={!companyId || !reportId}
+          title="Regenerate the report (discards inline edits)"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '10px 18px',
+            fontSize: 13,
+            fontWeight: 600,
+            color: DARK,
+            background: '#fff',
+            border: '1px solid #D1D5DB',
+            borderRadius: 8,
+            cursor: !companyId || !reportId ? 'not-allowed' : 'pointer',
+            opacity: !companyId || !reportId ? 0.6 : 1,
+            whiteSpace: 'nowrap',
+            transition: 'border-color .12s',
+          }}
+          onMouseEnter={(e) => { if (companyId && reportId) e.currentTarget.style.borderColor = DARK; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#D1D5DB'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Regenerate
+        </button>
         </div>
       </div>
     </Shell>

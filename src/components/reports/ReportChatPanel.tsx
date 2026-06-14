@@ -12,14 +12,12 @@ const SUGGESTIONS = ['Make it concise', 'More formal tone', 'Expand detail'];
 interface Props {
   companyId: string;
   reportId: string;
-  onRegenerate: () => void;
   onDone: () => void;
 }
 
 export function ReportChatPanel({
   companyId,
   reportId,
-  onRegenerate,
   onDone,
 }: Props) {
   const [toolActive, setToolActive] = useState(false);
@@ -154,7 +152,7 @@ export function ReportChatPanel({
         ))}
       </div>
 
-      {/* Input row — input + Regenerate + Send */}
+      {/* Input row — input + Send */}
       <div style={{ display: 'flex', gap: 10 }}>
         {isBusy ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, border: `1.5px solid ${ACCENT}`, background: '#fff' }}>
@@ -190,36 +188,6 @@ export function ReportChatPanel({
             onBlur={(e) => (e.currentTarget.style.borderColor = '#D1D5DB')}
           />
         )}
-
-        <button
-          onClick={onRegenerate}
-          disabled={isBusy}
-          title="Regenerate the report (discards inline edits)"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '10px 16px',
-            fontSize: 13,
-            fontWeight: 600,
-            color: DARK,
-            background: '#fff',
-            border: '1px solid #D1D5DB',
-            borderRadius: 8,
-            cursor: isBusy ? 'not-allowed' : 'pointer',
-            opacity: isBusy ? 0.6 : 1,
-            whiteSpace: 'nowrap',
-            transition: 'border-color .12s',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { if (!isBusy) e.currentTarget.style.borderColor = DARK; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#D1D5DB'; }}
-        >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-            <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Regenerate
-        </button>
 
         <button
           onClick={handleSend}

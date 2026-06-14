@@ -128,6 +128,8 @@ interface PreviewSectionBase {
 // Editable prose section.
 export interface PreviewNarrativeSection extends PreviewSectionBase {
   type: "narrative";
+  // "bullets" → render sentences as list items; "prose" (default) → paragraphs.
+  display?: "bullets" | "prose";
   sentences: PreviewSentence[];
 }
 
