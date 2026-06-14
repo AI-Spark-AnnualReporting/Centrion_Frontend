@@ -13,6 +13,7 @@ import type {
   ChangeDirection,
 } from '@/types/quarterly';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
+import { ReportChatPanel } from '@/components/reports/ReportChatPanel';
 
 // ─── colours (matches Coverage / Gaps conventions) ───────────────────────────
 const ACCENT = '#4040C8';
@@ -232,6 +233,7 @@ function SentenceView({
   editing,
   saving,
   error,
+  bullet,
   onStartEdit,
   onCancel,
   onSave,
@@ -240,10 +242,12 @@ function SentenceView({
   editing: boolean;
   saving: boolean;
   error: string | null;
+  bullet?: boolean;
   onStartEdit: () => void;
   onCancel: () => void;
   onSave: (text: string) => void;
 }) {
+  const Wrapper = (bullet ? 'li' : 'div') as 'li' | 'div';
   const [draft, setDraft] = useState(sentence.text);
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Esc cancels without saving; the resulting blur must then be a no-op.
@@ -267,7 +271,7 @@ function SentenceView({
 
   if (editing) {
     return (
-      <div style={{ marginBottom: 18 }}>
+      <Wrapper style={{ marginBottom: bullet ? 8 : 18 }}>
         <textarea
           ref={taRef}
           value={draft}
@@ -323,12 +327,12 @@ function SentenceView({
           )}
         </div>
         {error && <div style={{ marginTop: 4, fontSize: 12, color: RED }}>{error}</div>}
-      </div>
+      </Wrapper>
     );
   }
 
   return (
-    <div style={{ marginBottom: 18 }}>
+    <Wrapper style={{ marginBottom: bullet ? 8 : 18 }}>
       <p
         onClick={onStartEdit}
         title="Click to edit"
@@ -376,7 +380,7 @@ function SentenceView({
           <span style={{ fontSize: 10, color: MUTED, fontStyle: 'italic' }}>· edited</span>
         )}
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -461,6 +465,7 @@ function SectionView({
   editingId,
   savingId,
   sentenceError,
+  highlighted,
   onStartEdit,
   onCancelEdit,
   onSaveSentence,
@@ -470,12 +475,25 @@ function SectionView({
   editingId: string | null;
   savingId: string | null;
   sentenceError: string | null;
+  highlighted: boolean;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSaveSentence: (section: PreviewNarrativeSection, sentence: PreviewSentence, text: string) => void;
 }) {
   return (
-    <section ref={registerRef} data-section-id={section.id} style={{ marginBottom: 40, scrollMarginTop: 12 }}>
+    <section
+      ref={registerRef}
+      data-section-id={section.id}
+      style={{
+        marginBottom: 40,
+        scrollMarginTop: 12,
+        borderRadius: 8,
+        padding: highlighted ? '0 6px' : '0 6px',
+        marginLeft: -6,
+        marginRight: -6,
+        animation: highlighted ? 'section-flash 2s ease-out forwards' : undefined,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 700, color: '#fff', background: ACCENT, padding: '3px 7px', borderRadius: 6 }}>
           {pad2(section.number)}
@@ -485,20 +503,26 @@ function SectionView({
 
       {section.type === 'tables' ? (
         <TablesSection section={section} />
-      ) : (
-        section.sentences.map((s) => (
+      ) : (() => {
+        const items = section.sentences.map((s) => (
           <SentenceView
             key={s.id}
             sentence={s}
             editing={editingId === s.id}
             saving={savingId === s.id}
             error={editingId === s.id ? sentenceError : null}
+            bullet={section.display === 'bullets'}
             onStartEdit={() => onStartEdit(s.id)}
             onCancel={onCancelEdit}
             onSave={(text) => onSaveSentence(section, s, text)}
           />
-        ))
-      )}
+        ));
+        return section.display === 'bullets' ? (
+          <ul style={{ margin: 0, paddingLeft: 22, listStyleType: 'disc', listStylePosition: 'outside' }}>{items}</ul>
+        ) : (
+          <>{items}</>
+        );
+      })()}
     </section>
   );
 }
@@ -514,7 +538,7 @@ function SectionsRail({
   onJump: (id: string) => void;
 }) {
   return (
-    <div className="card" style={{ padding: '16px 14px', display: 'flex', flexDirection: 'column', minHeight: 0, alignSelf: 'start', position: 'sticky', top: 0 }}>
+    <div className="card" style={{ padding: '16px 14px', display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: '100%', overflowY: 'auto' }}>
       <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color: MUTED, textTransform: 'uppercase', marginBottom: 12, paddingLeft: 4 }}>
         Sections
       </span>
@@ -595,6 +619,10 @@ export default function QuarterlyPreviewPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
+
+  // ── chat panel ──
+  const [highlightedSections, setHighlightedSections] = useState<Set<string>>(new Set());
+  const highlightTimerRef = useRef<number | undefined>(undefined);
 
   // ── download (PDF / DOCX) ──
   const [menuOpen, setMenuOpen] = useState(false);
@@ -719,6 +747,41 @@ export default function QuarterlyPreviewPage() {
       });
   }, [companyId, reportId]);
 
+  // ── re-fetch after chat agent edit ──
+  const handlePreviewRefresh = useCallback(async () => {
+    if (!companyId || !reportId) return;
+    try {
+      const res = await quarterlyReports.getPreview(companyId, reportId);
+      if (!res.generated) return;
+      const next = res as QuarterlyPreviewReport;
+      setReport((prev) => {
+        if (!prev) return next;
+        // Find sections whose text fingerprint changed.
+        const changed = new Set<string>();
+        for (const sec of next.sections) {
+          const prevSec = prev.sections.find((s) => s.id === sec.id);
+          if (!prevSec || sectionFingerprint(prevSec) !== sectionFingerprint(sec)) {
+            changed.add(sec.id);
+          }
+        }
+        if (changed.size > 0) {
+          window.clearTimeout(highlightTimerRef.current);
+          setHighlightedSections(changed);
+          highlightTimerRef.current = window.setTimeout(
+            () => setHighlightedSections(new Set()),
+            2500,
+          );
+          // Scroll to the first changed section.
+          const firstId = [...changed][0];
+          sectionRefs.current.get(firstId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        return next;
+      });
+    } catch {
+      /* non-fatal — the user can see the old content */
+    }
+  }, [companyId, reportId]);
+
   // ── inline-edit save (optimistic; reverts on failure) ──
   const handleSaveSentence = useCallback(
     async (section: PreviewNarrativeSection, sentence: PreviewSentence, text: string) => {
@@ -807,68 +870,71 @@ export default function QuarterlyPreviewPage() {
   const { header } = report;
   return (
     <Shell reportId={reportId}>
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'grid',
-          gridTemplateColumns: '220px 1fr',
-          gap: 18,
-          padding: '20px 28px 16px',
-          alignItems: 'stretch',
-        }}
-      >
-        {/* LEFT — sections rail */}
-        <SectionsRail report={report} activeId={activeId} onJump={handleJump} />
+      {/* Content area + chat panel stacked vertically */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'grid',
+            gridTemplateColumns: '220px 1fr',
+            gap: 18,
+            padding: '20px 28px 16px',
+            alignItems: 'stretch',
+            overflow: 'hidden',
+          }}
+        >
+          {/* LEFT — sections rail */}
+          <SectionsRail report={report} activeId={activeId} onJump={handleJump} />
 
-        {/* RIGHT — the document (scrolls internally) */}
-        <div ref={scrollRef} style={{ minHeight: 0, overflowY: 'auto', paddingRight: 6 }}>
-          <div className="card" style={{ padding: '28px 36px', maxWidth: 760 }}>
-            {/* Document header */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 6 }}>
-              <h1 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: DARK, lineHeight: 1.2, fontFamily: "'Fraunces', Georgia, serif" }}>
-                {header.title}
-              </h1>
-              <button
-                className="btn bs"
-                onClick={handleRegenerate}
-                title="Regenerate (discards inline edits)"
-                style={{ flexShrink: 0, fontSize: 12, padding: '7px 12px', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
-              >
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                  <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Regenerate
-              </button>
+          {/* RIGHT — the document (scrolls internally) */}
+          <div ref={scrollRef} style={{ minHeight: 0, overflowY: 'auto', paddingRight: 6 }}>
+            <div className="card" style={{ padding: '28px 36px', maxWidth: 760 }}>
+              {/* Document header */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 6 }}>
+                <h1 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: DARK, lineHeight: 1.2, fontFamily: "'Fraunces', Georgia, serif" }}>
+                  {header.title}
+                </h1>
+              </div>
+              <p style={{ margin: '0 0 22px', fontSize: 13, color: MUTED }}>{header.subtitle}</p>
+              <div style={{ borderTop: `2px solid ${DARK}`, marginBottom: 26 }} />
+
+              {/* Sections */}
+              {report.sections.map((s) => (
+                <SectionView
+                  key={s.id}
+                  section={s}
+                  registerRef={(el) => {
+                    if (el) sectionRefs.current.set(s.id, el);
+                    else sectionRefs.current.delete(s.id);
+                  }}
+                  editingId={editingId}
+                  savingId={savingId}
+                  sentenceError={sentenceError}
+                  highlighted={highlightedSections.has(s.id)}
+                  onStartEdit={(id) => {
+                    setSentenceError(null);
+                    setEditingId(id);
+                  }}
+                  onCancelEdit={() => {
+                    setSentenceError(null);
+                    setEditingId(null);
+                  }}
+                  onSaveSentence={handleSaveSentence}
+                />
+              ))}
             </div>
-            <p style={{ margin: '0 0 22px', fontSize: 13, color: MUTED }}>{header.subtitle}</p>
-            <div style={{ borderTop: `2px solid ${DARK}`, marginBottom: 26 }} />
-
-            {/* Sections */}
-            {report.sections.map((s) => (
-              <SectionView
-                key={s.id}
-                section={s}
-                registerRef={(el) => {
-                  if (el) sectionRefs.current.set(s.id, el);
-                  else sectionRefs.current.delete(s.id);
-                }}
-                editingId={editingId}
-                savingId={savingId}
-                sentenceError={sentenceError}
-                onStartEdit={(id) => {
-                  setSentenceError(null);
-                  setEditingId(id);
-                }}
-                onCancelEdit={() => {
-                  setSentenceError(null);
-                  setEditingId(null);
-                }}
-                onSaveSentence={handleSaveSentence}
-              />
-            ))}
           </div>
         </div>
+
+        {/* Chat panel — always visible at bottom of content area */}
+        {companyId && reportId && (
+          <ReportChatPanel
+            companyId={companyId}
+            reportId={reportId}
+            onDone={handlePreviewRefresh}
+          />
+        )}
       </div>
 
       {/* Footer */}
@@ -884,6 +950,7 @@ export default function QuarterlyPreviewPage() {
           Click any sentence to edit inline
         </span>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div ref={downloadRef} style={{ position: 'relative' }}>
           {downloadError && (
             <div
@@ -943,12 +1010,47 @@ export default function QuarterlyPreviewPage() {
             </div>
           )}
         </div>
+
+        <button
+          onClick={handleRegenerate}
+          disabled={!companyId || !reportId}
+          title="Regenerate the report (discards inline edits)"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '10px 18px',
+            fontSize: 13,
+            fontWeight: 600,
+            color: DARK,
+            background: '#fff',
+            border: '1px solid #D1D5DB',
+            borderRadius: 8,
+            cursor: !companyId || !reportId ? 'not-allowed' : 'pointer',
+            opacity: !companyId || !reportId ? 0.6 : 1,
+            whiteSpace: 'nowrap',
+            transition: 'border-color .12s',
+          }}
+          onMouseEnter={(e) => { if (companyId && reportId) e.currentTarget.style.borderColor = DARK; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#D1D5DB'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Regenerate
+        </button>
+        </div>
       </div>
     </Shell>
   );
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+function sectionFingerprint(section: PreviewSection): string {
+  if (section.type === 'narrative') return section.sentences.map((s) => s.text).join('|||');
+  return section.tables.flatMap((t) => t.rows.map((r) => r.current_display)).join('|||');
+}
+
 function patchSentence(
   report: QuarterlyPreviewReport | null,
   sentenceId: string,
