@@ -48,9 +48,31 @@ export default function AssignDepartmentsSection({
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Assign Departments</div>
-        <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
-          Choose the departments that contribute to this report and who’s responsible for each.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              background: '#EEEEFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: PRIMARY,
+              flexShrink: 0,
+            }}
+          >
+            <svg viewBox="0 0 14 14" width="14" height="14" fill="none">
+              <rect x="2" y="1.5" width="10" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M4.5 5h5M4.5 7.5h5M4.5 10h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Assign Departments</div>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
+              Select which departments participate in this cycle and assign one responsible user per department.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -177,17 +199,34 @@ export default function AssignDepartmentsSection({
                     background: '#FAFBFE',
                   }}
                 >
-                  <span className="badge b-gy" style={{ fontFamily: "'DM Mono', monospace", flexShrink: 0 }}>
+                  <span
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 8,
+                      background: PRIMARY,
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      fontFamily: "'DM Mono', monospace",
+                      flexShrink: 0,
+                    }}
+                  >
                     {row.department_code}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E' }}>
                       {row.department_name}
                     </div>
-                    {users.length === 0 && (
+                    {users.length === 0 ? (
                       <div style={{ fontSize: 10.5, color: '#B45309', marginTop: 2, fontWeight: 600 }}>
                         No department users available. Invite one from the admin portal.
                       </div>
+                    ) : (
+                      <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 1 }}>Responsible user</div>
                     )}
                   </div>
                   <select

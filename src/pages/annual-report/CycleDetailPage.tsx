@@ -653,17 +653,9 @@ export default function CycleDetailPage() {
         )}
       </div>
 
-      {/* Draft → assign departments; otherwise the read-only sessions table */}
-      {cycle.status === 'draft' && canManage ? (
-        <AssignDepartmentsSection
-          allDepartments={allDepartments}
-          departmentUsers={departmentUsers}
-          assigned={assigned}
-          onAdd={addDepartment}
-          onRemove={removeDepartment}
-          onChangeUser={changeAssignedUser}
-        />
-      ) : (
+      {/* Department Sessions — shown for non-draft (or read-only IR) views; the
+          draft-admin view uses the Assign Departments section above instead. */}
+      {!(cycle.status === 'draft' && canManage) && (
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Department Sessions</div>
