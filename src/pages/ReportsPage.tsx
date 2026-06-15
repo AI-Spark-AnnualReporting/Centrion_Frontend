@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { ApiError, getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
 import {
-  clearActivePipeline,
   loadActivePipeline,
   type ActivePipelineRecord,
 } from '@/lib/active-pipeline';
@@ -16,6 +15,7 @@ import type {
   RegulatorsResponse,
 } from '@/types/lookups';
 import type { ProcessingPageState } from './ProcessingPage';
+import QuarterlyReportForm from '@/components/reports/QuarterlyReportForm';
 
 interface ReportGenerationConfig {
   region?: string | null;
@@ -68,6 +68,11 @@ interface ReportsListResponse {
 // Normalise API period strings like "FY-2026" → "FY 2026" for display.
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
+}
+
+function isQuarterlyReport(r: ReportSummary): boolean {
+  if (r.title?.toLowerCase().includes('quarterly')) return true;
+  return /^Q[1-4][\s-]/i.test(r.period);
 }
 
 // "2026-04-26T07:47:38..." → "Apr 26, 2026" for the gallery card footer.
@@ -124,6 +129,7 @@ function yearFromPeriod(period: string): number | null {
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
+const MAX_ESG_DOCUMENTS = 3;
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -146,6 +152,7 @@ const defaultGlobalCheckedFrameworks = ['GRI'];
 
 
 export default function ReportsPage() {
+  const [activeTab, setActiveTab] = useState<'esg' | 'quarterly'>('esg');
   const [genOpen, setGenOpen] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
@@ -163,8 +170,9 @@ export default function ReportsPage() {
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorsLoading, setSectorsLoading] = useState(true);
   const [selectedSectorId, setSelectedSectorId] = useState('');
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // When an existing report is selected, user chooses between reloading from
@@ -199,7 +207,7 @@ export default function ReportsPage() {
             scope_type: string;
             framework_codes: string[];
             gri_scope?: 'standard' | 'full';
-            file: File;
+            files: File[];
           };
         }
       | null;
@@ -217,7 +225,7 @@ export default function ReportsPage() {
 
     reportsApi
       .generate(companyId, {
-        files: [pending.file],
+        files: pending.files,
         year: pending.year,
         ...(pending.sector_id ? { sector_id: pending.sector_id } : {}),
         scope_type: pending.scope_type,
@@ -233,7 +241,7 @@ export default function ReportsPage() {
           reportId: handle.reportId,
           companyId,
           estimatedDurationSeconds: handle.estimatedDurationSeconds,
-          fileName: pending.file.name,
+          fileName: pending.files.length === 1 ? pending.files[0].name : `${pending.files.length} files`,
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
         };
@@ -242,15 +250,29 @@ export default function ReportsPage() {
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        setGenError(
-          err instanceof Error ? err.message : 'Generation failed. Please try again.',
-        );
+        setGenError(extractApiError(err));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
 
+  // A hand-off can request a specific tab (e.g. "Run in background" on a
+  // quarterly run returns here and wants the Quarterly tab active). Clear the
+  // hint afterwards so a refresh / back doesn't re-pin the tab.
+  useEffect(() => {
+    const tab = (location.state as { tab?: 'esg' | 'quarterly' } | null)?.tab;
+    if (tab === 'quarterly' || tab === 'esg') {
+      setActiveTab(tab);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
+  // Per-quarterly-report driver coverage % (the list endpoint doesn't carry it;
+  // it lives in the quarterly coverage endpoint). Keyed by report id.
+  const [quarterlyCoverage, setQuarterlyCoverage] = useState<Record<string, number>>({});
+  const [quarterlyCoverageLoading, setQuarterlyCoverageLoading] = useState(false);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
   // picking "+ Add new…" + a year puts the form into create-new mode.
@@ -285,8 +307,9 @@ export default function ReportsPage() {
         const list = (data?.reports ?? []).filter((r) => r && r.period);
         list.sort((a, b) => b.period.localeCompare(a.period));
         setExistingReports(list);
-        // If the company has no reports yet, jump straight to the year picker.
-        setIsAddingNewPeriod(list.length === 0);
+        // If the company has no ESG reports yet, jump straight to the year
+        // picker (quarterly reports live in their own tab/dropdown).
+        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r)));
       })
       .catch(() => {
         if (!cancelled) {
@@ -302,6 +325,40 @@ export default function ReportsPage() {
     };
   }, [companyId]);
 
+  // Load real driver coverage for each quarterly report so the cards aren't all
+  // stuck at 0% (the list endpoint omits it). One coverage call per report.
+  useEffect(() => {
+    if (!companyId) {
+      setQuarterlyCoverage({});
+      return;
+    }
+    const quarterlies = existingReports.filter(isQuarterlyReport);
+    if (quarterlies.length === 0) {
+      setQuarterlyCoverage({});
+      return;
+    }
+    let cancelled = false;
+    setQuarterlyCoverageLoading(true);
+    Promise.allSettled(
+      quarterlies.map((r) =>
+        quarterlyReports
+          .getCoverage(companyId, r.id)
+          .then((cov) => ({ id: r.id, pct: cov.summary.driver_coverage_pct })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const res of results) {
+        if (res.status === 'fulfilled') next[res.value.id] = res.value.pct;
+      }
+      setQuarterlyCoverage(next);
+      setQuarterlyCoverageLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, existingReports]);
+
   const applyReportToForm = (report: ReportSummary) => {
     const cfg = report.generation_config ?? {};
     setScope(cfg.scope_type === 'regional' ? 'regional' : 'global');
@@ -309,7 +366,7 @@ export default function ReportsPage() {
     setCheckedFw(cfg.framework_codes ?? []);
     setSelectedRegion(cfg.region ?? '');
     setSelectedCountryId(cfg.country_id ?? '');
-    setUploadedFile(null);
+    setUploadedFiles([]);
     setUploadError(null);
     // Mirror the report's stored GRI indicator scope onto the radio. Backend
     // values are "standard" or "full"; if it's null/undefined we treat the
@@ -325,7 +382,7 @@ export default function ReportsPage() {
     setCheckedFw(defaultGlobalCheckedFrameworks);
     setSelectedRegion('');
     setSelectedCountryId('');
-    // Leave uploadedFile alone — user may have uploaded before choosing a year.
+    // Leave uploadedFiles alone — user may have uploaded before choosing a year.
   };
 
   const handlePeriodChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -360,10 +417,14 @@ export default function ReportsPage() {
     setCustomYear(null);
   };
 
-  // Years already taken by an existing report — blocked in the year picker
+  // ESG reports only — the ESG year dropdown and gallery must not surface
+  // quarterly reports (those have their own tab and dropdown).
+  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r));
+
+  // Years already taken by an existing ESG report — blocked in the year picker
   // so one ESG report per year is enforced.
   const usedYears = new Set<number>(
-    existingReports
+    esgReports
       .map((r) => yearFromPeriod(r.period))
       .filter((y): y is number => y != null),
   );
@@ -375,6 +436,16 @@ export default function ReportsPage() {
   // submit button during the POST without changing the visible screen.
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
+
+  const extractApiError = (err: unknown): string => {
+    if (err instanceof ApiError) {
+      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
+      if (typeof body?.detail === 'string') return body.detail;
+      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
+    }
+    if (err instanceof Error) return err.message;
+    return 'Something went wrong. Please try again.';
+  };
 
   const triggerGenerate = () => {
     if (!companyId) return;
@@ -395,18 +466,18 @@ export default function ReportsPage() {
     if (
       selectedReport &&
       existingReportSource === 'upload' &&
-      uploadedFile
+      uploadedFiles.length > 0
     ) {
       const requestId = ++genRequestIdRef.current;
       setGenError(null);
       setGenWarning(null);
       setIsSubmittingGenerate(true);
-      const submittedFile = uploadedFile;
+      const submittedFiles = uploadedFiles;
       const targetReportId = selectedReport.id;
 
       reportsApi
         .addDocuments(companyId, targetReportId, {
-          files: [submittedFile],
+          files: submittedFiles,
         })
         .then((handle) => {
           if (requestId !== genRequestIdRef.current) return;
@@ -419,7 +490,7 @@ export default function ReportsPage() {
             reportId: handle.reportId ?? targetReportId,
             companyId,
             estimatedDurationSeconds: handle.estimatedDurationSeconds,
-            fileName: submittedFile.name,
+            fileName: submittedFiles.length === 1 ? submittedFiles[0].name : `${submittedFiles.length} files`,
             isExisting: handle.isExisting,
             conflictMessage: handle.message,
           };
@@ -428,22 +499,20 @@ export default function ReportsPage() {
         .catch((err: unknown) => {
           if (requestId !== genRequestIdRef.current) return;
           setIsSubmittingGenerate(false);
-          setGenError(
-            err instanceof Error ? err.message : 'Upload failed. Please try again.',
-          );
+          setGenError(extractApiError(err));
         });
       return;
     }
 
-    // Branch B — new report: requires a year picked via "+ Add new…" + a file.
-    if (customYear == null || selectedReport !== null || !uploadedFile) return;
+    // Branch B — new report: requires a year picked via "+ Add new…" + files.
+    if (customYear == null || selectedReport !== null || uploadedFiles.length === 0) return;
 
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setGenWarning(null);
     setIsSubmittingGenerate(true);
 
-    const submittedFile = uploadedFile;
+    const submittedFiles = uploadedFiles;
 
     const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
 
@@ -472,7 +541,7 @@ export default function ReportsPage() {
 
     reportsApi
       .generate(companyId, {
-        files: [submittedFile],
+        files: submittedFiles,
         year: customYear,
         ...(selectedSectorId ? { sector_id: selectedSectorId } : {}),
         scope_type: scope,
@@ -491,7 +560,7 @@ export default function ReportsPage() {
           reportId: handle.reportId,
           companyId,
           estimatedDurationSeconds: handle.estimatedDurationSeconds,
-          fileName: submittedFile.name,
+          fileName: submittedFiles.length === 1 ? submittedFiles[0].name : `${submittedFiles.length} files`,
           isExisting: handle.isExisting,
           conflictMessage: handle.message,
         };
@@ -503,45 +572,76 @@ export default function ReportsPage() {
       .catch((err: unknown) => {
         if (requestId !== genRequestIdRef.current) return;
         setIsSubmittingGenerate(false);
-        setGenError(
-          err instanceof Error ? err.message : 'Generation failed. Please try again.',
-        );
+        setGenError(extractApiError(err));
       });
   };
 
   // Click on a Recent Report card → open the dedicated detail page, which
   // handles its own coverage fetch and back-navigation.
   const handleReportCardClick = (report: ReportSummary) => {
-    navigate(`/reports/${report.id}`);
+    if (isQuarterlyReport(report)) {
+      navigate(`/quarterly-report/${report.id}/coverage`);
+    } else {
+      navigate(`/reports/${report.id}`);
+    }
   };
 
-  const acceptFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!hasAcceptedExtension(file.name)) {
+  const acceptFiles = (incoming: FileList | File[]) => {
+    const list = Array.from(incoming);
+    const accepted: File[] = [];
+    let rejected = false;
+    list.forEach((f) => {
+      if (hasAcceptedExtension(f.name)) accepted.push(f);
+      else rejected = true;
+    });
+    if (rejected) {
       setUploadError(`Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`);
-      return;
+    } else {
+      setUploadError(null);
     }
-    setUploadError(null);
-    setUploadedFile(file);
+    if (accepted.length > 0) {
+      setUploadedFiles((prev) => {
+        const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+        const merged = [...prev];
+        accepted.forEach((f) => {
+          const id = `${f.name}:${f.size}`;
+          if (!seen.has(id)) { seen.add(id); merged.push(f); }
+        });
+        if (merged.length > MAX_ESG_DOCUMENTS) {
+          setShowFileCapWarning(true);
+          return merged.slice(0, MAX_ESG_DOCUMENTS);
+        }
+        return merged;
+      });
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    acceptFile(e.target.files?.[0] ?? undefined);
-    // Reset so selecting the same file again re-fires onChange.
+    if (e.target.files && e.target.files.length > 0) acceptFiles(e.target.files);
     e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    acceptFile(e.dataTransfer.files?.[0] ?? undefined);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) acceptFiles(e.dataTransfer.files);
   };
 
   const openFilePicker = () => fileInputRef.current?.click();
-  const clearUploadedFile = () => {
-    setUploadedFile(null);
+  const removeUploadedFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     setUploadError(null);
   };
+  const clearUploadedFiles = () => {
+    setUploadedFiles([]);
+    setUploadError(null);
+  };
+
+  useEffect(() => {
+    if (!showFileCapWarning) return;
+    const t = setTimeout(() => setShowFileCapWarning(false), 3000);
+    return () => clearTimeout(t);
+  }, [showFileCapWarning]);
 
   useEffect(() => {
     getSectors()
@@ -638,7 +738,7 @@ export default function ReportsPage() {
     setScope(newScope);
     // Upload is only allowed in global scope — clear any prior file on switch.
     if (newScope !== 'global') {
-      setUploadedFile(null);
+      setUploadedFiles([]);
       setUploadError(null);
       setIsDragging(false);
     }
@@ -669,6 +769,26 @@ export default function ReportsPage() {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div><h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Reports</h2><p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>ESG, Annual, Quarterly & Sustainability</p></div>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          <button
+            className={`tab ${activeTab === 'esg' ? 'act' : ''}`}
+            onClick={() => setActiveTab('esg')}
+          >
+            ESG & Sustainability
+          </button>
+          <button
+            className={`tab ${activeTab === 'quarterly' ? 'act' : ''}`}
+            onClick={() => setActiveTab('quarterly')}
+          >
+            Quarterly
+          </button>
+          {/* Other report types hidden until they're wired up.
+          <button className="tab">Annual</button>
+          <button className="tab">Sustainability</button>
+          */}
+        </div>
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>ESG Validator</h2>
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>Configure parameters & run the ESG & sustainability validator</p>
@@ -701,25 +821,6 @@ export default function ReportsPage() {
           <button
             type="button"
             onClick={() => {
-              clearActivePipeline();
-              setResumableRun(null);
-            }}
-            style={{
-              padding: '6px 12px',
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#5A6080',
-              background: 'transparent',
-              border: '1px solid #E2E4F0',
-              borderRadius: 6,
-              cursor: 'pointer',
-            }}
-          >
-            Dismiss
-          </button>
-          <button
-            type="button"
-            onClick={() => {
               navigate('/reports/processing', {
                 state: {
                   runId: resumableRun.runId,
@@ -729,6 +830,8 @@ export default function ReportsPage() {
                   estimatedDurationSeconds: resumableRun.estimatedDurationSeconds,
                   fileName: resumableRun.fileName,
                   isExisting: true,
+                  reportType: resumableRun.reportType,
+                  period: resumableRun.period,
                 },
               });
             }}
@@ -748,6 +851,86 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {activeTab === 'quarterly' && (() => {
+        const quarterlyReportsList = existingReports.filter(isQuarterlyReport);
+        return (
+          <>
+            <QuarterlyReportForm
+              companyId={companyId}
+              existingReports={quarterlyReportsList}
+              periodsLoading={periodsLoading}
+            />
+
+            {quarterlyReportsList.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+                  {quarterlyReportsList.map((r, idx) => {
+                    // Coverage % is fetched per report; show a shimmer until it
+                    // resolves rather than flashing a misleading 0%.
+                    const coveragePending =
+                      quarterlyCoverageLoading && quarterlyCoverage[r.id] === undefined;
+                    const score = Math.round(
+                      quarterlyCoverage[r.id] ?? r.coverage?.percentage ?? 0,
+                    );
+                    const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => handleReportCardClick(r)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleReportCardClick(r); }
+                        }}
+                        title="Continue this quarterly report"
+                        style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: '1px solid #E2E4F0', display: 'flex', flexDirection: 'column', cursor: 'pointer', transition: 'transform .15s ease, box-shadow .15s ease' }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 22px rgba(26,29,46,.08)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
+                      >
+                        <div style={{ background: gradient, padding: '16px 18px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
+                            {formatPeriod(r.period)}
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'Quarterly Report'}</div>
+                          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                              {coveragePending ? (
+                                <span className="skel-dark" style={{ display: 'inline-block', width: 52, height: 26, borderRadius: 6 }} />
+                              ) : (
+                                <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
+                              )}
+                              <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
+                            </div>
+                            {!coveragePending && (
+                              <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                            )}
+                          </div>
+                          <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
+                            <div style={{ width: coveragePending ? '0%' : `${score}%`, height: '100%', background: '#22C55E', transition: 'width .3s ease' }} />
+                          </div>
+                          <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>DRIVER COVERAGE</div>
+                        </div>
+                        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '4px 10px', borderRadius: 999 }}>
+                            Continue →
+                          </span>
+                          <span style={{ fontSize: 10, color: '#9BA3C4' }}>
+                            {r.generated_at ? `Generated ${formatGenDate(r.generated_at)}` : 'In progress'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {activeTab === 'esg' && (
+      <>
       {/* Generate New ESG Report — collapsible */}
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer', borderBottom: genOpen ? '1px solid #ECEEF8' : 'none' }} onClick={() => setGenOpen(!genOpen)}>
@@ -853,7 +1036,7 @@ export default function ReportsPage() {
                     onChange={handlePeriodChange}
                   >
                     <option value="" disabled>Select a reporting year…</option>
-                    {existingReports.map((r) => (
+                    {esgReports.map((r) => (
                       <option key={r.id} value={r.id}>{formatPeriod(r.period)}</option>
                     ))}
                     <option value={ADD_NEW_SENTINEL}>+ Add new…</option>
@@ -1081,64 +1264,72 @@ export default function ReportsPage() {
               }}
             >
               <label className="fl-label">
-                Upload Source Document{!selectedReport && (
+                Upload Source Documents{!selectedReport && (
                   <>
                     {' '}
                     <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
                   </>
                 )}{' '}
                 <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
-                  (PDF, DOCX, TXT, CSV, XLSX — one file)
+                  (PDF, DOCX, TXT, CSV, XLSX — up to {MAX_ESG_DOCUMENTS} files)
                 </span>
               </label>
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept={ACCEPTED_UPLOAD_ATTR}
                 onChange={handleFileInputChange}
                 style={{ display: 'none' }}
               />
-              {uploadedFile ? (
-                <div
-                  className="upload-z"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    textAlign: 'left',
-                    padding: '14px 16px',
-                    borderColor: '#4040C8',
-                    background: 'rgba(64,64,200,.04)',
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                    <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
-                    <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
-                  </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {uploadedFile.name}
+              {uploadedFiles.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {uploadedFiles.map((f, i) => (
+                    <div
+                      key={`${f.name}:${f.size}`}
+                      className="upload-z"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        borderColor: '#4040C8',
+                        background: 'rgba(64,64,200,.04)',
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                        <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                        <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                      </svg>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {f.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 1 }}>{formatBytes(f.size)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeUploadedFile(i)}
+                        aria-label={`Remove ${f.name}`}
+                        title="Remove file"
+                        style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
                     </div>
-                    <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(uploadedFile.size)}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={openFilePicker}
-                    style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: 0, padding: '4px 8px', cursor: 'pointer' }}
-                  >
-                    Replace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearUploadedFile}
-                    aria-label="Remove file"
-                    title="Remove file"
-                    style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </button>
+                  ))}
+                  {uploadedFiles.length < MAX_ESG_DOCUMENTS && (
+                    <button
+                      type="button"
+                      onClick={openFilePicker}
+                      style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: '1px dashed #C5C9E0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      + Add more files ({uploadedFiles.length}/{MAX_ESG_DOCUMENTS})
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div
@@ -1173,6 +1364,11 @@ export default function ReportsPage() {
                   <span style={{ fontSize: 12, color: '#5A6080' }}>
                     Click to upload or drag &amp; drop annual report, HR data, financial statements
                   </span>
+                </div>
+              )}
+              {showFileCapWarning && (
+                <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">
+                  You can upload a maximum of {MAX_ESG_DOCUMENTS} documents at a time. Please split your files into smaller batches.
                 </div>
               )}
               {uploadError && (
@@ -1226,7 +1422,7 @@ export default function ReportsPage() {
                 const canGenerateNew =
                   selectedReport === null &&
                   customYear !== null &&
-                  uploadedFile !== null &&
+                  uploadedFiles.length > 0 &&
                   hasFramework &&
                   regionalReady;
                 const canGenerateFromDb =
@@ -1235,24 +1431,24 @@ export default function ReportsPage() {
                   hasFramework;
                 // Backend pulls year/sector/frameworks from the report's stored
                 // generation_config, so the local hasFramework check is not
-                // required here — only a file is needed.
+                // required here — only files are needed.
                 const canAddDocs =
                   selectedReport !== null &&
                   existingReportSource === 'upload' &&
-                  uploadedFile !== null;
+                  uploadedFiles.length > 0;
                 const canGenerate = canGenerateNew || canGenerateFromDb || canAddDocs;
                 const disabledReason =
                   scope === 'regional' && selectedRegion === ''
                     ? 'Select a region to continue'
                     : scope === 'regional' && selectedCountryId === ''
                       ? 'Select a country to continue'
-                      : selectedReport !== null && existingReportSource === 'upload' && uploadedFile === null
+                      : selectedReport !== null && existingReportSource === 'upload' && uploadedFiles.length === 0
                         ? 'Upload a document to add to this report'
                         : !hasFramework && !(selectedReport !== null && existingReportSource === 'upload')
                           ? 'Select at least one ESG framework to continue'
                           : selectedReport === null && customYear === null
                             ? 'Select a reporting year to continue'
-                            : selectedReport === null && uploadedFile === null
+                            : selectedReport === null && uploadedFiles.length === 0
                               ? 'Upload a source document to continue'
                               : undefined;
                 const isBusy = isSubmittingGenerate;
@@ -1356,9 +1552,9 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {existingReports.length > 0 && (
+      {existingReports.filter((r) => !isQuarterlyReport(r)).length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
-          {existingReports.map((r, idx) => {
+          {existingReports.filter((r) => !isQuarterlyReport(r)).map((r, idx) => {
             const score = Math.round(r.coverage?.percentage ?? 0);
             const env = r.coverage?.by_pillar?.E?.found ?? 0;
             const soc = r.coverage?.by_pillar?.S?.found ?? 0;
@@ -1443,6 +1639,8 @@ export default function ReportsPage() {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

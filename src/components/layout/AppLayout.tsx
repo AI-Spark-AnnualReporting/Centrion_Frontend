@@ -25,10 +25,9 @@ const PAGE_NAMES: Record<string, string> = {
 
 export function AppLayout() {
   const location = useLocation();
-  // Annual-report detail uses a dynamic :cycleId, so fall back by prefix.
   const pageName =
-    PAGE_NAMES[location.pathname] ||
-    (location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
+    PAGE_NAMES[location.pathname] ??
+    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
 
   return (
     <div className="app-shell">

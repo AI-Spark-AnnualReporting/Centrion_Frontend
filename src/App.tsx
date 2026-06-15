@@ -18,6 +18,9 @@ import { CompliancePage, CommsPage } from "./pages/OtherPages";
 import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
+import CoverageMapPage from "./pages/quarterly/CoverageMapPage";
+import GapQuestionsPage from "./pages/quarterly/GapQuestionsPage";
+import QuarterlyPreviewPage from "./pages/quarterly/QuarterlyPreviewPage";
 
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
 // They render inside AppLayout so the main sidebar drives navigation.
@@ -50,6 +53,9 @@ const App = () => (
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/processing" element={<ProcessingPage />} />
           <Route path="/reports/:reportId" element={<ReportDetailPage />} />
+          <Route path="/quarterly-report/:reportId/coverage" element={<CoverageMapPage />} />
+          <Route path="/quarterly-report/:reportId/gaps" element={<GapQuestionsPage />} />
+          <Route path="/quarterly-report/:reportId/preview" element={<QuarterlyPreviewPage />} />
           <Route path="/kpi" element={<KPIPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/ai" element={<AIPage />} />

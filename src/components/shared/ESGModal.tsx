@@ -26,6 +26,7 @@ interface ReportsListResponse {
 
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.txt', '.csv', '.xlsx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
+const MAX_DOCUMENTS = 3;
 const GLOBAL_FRAMEWORKS = ['GRI', 'IFRS'];
 // Pre-select GRI on the global scope (matches the Reports page default).
 const DEFAULT_GLOBAL_CHECKED = ['GRI'];
@@ -77,8 +78,9 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [checkedFw, setCheckedFw] = useState<string[]>(DEFAULT_GLOBAL_CHECKED);
   const [griScope, setGriScope] = useState<'standard' | 'full'>('standard');
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,6 +200,13 @@ export function ESGModal({ onClose }: ESGModalProps) {
       .filter((y): y is number => y != null),
   );
 
+  // Auto-dismiss the file-cap warning after 3 s.
+  useEffect(() => {
+    if (!showFileCapWarning) return;
+    const t = setTimeout(() => setShowFileCapWarning(false), 3000);
+    return () => clearTimeout(t);
+  }, [showFileCapWarning]);
+
   // ---- Handlers -------------------------------------------------------------
   // Multi-toggle used by regional regulator chips — global scope uses radios
   // and bypasses this.
@@ -241,32 +250,54 @@ export function ESGModal({ onClose }: ESGModalProps) {
     setCustomYear(null);
   };
 
-  const acceptFile = (file: File | undefined) => {
-    if (!file) return;
-    if (!hasAcceptedExtension(file.name)) {
-      setUploadError(
-        `Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`,
-      );
-      return;
+  const acceptFiles = (incoming: FileList | File[]) => {
+    const list = Array.from(incoming);
+    const accepted: File[] = [];
+    let rejected = false;
+    list.forEach((f) => {
+      if (hasAcceptedExtension(f.name)) accepted.push(f);
+      else rejected = true;
+    });
+    if (rejected) {
+      setUploadError(`Unsupported file type. Allowed: ${ACCEPTED_UPLOAD_EXT.join(', ')}`);
+    } else {
+      setUploadError(null);
     }
-    setUploadError(null);
-    setUploadedFile(file);
+    if (accepted.length > 0) {
+      setUploadedFiles((prev) => {
+        const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+        const merged = [...prev];
+        accepted.forEach((f) => {
+          const id = `${f.name}:${f.size}`;
+          if (!seen.has(id)) { seen.add(id); merged.push(f); }
+        });
+        if (merged.length > MAX_DOCUMENTS) {
+          setShowFileCapWarning(true);
+          return merged.slice(0, MAX_DOCUMENTS);
+        }
+        return merged;
+      });
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    acceptFile(e.target.files?.[0] ?? undefined);
+    if (e.target.files && e.target.files.length > 0) acceptFiles(e.target.files);
     e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    acceptFile(e.dataTransfer.files?.[0] ?? undefined);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) acceptFiles(e.dataTransfer.files);
   };
 
   const openFilePicker = () => fileInputRef.current?.click();
-  const clearUploadedFile = () => {
-    setUploadedFile(null);
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+    setUploadError(null);
+  };
+  const clearUploadedFiles = () => {
+    setUploadedFiles([]);
     setUploadError(null);
   };
 
@@ -279,7 +310,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
   const canGenerate =
     !!companyId &&
     customYear !== null &&
-    uploadedFile !== null &&
+    uploadedFiles.length > 0 &&
     hasFramework &&
     regionalReady;
 
@@ -293,12 +324,12 @@ export function ESGModal({ onClose }: ESGModalProps) {
           ? 'Select at least one ESG framework to continue'
           : customYear === null
             ? 'Select a reporting year to continue'
-            : uploadedFile === null
+            : uploadedFiles.length === 0
               ? 'Upload a source document to continue'
               : undefined;
 
   const triggerGenerate = () => {
-    if (!canGenerate || !companyId || !uploadedFile || customYear == null) return;
+    if (!canGenerate || !companyId || uploadedFiles.length === 0 || customYear == null) return;
 
     const griSelected = checkedFw.some((fw) => fw.startsWith('GRI'));
 
@@ -333,7 +364,7 @@ export function ESGModal({ onClose }: ESGModalProps) {
           framework_codes: checkedFw.map(frameworkLabelToCode),
           ...(griSelected ? { gri_scope: griScope } : {}),
           ...regionalExtras,
-          file: uploadedFile,
+          files: uploadedFiles,
         },
       },
     });
@@ -709,110 +740,73 @@ export function ESGModal({ onClose }: ESGModalProps) {
             </div>
           )}
 
-          {/* Upload Source Document */}
+          {/* Upload Source Documents */}
           <div style={{ marginBottom: 4 }}>
             <label className="fl-label">
-              Upload Source Document{' '}
+              Upload Source Documents{' '}
               <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>{' '}
-              <span
-                style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}
-              >
-                (PDF, DOCX, TXT, CSV, XLSX — one file)
+              <span style={{ fontWeight: 400, textTransform: 'none', color: '#9BA3C4' }}>
+                (PDF, DOCX, TXT, CSV, XLSX — up to {MAX_DOCUMENTS} files)
               </span>
             </label>
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               accept={ACCEPTED_UPLOAD_ATTR}
               onChange={handleFileInputChange}
               style={{ display: 'none' }}
             />
-            {uploadedFile ? (
-              <div
-                className="upload-z"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  textAlign: 'left',
-                  padding: '14px 16px',
-                  borderColor: '#4040C8',
-                  background: 'rgba(64,64,200,.04)',
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path
-                    d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z"
-                    stroke="#4040C8"
-                    strokeWidth="1.5"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M12 2v4h4"
-                    stroke="#4040C8"
-                    strokeWidth="1.5"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                <div style={{ flex: 1, minWidth: 0 }}>
+            {uploadedFiles.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {uploadedFiles.map((f, i) => (
                   <div
+                    key={`${f.name}:${f.size}`}
+                    className="upload-z"
                     style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: '#1A1D2E',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      textAlign: 'left',
+                      padding: '10px 14px',
+                      borderColor: '#4040C8',
+                      background: 'rgba(64,64,200,.04)',
                     }}
                   >
-                    {uploadedFile.name}
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+                      <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                      <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+                    </svg>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {f.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 1 }}>
+                        {formatBytes(f.size)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      aria-label={`Remove ${f.name}`}
+                      title="Remove file"
+                      style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4' }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
                   </div>
-                  <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-                    {formatBytes(uploadedFile.size)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={openFilePicker}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: '#4040C8',
-                    background: 'transparent',
-                    border: 0,
-                    padding: '4px 8px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Replace
-                </button>
-                <button
-                  type="button"
-                  onClick={clearUploadedFile}
-                  aria-label="Remove file"
-                  title="Remove file"
-                  style={{
-                    width: 22,
-                    height: 22,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'transparent',
-                    border: 0,
-                    padding: 0,
-                    cursor: 'pointer',
-                    color: '#9BA3C4',
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path
-                      d="M2 2l8 8M10 2l-8 8"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
+                ))}
+                {uploadedFiles.length < MAX_DOCUMENTS && (
+                  <button
+                    type="button"
+                    onClick={openFilePicker}
+                    style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', background: 'transparent', border: '1px dashed #C5C9E0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    + Add more files ({uploadedFiles.length}/{MAX_DOCUMENTS})
+                  </button>
+                )}
               </div>
             ) : (
               <div
@@ -844,18 +838,8 @@ export function ESGModal({ onClose }: ESGModalProps) {
                 }}
               >
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path
-                    d="M10 3v10M6 7l4-4 4 4"
-                    stroke="#9BA3C4"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2"
-                    stroke="#9BA3C4"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
+                  <path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
                 <span style={{ fontSize: 12, color: '#5A6080' }}>
                   Click to upload or drag &amp; drop annual report, HR data,
@@ -863,11 +847,13 @@ export function ESGModal({ onClose }: ESGModalProps) {
                 </span>
               </div>
             )}
+            {showFileCapWarning && (
+              <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">
+                You can upload a maximum of {MAX_DOCUMENTS} documents at a time. Please split your files into smaller batches.
+              </div>
+            )}
             {uploadError && (
-              <div
-                style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }}
-                role="alert"
-              >
+              <div style={{ fontSize: 11, color: '#E5484D', marginTop: 6 }} role="alert">
                 {uploadError}
               </div>
             )}
