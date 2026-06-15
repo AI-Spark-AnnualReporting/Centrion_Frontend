@@ -7,7 +7,12 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
-import type { AuthUser, LoginResponse } from "@/types/auth";
+import type {
+  AuthUser,
+  LoginResponse,
+  OnboardingPayload,
+  OnboardingResponse,
+} from "@/types/auth";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   CreateCompanyRequest,
@@ -37,9 +42,38 @@ import type {
   MeetingResponse,
   UpdateMeetingBody,
 } from "@/types/meeting";
+import type {
+  AdminOverview,
+  AdminUserRow,
+  Department,
+  DepartmentPayload,
+  InviteUserPayload,
+  InviteUserResponse,
+  PermissionMatrix,
+  RawAdminOverview,
+  SavePermissionsPayload,
+} from "@/types/admin";
+import { normalizeOverview } from "@/types/admin";
+import type {
+  AssignDepartmentsPayload,
+  AssignDepartmentsResponse,
+  Cycle,
+  CreateCyclePayload,
+  CycleOverview,
+  CycleSection,
+  ResolveSectionsResponse,
+  SARUser,
+} from "@/types/cycles";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
+).replace(/\/+$/, "");
+
+// The SAR service (Annual Report cycles) is a SEPARATE backend from Centriton,
+// running locally on :8010. Calls go through `sarRequest()` below, which reuses
+// the Centriton JWT for token passthrough.
+const SAR_BASE_URL = (
+  import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
 
 const TOKEN_STORAGE_KEY = "centriton_token";
@@ -130,10 +164,13 @@ interface RequestOptions {
   auth?: boolean;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  // Override the host the call targets (defaults to API_BASE_URL). Used by
+  // sarRequest() to hit the separate SAR backend while reusing all this logic.
+  baseUrl?: string;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = `${API_BASE_URL}${path}${buildQuery(opts.query)}`;
+  const url = `${opts.baseUrl ?? API_BASE_URL}${path}${buildQuery(opts.query)}`;
   const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS, ...(opts.headers ?? {}) };
 
   let body: BodyInit | undefined;
@@ -368,6 +405,15 @@ export const auth = {
     }),
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
+
+  // First-login onboarding for self-registered admins. Unlike the other auth
+  // calls this sends a JSON body, and returns a freshly-issued token whose JWT
+  // now carries onboarding_completed = true.
+  onboarding: (payload: OnboardingPayload) =>
+    request<OnboardingResponse>("/api/v1/auth/onboarding", {
+      method: "POST",
+      body: payload,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -1185,6 +1231,169 @@ export const admin = {
 };
 
 // ---------------------------------------------------------------------------
+// Admin Console (Part 5) — the dedicated /admin-console section. Lives
+// alongside `admin` above; role/status changes reuse `admin.updateUserRole`
+// and `admin.updateUserStatus` (already query-based and live).
+// ---------------------------------------------------------------------------
+
+export const adminConsole = {
+  // Backend returns a nested shape (stats{}, reports_chart[], …); normalise it
+  // to the flat AdminOverview the page renders.
+  overview: (): Promise<AdminOverview> =>
+    request<RawAdminOverview>("/api/v1/admin/overview").then(normalizeOverview),
+
+  listUsers: (params?: { role?: string; status?: string; search?: string }) =>
+    request<AdminUserRow[]>("/api/v1/admin/users", { query: params }),
+
+  inviteUser: (body: InviteUserPayload) =>
+    request<InviteUserResponse>("/api/v1/admin/users/invite", {
+      method: "POST",
+      body,
+    }),
+
+  // Reassign a user's department (department_user role only). Pass null to clear.
+  updateUserDepartment: (userId: string, departmentId: string | null) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/department`,
+      { method: "PATCH", body: { department_id: departmentId } },
+    ),
+
+  getPermissions: () => request<PermissionMatrix>("/api/v1/admin/permissions"),
+
+  savePermissions: (body: SavePermissionsPayload) =>
+    request<unknown>("/api/v1/admin/permissions", { method: "PUT", body }),
+
+  // Backend may return a raw array or a `{ departments: [...] }` wrapper —
+  // both are handled by the caller.
+  listDepartments: () =>
+    request<Department[] | { departments: Department[] }>(
+      "/api/v1/admin/departments",
+    ),
+
+  createDepartment: (body: DepartmentPayload) =>
+    request<Department>("/api/v1/admin/departments", { method: "POST", body }),
+
+  updateDepartment: (
+    id: string,
+    body: Partial<DepartmentPayload> & { is_active?: boolean },
+  ) =>
+    request<Department>(
+      `/api/v1/admin/departments/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
+
+  deleteDepartment: (id: string) =>
+    request<unknown>(`/api/v1/admin/departments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// SAR — Annual Report (Cycles). Separate backend (VITE_SAR_URL, :8010 local).
+// `sarRequest` is just `request` pinned to the SAR host; the Centriton JWT is
+// still attached for token passthrough.
+// ---------------------------------------------------------------------------
+
+function sarRequest<T>(
+  path: string,
+  opts: Omit<RequestOptions, "baseUrl"> = {},
+): Promise<T> {
+  return request<T>(path, { ...opts, baseUrl: SAR_BASE_URL });
+}
+
+// Unwrap a `{ key: T }` envelope or return the value as-is. SAR wraps most
+// responses (e.g. `{ cycle }`, `{ cycles }`); be tolerant of bare bodies too.
+function unwrap<T>(raw: unknown, key: string): T {
+  if (raw && typeof raw === "object" && key in (raw as Record<string, unknown>)) {
+    return (raw as Record<string, T>)[key];
+  }
+  return raw as T;
+}
+
+export const sarCycles = {
+  list: async (): Promise<Cycle[]> => {
+    const raw = await sarRequest<unknown>("/api/v1/admin/cycles");
+    const list = unwrap<Cycle[]>(raw, "cycles");
+    return Array.isArray(list) ? list : [];
+  },
+
+  get: async (id: string): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}`,
+    );
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  create: async (body: CreateCyclePayload): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>("/api/v1/admin/cycles", {
+      method: "POST",
+      body,
+    });
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  update: async (
+    id: string,
+    body: Partial<CreateCyclePayload>,
+  ): Promise<Cycle> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}`,
+      { method: "PUT", body },
+    );
+    return unwrap<Cycle>(raw, "cycle");
+  },
+
+  overview: (id: string): Promise<CycleOverview> =>
+    sarRequest<CycleOverview>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/overview`,
+    ),
+
+  sections: async (id: string): Promise<CycleSection[]> => {
+    const raw = await sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/sections`,
+    );
+    const list = unwrap<CycleSection[]>(raw, "sections");
+    return Array.isArray(list) ? list : [];
+  },
+
+  // Compute + persist the cycle's section list from its company profile. Empty
+  // POST; idempotent. 400 if company_profile/sector aren't set on the cycle.
+  resolveSections: (id: string): Promise<ResolveSectionsResponse> =>
+    sarRequest<ResolveSectionsResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/resolve-sections`,
+      { method: "POST" },
+    ),
+
+  // Bulk-assign departments + responsible users to a draft cycle.
+  assignDepartments: (
+    id: string,
+    body: AssignDepartmentsPayload,
+  ): Promise<AssignDepartmentsResponse> =>
+    sarRequest<AssignDepartmentsResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/assign-departments`,
+      { method: "POST", body },
+    ),
+
+  // Flip a draft cycle to active (generates questionnaires). Empty POST.
+  activate: (id: string): Promise<unknown> =>
+    sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/activate`,
+      { method: "POST" },
+    ),
+};
+
+export const sarUsers = {
+  listProjectManagers: async (): Promise<SARUser[]> => {
+    const raw = await sarRequest<unknown>(
+      "/api/v1/admin/users",
+      { query: { role: "project_manager" } },
+    );
+    const list = unwrap<SARUser[]>(raw, "users");
+    return Array.isArray(list) ? list : [];
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Lookups
 // ---------------------------------------------------------------------------
 
@@ -1308,14 +1517,19 @@ export async function login(
 
   // Every user belongs to a company. If the login payload's user object didn't
   // surface company_id, read it from the JWT claims so the rest of the app can
-  // rely on `useAuth().user.company_id`.
+  // rely on `useAuth().user.company_id`. The same claims also carry the
+  // onboarding flag, which we mirror onto the user (preferring the explicit
+  // top-level field) so ProtectedRoute can gate on it.
   const user: AuthUser = { ...res.user };
-  if (user.company_id == null) {
-    const claims = parseJwtPayload<{ company_id?: string | null }>(
-      res.access_token,
-    );
-    if (claims && "company_id" in claims) user.company_id = claims.company_id;
+  const claims = parseJwtPayload<{
+    company_id?: string | null;
+    onboarding_completed?: boolean | null;
+  }>(res.access_token);
+  if (user.company_id == null && claims && "company_id" in claims) {
+    user.company_id = claims.company_id;
   }
+  user.onboarding_completed =
+    res.onboarding_completed ?? claims?.onboarding_completed ?? null;
 
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -1346,18 +1560,29 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
   try {
     const user = JSON.parse(raw) as AuthUser;
-    if (user.company_id != null) return user;
+    // Nothing to backfill if both already present.
+    if (user.company_id != null && user.onboarding_completed != null) {
+      return user;
+    }
 
-    // Backfill from the JWT for sessions saved before company_id was captured.
+    // Backfill from the JWT for sessions saved before these fields were
+    // captured, so the onboarding gate still resolves on a page reload.
     const token = getAuthToken();
     if (!token) return user;
-    const claims = parseJwtPayload<{ company_id?: string | null }>(token);
-    if (claims && "company_id" in claims) {
-      const merged = { ...user, company_id: claims.company_id };
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
-      return merged;
+    const claims = parseJwtPayload<{
+      company_id?: string | null;
+      onboarding_completed?: boolean | null;
+    }>(token);
+    if (!claims) return user;
+    const merged: AuthUser = { ...user };
+    if (merged.company_id == null && "company_id" in claims) {
+      merged.company_id = claims.company_id;
     }
-    return user;
+    if (merged.onboarding_completed == null && "onboarding_completed" in claims) {
+      merged.onboarding_completed = claims.onboarding_completed;
+    }
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
+    return merged;
   } catch {
     return null;
   }
@@ -1496,6 +1721,9 @@ export const api = {
   chat,
   meetings,
   admin,
+  adminConsole,
+  sarCycles,
+  sarUsers,
   lookups,
   system,
 };

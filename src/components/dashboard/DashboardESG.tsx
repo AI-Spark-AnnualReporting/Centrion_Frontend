@@ -1207,7 +1207,9 @@ function SectorCriticalGaps({ coverage, reportId }: SectorCriticalGapsProps) {
   // nor `sector_threshold` flags will be set — and an empty list there means
   // "we don't know", not "all covered".
   const hasSector = !!sectorName;
-  const visible = sortedGaps.slice(0, 5);
+  // Render every gap and let the body scroll (matches the Framework Catalogue
+  // card height) rather than truncating to a handful with a "+N more" link.
+  const visible = sortedGaps;
   const overflow = sortedGaps.length - visible.length;
 
   return (
@@ -1275,6 +1277,8 @@ function SectorCriticalGaps({ coverage, reportId }: SectorCriticalGapsProps) {
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
+          maxHeight: 280,
+          overflowY: 'auto',
         }}
       >
         {!hasSector ? (

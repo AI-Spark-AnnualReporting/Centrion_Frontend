@@ -13,9 +13,10 @@ import {
   getToken,
   login as apiLogin,
   logout as apiLogout,
+  setAuthToken,
   setStoredUser,
 } from "@/lib/api";
-import type { AuthUser, UserProfile } from "@/types/auth";
+import type { AuthUser, OnboardingPayload, UserProfile } from "@/types/auth";
 import type { CompanyRecord } from "@/types/company";
 
 interface AuthContextValue {
@@ -29,6 +30,9 @@ interface AuthContextValue {
   // Re-fetch /auth/me and replace the cached user. Useful right after a
   // password change to flush must_change_password back to false.
   refreshUser(): Promise<void>;
+  // Submit the first-login onboarding form. Stores the freshly-issued token +
+  // user (onboarding_completed = true) so the gate clears immediately.
+  completeOnboarding(payload: OnboardingPayload): Promise<void>;
   logout(): void;
 }
 
@@ -74,21 +78,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     const me = await authApi.me<UserProfile>();
-    // Reconcile the /auth/me payload with the stored shape — the login
-    // response carries `role: "admin" | "user"` while /me widens it to a
-    // string, so coerce defensively.
+    // Reconcile the /auth/me payload with the stored shape — /me types `role`
+    // as a plain string while AuthUser narrows it to the 3 known roles, so
+    // coerce defensively (default to the least-privileged role).
     const next: AuthUser = {
       user_id: me.user_id,
       email: me.email,
       full_name: me.full_name,
-      role: (me.role as AuthUser["role"]) ?? "user",
+      role: (me.role as AuthUser["role"]) ?? "department_user",
       company_id: me.company_id,
       company_name: me.company_name,
       must_change_password: me.must_change_password ?? false,
+      // Carry the onboarding flag through — omitting it here would silently
+      // wipe the gate when refreshUser runs (e.g. after changePassword).
+      onboarding_completed: me.onboarding_completed ?? null,
     };
     setStoredUser(next);
     setUser(next);
   }, []);
+
+  const completeOnboarding = useCallback(
+    async (payload: OnboardingPayload) => {
+      const data = await authApi.onboarding(payload);
+      setAuthToken(data.access_token);
+      const updated: AuthUser = { ...data.user, onboarding_completed: true };
+      setStoredUser(updated);
+      setToken(data.access_token);
+      setUser(updated);
+    },
+    [],
+  );
 
   const changePassword = useCallback(
     async (oldPassword: string, newPassword: string) => {
@@ -123,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, login, changePassword, refreshUser, logout }}
+      value={{ user, token, loading, login, changePassword, refreshUser, completeOnboarding, logout }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,5 +1,7 @@
 interface StepIndicatorProps {
   currentStep: 1 | 2;
+  // [step1Label, step2Label]. Defaults to the registration flow's labels.
+  labels?: [string, string];
 }
 
 const ACCENT = '#4040C8';
@@ -39,7 +41,10 @@ function Circle({ state, label }: { state: 'active' | 'done' | 'inactive'; label
   );
 }
 
-export function StepIndicator({ currentStep }: StepIndicatorProps) {
+export function StepIndicator({
+  currentStep,
+  labels = ['Your Details', 'Company Setup'],
+}: StepIndicatorProps) {
   const step1State: 'active' | 'done' = currentStep === 1 ? 'active' : 'done';
   const step2State: 'active' | 'inactive' = currentStep === 2 ? 'active' : 'inactive';
   const connectorColor = currentStep === 2 ? ACCENT : MUTED_BORDER;
@@ -53,10 +58,10 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
         <span style={{ fontSize: 10, color: currentStep === 1 ? LABEL_ACTIVE : MUTED_TEXT, fontWeight: 600 }}>
-          Your Details
+          {labels[0]}
         </span>
         <span style={{ fontSize: 10, color: currentStep === 2 ? LABEL_ACTIVE : MUTED_TEXT, fontWeight: 600 }}>
-          Company Setup
+          {labels[1]}
         </span>
       </div>
     </div>
