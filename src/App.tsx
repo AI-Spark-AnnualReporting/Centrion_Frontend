@@ -30,7 +30,6 @@ const AdminDepartmentsPage = lazy(
 // Annual Report (Cycles) — admin-only. Rendered inside AppLayout so the main
 // sidebar + topbar stay (same shell as the Admin Console). Code-split.
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
-const CreateCyclePage = lazy(() => import("./pages/annual-report/CreateCyclePage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
 
 const App = () => (
@@ -69,13 +68,13 @@ const App = () => (
               path="/admin-console/departments"
               element={<AdminDepartmentsPage />}
             />
-            {/* Annual Report (Cycles) — admin-only, inside the main shell so
-                the sidebar + topbar stay. */}
+          </Route>
+          {/* Annual Report (Cycles) — admin + IR, inside the main shell so the
+              sidebar + topbar stay. Admins manage cycles; IR is read-only
+              (create/edit hidden in the pages). No separate /new route — the
+              create form lives on the list page (ESG-style). */}
+          <Route element={<ProtectedRoute requiredRole={["admin", "ir"]} />}>
             <Route path="/annual-report" element={<CyclesListPage />} />
-            <Route
-              path="/annual-report/cycles/new"
-              element={<CreateCyclePage />}
-            />
             <Route
               path="/annual-report/cycles/:cycleId"
               element={<CycleDetailPage />}

@@ -46,10 +46,13 @@ import type {
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
+  AssignDepartmentsPayload,
+  AssignDepartmentsResponse,
   Cycle,
   CreateCyclePayload,
   CycleOverview,
   CycleSection,
+  ResolveSectionsResponse,
   SARUser,
 } from "@/types/cycles";
 
@@ -1096,6 +1099,31 @@ export const sarCycles = {
     const list = unwrap<CycleSection[]>(raw, "sections");
     return Array.isArray(list) ? list : [];
   },
+
+  // Compute + persist the cycle's section list from its company profile. Empty
+  // POST; idempotent. 400 if company_profile/sector aren't set on the cycle.
+  resolveSections: (id: string): Promise<ResolveSectionsResponse> =>
+    sarRequest<ResolveSectionsResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/resolve-sections`,
+      { method: "POST" },
+    ),
+
+  // Bulk-assign departments + responsible users to a draft cycle.
+  assignDepartments: (
+    id: string,
+    body: AssignDepartmentsPayload,
+  ): Promise<AssignDepartmentsResponse> =>
+    sarRequest<AssignDepartmentsResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/assign-departments`,
+      { method: "POST", body },
+    ),
+
+  // Flip a draft cycle to active (generates questionnaires). Empty POST.
+  activate: (id: string): Promise<unknown> =>
+    sarRequest<unknown>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/activate`,
+      { method: "POST" },
+    ),
 };
 
 export const sarUsers = {

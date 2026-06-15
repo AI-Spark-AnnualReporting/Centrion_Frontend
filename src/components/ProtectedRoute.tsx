@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { isSarRole, redirectToSar } from "@/lib/sar";
 import type { AuthUser } from "@/types/auth";
 
 const CHANGE_PASSWORD_PATH = "/change-password";
@@ -11,7 +12,8 @@ export function ProtectedRoute({
   requiredRole,
 }: {
   children?: ReactNode;
-  requiredRole?: AuthUser["role"];
+  // Single role or a list of roles allowed on the route.
+  requiredRole?: AuthUser["role"] | AuthUser["role"][];
 }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -39,6 +41,15 @@ export function ProtectedRoute({
     return <Navigate to="/dashboard" replace />;
   }
 
+  // PM / department_user belong in the SAR workspace app — never in Centriton.
+  // Bounce them out regardless of how they got here (login, bookmark, refresh).
+  // Gated on !must_change_password so a freshly-invited user can still complete
+  // the forced rotation above before being handed off to SAR.
+  if (isSarRole(user.role) && !user.must_change_password) {
+    redirectToSar();
+    return null; // render nothing while the hard redirect happens
+  }
+
   // Onboarding gate — only self-registered admins who haven't finished it.
   // Strict === checks so older sessions (field absent/undefined) are never
   // bounced; invited users (project_manager / department_user) skip it.
@@ -55,8 +66,11 @@ export function ProtectedRoute({
   }
 
   // Role gate (e.g. the Admin Console). Non-matching roles bounce to the app.
-  if (requiredRole && user.role !== requiredRole) {
-    return <Navigate to="/dashboard" replace />;
+  if (requiredRole) {
+    const allowed = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    if (!allowed.includes(user.role)) {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <>{children ?? <Outlet />}</>;

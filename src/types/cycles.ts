@@ -14,19 +14,27 @@ export type CycleStatus =
 export interface Cycle {
   id: string;
   company_id: string;
-  name: string;
+  // Renamed fields carry both names — the SAR request contract uses
+  // cycle_name/start_date/end_date/sector/is_shariah; older shapes used
+  // name/cycle_*_date/sector_id/is_shariah_compliant. Read defensively.
+  name?: string;
+  cycle_name?: string;
   fiscal_year: number;
-  period_label: string;
-  content_language: ContentLanguage;
+  period_label?: string;
+  content_language?: ContentLanguage;
   project_manager_id: string;
   project_manager_name?: string;
-  cycle_start_date: string;
-  cycle_end_date: string;
+  cycle_start_date?: string;
+  start_date?: string;
+  cycle_end_date?: string;
+  end_date?: string;
   submission_deadline: string;
-  company_profile: string;
-  sector_id: string;
+  company_profile?: string;
+  sector_id?: string;
+  sector?: string;
   sector_name?: string;
-  is_shariah_compliant: boolean;
+  is_shariah_compliant?: boolean;
+  is_shariah?: boolean;
   has_subsidiaries: boolean;
   has_sukuk: boolean;
   status: CycleStatus;
@@ -40,19 +48,23 @@ export interface Cycle {
   total_departments?: number;
 }
 
+// Exact request body for POST/PUT /api/v1/admin/cycles. Do NOT add company_id
+// (derived from JWT), content_language (no such field on SAR), or sector_id
+// (use `sector` code). company_profile is "listed" | "private"; sector is one
+// of bank|insurance|general|reit|finance_co.
 export interface CreateCyclePayload {
-  name: string;
+  cycle_name: string;
   fiscal_year: number;
-  content_language: ContentLanguage;
   project_manager_id: string;
-  cycle_start_date: string;
-  cycle_end_date: string;
+  start_date: string;
+  end_date: string;
   submission_deadline: string;
-  company_profile: string;
-  sector_id: string;
-  is_shariah_compliant: boolean;
-  has_subsidiaries: boolean;
-  has_sukuk: boolean;
+  kickoff_brief?: string;
+  company_profile?: string;
+  sector?: string;
+  is_shariah?: boolean;
+  has_subsidiaries?: boolean;
+  has_sukuk?: boolean;
 }
 
 export type SessionStatus =
@@ -65,6 +77,7 @@ export interface CycleDepartmentProgress {
   department_id: string;
   department_name: string;
   department_code: string;
+  assigned_user_id?: string | null;
   assigned_user_name?: string;
   assigned_user_email?: string;
   session_status: SessionStatus;
@@ -85,21 +98,62 @@ export interface CycleOverview {
   departments: CycleDepartmentProgress[];
 }
 
-export type SectionLayer = "common" | "cma_required" | "custom";
-export type SectionMode = "ai_written" | "upload" | "system" | "extract" | "manual";
-export type SectionStatus = "pending" | "locked" | "in_progress" | "completed";
+// Shapes from POST /resolve-sections and GET /sections.
+export type SectionLayer = "common" | "cma" | "sector" | "optional";
+export type SectionMode =
+  | "generate"
+  | "attach"
+  | "auto"
+  | "manual"
+  | "extract"
+  | "analyze";
+export type SectionStatus = "pending" | "drafting" | "locked";
 
 export interface CycleSection {
-  id: string;
-  cycle_id: string;
   section_code: string;
-  section_name: string;
+  title: string;
+  section_number?: number;
   layer: SectionLayer;
+  content_source?: string | null;
+  ai_allowed?: boolean;
   mode: SectionMode;
   status: SectionStatus;
-  assigned_dept_id?: string;
-  assigned_dept_name?: string;
-  word_count?: number;
+  display_order?: number;
+  verified?: boolean;
+  locked_at?: string | null;
+  attachment?: unknown;
+  content?: unknown;
+  feeders?: unknown[];
+}
+
+// POST /api/v1/admin/cycles/{id}/resolve-sections response.
+export interface ResolveSectionsResponse {
+  success: boolean;
+  cycle_id: string;
+  sections_created: number;
+  sections: CycleSection[];
+}
+
+// POST /api/v1/admin/cycles/{id}/assign-departments
+export interface AssignDepartmentsPayload {
+  assignments: { department_id: string; user_id: string }[];
+}
+
+export interface AssignDepartmentsResponse {
+  success: boolean;
+  message: string;
+  assignments_created: number;
+  assignments: Array<{
+    id: string;
+    cycle_id: string;
+    department_id: string;
+    department_name: string;
+    user_id: string;
+    user_name: string;
+    user_email: string;
+    assigned_by: string;
+    assigned_at: string;
+  }>;
 }
 
 export interface SARUser {
@@ -113,10 +167,18 @@ export interface SARUser {
 // Company-profile choices for the create/edit forms. There is no existing
 // source for these in the repo — the values must match the SAR backend's
 // expected `company_profile` strings. Verify against SAR before shipping.
+// SAR accepts only "listed" or "private" for company_profile.
 export const COMPANY_PROFILE_OPTIONS: { value: string; label: string }[] = [
-  { value: "listed_tadawul", label: "Listed (Tadawul)" },
-  { value: "listed_nomu", label: "Listed (Nomu)" },
-  { value: "unlisted", label: "Unlisted" },
-  { value: "government", label: "Government / SOE" },
+  { value: "listed", label: "Listed (Tadawul)" },
   { value: "private", label: "Private" },
+];
+
+// SAR's 5 fixed sector codes — sent as `sector` (NOT a UUID). These are SAR's
+// own set, distinct from Centriton's sectors lookup.
+export const CYCLE_SECTOR_OPTIONS: { value: string; label: string }[] = [
+  { value: "bank", label: "Bank" },
+  { value: "insurance", label: "Insurance" },
+  { value: "general", label: "General" },
+  { value: "reit", label: "REIT" },
+  { value: "finance_co", label: "Finance Company" },
 ];

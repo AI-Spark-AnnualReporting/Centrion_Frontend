@@ -162,11 +162,14 @@ export function Sidebar() {
                         className={`sb-item ${child.path && location.pathname.startsWith(child.path) ? 'act' : ''}`}
                         style={{ paddingLeft: 34, fontSize: 11 }}
                         onClick={() => {
-                          // Admins manage Annual cycles in-app; everyone else
-                          // is sent to the external workspace app.
+                          // Admins manage Annual cycles in-app and IR views them
+                          // in-app; PMs/departments go to the external workspace.
                           if (child.key === 'annual') {
-                            if (user?.role === 'admin') handleNav('/annual-report');
-                            else goAnnual();
+                            if (user?.role === 'admin' || user?.role === 'ir') {
+                              handleNav('/annual-report');
+                            } else {
+                              goAnnual();
+                            }
                           } else if (child.external) {
                             goAnnual();
                           } else if (child.path) {

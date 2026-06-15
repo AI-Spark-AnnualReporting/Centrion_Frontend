@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { sarCycles, sarUsers, getSectors } from '@/lib/api';
-import type { Sector } from '@/types/company';
+import { sarCycles, sarUsers, adminConsole, ApiError } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type {
   ContentLanguage,
   CreateCyclePayload,
@@ -11,7 +11,9 @@ import type {
   SARUser,
   SectionMode,
 } from '@/types/cycles';
-import { COMPANY_PROFILE_OPTIONS } from '@/types/cycles';
+import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import type { AdminUserRow, Department } from '@/types/admin';
+import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import {
   CycleStatusBadge,
   ProgressBar,
@@ -32,35 +34,34 @@ const toDateInput = (s?: string | null) => (s ? s.slice(0, 10) : '');
 function EditCycleModal({
   cycle,
   projectManagers,
-  sectors,
   onClose,
   onSaved,
 }: {
   cycle: Cycle;
   projectManagers: SARUser[];
-  sectors: Sector[];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [name, setName] = useState(cycle.name);
+  // Prefill defensively — the GET response may use either the new SAR field
+  // names (cycle_name/start_date/sector/is_shariah) or the older ones.
+  const [name, setName] = useState(cycle.cycle_name ?? cycle.name ?? '');
   const [fiscalYear, setFiscalYear] = useState(String(cycle.fiscal_year));
-  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(cycle.content_language);
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(cycle.content_language ?? 'en');
   const [projectManagerId, setProjectManagerId] = useState(cycle.project_manager_id);
-  const [startDate, setStartDate] = useState(toDateInput(cycle.cycle_start_date));
-  const [endDate, setEndDate] = useState(toDateInput(cycle.cycle_end_date));
+  const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
+  const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
-  const [companyProfile, setCompanyProfile] = useState(cycle.company_profile);
-  const [sectorId, setSectorId] = useState(cycle.sector_id);
-  const [shariah, setShariah] = useState(cycle.is_shariah_compliant);
+  const [companyProfile, setCompanyProfile] = useState(cycle.company_profile ?? '');
+  const [sectorId, setSectorId] = useState(cycle.sector ?? cycle.sector_id ?? '');
+  const [shariah, setShariah] = useState(cycle.is_shariah ?? cycle.is_shariah_compliant ?? false);
   const [subsidiaries, setSubsidiaries] = useState(cycle.has_subsidiaries);
   const [sukuk, setSukuk] = useState(cycle.has_sukuk);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const canSubmit =
-    name.trim() !== '' &&
+    name.trim().length >= 3 &&
     fiscalYear.trim() !== '' &&
-    !!contentLanguage &&
     projectManagerId !== '' &&
     startDate !== '' &&
     endDate !== '' &&
@@ -74,16 +75,15 @@ function EditCycleModal({
     setBusy(true);
     try {
       const payload: Partial<CreateCyclePayload> = {
-        name: name.trim(),
+        cycle_name: name.trim(),
         fiscal_year: parseInt(fiscalYear, 10),
-        content_language: contentLanguage,
         project_manager_id: projectManagerId,
-        cycle_start_date: startDate,
-        cycle_end_date: endDate,
+        start_date: startDate,
+        end_date: endDate,
         submission_deadline: submissionDeadline,
         company_profile: companyProfile,
-        sector_id: sectorId,
-        is_shariah_compliant: shariah,
+        sector: sectorId,
+        is_shariah: shariah,
         has_subsidiaries: subsidiaries,
         has_sukuk: sukuk,
       };
@@ -217,11 +217,11 @@ function EditCycleModal({
             <label className="fl-label">Sector *</label>
             <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
               <option value="">Select a sector</option>
-              {cycle.sector_id && !sectors.some((s) => s.id === cycle.sector_id) && (
-                <option value={cycle.sector_id}>{cycle.sector_name ?? 'Current sector'}</option>
+              {sectorId && !CYCLE_SECTOR_OPTIONS.some((s) => s.value === sectorId) && (
+                <option value={sectorId}>{cycle.sector_name ?? sectorId}</option>
               )}
-              {sectors.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+              {CYCLE_SECTOR_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
           </div>
@@ -263,16 +263,19 @@ function StatTile({ label, value, accent, bar }: { label: string; value: React.R
 
 const MODE_FILTERS: { key: SectionMode | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'ai_written', label: 'AI-written' },
-  { key: 'upload', label: 'Upload' },
-  { key: 'system', label: 'System' },
-  { key: 'extract', label: 'Extract' },
+  { key: 'generate', label: 'Generate' },
+  { key: 'attach', label: 'Attach' },
+  { key: 'auto', label: 'Auto' },
   { key: 'manual', label: 'Manual' },
+  { key: 'extract', label: 'Extract' },
+  { key: 'analyze', label: 'Analyze' },
 ];
 
 export default function CycleDetailPage() {
   const { cycleId = '' } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canManage = user?.role === 'admin';
 
   const [overview, setOverview] = useState<CycleOverview | null>(null);
   const [sections, setSections] = useState<CycleSection[]>([]);
@@ -281,11 +284,20 @@ export default function CycleDetailPage() {
   const [modeFilter, setModeFilter] = useState<SectionMode | 'all'>('all');
   const [editing, setEditing] = useState(false);
   const [sectionsBusy, setSectionsBusy] = useState(false);
+  const [sectionsMsg, setSectionsMsg] = useState('');
+  const [sectionsErr, setSectionsErr] = useState('');
   const [deptBusy, setDeptBusy] = useState(false);
 
-  // Shared lookups for the edit modal (loaded once).
+  // PM list for the edit modal (loaded once). Sectors are a static list.
   const [pms, setPms] = useState<SARUser[]>([]);
-  const [sectors, setSectors] = useState<Sector[]>([]);
+
+  // Draft-state department assignment.
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
+  const [departmentUsers, setDepartmentUsers] = useState<AdminUserRow[]>([]);
+  const [assigned, setAssigned] = useState<DepartmentAssignment[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState('');
+  const [submitErr, setSubmitErr] = useState('');
 
   const fetchOverview = () => {
     setDeptBusy(true);
@@ -307,13 +319,144 @@ export default function CycleDetailPage() {
       .finally(() => setSectionsBusy(false));
   };
 
+  // Re-resolve: POST /resolve-sections recomputes the section list from the
+  // cycle's profile (idempotent). Returns the full current list.
+  const resolveSections = () => {
+    setSectionsBusy(true);
+    setSectionsErr('');
+    setSectionsMsg('');
+    return sarCycles
+      .resolveSections(cycleId)
+      .then((res) => {
+        setSections(res.sections ?? []);
+        setSectionsMsg(
+          res.sections_created > 0
+            ? `${res.sections_created} section${res.sections_created === 1 ? '' : 's'} added.`
+            : 'Already up to date — no new sections.',
+        );
+      })
+      .catch((e) =>
+        setSectionsErr(
+          e instanceof Error
+            ? e.message
+            : 'Failed to resolve sections. Ensure company profile and sector are set.',
+        ),
+      )
+      .finally(() => setSectionsBusy(false));
+  };
+
   useEffect(() => {
     setLoading(true);
     Promise.all([fetchOverview(), fetchSections()]).finally(() => setLoading(false));
     sarUsers.listProjectManagers().then(setPms).catch(() => setPms([]));
-    getSectors().then(setSectors).catch(() => setSectors([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleId]);
+
+  const isDraft = overview?.cycle.status === 'draft';
+
+  // Load the department + user lists (and hydrate any saved assignments) once we
+  // know the cycle is a draft an admin can manage.
+  useEffect(() => {
+    if (!isDraft || !canManage) return;
+    adminConsole
+      .listDepartments()
+      .then((res) => {
+        const list = Array.isArray(res)
+          ? res
+          : Array.isArray(res?.departments)
+            ? res.departments
+            : [];
+        setAllDepartments(list.filter((d) => d.is_active !== false));
+      })
+      .catch(() => setAllDepartments([]));
+
+    adminConsole
+      .listUsers({ role: 'department_user' })
+      .then((res: unknown) => {
+        const list = Array.isArray(res)
+          ? res
+          : Array.isArray((res as { users?: AdminUserRow[] })?.users)
+            ? (res as { users: AdminUserRow[] }).users
+            : [];
+        setDepartmentUsers(list);
+      })
+      .catch(() => setDepartmentUsers([]));
+
+    // Hydrate from any existing assignments on the cycle (usually empty for a
+    // fresh draft).
+    setAssigned(
+      (overview?.departments ?? []).map((d) => ({
+        department_id: d.department_id,
+        department_name: d.department_name,
+        department_code: d.department_code,
+        assigned_user_id: d.assigned_user_id ?? null,
+      })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDraft, canManage, cycleId]);
+
+  const addDepartment = (dept: Department) =>
+    setAssigned((prev) =>
+      prev.some((a) => a.department_id === dept.id)
+        ? prev
+        : [
+            ...prev,
+            {
+              department_id: dept.id,
+              department_name: dept.department_name,
+              department_code: dept.department_code,
+              assigned_user_id: null,
+            },
+          ],
+    );
+
+  const removeDepartment = (departmentId: string) =>
+    setAssigned((prev) => prev.filter((a) => a.department_id !== departmentId));
+
+  const changeAssignedUser = (departmentId: string, userId: string) =>
+    setAssigned((prev) =>
+      prev.map((a) =>
+        a.department_id === departmentId ? { ...a, assigned_user_id: userId || null } : a,
+      ),
+    );
+
+  const canSubmit =
+    assigned.length > 0 && assigned.every((a) => !!a.assigned_user_id);
+
+  // Submit = assign departments (bulk) THEN activate, in sequence.
+  const handleSubmitCycle = async () => {
+    if (submitting || !canSubmit) return;
+    setSubmitErr('');
+    setSubmitMsg('');
+    setSubmitting(true);
+    try {
+      await sarCycles.assignDepartments(cycleId, {
+        assignments: assigned.map((a) => ({
+          department_id: a.department_id,
+          user_id: a.assigned_user_id as string,
+        })),
+      });
+      await sarCycles.activate(cycleId);
+      setSubmitMsg('Cycle activated. AI-generated questions are being prepared.');
+      await fetchOverview();
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : undefined;
+      const msg =
+        e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
+          ? (e.body as { detail: string }).detail
+          : e instanceof Error
+            ? e.message
+            : 'Failed to activate cycle.';
+      if (status === 400 && /draft/i.test(msg)) {
+        setSubmitErr('This cycle is no longer in draft. Refreshing…');
+        await fetchOverview();
+      } else {
+        setSubmitErr(msg);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const filteredSections = useMemo(
     () => (modeFilter === 'all' ? sections : sections.filter((s) => s.mode === modeFilter)),
@@ -364,7 +507,7 @@ export default function CycleDetailPage() {
             ←
           </button>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1A1D2E' }}>{cycle.name}</h1>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1A1D2E' }}>{cycle.cycle_name ?? cycle.name}</h1>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
               FY{cycle.fiscal_year} · Deadline{' '}
               <span style={{ color: isOverdue(cycle.submission_deadline, cycle.status) ? '#DC2626' : '#9BA3C4' }}>
@@ -377,17 +520,73 @@ export default function CycleDetailPage() {
             </div>
           </div>
         </div>
-        <button className="btn bs" type="button" onClick={() => setEditing(true)}>
-          ✎ Edit
-        </button>
+        {canManage && (
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button className="btn bs" type="button" onClick={() => setEditing(true)}>
+              ✎ Edit
+            </button>
+            {cycle.status === 'draft' && (
+              <button
+                className="btn bp"
+                type="button"
+                onClick={handleSubmitCycle}
+                disabled={!canSubmit || submitting}
+                title={!canSubmit ? 'Assign at least one department, each with a responsible user' : undefined}
+              >
+                {submitting ? 'Submitting…' : '✓ Submit'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Stat tiles */}
+      {/* Submit feedback (draft) */}
+      {cycle.status === 'draft' && (submitMsg || submitErr) && (
+        <div
+          role={submitErr ? 'alert' : 'status'}
+          style={{
+            marginBottom: 14,
+            padding: '10px 14px',
+            borderRadius: 10,
+            fontSize: 12,
+            fontWeight: 600,
+            background: submitErr ? 'rgba(229,72,77,.08)' : 'rgba(34,197,94,.1)',
+            border: `1px solid ${submitErr ? 'rgba(229,72,77,.25)' : 'rgba(34,197,94,.25)'}`,
+            color: submitErr ? '#B33A3E' : '#16A34A',
+          }}
+        >
+          {submitErr || submitMsg}
+        </div>
+      )}
+
+      {/* Draft → assign departments sits right under the header, above the stats */}
+      {cycle.status === 'draft' && canManage && (
+        <div style={{ marginBottom: 16 }}>
+          <AssignDepartmentsSection
+            allDepartments={allDepartments}
+            departmentUsers={departmentUsers}
+            assigned={assigned}
+            onAdd={addDepartment}
+            onRemove={removeDepartment}
+            onChangeUser={changeAssignedUser}
+          />
+        </div>
+      )}
+
+      {/* Stat tiles — in draft, Total Departments tracks the live local count */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
-        <StatTile label="Total Departments" value={stats.total_departments} />
-        <StatTile label="Submitted" value={stats.submitted} accent="#16A34A" />
-        <StatTile label="In Progress" value={stats.in_progress} accent={PRIMARY} />
-        <StatTile label="Completion Rate" value={`${Math.round(stats.completion_rate)}%`} accent={PRIMARY} bar={stats.completion_rate} />
+        <StatTile
+          label="Total Departments"
+          value={cycle.status === 'draft' ? assigned.length : stats.total_departments}
+        />
+        <StatTile label="Submitted" value={cycle.status === 'draft' ? 0 : stats.submitted} accent="#16A34A" />
+        <StatTile label="In Progress" value={cycle.status === 'draft' ? 0 : stats.in_progress} accent={PRIMARY} />
+        <StatTile
+          label="Completion Rate"
+          value={cycle.status === 'draft' ? '0%' : `${Math.round(stats.completion_rate)}%`}
+          accent={PRIMARY}
+          bar={cycle.status === 'draft' ? 0 : stats.completion_rate}
+        />
       </div>
 
       {/* Report Sections */}
@@ -398,10 +597,18 @@ export default function CycleDetailPage() {
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
               The sections this cycle’s annual report will contain.
             </div>
+            {sectionsMsg && (
+              <div style={{ fontSize: 11, color: '#16A34A', marginTop: 6, fontWeight: 600 }}>{sectionsMsg}</div>
+            )}
+            {sectionsErr && (
+              <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>{sectionsErr}</div>
+            )}
           </div>
-          <button className="btn bs bsm" type="button" disabled={sectionsBusy} onClick={() => fetchSections()}>
-            ⟳ Re-resolve from current profile
-          </button>
+          {canManage && (
+            <button className="btn bs bsm" type="button" disabled={sectionsBusy} onClick={() => resolveSections()}>
+              {sectionsBusy ? 'Resolving…' : '⟳ Re-resolve from current profile'}
+            </button>
+          )}
         </div>
 
         <div style={{ padding: '10px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid #F4F5FB' }}>
@@ -433,9 +640,9 @@ export default function CycleDetailPage() {
             </thead>
             <tbody>
               {filteredSections.map((s, i) => (
-                <tr key={s.id} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{s.section_code || i + 1}</td>
-                  <td style={{ ...td, fontWeight: 600 }}>{s.section_name}</td>
+                <tr key={s.section_code || i} style={{ borderTop: '1px solid #F4F5FB' }}>
+                  <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{s.section_number ?? i + 1}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{s.title}</td>
                   <td style={td}><SectionLayerBadge layer={s.layer} /></td>
                   <td style={td}><SectionModeBadge mode={s.mode} /></td>
                   <td style={td}><SectionStatusBadge status={s.status} /></td>
@@ -446,7 +653,17 @@ export default function CycleDetailPage() {
         )}
       </div>
 
-      {/* Department Sessions */}
+      {/* Draft → assign departments; otherwise the read-only sessions table */}
+      {cycle.status === 'draft' && canManage ? (
+        <AssignDepartmentsSection
+          allDepartments={allDepartments}
+          departmentUsers={departmentUsers}
+          assigned={assigned}
+          onAdd={addDepartment}
+          onRemove={removeDepartment}
+          onChangeUser={changeAssignedUser}
+        />
+      ) : (
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Department Sessions</div>
@@ -498,12 +715,12 @@ export default function CycleDetailPage() {
           </table>
         )}
       </div>
+      )}
 
       {editing && (
         <EditCycleModal
           cycle={cycle}
           projectManagers={pms}
-          sectors={sectors}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);

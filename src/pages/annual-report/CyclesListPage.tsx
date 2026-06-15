@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sarCycles } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type { Cycle, CycleStatus } from '@/types/cycles';
 import { initialsOf, gradientFor } from '@/lib/avatar';
+import CycleForm from './CycleForm';
 import {
   CycleStatusBadge,
   ProgressBar,
@@ -86,13 +88,15 @@ function StatTile({
 
 export default function CyclesListPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canManage = user?.role === 'admin';
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
+  const fetchCycles = () => {
     setLoading(true);
     setError('');
     sarCycles
@@ -100,6 +104,10 @@ export default function CyclesListPage() {
       .then(setCycles)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load cycles.'))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchCycles();
   }, []);
 
   const counts = useMemo(() => {
@@ -128,7 +136,7 @@ export default function CyclesListPage() {
     return cycles.filter((c) => {
       if (filter !== 'all' && c.status !== filter) return false;
       if (q) {
-        const hay = `${c.name} ${c.fiscal_year} ${c.project_manager_name ?? ''}`.toLowerCase();
+        const hay = `${c.cycle_name ?? c.name ?? ''} ${c.fiscal_year} ${c.project_manager_name ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -149,24 +157,17 @@ export default function CyclesListPage() {
   return (
     <div>
       {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          marginBottom: 16,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E' }}>Reporting Cycles</h1>
-          <p style={{ fontSize: 12, color: '#5A6080', marginTop: 2 }}>
-            Manage annual report cycles across fiscal years.
-          </p>
-        </div>
-        <button className="btn bp" type="button" onClick={() => navigate('/annual-report/cycles/new')}>
-          + New Cycle
-        </button>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E' }}>Reporting Cycles</h1>
+        <p style={{ fontSize: 12, color: '#5A6080', marginTop: 2 }}>
+          {canManage
+            ? 'Create a new reporting cycle, then track them across fiscal years.'
+            : 'Track annual report cycles across fiscal years.'}
+        </p>
       </div>
+
+      {/* Create cycle form — admins only (ESG-style). Refreshes list on create. */}
+      {canManage && <CycleForm onCreated={() => fetchCycles()} />}
 
       {/* Stat tiles */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
@@ -270,7 +271,7 @@ export default function CyclesListPage() {
                 return (
                   <tr key={c.id} style={{ borderTop: '1px solid #F4F5FB' }}>
                     <td style={td}>
-                      <div style={{ fontWeight: 700, color: '#1A1D2E' }}>{c.name}</div>
+                      <div style={{ fontWeight: 700, color: '#1A1D2E' }}>{c.cycle_name ?? c.name}</div>
                       <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 1 }}>FY{c.fiscal_year}</div>
                     </td>
                     <td style={td}>

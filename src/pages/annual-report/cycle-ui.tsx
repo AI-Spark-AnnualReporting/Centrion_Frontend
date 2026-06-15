@@ -58,9 +58,8 @@ export function SessionStatusBadge({ status }: { status: SessionStatus }) {
 
 const SECTION_STATUS: Record<SectionStatus, { label: string; cls: string }> = {
   pending: { label: 'Pending', cls: 'b-gy' },
+  drafting: { label: 'Drafting', cls: 'b-am' },
   locked: { label: 'Locked', cls: 'b-gn' },
-  in_progress: { label: 'In Progress', cls: 'b-am' },
-  completed: { label: 'Completed', cls: 'b-bl' },
 };
 
 export function SectionStatusBadge({ status }: { status: SectionStatus }) {
@@ -70,8 +69,9 @@ export function SectionStatusBadge({ status }: { status: SectionStatus }) {
 
 const SECTION_LAYER: Record<SectionLayer, { label: string; cls: string }> = {
   common: { label: 'Common', cls: 'b-gy' },
-  cma_required: { label: 'CMA Required', cls: 'b-pp' },
-  custom: { label: 'Custom', cls: 'b-bl' },
+  cma: { label: 'CMA', cls: 'b-pp' },
+  sector: { label: 'Sector', cls: 'b-bl' },
+  optional: { label: 'Optional', cls: 'b-am' },
 };
 
 export function SectionLayerBadge({ layer }: { layer: SectionLayer }) {
@@ -80,15 +80,16 @@ export function SectionLayerBadge({ layer }: { layer: SectionLayer }) {
 }
 
 const SECTION_MODE: Record<SectionMode, { label: string; cls: string }> = {
-  ai_written: { label: 'AI-written', cls: 'b-pp' },
-  upload: { label: 'Upload', cls: 'b-bl' },
-  system: { label: 'System', cls: 'b-gy' },
+  generate: { label: 'Generate', cls: 'b-pp' },
+  attach: { label: 'Attach', cls: 'b-bl' },
+  auto: { label: 'Auto', cls: 'b-gy' },
+  manual: { label: 'Manual', cls: 'b-am' },
   extract: { label: 'Extract', cls: 'b-tl' },
-  manual: { label: 'manual', cls: 'b-am' },
+  analyze: { label: 'Analyze', cls: 'b-gn' },
 };
 
 export function SectionModeBadge({ mode }: { mode: SectionMode }) {
-  const m = SECTION_MODE[mode] ?? SECTION_MODE.system;
+  const m = SECTION_MODE[mode] ?? SECTION_MODE.auto;
   return <span className={`badge ${m.cls}`}>{m.label}</span>;
 }
 
