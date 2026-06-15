@@ -705,7 +705,7 @@ export default function CoverageMapPage() {
             <p style={{ fontSize: 13, color: MUTED, marginBottom: 20 }}>
               No figures were extracted from these documents.
             </p>
-            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}>
+            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports/quarterly')}>
               ← Back to Reports
             </button>
           </div>
@@ -873,7 +873,7 @@ export default function CoverageMapPage() {
           <button
             className="btn bs"
             style={{ fontSize: 13, padding: '10px 18px' }}
-            onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}
+            onClick={() => navigate('/reports/quarterly')}
           >
             ← Back
           </button>

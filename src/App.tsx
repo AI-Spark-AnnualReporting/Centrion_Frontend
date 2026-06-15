@@ -51,6 +51,9 @@ const App = () => (
           <Route index element={<DashboardPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          {/* Quarterly shares ReportsPage (route-driven view), surfaced as a
+              sidebar child of Reports. Static path outranks /reports/:reportId. */}
+          <Route path="/reports/quarterly" element={<ReportsPage />} />
           <Route path="/reports/processing" element={<ProcessingPage />} />
           <Route path="/reports/:reportId" element={<ReportDetailPage />} />
           <Route path="/quarterly-report/:reportId/coverage" element={<CoverageMapPage />} />

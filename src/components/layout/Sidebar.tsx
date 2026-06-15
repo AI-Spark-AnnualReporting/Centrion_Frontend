@@ -5,8 +5,11 @@ import { useAuth } from '@/context/AuthContext';
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // types offered on the Reports page. ESG opens the in-app page; Annual lives in
 // the separate workspace app and is routed by role.
-const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: boolean }[] = [
-  { key: 'esg', label: 'ESG Validator', path: '/reports' },
+const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: boolean; end?: boolean }[] = [
+  // `end` → highlight only on an exact path match, so ESG isn't also "active"
+  // on /reports/quarterly (which startsWith('/reports')).
+  { key: 'esg', label: 'ESG Validator', path: '/reports', end: true },
+  { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly' },
   // Annual: admins manage cycles in-app at /annual-report; PMs/departments
   // still go to the external workspace app (routed by role in goAnnual()).
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
@@ -156,10 +159,16 @@ export function Sidebar() {
                 </button>
                 {reportsOpen && (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {REPORT_CHILDREN.map((child) => (
+                    {REPORT_CHILDREN.map((child) => {
+                      const childActive = child.path
+                        ? child.end
+                          ? location.pathname === child.path
+                          : location.pathname.startsWith(child.path)
+                        : false;
+                      return (
                       <button
                         key={child.key}
-                        className={`sb-item ${child.path && location.pathname.startsWith(child.path) ? 'act' : ''}`}
+                        className={`sb-item ${childActive ? 'act' : ''}`}
                         style={{ paddingLeft: 34, fontSize: 11 }}
                         onClick={() => {
                           // Admins manage Annual cycles in-app and IR views them
@@ -189,7 +198,8 @@ export function Sidebar() {
                         />
                         {child.label}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -7,6 +7,7 @@ import { FloatingChatbot } from '../shared/FloatingChatbot';
 const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
   '/reports': 'Reports',
+  '/reports/quarterly': 'Quarterly Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance',
   '/ai': 'AI Copilot',
