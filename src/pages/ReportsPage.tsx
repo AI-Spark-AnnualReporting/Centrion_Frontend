@@ -790,10 +790,6 @@ export default function ReportsPage() {
           */}
         </div>
       </div>
-      <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>ESG Validator</h2>
-        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>Configure parameters & run the ESG & sustainability validator</p>
-      </div>
 
       {resumableRun && (
         <div
