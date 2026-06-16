@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
-  ContentLanguage,
   CreateCyclePayload,
   Cycle,
   CycleOverview,
@@ -23,6 +22,7 @@ import {
   SessionStatusBadge,
   formatCycleDate,
   isOverdue,
+  safePct,
 } from './cycle-ui';
 
 const PRIMARY = '#4040C8';
@@ -33,12 +33,10 @@ const toDateInput = (s?: string | null) => (s ? s.slice(0, 10) : '');
 // ── Edit Cycle modal ────────────────────────────────────────────────────────
 function EditCycleModal({
   cycle,
-  projectManagers,
   onClose,
   onSaved,
 }: {
   cycle: Cycle;
-  projectManagers: SARUser[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -46,8 +44,9 @@ function EditCycleModal({
   // names (cycle_name/start_date/sector/is_shariah) or the older ones.
   const [name, setName] = useState(cycle.cycle_name ?? cycle.name ?? '');
   const [fiscalYear, setFiscalYear] = useState(String(cycle.fiscal_year));
-  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(cycle.content_language ?? 'en');
-  const [projectManagerId, setProjectManagerId] = useState(cycle.project_manager_id);
+  // Project Manager isn't editable here — keep the cycle's current PM and send
+  // it back unchanged so the PUT doesn't drop it.
+  const projectManagerId = cycle.project_manager_id;
   const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
   const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
@@ -62,7 +61,6 @@ function EditCycleModal({
   const canSubmit =
     name.trim().length >= 3 &&
     fiscalYear.trim() !== '' &&
-    projectManagerId !== '' &&
     startDate !== '' &&
     endDate !== '' &&
     submissionDeadline !== '' &&
@@ -151,35 +149,9 @@ function EditCycleModal({
             <label className="fl-label">Cycle Name *</label>
             <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="fl" style={{ margin: 0 }}>
-              <label className="fl-label">Fiscal Year *</label>
-              <input className="inp" type="number" value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} />
-            </div>
-            <div className="fl" style={{ margin: 0 }}>
-              <label className="fl-label">Content Language *</label>
-              <div className="tabs" style={{ marginBottom: 0 }}>
-                <button type="button" className={`tab ${contentLanguage === 'en' ? 'act' : ''}`} onClick={() => setContentLanguage('en')}>
-                  English
-                </button>
-                <button type="button" className={`tab ${contentLanguage === 'ar' ? 'act' : ''}`} onClick={() => setContentLanguage('ar')}>
-                  العربية
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Project Manager — added per Part 6 spec */}
           <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Project Manager *</label>
-            <select className="inp sel" value={projectManagerId} onChange={(e) => setProjectManagerId(e.target.value)}>
-              <option value="">Select a Project Manager</option>
-              {projectManagers.map((pm) => (
-                <option key={pm.id ?? pm.user_id} value={pm.user_id}>
-                  {pm.full_name}
-                </option>
-              ))}
-            </select>
+            <label className="fl-label">Fiscal Year *</label>
+            <input className="inp" type="number" value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -288,7 +260,8 @@ export default function CycleDetailPage() {
   const [sectionsErr, setSectionsErr] = useState('');
   const [deptBusy, setDeptBusy] = useState(false);
 
-  // PM list for the edit modal (loaded once). Sectors are a static list.
+  // PMs — used only to resolve the assigned PM's name for the header (the
+  // overview payload carries project_manager_id but not always the name).
   const [pms, setPms] = useState<SARUser[]>([]);
 
   // Draft-state department assignment.
@@ -308,15 +281,30 @@ export default function CycleDetailPage() {
       .finally(() => setDeptBusy(false));
   };
 
-  const fetchSections = () => {
+  // Initial load: GET the resolved sections. If none exist yet (a freshly
+  // created cycle whose sections haven't been resolved), resolve them now so the
+  // view shows a populated list without a manual "Re-resolve" click.
+  const fetchSections = async () => {
     setSectionsBusy(true);
-    return sarCycles
-      .sections(cycleId)
-      .then(setSections)
-      .catch(() => {
-        /* sections are secondary — overview error already surfaces */
-      })
-      .finally(() => setSectionsBusy(false));
+    try {
+      const list = await sarCycles.sections(cycleId);
+      if (list.length > 0 || !canManage) {
+        setSections(list);
+        return;
+      }
+      try {
+        const res = await sarCycles.resolveSections(cycleId);
+        setSections(res.sections ?? []);
+      } catch {
+        // resolve can 400 if company profile / sector aren't set — show the
+        // empty list and let the admin resolve manually.
+        setSections(list);
+      }
+    } catch {
+      /* sections are secondary — overview error already surfaces */
+    } finally {
+      setSectionsBusy(false);
+    }
   };
 
   // Re-resolve: POST /resolve-sections recomputes the section list from the
@@ -490,6 +478,12 @@ export default function CycleDetailPage() {
   }
 
   const { cycle, stats, departments } = overview;
+  // Overview gives project_manager_id but not always the name — resolve from the
+  // PM list, falling back to any name the payload did include.
+  const pmName =
+    cycle.project_manager_name ??
+    pms.find((p) => p.user_id === cycle.project_manager_id)?.full_name ??
+    '—';
   const th: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#9BA3C4', textTransform: 'uppercase', letterSpacing: '.5px', textAlign: 'left', padding: '12px 16px' };
   const td: React.CSSProperties = { fontSize: 12, color: '#1A1D2E', padding: '12px 16px' };
 
@@ -516,7 +510,7 @@ export default function CycleDetailPage() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
               <CycleStatusBadge status={cycle.status} />
-              <span style={{ fontSize: 11, color: '#5A6080' }}>PM: {cycle.project_manager_name ?? '—'}</span>
+              <span style={{ fontSize: 11, color: '#5A6080' }}>PM: {pmName}</span>
             </div>
           </div>
         </div>
@@ -583,7 +577,7 @@ export default function CycleDetailPage() {
         <StatTile label="In Progress" value={cycle.status === 'draft' ? 0 : stats.in_progress} accent={PRIMARY} />
         <StatTile
           label="Completion Rate"
-          value={cycle.status === 'draft' ? '0%' : `${Math.round(stats.completion_rate)}%`}
+          value={cycle.status === 'draft' ? '0%' : `${safePct(stats.completion_rate)}%`}
           accent={PRIMARY}
           bar={cycle.status === 'draft' ? 0 : stats.completion_rate}
         />
@@ -696,7 +690,7 @@ export default function CycleDetailPage() {
                   <td style={td}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <ProgressBar pct={d.progress} width={120} />
-                      <span style={{ fontSize: 11, color: '#5A6080', fontFamily: "'DM Mono', monospace" }}>{Math.round(d.progress)}%</span>
+                      <span style={{ fontSize: 11, color: '#5A6080', fontFamily: "'DM Mono', monospace" }}>{safePct(d.progress)}%</span>
                     </div>
                   </td>
                   <td style={td}><SessionStatusBadge status={d.session_status} /></td>
@@ -712,7 +706,6 @@ export default function CycleDetailPage() {
       {editing && (
         <EditCycleModal
           cycle={cycle}
-          projectManagers={pms}
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);
