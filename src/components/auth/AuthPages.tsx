@@ -311,8 +311,9 @@ export function SignupPage() {
             </p>
           </div>
           <div className="flex flex-col gap-[10px]">
-            <div className="auth-stat"><div className="auth-sv">Free 14-day trial</div><div className="auth-sl">No credit card required</div></div>
-            <div className="auth-stat"><div className="auth-sv">80+ frameworks</div><div className="auth-sl">Global regulatory coverage</div></div>
+            <div className="auth-stat"><div className="auth-sv">ESG Disclosure Report</div><div className="auth-sl">CMA / Tadawul-aligned ESG disclosures</div></div>
+            <div className="auth-stat"><div className="auth-sv">Quarterly Report</div><div className="auth-sl">Document-first quarterly results</div></div>
+            <div className="auth-stat"><div className="auth-sv">Annual Report</div><div className="auth-sl">Full-year report, end-to-end</div></div>
           </div>
         </div>
         <div className="auth-r">
