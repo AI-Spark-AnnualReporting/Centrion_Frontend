@@ -152,7 +152,6 @@ const defaultGlobalCheckedFrameworks = ['GRI'];
 
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState<'esg' | 'quarterly'>('esg');
   const [genOpen, setGenOpen] = useState(true);
   const [scope, setScope] = useState<'global' | 'regional'>('global');
   const [selectedRegion, setSelectedRegion] = useState('');
@@ -194,6 +193,13 @@ export default function ReportsPage() {
   const companyId = user?.company_id ?? null;
   const location = useLocation();
   const navigate = useNavigate();
+  // View is driven by the route: /reports → ESG, /reports/quarterly → Quarterly
+  // (Quarterly is a sidebar child of Reports, not an in-page tab).
+  const activeTab: 'esg' | 'quarterly' = location.pathname.startsWith(
+    '/reports/quarterly',
+  )
+    ? 'quarterly'
+    : 'esg';
 
   // Dashboard "Generate ESG Report" modal hands off a payload here. We show
   // the full-width loading screen and run the same generate → coverage chain
@@ -254,18 +260,6 @@ export default function ReportsPage() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, companyId]);
-
-  // A hand-off can request a specific tab (e.g. "Run in background" on a
-  // quarterly run returns here and wants the Quarterly tab active). Clear the
-  // hint afterwards so a refresh / back doesn't re-pin the tab.
-  useEffect(() => {
-    const tab = (location.state as { tab?: 'esg' | 'quarterly' } | null)?.tab;
-    if (tab === 'quarterly' || tab === 'esg') {
-      setActiveTab(tab);
-      navigate(location.pathname, { replace: true, state: null });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state]);
 
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
@@ -769,29 +763,15 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div><h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Reports</h2><p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>ESG, Annual, Quarterly & Sustainability</p></div>
-        <div className="tabs" style={{ marginBottom: 0 }}>
-          <button
-            className={`tab ${activeTab === 'esg' ? 'act' : ''}`}
-            onClick={() => setActiveTab('esg')}
-          >
-            ESG & Sustainability
-          </button>
-          <button
-            className={`tab ${activeTab === 'quarterly' ? 'act' : ''}`}
-            onClick={() => setActiveTab('quarterly')}
-          >
-            Quarterly
-          </button>
-          {/* Other report types hidden until they're wired up.
-          <button className="tab">Annual</button>
-          <button className="tab">Sustainability</button>
-          */}
-        </div>
       <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>ESG Validator</h2>
-        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>Configure parameters & run the ESG & sustainability validator</p>
+        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+          {activeTab === 'quarterly' ? 'Quarterly Reports' : 'ESG Validator'}
+        </h2>
+        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
+          {activeTab === 'quarterly'
+            ? 'Document-first quarterly results — figures, drivers & YoY narrative'
+            : 'Configure parameters & run the ESG & sustainability validator'}
+        </p>
       </div>
 
       {resumableRun && (

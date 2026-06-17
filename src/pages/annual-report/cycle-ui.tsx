@@ -12,6 +12,10 @@ import type {
 
 const PRIMARY = '#4040C8';
 
+// Clamp/round a possibly-null/NaN API value to a 0–100 integer for "%" labels.
+export const safePct = (n: number | null | undefined): number =>
+  Number.isFinite(n as number) ? Math.max(0, Math.min(100, Math.round(n as number))) : 0;
+
 // "Mar 31, 2026" — matches the deadline format in the design.
 export function formatCycleDate(input?: string | null): string {
   if (!input) return '—';
@@ -95,7 +99,10 @@ export function SectionModeBadge({ mode }: { mode: SectionMode }) {
 
 // Thin progress bar. `pct` is 0–100; bar turns teal/green at 100%.
 export function ProgressBar({ pct, width = 110 }: { pct: number; width?: number | string }) {
-  const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+  // Guard against null/undefined/NaN from the API — otherwise width becomes
+  // `NaN%` (invalid CSS → the bar renders full) and labels read "NaN%".
+  const safe = Number.isFinite(pct) ? pct : 0;
+  const clamped = Math.max(0, Math.min(100, Math.round(safe)));
   return (
     <div
       style={{

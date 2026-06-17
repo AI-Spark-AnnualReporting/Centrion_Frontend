@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { auth } from '@/lib/api';
 import type { UserProfile } from '@/types/auth';
+import { CompanyDetailsCard } from '@/components/profile/CompanyDetailsCard';
 
 // Header certification chips — also static placeholders.
 const CERTIFICATIONS = ['SAMA Licensed', 'GRI Certified'];
@@ -50,7 +51,9 @@ export default function ProfilePage() {
   }, []);
 
   return (
-    <div>
+    // Bottom padding clears the fixed "Ask Centriyon" chatbot button so the
+    // Company Details card (and its Save button) don't sit under it.
+    <div style={{ paddingBottom: 96 }}>
       {/* Page heading */}
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Profile</h2>
@@ -242,6 +245,10 @@ export default function ProfilePage() {
           </div>
         </>
       )}
+
+      {/* Company Details — loads independently; visible to all roles, editable
+          by admin only. */}
+      <CompanyDetailsCard />
     </div>
   );
 }

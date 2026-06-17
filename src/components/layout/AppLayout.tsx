@@ -7,6 +7,7 @@ import { FloatingChatbot } from '../shared/FloatingChatbot';
 const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
   '/reports': 'Reports',
+  '/reports/quarterly': 'Quarterly Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance',
   '/ai': 'AI Copilot',
@@ -23,6 +24,25 @@ const PAGE_NAMES: Record<string, string> = {
   '/annual-report/cycles/new': 'New Cycle',
 };
 
+// Centered spinner shown while a lazily-loaded page's chunk downloads.
+function PageLoader() {
+  return (
+    <div
+      style={{
+        minHeight: 360,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 14,
+      }}
+    >
+      <div className="proc-ring" style={{ width: 40, height: 40, borderWidth: 3 }} />
+      <div style={{ fontSize: 12, color: '#9BA3C4', fontWeight: 600 }}>Loading…</div>
+    </div>
+  );
+}
+
 export function AppLayout() {
   const location = useLocation();
   const pageName =
@@ -35,13 +55,7 @@ export function AppLayout() {
       <div className="main">
         <Topbar pageName={pageName} />
         <div className="content">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full text-[13px] text-[#5A6080]">
-                Loading…
-              </div>
-            }
-          >
+          <Suspense fallback={<PageLoader />}>
             <Outlet />
           </Suspense>
         </div>

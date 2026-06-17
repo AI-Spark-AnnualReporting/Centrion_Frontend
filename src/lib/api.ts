@@ -15,6 +15,7 @@ import type {
 } from "@/types/auth";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
+  Company,
   CreateCompanyRequest,
   CreateCompanyResponse,
   Sector,
@@ -434,6 +435,13 @@ export const companies = {
 
   get: <T = unknown>(companyId: string) =>
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}`),
+
+  // The caller's own company (resolved from the JWT) — backs the Profile page
+  // Company Details card. PATCH accepts a partial of the editable fields.
+  getMyCompany: () => request<Company>("/api/v1/companies/me"),
+
+  updateMyCompany: (body: Partial<Company>) =>
+    request<Company>("/api/v1/companies/me", { method: "PATCH", body }),
 
   getDigitalTwin: <T = unknown>(companyId: string, period?: string) =>
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/twin`, {

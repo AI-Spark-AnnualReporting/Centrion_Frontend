@@ -99,84 +99,67 @@ export default function AssignDepartmentsSection({
           </span>
         </div>
 
-        {/* Search + add */}
-        <div style={{ position: 'relative', marginBottom: assigned.length ? 14 : 0 }}>
+        {/* Search + add — inline results (in normal flow so the card's
+            overflow:hidden can't clip them). */}
+        <div style={{ marginBottom: assigned.length || focused ? 14 : 0 }}>
           <input
             className="inp"
             placeholder="Search and add departments…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setFocused(true)}
-            onBlur={() => setTimeout(() => setFocused(false), 120)}
+            onBlur={() => setTimeout(() => setFocused(false), 150)}
           />
-          {focused && available.length > 0 && (
+          {focused && (
             <div
               style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                right: 0,
-                zIndex: 30,
-                background: '#fff',
+                marginTop: 6,
                 border: '1px solid #E2E4F0',
                 borderRadius: 10,
-                boxShadow: '0 12px 32px rgba(20,22,40,.12)',
-                maxHeight: 240,
+                background: '#fff',
+                maxHeight: 200,
                 overflowY: 'auto',
                 padding: 4,
               }}
             >
-              {available.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onAdd(d);
-                    setQuery('');
-                  }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '9px 10px',
-                    border: 'none',
-                    background: 'transparent',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F4F5FB')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <span className="badge b-gy" style={{ fontFamily: "'DM Mono', monospace" }}>
-                    {d.department_code}
-                  </span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>
-                    {d.department_name}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {focused && query.trim() !== '' && available.length === 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                right: 0,
-                zIndex: 30,
-                background: '#fff',
-                border: '1px solid #E2E4F0',
-                borderRadius: 10,
-                padding: '12px',
-                fontSize: 12,
-                color: '#9BA3C4',
-              }}
-            >
-              No matching departments.
+              {available.length === 0 ? (
+                <div style={{ padding: '10px 8px', fontSize: 12, color: '#9BA3C4' }}>
+                  {query.trim() ? 'No matching departments.' : 'All departments added.'}
+                </div>
+              ) : (
+                available.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onAdd(d);
+                      setQuery('');
+                    }}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '9px 10px',
+                      border: 'none',
+                      background: 'transparent',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#F4F5FB')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span className="badge b-gy" style={{ fontFamily: "'DM Mono', monospace" }}>
+                      {d.department_code}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1A1D2E' }}>
+                      {d.department_name}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
           )}
         </div>

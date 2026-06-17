@@ -99,12 +99,6 @@ function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
 }
 
-// Extract the 4-digit year from a period string like "Q1-2026".
-function yearFromPeriod(period: string): number | null {
-  const m = period.match(/(\d{4})/);
-  return m ? Number(m[1]) : null;
-}
-
 // Sentinel value for the "+ Add new…" option in the reporting-year select.
 const ADD_NEW_SENTINEL = '__add_new__';
 
@@ -244,6 +238,13 @@ export default function QuarterlyReportForm({
     return () => clearTimeout(t);
   }, [showFileCapWarning]);
 
+  // Auto-dismiss the error toast after 5 s.
+  useEffect(() => {
+    if (!genError) return;
+    const t = setTimeout(() => setGenError(null), 5000);
+    return () => clearTimeout(t);
+  }, [genError]);
+
   // Close the metrics popup on Escape.
   useEffect(() => {
     if (!metricsModal) return;
@@ -347,14 +348,6 @@ export default function QuarterlyReportForm({
     setFiles([]);
     setGenError(null);
   };
-
-  // Years already taken by an existing quarterly report — greyed out in the
-  // year picker, mirroring the ESG dropdown.
-  const usedYears = new Set<number>(
-    existingReports
-      .map((r) => yearFromPeriod(r.period))
-      .filter((y): y is number => y != null),
-  );
 
   const toggleArea = (key: string) => {
     setSelectedAreas((prev) =>
@@ -475,9 +468,15 @@ export default function QuarterlyReportForm({
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
-      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
-      if (typeof body?.detail === 'string') return body.detail;
-      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
+      const body = err.body as
+        | { detail?: string | { error?: string } | Array<{ msg?: string }> }
+        | null;
+      const detail = body?.detail;
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail) && detail[0]?.msg) return detail[0].msg;
+      if (detail && typeof detail === 'object' && 'error' in detail && detail.error) {
+        return detail.error;
+      }
     }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
@@ -773,14 +772,11 @@ export default function QuarterlyReportForm({
                   <option value="" disabled>
                     Select year…
                   </option>
-                  {yearPickerOptions().map((y) => {
-                    const taken = usedYears.has(y);
-                    return (
-                      <option key={y} value={y} disabled={taken}>
-                        {taken ? `${y} — already has a report` : y}
-                      </option>
-                    );
-                  })}
+                  {yearPickerOptions().map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
                 </select>
                 {existingReports.length > 0 && (
                   <button
@@ -1261,25 +1257,6 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Error banner */}
-        {genError && (
-          <div
-            role="alert"
-            style={{
-              marginBottom: 12,
-              padding: '10px 14px',
-              borderRadius: 8,
-              background: 'rgba(229,72,77,.08)',
-              border: '1px solid rgba(229,72,77,.25)',
-              color: '#B33A3E',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            {genError}
-          </div>
-        )}
-
         {/* Submit */}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
@@ -1338,6 +1315,107 @@ export default function QuarterlyReportForm({
           </button>
         </div>
       </div>
+      )}
+
+      {/* Error toast — slides in top-right, auto-dismisses after 5 s */}
+      {genError && (
+        <div
+          role="alert"
+          onClick={() => setGenError(null)}
+          style={{
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            zIndex: 1200,
+            width: 'min(380px, calc(100vw - 40px))',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+            padding: '14px 16px',
+            borderRadius: 14,
+            background: '#fff',
+            border: '1px solid rgba(229,72,77,.2)',
+            boxShadow: '0 16px 40px rgba(229,72,77,.18), 0 4px 12px rgba(20,22,40,.08)',
+            cursor: 'pointer',
+            overflow: 'hidden',
+            animation: 'qr-toast-in .35s cubic-bezier(.21,1.02,.73,1)',
+          }}
+        >
+          <style>{`
+            @keyframes qr-toast-in {
+              from { opacity: 0; transform: translateX(24px) scale(.96); }
+              to   { opacity: 1; transform: translateX(0) scale(1); }
+            }
+            @keyframes qr-toast-bar {
+              from { transform: scaleX(1); }
+              to   { transform: scaleX(0); }
+            }
+          `}</style>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              flexShrink: 0,
+              background: 'rgba(229,72,77,.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+              <path d="M10 6v5M10 14h.01" stroke="#E5484D" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="10" cy="10" r="8.5" stroke="#E5484D" strokeWidth="1.5" />
+            </svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 4 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E', marginBottom: 2 }}>
+              Couldn't generate report
+            </div>
+            <div style={{ fontSize: 12, color: '#5A6080', lineHeight: 1.5, wordBreak: 'break-word' }}>
+              {genError}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setGenError(null);
+            }}
+            aria-label="Dismiss"
+            title="Dismiss"
+            style={{
+              width: 22,
+              height: 22,
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              color: '#9BA3C4',
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+          {/* Countdown progress bar */}
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              height: 3,
+              width: '100%',
+              background: '#E5484D',
+              transformOrigin: 'left',
+              animation: 'qr-toast-bar 5s linear forwards',
+            }}
+          />
+        </div>
       )}
 
       {/* File cap warning — auto-dismisses after 3 s */}
