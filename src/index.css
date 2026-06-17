@@ -507,6 +507,14 @@ body {
 @keyframes slide-in-right { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes section-flash { 0% { background: rgba(64,64,200,.12); } 100% { background: transparent; } }
 
+/* Onboarding — eye-catching reveals */
+@keyframes onb-rise { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes onb-pop { 0% { transform: scale(0); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes onb-float { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(26px, -22px); } }
+@keyframes onb-float2 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-24px, 18px); } }
+@keyframes onb-sheen { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes onb-ring { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
+
 /* Skeleton placeholder — used in place of spinners while content loads */
 .skel {
   background: linear-gradient(90deg, #ECEEF8 0%, #F5F6FB 50%, #ECEEF8 100%);

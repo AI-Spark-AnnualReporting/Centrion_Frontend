@@ -54,11 +54,25 @@ export interface OnboardingPayload {
   fiscal_year_end_month: number;
   reporting_currency: "SAR" | "AED" | "BHD" | "KWD" | "OMR" | "QAR" | "USD";
   primary_language: "en" | "ar";
+  // Default departments the admin chose to create (their AI agents get
+  // generated server-side). Sent with the onboarding completion.
+  selected_department_codes: string[];
   // Optional
   founded_year?: number | null;
   website_url?: string | null;
   headquarter_city?: string | null;
   listed_exchange?: string | null;
+}
+
+// GET /api/v1/auth/onboarding/department-options — the default departments the
+// admin can opt into during onboarding.
+export type DepartmentCategory = "leadership" | "core" | "commercial" | "support";
+
+export interface DepartmentOption {
+  code: string;
+  name: string;
+  description: string;
+  category: DepartmentCategory;
 }
 
 export interface OnboardingResponse {

@@ -9,6 +9,7 @@
 
 import type {
   AuthUser,
+  DepartmentOption,
   LoginResponse,
   OnboardingPayload,
   OnboardingResponse,
@@ -415,6 +416,12 @@ export const auth = {
       method: "POST",
       body: payload,
     }),
+
+  // Default departments the admin can opt into during onboarding.
+  onboardingDepartmentOptions: () =>
+    request<{ departments: DepartmentOption[] }>(
+      "/api/v1/auth/onboarding/department-options",
+    ),
 };
 
 // ---------------------------------------------------------------------------
