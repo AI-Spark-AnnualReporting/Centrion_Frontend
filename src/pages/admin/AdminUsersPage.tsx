@@ -494,7 +494,7 @@ export default function AdminUsersPage() {
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, color: '#1A1D2E' }}>Users &amp; Roles</h2>
           <p style={{ fontSize: 12, color: '#5A6080', marginTop: 2 }}>
-            Manage who has access to Centriton and what they can do.
+            Manage who has access to Centriyon and what they can do.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

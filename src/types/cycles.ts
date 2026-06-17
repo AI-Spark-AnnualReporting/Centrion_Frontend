@@ -1,5 +1,5 @@
 // Types for the Annual Report (Cycles) feature — Part 6. Backed by the SAR
-// service (a separate backend from Centriton; see `sarRequest` in lib/api.ts).
+// service (a separate backend from Centriyon; see `sarRequest` in lib/api.ts).
 // Field names mirror the SAR API exactly so payloads round-trip without mapping.
 
 export type ContentLanguage = "en" | "ar";
@@ -174,7 +174,7 @@ export const COMPANY_PROFILE_OPTIONS: { value: string; label: string }[] = [
 ];
 
 // SAR's 5 fixed sector codes — sent as `sector` (NOT a UUID). These are SAR's
-// own set, distinct from Centriton's sectors lookup.
+// own set, distinct from Centriyon's sectors lookup.
 export const CYCLE_SECTOR_OPTIONS: { value: string; label: string }[] = [
   { value: "bank", label: "Bank" },
   { value: "insurance", label: "Insurance" },

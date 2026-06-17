@@ -54,7 +54,7 @@ export function LoginPage() {
       if (loggedIn.must_change_password) {
         navigate('/change-password', { replace: true });
       } else if (isSarRole(loggedIn.role) && redirectToSar()) {
-        // PM / department_user belong in the SAR workspace app, not Centriton.
+        // PM / department_user belong in the SAR workspace app, not Centriyon.
         // redirectToSar() navigates away; stop here.
         return;
       } else {
@@ -82,15 +82,16 @@ export function LoginPage() {
               </div>
               <span className="text-[17px] font-extrabold text-white tracking-tight">Centriyon</span>
             </div>
-            <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.55)', fontWeight: 500, marginBottom: 0 }}>Investor Portal</p>
-            <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.4)', lineHeight: 1.65, marginBottom: '32px', maxWidth: '240px' }}>
-              The institutional-grade ESG &amp; IR platform for SAMA/CMA-regulated companies in Saudi Arabia.
+            <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.4)', lineHeight: 1.65, marginTop: '10px', marginBottom: '32px', maxWidth: '250px' }}>
+              Your AI workspace for regulated corporate reporting. Centriyon turns source documents into
+              board- and investor-ready reports — with traceable figures, linked drivers, and CMA / Tadawul-aligned
+              disclosures.
             </p>
           </div>
           <div className="flex flex-col gap-[10px]">
-            <div className="auth-stat"><div className="auth-sv">36+ GRI Metrics</div><div className="auth-sl">Fully mapped to GRI Universal 2021</div></div>
-            <div className="auth-stat"><div className="auth-sv">SAMA · CMA · Tadawul</div><div className="auth-sl">Saudi regulatory alignment built-in</div></div>
-            <div className="auth-stat"><div className="auth-sv">91.7% Confidence</div><div className="auth-sl">AI-powered ESG disclosure scoring</div></div>
+            <div className="auth-stat"><div className="auth-sv">ESG Disclosure Report</div><div className="auth-sl">CMA / Tadawul-aligned ESG disclosures</div></div>
+            <div className="auth-stat"><div className="auth-sv">Quarterly Report</div><div className="auth-sl">Document-first quarterly results</div></div>
+            <div className="auth-stat"><div className="auth-sv">Annual Report</div><div className="auth-sl">Full-year report, end-to-end</div></div>
           </div>
         </div>
         <div className="auth-r">
@@ -305,7 +306,8 @@ export function SignupPage() {
               <span className="text-[17px] font-extrabold text-white tracking-tight">Centriyon</span>
             </div>
             <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.4)', lineHeight: 1.65, marginBottom: '32px', maxWidth: '240px' }}>
-              Get started in minutes — GRI 2021, IFRS S1/S2, SAMA &amp; CMA pre-configured.
+              Get started in minutes. Centriyon turns your source documents into board- and investor-ready
+              reports — GRI 2021, IFRS S1/S2, SAMA &amp; CMA pre-configured.
             </p>
           </div>
           <div className="flex flex-col gap-[10px]">

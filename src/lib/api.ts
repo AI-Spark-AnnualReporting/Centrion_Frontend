@@ -1,4 +1,4 @@
-// Typed fetch client for the Centriton Platform API.
+// Typed fetch client for the Centriyon Platform API.
 // Paths + shapes derived from openapi.json.
 //
 // All authenticated calls MUST go through either:
@@ -70,9 +70,9 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
 ).replace(/\/+$/, "");
 
-// The SAR service (Annual Report cycles) is a SEPARATE backend from Centriton,
+// The SAR service (Annual Report cycles) is a SEPARATE backend from Centriyon,
 // running locally on :8010. Calls go through `sarRequest()` below, which reuses
-// the Centriton JWT for token passthrough.
+// the Centriyon JWT for token passthrough.
 const SAR_BASE_URL = (
   import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
@@ -1298,7 +1298,7 @@ export const adminConsole = {
 
 // ---------------------------------------------------------------------------
 // SAR — Annual Report (Cycles). Separate backend (VITE_SAR_URL, :8010 local).
-// `sarRequest` is just `request` pinned to the SAR host; the Centriton JWT is
+// `sarRequest` is just `request` pinned to the SAR host; the Centriyon JWT is
 // still attached for token passthrough.
 // ---------------------------------------------------------------------------
 

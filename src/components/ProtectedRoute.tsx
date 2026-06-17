@@ -41,7 +41,7 @@ export function ProtectedRoute({
     return <Navigate to="/dashboard" replace />;
   }
 
-  // PM / department_user belong in the SAR workspace app — never in Centriton.
+  // PM / department_user belong in the SAR workspace app — never in Centriyon.
   // Bounce them out regardless of how they got here (login, bookmark, refresh).
   // Gated on !must_change_password so a freshly-invited user can still complete
   // the forced rotation above before being handed off to SAR.

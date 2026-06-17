@@ -1,6 +1,6 @@
 // SAR workspace app redirect. `project_manager` / `department_user` users work
-// in the separate SAR frontend app (Next.js, :3000), not in Centriton — they're
-// handed off there with their Centriton JWT via SAR's token-passthrough page.
+// in the separate SAR frontend app (Next.js, :3000), not in Centriyon — they're
+// handed off there with their Centriyon JWT via SAR's token-passthrough page.
 //
 // NOTE: this is the SAR *app* URL (VITE_SAR_APP_URL), distinct from the SAR
 // cycles *API* (VITE_SAR_URL / :8010 used by sarRequest in api.ts).

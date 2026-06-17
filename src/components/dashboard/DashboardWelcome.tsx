@@ -119,13 +119,13 @@ export function DashboardWelcome({ company }: { company: string }) {
             marginBottom: 8,
           }}
         >
-          Centriton · {company}
+          Centriyon · {company}
         </div>
         <h1 style={{ fontSize: 26, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.5px', marginBottom: 10 }}>
-          Welcome to Centriton
+          Welcome to Centriyon
         </h1>
         <p style={{ fontSize: 12.5, color: '#5A6080', lineHeight: 1.7, maxWidth: 580, margin: '0 auto' }}>
-          Your AI workspace for regulated corporate reporting. Centriton turns source documents into
+          Your AI workspace for regulated corporate reporting. Centriyon turns source documents into
           board- and investor-ready reports — with traceable figures, linked drivers, and CMA / Tadawul-aligned
           disclosures. Pick a report below to begin.
         </p>
@@ -280,7 +280,7 @@ export function DashboardWelcome({ company }: { company: string }) {
           </svg>
         </div>
         <div style={{ fontSize: 11.5, color: '#3A3F5C', lineHeight: 1.6 }}>
-          <strong style={{ color: '#1A1D2E' }}>How Centriton works.</strong> Every report is document-first —
+          <strong style={{ color: '#1A1D2E' }}>How Centriyon works.</strong> Every report is document-first —
           upload your source files, and the AI extracts the numbers and the reasons behind them, asks only about
           what it couldn't find, and never invents a figure. You review, edit, and publish — with full source
           traceability on every line.
