@@ -167,7 +167,9 @@ export default function CyclesListPage() {
       </div>
 
       {/* Create cycle form — admins only (ESG-style). Refreshes list on create. */}
-      {canManage && <CycleForm onCreated={() => fetchCycles()} />}
+      {canManage && (
+        <CycleForm onCreated={(cycle) => navigate(`/annual-report/cycles/${cycle.id}`)} />
+      )}
 
       {/* Stat tiles */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
