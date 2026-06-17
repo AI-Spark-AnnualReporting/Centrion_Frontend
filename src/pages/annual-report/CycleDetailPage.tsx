@@ -635,7 +635,7 @@ export default function CycleDetailPage() {
             <tbody>
               {filteredSections.map((s, i) => (
                 <tr key={s.section_code || i} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{s.section_number ?? i + 1}</td>
+                  <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{i + 1}</td>
                   <td style={{ ...td, fontWeight: 600 }}>{s.title}</td>
                   <td style={td}><SectionLayerBadge layer={s.layer} /></td>
                   <td style={td}><SectionModeBadge mode={s.mode} /></td>

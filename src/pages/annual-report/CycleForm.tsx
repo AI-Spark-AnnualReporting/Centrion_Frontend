@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { sarCycles, sarUsers } from '@/lib/api';
-import type { ContentLanguage, CreateCyclePayload, Cycle, SARUser } from '@/types/cycles';
+import { sarCycles, adminConsole } from '@/lib/api';
+import type { ContentLanguage, CreateCyclePayload, Cycle } from '@/types/cycles';
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import type { AdminUserRow } from '@/types/admin';
 
 const PRIMARY = '#4040C8';
 
@@ -92,12 +93,27 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const [subsidiaries, setSubsidiaries] = useState(false);
   const [sukuk, setSukuk] = useState(false);
 
-  const [pms, setPms] = useState<SARUser[]>([]);
+  const [pms, setPms] = useState<AdminUserRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    sarUsers.listProjectManagers().then(setPms).catch(() => setPms([]));
+    // Company-scoped PMs via the Centriyon admin endpoint (the SAR endpoint
+    // returned PMs across every company). These user IDs are shared with SAR,
+    // so they're valid as the cycle's project_manager_id.
+    adminConsole
+      .listUsers({ role: 'project_manager' })
+      .then((res: unknown) => {
+        const list = Array.isArray(res)
+          ? res
+          : Array.isArray((res as { users?: AdminUserRow[] })?.users)
+            ? (res as { users: AdminUserRow[] }).users
+            : [];
+        // Filter to PMs client-side too — the backend doesn't reliably honour
+        // the ?role=project_manager query param (it returned admins as well).
+        setPms(list.filter((u) => u.role === 'project_manager'));
+      })
+      .catch(() => setPms([]));
   }, []);
 
   // First empty required field, if any — drives the on-click validation message
