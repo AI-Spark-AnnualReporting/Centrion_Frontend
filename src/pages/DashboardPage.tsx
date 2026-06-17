@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DashboardESG } from '@/components/dashboard/DashboardESG';
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard';
+import { DashboardWelcome } from '@/components/dashboard/DashboardWelcome';
 import { ESGModal } from '@/components/shared/ESGModal';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
+import { reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
@@ -15,6 +17,39 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const company = user?.company_name ?? 'Your company';
   const companyId = user?.company_id ?? null;
+
+  // First-run gate: while we don't know yet it's null; false → no reports →
+  // show the welcome screen instead of an empty dashboard.
+  const [hasReports, setHasReports] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!companyId) {
+      setHasReports(false);
+      return;
+    }
+    let cancelled = false;
+    reportsApi
+      .list<{ reports?: unknown[] }>(companyId)
+      .then((data) => {
+        if (!cancelled) setHasReports((data?.reports ?? []).length > 0);
+      })
+      // On error, fall back to the normal dashboard rather than the welcome.
+      .catch(() => {
+        if (!cancelled) setHasReports(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  if (hasReports === null) {
+    return (
+      <div style={{ padding: 48, textAlign: 'center', fontSize: 13, color: '#5A6080' }}>Loading…</div>
+    );
+  }
+
+  if (!hasReports) {
+    return <DashboardWelcome company={company} />;
+  }
 
   return (
     <div>

@@ -32,28 +32,34 @@ const TYPE_BADGE: Record<string, string> = {
   roadshow: 'b-tl',
 };
 
+// Current enum values first; legacy keys retained so historical rows still
+// render a sensible label/badge instead of falling back to "Member".
 const POSITION_LABELS: Record<string, string> = {
   executive: 'Executive',
   board_member: 'Board',
-  investor: 'Investor',
+  investor_contact: 'Investor',
   esg_lead: 'ESG Lead',
+  other: 'Other',
+  // legacy
+  investor: 'Investor',
   finance: 'Finance',
   operations: 'Operations',
   CTO: 'CTO',
   CEO: 'CEO',
-  other: 'Other',
 };
 
 const POSITION_BADGE: Record<string, string> = {
   executive: 'b-pp',
   board_member: 'b-bl',
-  investor: 'b-tl',
+  investor_contact: 'b-tl',
   esg_lead: 'b-gn',
+  other: 'b-gy',
+  // legacy
+  investor: 'b-tl',
   finance: 'b-am',
   operations: 'b-bl',
   CTO: 'b-pp',
   CEO: 'b-pp',
-  other: 'b-gy',
 };
 
 // Sort priority for the leadership card — board first, then C-suite/exec,
@@ -61,14 +67,16 @@ const POSITION_BADGE: Record<string, string> = {
 // see at the top of "who's around the table".
 const POSITION_PRIORITY: Record<string, number> = {
   board_member: 0,
+  executive: 2,
+  investor_contact: 3,
+  esg_lead: 4,
+  other: 5,
+  // legacy
   CEO: 1,
   CTO: 1,
-  executive: 2,
   investor: 3,
-  esg_lead: 4,
   finance: 4,
   operations: 4,
-  other: 5,
 };
 
 const PILLAR_TONE: Record<string, string> = {

@@ -143,9 +143,9 @@ export default function ProcessingPage() {
       <QuarterlyGeneratingScreen
         phase={phase}
         errorMessage={phase === "failed" ? poll.run.error_message : null}
-        // "Run in background" returns to Reports on the Quarterly tab.
-        onCancel={() => navigate("/reports", { replace: true, state: { tab: "quarterly" } })}
-        onRetry={() => navigate("/reports", { replace: true, state: { tab: "quarterly" } })}
+        // "Run in background" returns to the Quarterly reports page.
+        onCancel={() => navigate("/reports/quarterly", { replace: true })}
+        onRetry={() => navigate("/reports/quarterly", { replace: true })}
         onKeepWaiting={restart}
         period={state.period ?? null}
         companyName={user?.company_name ?? null}

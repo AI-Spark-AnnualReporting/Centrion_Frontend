@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
-import type { QuarterlyCoverageResponse, CoverageFigure } from '@/types/quarterly';
+import type { QuarterlyCoverageResponse, CoverageFigure, CoverageDriver } from '@/types/quarterly';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import {
   Table,
@@ -197,6 +197,141 @@ function DriverPill({ status }: { status: 'missing' | 'found' }) {
       />
       {missing ? 'Reason missing' : 'Reason found'}
     </span>
+  );
+}
+
+// ─── Source provenance badge ──────────────────────────────────────────────────
+function SourceBadge({ source }: { source: CoverageDriver['source'] }) {
+  const extracted = source === 'extracted';
+  const color = extracted ? GREEN : ACCENT;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: '2px 9px',
+        borderRadius: 20,
+        fontSize: 9.5,
+        fontWeight: 800,
+        letterSpacing: '.4px',
+        textTransform: 'uppercase',
+        color,
+        background: extracted ? GREEN_PILL_BG : '#EEF0FF',
+        border: `1px solid ${extracted ? '#A7F3D0' : '#C9CCF7'}`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {extracted ? (
+        <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+          <path d="M5 2h7l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke={color} strokeWidth="1.7" />
+          <path d="M12 2v5h4" stroke={color} strokeWidth="1.7" />
+        </svg>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+          <circle cx="10" cy="6.5" r="3.1" stroke={color} strokeWidth="1.7" />
+          <path d="M4 16.5c0-3.2 2.7-5.5 6-5.5s6 2.3 6 5.5" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      )}
+      {extracted ? 'Extracted from document' : 'User provided'}
+    </span>
+  );
+}
+
+// ─── Driver evidence — revealed when a "found" figure row is expanded.
+// Each driver is an evidence card: provenance + page, the reason, and the
+// verbatim quote rendered as an editorial citation. ──────────────────────────
+function DriverEvidence({ drivers }: { drivers: CoverageDriver[] }) {
+  if (drivers.length === 0) {
+    return (
+      <div style={{ padding: '4px 2px 12px', fontSize: 12, color: MUTED, animation: 'fade-in .22s ease' }}>
+        No supporting drivers recorded for this figure.
+      </div>
+    );
+  }
+  return (
+    <div style={{ animation: 'fade-in .22s ease', padding: '4px 2px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11 }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: GREEN }} />
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.7px', textTransform: 'uppercase', color: GREEN }}>
+          Why this moved · {drivers.length} {drivers.length === 1 ? 'reason' : 'reasons'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {drivers.map((d, i) => (
+          <div
+            key={i}
+            style={{
+              position: 'relative',
+              borderRadius: 12,
+              border: '1px solid #E3F4EC',
+              background: 'linear-gradient(180deg,#F6FDF9,#FFFFFF)',
+              padding: '13px 16px 14px 19px',
+              boxShadow: '0 1px 3px rgba(16,185,129,.07)',
+            }}
+          >
+            <span style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, borderRadius: 3, background: GREEN }} />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                marginBottom: d.text ? 9 : 0,
+                flexWrap: 'wrap',
+              }}
+            >
+              <SourceBadge source={d.source} />
+              {d.page != null && (
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: MUTED, fontFamily: MONO }}>
+                  Page {d.page}
+                </span>
+              )}
+            </div>
+            {d.text && (
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1F2340', lineHeight: 1.5 }}>{d.text}</div>
+            )}
+            {d.quote && (
+              <blockquote
+                style={{
+                  position: 'relative',
+                  margin: '10px 0 0',
+                  padding: '10px 14px 11px 38px',
+                  borderRadius: 10,
+                  background: '#F3F7F5',
+                  border: '1px solid #E8EFEB',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 11,
+                    top: 1,
+                    fontFamily: 'Georgia, serif',
+                    fontSize: 34,
+                    lineHeight: 1,
+                    color: 'rgba(16,185,129,.4)',
+                  }}
+                >
+                  &ldquo;
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'Georgia, "Times New Roman", serif',
+                    fontStyle: 'italic',
+                    fontSize: 12.5,
+                    lineHeight: 1.65,
+                    color: '#3C4A43',
+                  }}
+                >
+                  {d.quote}
+                </span>
+              </blockquote>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -440,6 +575,9 @@ function FigureTable({
 }) {
   // Only show the prior-period column when at least one row actually has prior data.
   const showPrior = rows.some((r) => r.prior_display != null);
+  const colSpan = 3 + (showPrior ? 2 : 0);
+  // Which "found" figure's evidence is expanded (one at a time).
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   return (
     <div style={{ overflowY: 'auto', maxHeight }}>
       <Table>
@@ -453,36 +591,69 @@ function FigureTable({
             {showPrior && (
               <TableHead style={{ fontSize: 11, textAlign: 'right', width: 100 }}>CHANGE</TableHead>
             )}
-            <TableHead style={{ fontSize: 11, width: 140 }}>DRIVER</TableHead>
+            <TableHead style={{ fontSize: 11, width: 160 }}>DRIVER</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.figure_id} style={{ verticalAlign: 'middle' }}>
-              <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: 13, color: '#1F2340' }}>{row.label}</div>
-                <div style={{ fontSize: 11, color: MUTED, marginTop: 1, textTransform: 'capitalize' }}>
-                  {row.statement.replace(/_/g, ' ')}
-                </div>
-              </TableCell>
-              {showPrior && (
-                <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, color: MUTED, paddingTop: 10, paddingBottom: 10 }}>
-                  {row.prior_display ?? '—'}
-                </TableCell>
-              )}
-              <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, paddingTop: 10, paddingBottom: 10 }}>
-                {row.current_display}
-              </TableCell>
-              {showPrior && (
-                <TableCell style={{ textAlign: 'right', paddingTop: 10, paddingBottom: 10 }}>
-                  <ChangeCell pct={row.change_pct} direction={row.change_direction} />
-                </TableCell>
-              )}
-              <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
-                <DriverPill status={row.driver_status} />
-              </TableCell>
-            </TableRow>
-          ))}
+          {rows.map((row) => {
+            const isFound = row.driver_status === 'found';
+            const isExpanded = expandedId === row.figure_id;
+            return (
+              <Fragment key={row.figure_id}>
+                <TableRow
+                  onClick={isFound ? () => setExpandedId(isExpanded ? null : row.figure_id) : undefined}
+                  style={{
+                    verticalAlign: 'middle',
+                    cursor: isFound ? 'pointer' : 'default',
+                    background: isExpanded ? '#F6FDF9' : undefined,
+                  }}
+                >
+                  <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1F2340' }}>{row.label}</div>
+                    <div style={{ fontSize: 11, color: MUTED, marginTop: 1, textTransform: 'capitalize' }}>
+                      {row.statement.replace(/_/g, ' ')}
+                    </div>
+                  </TableCell>
+                  {showPrior && (
+                    <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, color: MUTED, paddingTop: 10, paddingBottom: 10 }}>
+                      {row.prior_display ?? '—'}
+                    </TableCell>
+                  )}
+                  <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, paddingTop: 10, paddingBottom: 10 }}>
+                    {row.current_display}
+                  </TableCell>
+                  {showPrior && (
+                    <TableCell style={{ textAlign: 'right', paddingTop: 10, paddingBottom: 10 }}>
+                      <ChangeCell pct={row.change_pct} direction={row.change_direction} />
+                    </TableCell>
+                  )}
+                  <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                      <DriverPill status={row.driver_status} />
+                      {isFound && (
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          style={{ color: GREEN, transition: 'transform .15s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}
+                        >
+                          <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {isFound && isExpanded && (
+                  <TableRow style={{ background: '#F6FDF9' }}>
+                    <TableCell colSpan={colSpan} style={{ padding: '0 16px 8px', borderTop: 'none' }}>
+                      <DriverEvidence drivers={row.drivers} />
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
@@ -705,7 +876,7 @@ export default function CoverageMapPage() {
             <p style={{ fontSize: 13, color: MUTED, marginBottom: 20 }}>
               No figures were extracted from these documents.
             </p>
-            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}>
+            <button className="btn bs" style={{ padding: '10px 18px' }} onClick={() => navigate('/reports/quarterly')}>
               ← Back to Reports
             </button>
           </div>
@@ -873,7 +1044,7 @@ export default function CoverageMapPage() {
           <button
             className="btn bs"
             style={{ fontSize: 13, padding: '10px 18px' }}
-            onClick={() => navigate('/reports', { state: { tab: 'quarterly' } })}
+            onClick={() => navigate('/reports/quarterly')}
           >
             ← Back
           </button>

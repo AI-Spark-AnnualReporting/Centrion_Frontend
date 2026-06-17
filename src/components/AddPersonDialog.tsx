@@ -1,35 +1,28 @@
 import { useState } from 'react';
 import { team, type TeamMember } from '@/lib/api';
 
+// Backend `position_type` enum — only these five values are accepted by the
+// API. Anything else returns 422, so the form must never send a stale value.
 export type PositionType =
   | 'executive'
   | 'board_member'
-  | 'investor'
+  | 'investor_contact'
   | 'esg_lead'
-  | 'finance'
-  | 'operations'
-  | 'CTO'
-  | 'CEO'
   | 'other';
 
 export const POSITION_LABELS: Record<PositionType, string> = {
   executive: 'Executive',
   board_member: 'Board Member',
-  investor: 'Investor',
+  investor_contact: 'Investor',
   esg_lead: 'ESG Lead',
-  finance: 'Finance',
-  operations: 'Operations',
-  CTO: 'CTO',
-  CEO: 'CEO',
   other: 'Other',
 };
 
 export const POSITION_OPTIONS: Array<{ value: PositionType; label: string }> = [
   { value: 'executive', label: POSITION_LABELS.executive },
   { value: 'board_member', label: POSITION_LABELS.board_member },
-  { value: 'investor', label: POSITION_LABELS.investor },
-  { value: 'CTO', label: POSITION_LABELS.CTO },
-  { value: 'CEO', label: POSITION_LABELS.CEO },
+  { value: 'investor_contact', label: POSITION_LABELS.investor_contact },
+  { value: 'esg_lead', label: POSITION_LABELS.esg_lead },
   { value: 'other', label: POSITION_LABELS.other },
 ];
 

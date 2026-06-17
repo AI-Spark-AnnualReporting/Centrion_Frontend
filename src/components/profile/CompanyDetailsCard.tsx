@@ -1,0 +1,398 @@
+import { useEffect, useState } from 'react';
+import { companies, getSectors } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import type { Company, CompanyEditableFields, Sector } from '@/types/company';
+
+// Fields an admin may PATCH. Save diffs these against the loaded company so we
+// only send what actually changed.
+const EDITABLE_FIELDS: (keyof CompanyEditableFields)[] = [
+  'name',
+  'sector_id',
+  'jurisdiction',
+  'employee_count',
+  'founded_year',
+  'website_url',
+  'headquarter_city',
+  'listed_exchange',
+  'reporting_currency',
+  'primary_language',
+  'fiscal_year_end_month',
+];
+
+const CURRENCIES: { code: string; label: string }[] = [
+  { code: 'SAR', label: 'SAR — Saudi Riyal' },
+  { code: 'USD', label: 'USD — US Dollar' },
+  { code: 'EUR', label: 'EUR — Euro' },
+  { code: 'GBP', label: 'GBP — British Pound' },
+  { code: 'AED', label: 'AED — UAE Dirham' },
+  { code: 'QAR', label: 'QAR — Qatari Riyal' },
+  { code: 'KWD', label: 'KWD — Kuwaiti Dinar' },
+  { code: 'BHD', label: 'BHD — Bahraini Dinar' },
+  { code: 'OMR', label: 'OMR — Omani Rial' },
+];
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: '#1A1D2E', fontWeight: 600 }}>{value}</div>
+    </div>
+  );
+}
+
+function fmtDate(iso?: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+}
+
+export function CompanyDetailsCard() {
+  const { user } = useAuth();
+  const canEdit = user?.role === 'admin';
+
+  const [company, setCompany] = useState<Company | null>(null);
+  const [form, setForm] = useState<Partial<Company>>({});
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([companies.getMyCompany(), getSectors()])
+      .then(([companyData, sectorsData]) => {
+        if (cancelled) return;
+        setCompany(companyData);
+        setForm(companyData);
+        setSectors(sectorsData);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load company');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isDirty = company !== null && JSON.stringify(form) !== JSON.stringify(company);
+
+  const updateField = <K extends keyof Company>(key: K, value: Company[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  const handleSave = async () => {
+    if (!company) return;
+    const payload: Partial<Company> = {};
+    for (const key of EDITABLE_FIELDS) {
+      if (form[key] !== company[key]) {
+        (payload as Record<string, unknown>)[key] = form[key];
+      }
+    }
+    if (Object.keys(payload).length === 0) {
+      setSuccess('No changes to save');
+      setTimeout(() => setSuccess(null), 2000);
+      return;
+    }
+    try {
+      setSaving(true);
+      setError(null);
+      const updated = await companies.updateMyCompany(payload);
+      setCompany(updated);
+      setForm(updated);
+      setSuccess('Company details updated successfully');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update company');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="ch">
+        <div>
+          <div className="ct">Company Details</div>
+          <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
+            Your company's profile and reporting preferences
+          </div>
+        </div>
+      </div>
+
+      <div className="cb">
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="skel" style={{ height: 56, borderRadius: 10 }} />
+            ))}
+          </div>
+        ) : error && !company ? (
+          <div
+            role="alert"
+            style={{
+              background: 'rgba(239,68,68,.04)',
+              border: '1px solid rgba(239,68,68,.25)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              color: '#DC2626',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {error}
+          </div>
+        ) : (
+          <>
+            {/* Section 1 — Basic Info */}
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Company Name *</label>
+                <input
+                  className="inp"
+                  value={form.name ?? ''}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  disabled={!canEdit}
+                />
+              </div>
+              <div className="fl">
+                <label className="fl-label">Sector</label>
+                <select
+                  className="inp sel"
+                  value={form.sector_id ?? ''}
+                  onChange={(e) => updateField('sector_id', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select sector</option>
+                  {sectors.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Jurisdiction</label>
+                <input
+                  className="inp"
+                  value={form.jurisdiction ?? ''}
+                  onChange={(e) => updateField('jurisdiction', e.target.value || null)}
+                  disabled={!canEdit}
+                  placeholder="e.g. Saudi Arabia"
+                />
+              </div>
+              <div className="fl">
+                <label className="fl-label">Headquarter City</label>
+                <input
+                  className="inp"
+                  value={form.headquarter_city ?? ''}
+                  onChange={(e) => updateField('headquarter_city', e.target.value || null)}
+                  disabled={!canEdit}
+                />
+              </div>
+            </div>
+
+            {/* Section 2 — Business Details */}
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Employee Count</label>
+                <input
+                  type="number"
+                  className="inp"
+                  value={form.employee_count ?? ''}
+                  onChange={(e) =>
+                    updateField('employee_count', e.target.value ? parseInt(e.target.value, 10) : null)
+                  }
+                  disabled={!canEdit}
+                  min={1}
+                />
+              </div>
+              <div className="fl">
+                <label className="fl-label">Founded Year</label>
+                <input
+                  type="number"
+                  className="inp"
+                  value={form.founded_year ?? ''}
+                  onChange={(e) =>
+                    updateField('founded_year', e.target.value ? parseInt(e.target.value, 10) : null)
+                  }
+                  disabled={!canEdit}
+                  min={1800}
+                  max={new Date().getFullYear()}
+                />
+              </div>
+            </div>
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Website URL</label>
+                <input
+                  type="url"
+                  className="inp"
+                  value={form.website_url ?? ''}
+                  onChange={(e) => updateField('website_url', e.target.value || null)}
+                  disabled={!canEdit}
+                  placeholder="https://example.com"
+                />
+              </div>
+              <div className="fl">
+                <label className="fl-label">Listed Exchange</label>
+                <input
+                  className="inp"
+                  value={form.listed_exchange ?? ''}
+                  onChange={(e) => updateField('listed_exchange', e.target.value || null)}
+                  disabled={!canEdit}
+                  placeholder="e.g. Tadawul, NYSE"
+                />
+              </div>
+            </div>
+
+            {/* Section 3 — Reporting Preferences */}
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Reporting Currency</label>
+                <select
+                  className="inp sel"
+                  value={form.reporting_currency ?? ''}
+                  onChange={(e) => updateField('reporting_currency', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select currency</option>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="fl">
+                <label className="fl-label">Primary Language</label>
+                <select
+                  className="inp sel"
+                  value={form.primary_language ?? ''}
+                  onChange={(e) => updateField('primary_language', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select language</option>
+                  <option value="en">English</option>
+                  <option value="ar">العربية</option>
+                </select>
+              </div>
+            </div>
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Fiscal Year End Month</label>
+                <select
+                  className="inp sel"
+                  value={form.fiscal_year_end_month ?? ''}
+                  onChange={(e) =>
+                    updateField('fiscal_year_end_month', e.target.value ? parseInt(e.target.value, 10) : null)
+                  }
+                  disabled={!canEdit}
+                >
+                  <option value="">Select month</option>
+                  {MONTHS.map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="fl" />
+            </div>
+
+            {/* Section 4 — Description (read-only for everyone) */}
+            <div className="fl" style={{ marginTop: 8 }}>
+              <label className="fl-label">
+                Company Description
+                <span style={{ marginLeft: 8, fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>
+                  Read-only
+                </span>
+              </label>
+              <textarea
+                className="inp"
+                value={form.description ?? ''}
+                disabled
+                readOnly
+                rows={4}
+                style={{ background: '#F5F6FA', cursor: 'not-allowed', color: '#5A6080', resize: 'vertical' }}
+              />
+              <p style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 4 }}>
+                This field drives AI prompts for your departments. Contact support to update it.
+              </p>
+            </div>
+
+            {/* Section 5 — Plan & Account (always read-only chips) */}
+            {company && (
+              <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #E2E4F0' }}>
+                <h3 style={{ marginBottom: 14, fontSize: 12, fontWeight: 800, color: '#5A6080' }}>
+                  Plan &amp; Account
+                </h3>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 16,
+                  }}
+                >
+                  <InfoItem label="Plan" value={company.plan_name ?? 'Enterprise'} />
+                  <InfoItem label="Max Seats" value={String(company.max_seats ?? 12)} />
+                  <InfoItem label="Plan Renewal" value={fmtDate(company.plan_renewal_date)} />
+                  <InfoItem label="Account Created" value={fmtDate(company.created_at)} />
+                </div>
+              </div>
+            )}
+
+            {/* Save error (inline) */}
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: 16,
+                  background: 'rgba(239,68,68,.04)',
+                  border: '1px solid rgba(239,68,68,.25)',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  color: '#DC2626',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {error}
+              </div>
+            )}
+            {success && (
+              <div
+                role="status"
+                style={{
+                  marginTop: 16,
+                  background: 'rgba(34,197,94,.08)',
+                  border: '1px solid rgba(34,197,94,.25)',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  color: '#16A34A',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {success}
+              </div>
+            )}
+
+            {canEdit && (
+              <div style={{ marginTop: 22, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn bp" type="button" onClick={handleSave} disabled={saving || !isDirty}>
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

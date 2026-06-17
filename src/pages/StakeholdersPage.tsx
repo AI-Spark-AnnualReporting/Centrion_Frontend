@@ -3,27 +3,20 @@ import { team, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 // Backend `position_type` enum, kept verbatim so the value posted to the
-// API is always one of the seven the server accepts.
+// API is always one of the five the server accepts. Sending any other value
+// (the retired investor / CTO / CEO / finance / operations) returns a 422.
 type PositionType =
   | 'executive'
   | 'board_member'
-  | 'investor'
+  | 'investor_contact'
   | 'esg_lead'
-  | 'finance'
-  | 'operations'
-  | 'CTO'
-  | 'CEO'
   | 'other';
 
 const POSITION_LABELS: Record<PositionType, string> = {
   executive: 'Executive',
   board_member: 'Board Member',
-  investor: 'Investor',
+  investor_contact: 'Investor',
   esg_lead: 'ESG Lead',
-  finance: 'Finance',
-  operations: 'Operations',
-  CTO: 'CTO',
-  CEO: 'CEO',
   other: 'Other',
 };
 
@@ -32,23 +25,29 @@ const POSITION_LABELS: Record<PositionType, string> = {
 const POSITION_BADGE_CLASS: Record<PositionType, string> = {
   executive: 'b-pp',
   board_member: 'b-bl',
-  investor: 'b-tl',
+  investor_contact: 'b-tl',
   esg_lead: 'b-gn',
-  finance: 'b-am',
-  operations: 'b-bl',
-  CTO: 'b-pp',
-  CEO: 'b-pp',
   other: 'b-gy',
 };
 
 const POSITION_OPTIONS: Array<{ value: PositionType; label: string }> = [
   { value: 'executive', label: POSITION_LABELS.executive },
   { value: 'board_member', label: POSITION_LABELS.board_member },
-  { value: 'investor', label: POSITION_LABELS.investor },
-  { value: 'CTO', label: POSITION_LABELS.CTO },
-  { value: 'CEO', label: POSITION_LABELS.CEO },
+  { value: 'investor_contact', label: POSITION_LABELS.investor_contact },
+  { value: 'esg_lead', label: POSITION_LABELS.esg_lead },
   { value: 'other', label: POSITION_LABELS.other },
 ];
+
+// Legacy → current position_type aliases. Existing rows (or cached data) may
+// still carry retired values; map them so they land on the right tab/label
+// instead of falling through to "other".
+const LEGACY_POSITION_ALIASES: Record<string, PositionType> = {
+  investor: 'investor_contact',
+  CTO: 'executive',
+  CEO: 'executive',
+  finance: 'other',
+  operations: 'other',
+};
 
 type TabKey = 'board' | 'investor' | 'executive' | 'other';
 
@@ -68,14 +67,14 @@ const PLACEHOLDER_LABELS: Record<TabKey, string> = {
 
 const TAB_POSITIONS: Record<TabKey, PositionType[]> = {
   board: ['board_member'],
-  investor: ['investor'],
-  executive: ['executive', 'CTO', 'CEO'],
-  other: ['esg_lead', 'finance', 'operations', 'other'],
+  investor: ['investor_contact'],
+  executive: ['executive'],
+  other: ['esg_lead', 'other'],
 };
 
 const TAB_DEFAULT_POSITION: Record<TabKey, PositionType> = {
   board: 'board_member',
-  investor: 'investor',
+  investor: 'investor_contact',
   executive: 'executive',
   other: 'other',
 };
@@ -139,7 +138,9 @@ function splitFullName(s: string): { firstName: string; lastName: string } {
 // tab instead of silently disappearing.
 function toPositionType(raw: unknown): PositionType {
   if (typeof raw !== 'string') return 'other';
-  return raw in POSITION_LABELS ? (raw as PositionType) : 'other';
+  if (raw in POSITION_LABELS) return raw as PositionType;
+  if (raw in LEGACY_POSITION_ALIASES) return LEGACY_POSITION_ALIASES[raw];
+  return 'other';
 }
 
 function teamMemberToPerson(m: TeamMember): Person {
@@ -165,8 +166,8 @@ function teamMemberToPerson(m: TeamMember): Person {
 // create to switch to the right tab so the new card is immediately visible.
 function tabForPosition(p: PositionType): TabKey {
   if (p === 'board_member') return 'board';
-  if (p === 'investor') return 'investor';
-  if (p === 'executive' || p === 'CTO' || p === 'CEO') return 'executive';
+  if (p === 'investor_contact') return 'investor';
+  if (p === 'executive') return 'executive';
   return 'other';
 }
 

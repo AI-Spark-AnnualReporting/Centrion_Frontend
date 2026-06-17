@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { createCompany, getSectors, register } from '@/lib/api';
+import { isSarRole, redirectToSar } from '@/lib/sar';
 import type { StepOneState, StepTwoState } from '@/types/register';
 import type { Sector } from '@/types/company';
 import { StepIndicator } from '@/components/registration/StepIndicator';
@@ -52,6 +53,10 @@ export function LoginPage() {
       // own, but explicit navigation avoids the visible bounce.
       if (loggedIn.must_change_password) {
         navigate('/change-password', { replace: true });
+      } else if (isSarRole(loggedIn.role) && redirectToSar()) {
+        // PM / department_user belong in the SAR workspace app, not Centriton.
+        // redirectToSar() navigates away; stop here.
+        return;
       } else {
         navigate('/');
       }
