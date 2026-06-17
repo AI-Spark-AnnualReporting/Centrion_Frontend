@@ -5,41 +5,48 @@ export interface CoverageDriver {
   source: "extracted" | "user_provided";
 }
 
-export interface CoverageFigure {
+// One provenance entry for a value — where the figure was read from. Both
+// fields can be null for figures read from a plain table (no captured snippet).
+export interface CoverageSource {
+  page: number | null;
+  quote: string | null;
+}
+
+// A single extracted figure (one period) under a metric. Each value carries its
+// own driver status: when "found", render `drivers`; when "missing", render the
+// "Reason not found" panel with `sources`.
+export interface CoverageValue {
   figure_id: string;
-  code: string;
+  display: string;
+  driver_status: "missing" | "found";
+  sources: CoverageSource[];
+  drivers: CoverageDriver[];
+}
+
+// Figures grouped by metric. One row per metric, with `values` nested beneath.
+export interface CoverageMetric {
   metric: string;
   label: string;
   statement: string;
-  current_value: number;
-  current_display: string;
-  prior_value: number | null;
-  prior_display: string | null;
-  change_pct: number | null;
-  change_direction: "up" | "down" | null;
-  driver_status: "missing" | "found";
-  drivers: CoverageDriver[];
+  code: string;
+  values: CoverageValue[];
 }
 
 export interface CoverageSummary {
   figures_extracted: number;
-  documents_count: number;
+  // Optional — not always present in the coverage payload.
+  documents_count?: number;
   reason_linked: number;
   reason_missing: number;
   driver_coverage_pct: number;
-  comparatives_matched: number;
-  comparatives_total: number;
-  comparatives_missing_prior: number;
 }
 
 export interface QuarterlyCoverageResponse {
   report_id: string;
   company_id: string;
-  period_label: string;
-  prior_period_label: string;
+  period_label?: string;
   summary: CoverageSummary;
-  needs_reason: CoverageFigure[];
-  reason_found: CoverageFigure[];
+  metrics: CoverageMetric[];
 }
 
 export interface GapItem {

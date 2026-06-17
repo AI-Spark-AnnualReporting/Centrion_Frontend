@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
-import type { QuarterlyCoverageResponse, CoverageFigure, CoverageDriver } from '@/types/quarterly';
+import type { QuarterlyCoverageResponse, CoverageMetric, CoverageDriver, CoverageSource } from '@/types/quarterly';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import {
   Table,
@@ -156,16 +156,6 @@ function CodeTag({ code }: { code: string }) {
 }
 
 // ─── Change cell ──────────────────────────────────────────────────────────────
-function ChangeCell({ pct, direction }: { pct: number | null; direction: 'up' | 'down' | null }) {
-  if (pct == null || direction == null) return <span style={{ color: MUTED }}>—</span>;
-  const up = direction === 'up';
-  return (
-    <span style={{ color: up ? GREEN : '#EF4444', fontFamily: MONO, fontSize: 12, whiteSpace: 'nowrap' }}>
-      {up ? '▲' : '▼'} {(Math.abs(pct) > 0 ? (pct > 0 ? '+' : '') : '') + Math.abs(pct).toFixed(1)}%
-    </span>
-  );
-}
-
 // ─── Driver pill ──────────────────────────────────────────────────────────────
 function DriverPill({ status }: { status: 'missing' | 'found' }) {
   const missing = status === 'missing';
@@ -238,101 +228,58 @@ function SourceBadge({ source }: { source: CoverageDriver['source'] }) {
   );
 }
 
-// ─── Driver evidence — revealed when a "found" figure row is expanded.
-// Each driver is an evidence card: provenance + page, the reason, and the
-// verbatim quote rendered as an editorial citation. ──────────────────────────
-function DriverEvidence({ drivers }: { drivers: CoverageDriver[] }) {
-  if (drivers.length === 0) {
-    return (
-      <div style={{ padding: '4px 2px 12px', fontSize: 12, color: MUTED, animation: 'fade-in .22s ease' }}>
-        No supporting drivers recorded for this figure.
-      </div>
-    );
-  }
+// An italic, editorial-style rendering of a verbatim source quote. Falls back
+// to an em-dash when there's no quote.
+function QuoteText({ quote, color }: { quote: string | null; color: string }) {
+  if (!quote) return <span style={{ color: MUTED }}>—</span>;
   return (
-    <div style={{ animation: 'fade-in .22s ease', padding: '4px 2px 14px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11 }}>
-        <span style={{ width: 5, height: 5, borderRadius: '50%', background: GREEN }} />
-        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.7px', textTransform: 'uppercase', color: GREEN }}>
-          Why this moved · {drivers.length} {drivers.length === 1 ? 'reason' : 'reasons'}
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {drivers.map((d, i) => (
-          <div
-            key={i}
-            style={{
-              position: 'relative',
-              borderRadius: 12,
-              border: '1px solid #E3F4EC',
-              background: 'linear-gradient(180deg,#F6FDF9,#FFFFFF)',
-              padding: '13px 16px 14px 19px',
-              boxShadow: '0 1px 3px rgba(16,185,129,.07)',
-            }}
-          >
-            <span style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, borderRadius: 3, background: GREEN }} />
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 10,
-                marginBottom: d.text ? 9 : 0,
-                flexWrap: 'wrap',
-              }}
-            >
-              <SourceBadge source={d.source} />
-              {d.page != null && (
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: MUTED, fontFamily: MONO }}>
-                  Page {d.page}
-                </span>
-              )}
-            </div>
-            {d.text && (
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1F2340', lineHeight: 1.5 }}>{d.text}</div>
-            )}
-            {d.quote && (
-              <blockquote
-                style={{
-                  position: 'relative',
-                  margin: '10px 0 0',
-                  padding: '10px 14px 11px 38px',
-                  borderRadius: 10,
-                  background: '#F3F7F5',
-                  border: '1px solid #E8EFEB',
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    left: 11,
-                    top: 1,
-                    fontFamily: 'Georgia, serif',
-                    fontSize: 34,
-                    lineHeight: 1,
-                    color: 'rgba(16,185,129,.4)',
-                  }}
-                >
-                  &ldquo;
-                </span>
-                <span
-                  style={{
-                    fontFamily: 'Georgia, "Times New Roman", serif',
-                    fontStyle: 'italic',
-                    fontSize: 12.5,
-                    lineHeight: 1.65,
-                    color: '#3C4A43',
-                  }}
-                >
-                  {d.quote}
-                </span>
-              </blockquote>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <span
+      style={{
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontStyle: 'italic',
+        fontSize: 12.5,
+        lineHeight: 1.65,
+        color,
+      }}
+    >
+      {quote}
+    </span>
   );
+}
+
+// Fixed message shown when a value has no located driver.
+const REASON_NOT_FOUND_TEXT = 'Reason not found in the source document(s).';
+
+// One row of the flat Value | Page | Reason table.
+type EvidenceRow = { page: number | null; reason: React.ReactNode };
+
+// Expand a single value into its evidence rows. A "found" value yields one row
+// per driver (reason = text + provenance badge + quote); a "missing" value
+// yields one row per source (reason = the verbatim quote). When there's nothing
+// to show, a single fallback row carries the status message.
+function valueRows(v: CoverageValue): EvidenceRow[] {
+  if (v.driver_status === 'found') {
+    if (v.drivers.length === 0) {
+      return [{ page: null, reason: <span style={{ color: MUTED }}>No supporting drivers recorded.</span> }];
+    }
+    return v.drivers.map((d) => ({
+      page: d.page,
+      reason: (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 7 }}>
+          {d.text && (
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#1F2340', lineHeight: 1.5 }}>{d.text}</div>
+          )}
+          <SourceBadge source={d.source} />
+          {d.quote && <QuoteText quote={d.quote} color="#3C4A43" />}
+        </div>
+      ),
+    }));
+  }
+  const srcs = v.sources.filter((s) => s.page != null || s.quote);
+  if (srcs.length === 0) {
+    return [{ page: null, reason: <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>{REASON_NOT_FOUND_TEXT}</span> }];
+  }
+  return srcs.map((s) => ({ page: s.page, reason: <QuoteText quote={s.quote} color="#4A4133" /> }));
 }
 
 // ─── Summary card ─────────────────────────────────────────────────────────────
@@ -561,99 +508,84 @@ function FilterBar({
   );
 }
 
-// ─── Figure table (shared by overview + split sections) ───────────────────────
-function FigureTable({
-  rows,
-  periodLabel,
-  priorLabel,
+// ─── Metric table — grouped by metric, with each value flattened into a
+// Value | Page | Reason table. A value spans one row per source/driver; status
+// is conveyed by the row tint, the left accent bar, and (optionally) a pill. ──
+const VCELL: React.CSSProperties = { verticalAlign: 'top', paddingTop: 11, paddingBottom: 11 };
+const COL_BORDER = '1px solid #EEF0F5';
+
+function MetricTable({
+  metrics,
   maxHeight,
+  showStatusPill = true,
 }: {
-  rows: CoverageFigure[];
-  periodLabel: string;
-  priorLabel: string;
+  metrics: CoverageMetric[];
   maxHeight?: number | string;
+  // Hide the per-row status pill when the section already implies the status
+  // (a single-status filter tab or a gaps-first split section).
+  showStatusPill?: boolean;
 }) {
-  // Only show the prior-period column when at least one row actually has prior data.
-  const showPrior = rows.some((r) => r.prior_display != null);
-  const colSpan = 3 + (showPrior ? 2 : 0);
-  // Which "found" figure's evidence is expanded (one at a time).
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   return (
     <div style={{ overflowY: 'auto', maxHeight }}>
       <Table>
         <TableHeader style={{ position: 'sticky', top: 0, zIndex: 1 }}>
           <TableRow style={{ background: '#F8F9FC' }}>
-            <TableHead style={{ fontSize: 11 }}>METRIC</TableHead>
-            {showPrior && (
-              <TableHead style={{ fontSize: 11, textAlign: 'right', width: 120 }}>{priorLabel}</TableHead>
-            )}
-            <TableHead style={{ fontSize: 11, textAlign: 'right', width: 120 }}>{periodLabel}</TableHead>
-            {showPrior && (
-              <TableHead style={{ fontSize: 11, textAlign: 'right', width: 100 }}>CHANGE</TableHead>
-            )}
-            <TableHead style={{ fontSize: 11, width: 160 }}>DRIVER</TableHead>
+            <TableHead style={{ fontSize: 11, width: 200, borderRight: COL_BORDER }}>VALUE</TableHead>
+            <TableHead style={{ fontSize: 11, width: 96, borderRight: COL_BORDER }}>PAGE</TableHead>
+            <TableHead style={{ fontSize: 11 }}>REASON</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => {
-            const isFound = row.driver_status === 'found';
-            const isExpanded = expandedId === row.figure_id;
-            return (
-              <Fragment key={row.figure_id}>
-                <TableRow
-                  onClick={isFound ? () => setExpandedId(isExpanded ? null : row.figure_id) : undefined}
-                  style={{
-                    verticalAlign: 'middle',
-                    cursor: isFound ? 'pointer' : 'default',
-                    background: isExpanded ? '#F6FDF9' : undefined,
-                  }}
-                >
-                  <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1F2340' }}>{row.label}</div>
-                    <div style={{ fontSize: 11, color: MUTED, marginTop: 1, textTransform: 'capitalize' }}>
-                      {row.statement.replace(/_/g, ' ')}
-                    </div>
-                  </TableCell>
-                  {showPrior && (
-                    <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, color: MUTED, paddingTop: 10, paddingBottom: 10 }}>
-                      {row.prior_display ?? '—'}
+          {metrics.map((m) => (
+            <Fragment key={m.code}>
+              {/* Metric group header */}
+              <TableRow style={{ background: '#FBFBFE' }}>
+                <TableCell colSpan={3} style={{ paddingTop: 9, paddingBottom: 9 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#1F2340' }}>{m.label}</div>
+                  <div style={{ fontSize: 11, color: MUTED, marginTop: 1, textTransform: 'capitalize' }}>
+                    {m.statement.replace(/_/g, ' ')}
+                  </div>
+                </TableCell>
+              </TableRow>
+              {/* One value → one row per evidence entry, value cell spans them */}
+              {m.values.map((v) => {
+                const isFound = v.driver_status === 'found';
+                const tint = isFound ? '#F6FDF9' : AMBER_BG;
+                const accent = isFound ? GREEN : AMBER;
+                const rows = valueRows(v);
+                return rows.map((e, idx) => (
+                  <TableRow key={`${v.figure_id}-${idx}`} style={{ background: tint }}>
+                    {idx === 0 && (
+                      <TableCell
+                        rowSpan={rows.length}
+                        style={{ ...VCELL, paddingLeft: 16, borderLeft: `3px solid ${accent}`, borderRight: COL_BORDER }}
+                      >
+                        <div style={{ fontFamily: MONO, fontSize: 13, fontWeight: 700, color: '#1F2340' }}>{v.display}</div>
+                        {showStatusPill && (
+                          <div style={{ marginTop: 7 }}>
+                            <DriverPill status={v.driver_status} />
+                          </div>
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell
+                      style={{
+                        ...VCELL,
+                        fontFamily: MONO,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: e.page != null ? '#1F2340' : MUTED,
+                        borderRight: COL_BORDER,
+                      }}
+                    >
+                      {e.page != null ? `Page ${e.page}` : '—'}
                     </TableCell>
-                  )}
-                  <TableCell style={{ textAlign: 'right', fontFamily: MONO, fontSize: 13, paddingTop: 10, paddingBottom: 10 }}>
-                    {row.current_display}
-                  </TableCell>
-                  {showPrior && (
-                    <TableCell style={{ textAlign: 'right', paddingTop: 10, paddingBottom: 10 }}>
-                      <ChangeCell pct={row.change_pct} direction={row.change_direction} />
-                    </TableCell>
-                  )}
-                  <TableCell style={{ paddingTop: 10, paddingBottom: 10 }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                      <DriverPill status={row.driver_status} />
-                      {isFound && (
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 12 12"
-                          fill="none"
-                          style={{ color: GREEN, transition: 'transform .15s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}
-                        >
-                          <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-                {isFound && isExpanded && (
-                  <TableRow style={{ background: '#F6FDF9' }}>
-                    <TableCell colSpan={colSpan} style={{ padding: '0 16px 8px', borderTop: 'none' }}>
-                      <DriverEvidence drivers={row.drivers} />
-                    </TableCell>
+                    <TableCell style={VCELL}>{e.reason}</TableCell>
                   </TableRow>
-                )}
-              </Fragment>
-            );
-          })}
+                ));
+              })}
+            </Fragment>
+          ))}
         </TableBody>
       </Table>
     </div>
@@ -759,24 +691,42 @@ export default function CoverageMapPage() {
     setActiveFilter(view === 'gaps-first' ? 'missing' : 'all');
   }, [view]);
 
-  const allFigures = useMemo<CoverageFigure[]>(() => {
+  const sortedMetrics = useMemo<CoverageMetric[]>(() => {
     if (!data) return [];
-    return [...data.needs_reason, ...data.reason_found].sort((a, b) =>
-      a.code.localeCompare(b.code)
-    );
+    return [...data.metrics].sort((a, b) => a.code.localeCompare(b.code));
   }, [data]);
 
-  const filteredFigures = useMemo<CoverageFigure[]>(() => {
-    return allFigures.filter((f) => {
-      if (activeFilter === 'missing' && f.driver_status !== 'missing') return false;
-      if (activeFilter === 'found' && f.driver_status !== 'found') return false;
-      const q = search.trim().toLowerCase();
-      if (q) return f.label.toLowerCase().includes(q);
-      return true;
-    });
-  }, [allFigures, activeFilter, search]);
+  // Value-level tallies (each metric holds one or more values).
+  const valueCounts = useMemo(() => {
+    let missing = 0;
+    let found = 0;
+    for (const m of sortedMetrics) {
+      for (const v of m.values) {
+        if (v.driver_status === 'missing') missing += 1;
+        else found += 1;
+      }
+    }
+    return { missing, found, total: missing + found };
+  }, [sortedMetrics]);
 
-  const needsCount = data?.needs_reason.length ?? 0;
+  // Keep each metric but narrow its values to the requested status, dropping
+  // metrics left with no values (or filtered out by the search query).
+  const filterMetrics = (status: 'all' | 'missing' | 'found', query: string): CoverageMetric[] => {
+    const q = query.trim().toLowerCase();
+    return sortedMetrics
+      .map((m) => ({
+        ...m,
+        values: status === 'all' ? m.values : m.values.filter((v) => v.driver_status === status),
+      }))
+      .filter((m) => m.values.length > 0 && (!q || m.label.toLowerCase().includes(q)));
+  };
+
+  const filteredMetrics = filterMetrics(activeFilter, search);
+  // Split sections for the "Gaps first" view (search not applied there).
+  const missingMetrics = filterMetrics('missing', '');
+  const foundMetrics = filterMetrics('found', '');
+
+  const needsCount = data?.summary.reason_missing ?? 0;
   const allCovered = data != null && needsCount === 0;
 
   return (
@@ -801,7 +751,8 @@ export default function CoverageMapPage() {
             </h1>
             {data && (
               <p style={{ margin: '4px 0 0', fontSize: 12, color: MUTED }}>
-                What the AI found in your documents for <strong>{data.period_label}</strong>. Resolve
+                What the AI found in your documents
+                {data.period_label ? <> for <strong>{data.period_label}</strong></> : null}. Resolve
                 the missing reasons before generating.
               </p>
             )}
@@ -898,7 +849,11 @@ export default function CoverageMapPage() {
                 icon={<DocIcon />}
                 title="Figures extracted"
                 value={data.summary.figures_extracted}
-                sub={`Across ${data.summary.documents_count} document${data.summary.documents_count !== 1 ? 's' : ''}`}
+                sub={
+                  data.summary.documents_count != null
+                    ? `Across ${data.summary.documents_count} document${data.summary.documents_count !== 1 ? 's' : ''}`
+                    : 'From your documents'
+                }
               />
               <SummaryCard
                 icon={<CheckIcon />}
@@ -913,15 +868,6 @@ export default function CoverageMapPage() {
                 sub="Needs input"
                 highlight={data.summary.reason_missing > 0}
               />
-              {/* Hidden for now — restore (and set the grid back to 4 columns)
-                  to bring the "Comparatives matched" card back.
-              <SummaryCard
-                icon={<ChartIcon />}
-                title="Comparatives matched"
-                value={`${data.summary.comparatives_matched}/${data.summary.comparatives_total}`}
-                sub={`${data.summary.comparatives_missing_prior} missing prior year`}
-              />
-              */}
             </div>
 
             {/* Driver coverage bar */}
@@ -938,24 +884,23 @@ export default function CoverageMapPage() {
                   <FilterBar
                     active={activeFilter}
                     setActive={setActiveFilter}
-                    totalCount={allFigures.length}
-                    missingCount={data.needs_reason.length}
-                    foundCount={data.reason_found.length}
+                    totalCount={valueCounts.total}
+                    missingCount={valueCounts.missing}
+                    foundCount={valueCounts.found}
                     search={search}
                     setSearch={setSearch}
                   />
                 </div>
 
-                {filteredFigures.length === 0 ? (
+                {filteredMetrics.length === 0 ? (
                   <div style={{ padding: '36px', textAlign: 'center', color: MUTED, fontSize: 13 }}>
                     No figures match your search.
                   </div>
                 ) : (
-                  <FigureTable
-                    rows={filteredFigures}
-                    periodLabel={data.period_label}
-                    priorLabel={data.prior_period_label}
+                  <MetricTable
+                    metrics={filteredMetrics}
                     maxHeight="calc(100vh - 420px)"
+                    showStatusPill={activeFilter === 'all'}
                   />
                 )}
               </div>
@@ -963,12 +908,12 @@ export default function CoverageMapPage() {
               /* ── GAPS FIRST: split sections (Needs a reason / Reason found) ── */
               <>
                 {/* Needs a reason */}
-                {data.needs_reason.length > 0 && (
+                {missingMetrics.length > 0 && (
                   <div className="card" style={{ overflow: 'hidden', marginBottom: 16 }}>
                     <SectionHeader
                       tone="amber"
                       label="Needs a reason"
-                      count={data.needs_reason.length}
+                      count={valueCounts.missing}
                       caption="These figures moved materially but no driver was found in your documents. Answer each so the report can explain the change."
                       action={
                         <button
@@ -980,34 +925,24 @@ export default function CoverageMapPage() {
                         </button>
                       }
                     />
-                    <FigureTable
-                      rows={data.needs_reason}
-                      periodLabel={data.period_label}
-                      priorLabel={data.prior_period_label}
-                      maxHeight="calc(50vh - 120px)"
-                    />
+                    <MetricTable metrics={missingMetrics} maxHeight="calc(50vh - 120px)" showStatusPill={false} />
                   </div>
                 )}
 
                 {/* Reason found */}
-                {data.reason_found.length > 0 && (
+                {foundMetrics.length > 0 && (
                   <div className="card" style={{ overflow: 'hidden' }}>
                     <SectionHeader
                       tone="green"
                       label="Reason found"
-                      count={data.reason_found.length}
+                      count={valueCounts.found}
                       caption="Drivers the AI located directly in the source documents — no action needed."
                     />
-                    <FigureTable
-                      rows={data.reason_found}
-                      periodLabel={data.period_label}
-                      priorLabel={data.prior_period_label}
-                      maxHeight="calc(50vh - 120px)"
-                    />
+                    <MetricTable metrics={foundMetrics} maxHeight="calc(50vh - 120px)" showStatusPill={false} />
                   </div>
                 )}
 
-                {data.needs_reason.length === 0 && (
+                {missingMetrics.length === 0 && (
                   <div className="card" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ width: 26, height: 26, borderRadius: 7, background: 'rgba(16,185,129,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <CheckIcon />

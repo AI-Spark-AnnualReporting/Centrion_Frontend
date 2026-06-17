@@ -892,7 +892,7 @@ export const quarterlyReports = {
     figureId: string,
     body: { text: string; source: "user_provided" },
   ) =>
-    request<{ figure: import("@/types/quarterly").CoverageFigure }>(
+    request<{ figure: import("@/types/quarterly").CoverageValue }>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}/driver`,
       { method: "POST", body },
     ),
