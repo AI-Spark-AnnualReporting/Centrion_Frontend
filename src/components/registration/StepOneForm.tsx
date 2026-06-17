@@ -88,7 +88,7 @@ export function StepOneForm({ initialValues, onSubmit, error }: StepOneFormProps
         <input
           type="email"
           className="inp"
-          placeholder="you@centriton.com"
+          placeholder="you@centriyon.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
