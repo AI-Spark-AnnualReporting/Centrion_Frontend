@@ -65,6 +65,7 @@ import type {
   CycleSection,
   ResolveSectionsResponse,
   SARUser,
+  SessionStatus,
 } from "@/types/cycles";
 
 const API_BASE_URL = (
@@ -1325,11 +1326,50 @@ function unwrap<T>(raw: unknown, key: string): T {
   return raw as T;
 }
 
+// Raw department row as the SAR backend actually returns it. The `*_percentage`
+// / `status` / `user_*` keys are the backend's names; the optional frontend-name
+// fields let `overview()` normalise either shape (see below).
+interface RawCycleDepartment {
+  department_id: string;
+  department_name: string;
+  department_code: string;
+  user_id?: string | null;
+  user_name?: string;
+  user_email?: string;
+  status?: SessionStatus;
+  progress_percentage?: number;
+  submitted_at?: string | null;
+  // Frontend-shaped names, in case the backend is ever updated to emit them:
+  assigned_user_id?: string | null;
+  assigned_user_name?: string;
+  assigned_user_email?: string;
+  session_status?: SessionStatus;
+  progress?: number;
+}
+
+interface RawCycleOverview extends Omit<CycleOverview, "departments"> {
+  departments?: RawCycleDepartment[];
+}
+
+// Raw cycle as the list endpoint returns it — same as `Cycle` plus the backend's
+// `pm_name` (the page reads `project_manager_name`).
+interface RawCycle extends Cycle {
+  pm_name?: string;
+}
+
 export const sarCycles = {
   list: async (): Promise<Cycle[]> => {
     const raw = await sarRequest<unknown>("/api/v1/admin/cycles");
-    const list = unwrap<Cycle[]>(raw, "cycles");
-    return Array.isArray(list) ? list : [];
+    const list = unwrap<RawCycle[]>(raw, "cycles");
+    if (!Array.isArray(list)) return [];
+    // The SAR backend names the manager `pm_name`, but the list page reads
+    // `project_manager_name`. Map it so the Project Manager column renders the
+    // name instead of —. (The list endpoint returns no per-cycle progress, so
+    // progress stays 0% until the backend surfaces it.)
+    return list.map((c) => ({
+      ...c,
+      project_manager_name: c.project_manager_name ?? c.pm_name,
+    }));
   },
 
   get: async (id: string): Promise<Cycle> => {
@@ -1358,10 +1398,31 @@ export const sarCycles = {
     return unwrap<Cycle>(raw, "cycle");
   },
 
-  overview: (id: string): Promise<CycleOverview> =>
-    sarRequest<CycleOverview>(
+  // The SAR backend returns department rows keyed as `progress_percentage`,
+  // `status`, `user_name`/`user_email`/`user_id`, but the page + CycleOverview
+  // type use `progress`, `session_status`, `assigned_user_*`. Map them here so
+  // the Department Sessions table shows real progress/status/assignee instead of
+  // 0% / Not Started / —. Fallbacks keep it working if the backend ever switches
+  // to the frontend names.
+  overview: async (id: string): Promise<CycleOverview> => {
+    const raw = await sarRequest<RawCycleOverview>(
       `/api/v1/admin/cycles/${encodeURIComponent(id)}/overview`,
-    ),
+    );
+    return {
+      ...raw,
+      departments: (raw.departments ?? []).map((d) => ({
+        department_id: d.department_id,
+        department_name: d.department_name,
+        department_code: d.department_code,
+        assigned_user_id: d.assigned_user_id ?? d.user_id ?? null,
+        assigned_user_name: d.assigned_user_name ?? d.user_name,
+        assigned_user_email: d.assigned_user_email ?? d.user_email,
+        session_status: (d.session_status ?? d.status) as SessionStatus,
+        progress: d.progress ?? d.progress_percentage ?? 0,
+        submitted_at: d.submitted_at ?? null,
+      })),
+    };
+  },
 
   sections: async (id: string): Promise<CycleSection[]> => {
     const raw = await sarRequest<unknown>(
