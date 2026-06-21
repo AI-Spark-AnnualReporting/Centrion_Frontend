@@ -111,6 +111,27 @@ export interface DocumentBankDocument {
   download_expires_at: string | null;
 }
 
+// GET /api/v1/documents/{company_id} — flat "all documents" view. Unlike the
+// by-report shape, this includes ad-hoc documents not tied to any report, sorted
+// newest first. `report_id`/`report_type` are null for ad-hoc uploads.
+export interface CompanyDocument {
+  id: string;
+  filename: string;
+  file_type: string;
+  file_size_bytes: number;
+  extraction_status: string;
+  report_id: string | null;
+  report_type: 'annual' | 'esg' | null;
+  created_at: string;
+  download_url: string | null;
+  download_expires_at: string | null;
+}
+
+export interface CompanyDocumentsResponse {
+  documents: CompanyDocument[];
+  total: number;
+}
+
 export interface DocumentBankReport {
   report_id: string;
   title: string;

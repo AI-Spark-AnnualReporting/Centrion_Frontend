@@ -2,13 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { documents as documentsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
-  DocumentBankDocument,
-  DocumentBankResponse,
+  CompanyDocument,
+  CompanyDocumentsResponse,
 } from '@/types/report';
-
-function formatPeriod(period: string): string {
-  return period.replace(/-/g, ' ').trim();
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -24,17 +20,18 @@ function formatDate(iso: string): string {
   });
 }
 
-function statusColor(status: string): { color: string; bg: string } {
-  if (status === 'completed') return { color: '#16A34A', bg: 'rgba(34,197,94,.12)' };
-  if (status === 'failed') return { color: '#DC2626', bg: 'rgba(239,68,68,.12)' };
-  return { color: '#B45309', bg: 'rgba(245,158,11,.15)' };
+// Human label for where a document came from. Ad-hoc uploads have no report.
+function sourceLabel(doc: CompanyDocument): string {
+  if (doc.report_type === 'annual') return 'Annual report';
+  if (doc.report_type === 'esg') return 'ESG report';
+  return 'Ad-hoc upload';
 }
 
 export default function DocsPage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
 
-  const [data, setData] = useState<DocumentBankResponse | null>(null);
+  const [data, setData] = useState<CompanyDocumentsResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -49,7 +46,7 @@ export default function DocsPage() {
     setLoading(true);
     setError(null);
     documentsApi
-      .byReport<DocumentBankResponse>(companyId)
+      .list<CompanyDocumentsResponse>(companyId)
       .then((res) => {
         if (requestId !== requestIdRef.current) return;
         setData(res);
@@ -67,7 +64,8 @@ export default function DocsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
-  const totalDocs = data?.reports.reduce((acc, r) => acc + r.documents.length, 0) ?? 0;
+  const docs = data?.documents ?? [];
+  const total = data?.total ?? docs.length;
 
   return (
     <div>
@@ -76,9 +74,9 @@ export default function DocsPage() {
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>Document Bank</h2>
           <p style={{ fontSize: 11, color: '#5A6080', marginTop: 4 }}>
-            Every uploaded document grouped by the report it was processed against.
+            Every document uploaded for your company, newest first.
             {data && (
-              <> &middot; {data.reports.length} report{data.reports.length === 1 ? '' : 's'} &middot; {totalDocs} document{totalDocs === 1 ? '' : 's'}</>
+              <> &middot; {total} document{total === 1 ? '' : 's'}</>
             )}
           </p>
         </div>
@@ -128,64 +126,26 @@ export default function DocsPage() {
       )}
 
       {/* Empty */}
-      {!loading && !error && data && data.reports.length === 0 && (
+      {!loading && !error && data && docs.length === 0 && (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 13, color: '#9BA3C4' }}>
-            No reports yet. Documents you upload while generating reports will appear here.
+            No documents yet. Files you upload will appear here.
           </div>
         </div>
       )}
 
-      {/* Report cards */}
-      {!loading && data && data.reports.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {data.reports.map((report) => (
-            <div
-              key={report.report_id}
-              style={{
-                background: '#fff',
-                borderRadius: 14,
-                border: '1px solid #E2E4F0',
-                overflow: 'hidden',
-              }}
-            >
-              {/* Report header */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '14px 18px',
-                  borderBottom: '1px solid #ECEEF8',
-                  background: '#F8F9FE',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
-                    {report.title} — {formatPeriod(report.period)}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>
-                    Created {formatDate(report.created_at)} · Status {report.status}
-                  </div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
-                  {report.documents.length} {report.documents.length === 1 ? 'document' : 'documents'}
-                </span>
-              </div>
-
-              {/* Documents list */}
-              {report.documents.length === 0 ? (
-                <div style={{ padding: '14px 18px', fontSize: 11, color: '#9BA3C4' }}>
-                  No documents attached to this report.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {report.documents.map((doc) => (
-                    <DocumentRow key={doc.id} doc={doc} />
-                  ))}
-                </div>
-              )}
-            </div>
+      {/* Document list */}
+      {!loading && data && docs.length > 0 && (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 14,
+            border: '1px solid #E2E4F0',
+            overflow: 'hidden',
+          }}
+        >
+          {docs.map((doc) => (
+            <DocumentRow key={doc.id} doc={doc} />
           ))}
         </div>
       )}
@@ -193,8 +153,7 @@ export default function DocsPage() {
   );
 }
 
-function DocumentRow({ doc }: { doc: DocumentBankDocument }) {
-  const status = statusColor(doc.extraction_status);
+function DocumentRow({ doc }: { doc: CompanyDocument }) {
   return (
     <div
       style={{
@@ -236,24 +195,9 @@ function DocumentRow({ doc }: { doc: DocumentBankDocument }) {
           {doc.filename}
         </div>
         <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-          {formatBytes(doc.file_size_bytes)} · Uploaded {formatDate(doc.uploaded_at)}
+          {formatBytes(doc.file_size_bytes)} · {sourceLabel(doc)} · Uploaded {formatDate(doc.created_at)}
         </div>
       </div>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          padding: '3px 8px',
-          borderRadius: 999,
-          textTransform: 'uppercase',
-          letterSpacing: '.4px',
-          color: status.color,
-          background: status.bg,
-          flexShrink: 0,
-        }}
-      >
-        {doc.extraction_status}
-      </span>
       {doc.download_url ? (
         <a
           href={doc.download_url}

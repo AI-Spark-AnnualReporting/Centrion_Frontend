@@ -230,7 +230,7 @@ Full coverage breakdown: header (period, frameworks, overall %), pillar breakdow
 - **MeetingsPage** — calendar/list of meetings; create/edit/cancel; `ScheduleMeetingModal`.
 - **StakeholdersPage** — team roster by position type; add/edit/remove via `team.*` and `AddPersonDialog` (generates temp password, shows it once).
 - **ProfilePage** — `auth.me()`; identity, org info, company id, certifications (some static).
-- **DocsPage** — document bank grouped by report (`documents.byReport`); file metadata + signed download URLs.
+- **DocsPage** — document bank: flat, newest-first list of all company documents incl. ad-hoc uploads (`documents.list`); file metadata + signed download URLs.
 - **QuestionsPage** — coverage questions grouped by report (`companies.listQuestions`).
 - **CompliancePage**, **CommsPage** — placeholders.
 - **NotFound** — 404.
@@ -349,7 +349,7 @@ All paths are under `${VITE_API_URL}`. `{companyId}` etc. are path params. Funct
 | Method | Path | Function | Notes |
 |--------|------|----------|-------|
 | POST | `/api/v1/documents/upload` | `documents.upload` | FormData files + frameworks[] (default ["GRI"]); async → `PipelineHandle` |
-| GET | `/api/v1/documents/{companyId}` | `documents.list` | |
+| GET | `/api/v1/documents/{companyId}` | `documents.list` | expires_in? → `CompanyDocumentsResponse` (all docs, incl. ad-hoc) |
 | GET | `/api/v1/documents/{companyId}/{documentId}` | `documents.get` | |
 | GET | `/api/v1/documents/{companyId}/by-report` | `documents.byReport` | expires_in? → `DocumentBankResponse` |
 
