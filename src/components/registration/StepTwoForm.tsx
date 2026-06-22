@@ -1,11 +1,8 @@
 import { useState } from 'react';
 import type { StepTwoState } from '@/types/register';
-import type { Sector } from '@/types/company';
 
 interface StepTwoFormProps {
   initialValues: StepTwoState;
-  sectors: Sector[];
-  sectorsLoading: boolean;
   onSubmit: (data: StepTwoState) => void;
   onBack: () => void;
   error: string;
@@ -32,20 +29,17 @@ function Spinner() {
 
 export function StepTwoForm({
   initialValues,
-  sectors,
-  sectorsLoading,
   onSubmit,
   onBack,
   error,
   loading,
 }: StepTwoFormProps) {
   const [companyName, setCompanyName] = useState(initialValues.companyName);
-  const [sector_id, setSectorId] = useState(initialValues.sector_id);
   const [jurisdiction, setJurisdiction] = useState(initialValues.jurisdiction || 'KSA');
 
   const handleCreate = () => {
     if (loading) return;
-    onSubmit({ companyName, sector_id, jurisdiction });
+    onSubmit({ companyName, jurisdiction });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -67,36 +61,9 @@ export function StepTwoForm({
       </div>
 
       <div className="fl">
-        <label>Sector</label>
-        <select
-          className="inp"
-          value={sector_id}
-          onChange={(e) => setSectorId(e.target.value)}
-          disabled={sectorsLoading}
-        >
-          {sectorsLoading ? (
-            <option value="" disabled>
-              Loading sectors…
-            </option>
-          ) : (
-            <>
-              <option value="" disabled>
-                Select a sector
-              </option>
-              {sectors.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </>
-          )}
-        </select>
-      </div>
-
-      <div className="fl">
         <label>Jurisdiction</label>
         <select
-          className="inp"
+          className="inp sel"
           value={jurisdiction}
           onChange={(e) => setJurisdiction(e.target.value)}
         >
@@ -146,7 +113,7 @@ export function StepTwoForm({
               Creating account…
             </>
           ) : (
-            'Create Account'
+            'Create Account →'
           )}
         </button>
       </div>

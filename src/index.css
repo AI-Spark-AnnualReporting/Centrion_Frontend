@@ -104,7 +104,11 @@ body {
   box-shadow: 0 40px 100px rgba(0,0,0,.4);
 }
 .auth-l {
-  flex: 0 0 380px; background: #3535B5; padding: 44px 40px;
+  flex: 0 0 380px; padding: 44px 40px;
+  /* Solid indigo with a faint dot-grid texture overlay. */
+  background:
+    radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px) 0 0 / 22px 22px,
+    #3535B5;
   display: flex; flex-direction: column; justify-content: space-between;
   position: relative; overflow: hidden;
   border-right: 1px solid rgba(255,255,255,.12);

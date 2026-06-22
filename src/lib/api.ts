@@ -1691,10 +1691,8 @@ export async function getSectors(): Promise<Sector[]> {
 export async function createCompany(
   params: CreateCompanyRequest,
 ): Promise<CreateCompanyResponse> {
-  const query = new URLSearchParams({
-    name: params.name,
-    sector_id: params.sector_id,
-  });
+  const query = new URLSearchParams({ name: params.name });
+  if (params.sector_id) query.append("sector_id", params.sector_id);
   if (params.jurisdiction) query.append("jurisdiction", params.jurisdiction);
 
   let res: Response;

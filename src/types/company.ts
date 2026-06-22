@@ -11,7 +11,9 @@ export interface SectorsResponse {
 
 export interface CreateCompanyRequest {
   name: string;
-  sector_id: string;
+  // Sector is captured on a separate onboarding step, not at signup, so it is
+  // optional here and omitted from the request when not provided.
+  sector_id?: string;
   jurisdiction?: string;
 }
 

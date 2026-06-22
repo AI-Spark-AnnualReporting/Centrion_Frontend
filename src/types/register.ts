@@ -7,7 +7,6 @@ export interface StepOneState {
 
 export interface StepTwoState {
   companyName: string;
-  sector_id: string;
   jurisdiction: string;
 }
 
