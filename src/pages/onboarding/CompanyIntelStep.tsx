@@ -1,19 +1,37 @@
 import { useRef, useState } from 'react';
 
-// Step 1 — "Set Up Your Workspace". Visual only: collects a website URL or an
-// uploaded company profile, then hands off to the Analysing loader (onAnalyse)
-// or lets the user fill the form by hand (onSkipManual).
+const ACCEPTED_EXTS = ['pdf', 'docx'];
+
+// Step 1 — "Set Up Your Workspace". Collects a website URL or an uploaded
+// company-profile document (PDF/DOCX only), then hands the file up to be analysed
+// (onAnalyse) or lets the user fill the form by hand (onSkipManual).
 export default function CompanyIntelStep({
   onAnalyse,
   onSkipManual,
 }: {
-  onAnalyse: () => void;
+  onAnalyse: (file: File | null) => void;
   onSkipManual: () => void;
 }) {
   const [website, setWebsite] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const pickFile = (f: File | null) => {
+    if (!f) {
+      setFile(null);
+      return;
+    }
+    const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!ACCEPTED_EXTS.includes(ext)) {
+      setError('Only PDF and DOCX files are supported.');
+      setFile(null);
+      return;
+    }
+    setError(null);
+    setFile(f);
+  };
 
   return (
     <>
@@ -45,7 +63,7 @@ export default function CompanyIntelStep({
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]);
+          pickFile(e.dataTransfer.files?.[0] ?? null);
         }}
       >
         <div style={{ fontSize: 30, lineHeight: 1 }}>📁</div>
@@ -57,7 +75,7 @@ export default function CompanyIntelStep({
               Drop your company profile here
             </div>
             <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>
-              PDF, DOCX, PPTX — up to 20 MB
+              PDF, DOCX — up to 20 MB
             </div>
           </>
         )}
@@ -67,13 +85,19 @@ export default function CompanyIntelStep({
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.docx,.pptx"
+          accept=".pdf,.docx"
           style={{ display: 'none' }}
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
         />
       </div>
 
-      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={onAnalyse}>
+      {error && (
+        <div style={{ fontSize: 12, color: '#E5484D', marginTop: 10, fontWeight: 600 }} role="alert">
+          {error}
+        </div>
+      )}
+
+      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={() => onAnalyse(file)}>
         Analyse Company →
       </button>
 

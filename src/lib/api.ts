@@ -1686,6 +1686,31 @@ export async function getSectors(): Promise<Sector[]> {
   return data.sectors;
 }
 
+// Onboarding "Company Intel": upload a company-profile doc (PDF/DOCX); the
+// backend LLM-extracts the Review-Details fields. Nulls for anything not found.
+export interface ExtractedCompanyProfile {
+  description: string | null;
+  sector: string | null;
+  employee_count: number | null;
+  founded_year: number | null;
+  headquarter_city: string | null;
+  fiscal_year_end_month: number | null;
+  reporting_currency: string | null;
+  primary_language: string | null;
+  listed_exchange: string | null;
+  website_url: string | null;
+}
+
+export async function extractCompanyProfile(file: File): Promise<ExtractedCompanyProfile> {
+  const form = new FormData();
+  form.append("file", file);
+  const { fields } = await postForm<{ fields: ExtractedCompanyProfile }>(
+    "/api/v1/auth/onboarding/extract-profile",
+    form,
+  );
+  return fields;
+}
+
 // Spec-named createCompany() — raw fetch per .claude/specs/2step_register.md.
 // Typed companies.create() namespace remains for future callers.
 export async function createCompany(

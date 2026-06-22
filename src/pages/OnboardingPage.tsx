@@ -6,6 +6,7 @@ import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
+import { extractCompanyProfile, type ExtractedCompanyProfile } from '@/lib/api';
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -84,7 +85,12 @@ export default function OnboardingPage() {
   const [selectedDeptCodes, setSelectedDeptCodes] = useState<string[]>([]);
   const [deptOptions, setDeptOptions] = useState<DepartmentOption[]>([]);
 
-  // Mock "AI extraction" — fills the Review form with sample data.
+  // Company-Intel extraction (real, doc-upload path).
+  const [analyseFile, setAnalyseFile] = useState<File | null>(null);
+  const [extractPhase, setExtractPhase] = useState<'running' | 'completed' | null>(null);
+
+  // Mock "AI extraction" — fills the Review form with sample data (used only on
+  // the no-file / URL path until website scraping is wired).
   const prefillFromAnalysis = () => {
     setDescription(
       'Al-Noor Capital is a leading Saudi investment bank providing comprehensive financial advisory, asset management, and capital markets services to institutional and high-net-worth clients across the GCC and MENA region.',
@@ -97,6 +103,38 @@ export default function OnboardingPage() {
     setReportingCurrency('SAR');
     setPrimaryLanguage('en');
     setListedExchange('Tadawul (1010)');
+  };
+
+  // Apply LLM-extracted fields onto the Review form (defaults are kept for nulls).
+  const applyExtracted = (d: ExtractedCompanyProfile) => {
+    if (d.description) setDescription(d.description);
+    if (d.sector) setSector(d.sector);
+    if (d.employee_count != null) setEmployeeCount(String(d.employee_count));
+    if (d.founded_year != null) setFoundedYear(String(d.founded_year));
+    if (d.headquarter_city) setHeadquarterCity(d.headquarter_city);
+    if (d.fiscal_year_end_month != null) setFiscalYearEndMonth(String(d.fiscal_year_end_month));
+    if (d.reporting_currency) setReportingCurrency(d.reporting_currency as OnboardingPayload['reporting_currency']);
+    if (d.primary_language) setPrimaryLanguage(d.primary_language as OnboardingPayload['primary_language']);
+    if (d.listed_exchange) setListedExchange(d.listed_exchange);
+  };
+
+  // "Analyse Company": with a file → real backend extraction (phase-driven
+  // loader); without → keep the mock prefill path (URL scraping comes later).
+  const handleAnalyse = (file: File | null) => {
+    setAnalyseFile(file);
+    setStep('analysing');
+    if (!file) {
+      setExtractPhase(null);
+      return;
+    }
+    setExtractPhase('running');
+    extractCompanyProfile(file)
+      .then((data) => {
+        applyExtracted(data);
+        setExtractPhase('completed');
+      })
+      // On extraction failure, fall through to the Review form for manual entry.
+      .catch(() => setStep('review'));
   };
 
   const buildPayload = (): OnboardingPayload => {
@@ -138,8 +176,9 @@ export default function OnboardingPage() {
             title="Analysing Your Company"
             subtitle="Extracting key information from your company profile."
             steps={ANALYSE_STEPS}
+            phase={extractPhase ?? undefined}
             onComplete={() => {
-              prefillFromAnalysis();
+              if (!analyseFile) prefillFromAnalysis(); // mock path (no file)
               setStep('review');
             }}
           />
@@ -189,7 +228,7 @@ export default function OnboardingPage() {
 
           {step === 'intel' && (
             <CompanyIntelStep
-              onAnalyse={() => setStep('analysing')}
+              onAnalyse={handleAnalyse}
               onSkipManual={() => setStep('review')}
             />
           )}
