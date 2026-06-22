@@ -494,6 +494,69 @@ body {
   margin-bottom: 5px; display: block;
 }
 
+/* ─── Onboarding wizard ───────────────────────────────── */
+/* Wider card than the 900px login/signup shell — the wizard (esp. the
+   department grid + upload rows) needs more horizontal room. */
+.auth-card-wide { width: 1180px; max-width: 95vw; }
+.auth-card-wide .auth-r { padding: 48px 56px; }
+.ob-loader-screen {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background:
+    radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px) 0 0 / 22px 22px,
+    #3535B5;
+}
+.ob-or {
+  display: flex; align-items: center; gap: 12px;
+  margin: 18px 0; font-size: 12px; color: #9BA3C4;
+}
+.ob-or::before, .ob-or::after { content: ''; flex: 1; height: 1px; background: #E8EAF3; }
+.ob-drop {
+  border: 1.5px dashed #D2D6E6; border-radius: 14px;
+  background: #FAFBFE; padding: 30px 20px; text-align: center;
+  transition: border-color .15s, background .15s;
+}
+.ob-drop.over { border-color: #4040C8; background: #F4F5FF; }
+.ob-browse {
+  margin-top: 14px; padding: 9px 18px;
+  border: 1.5px solid #C7CBF0; border-radius: 9px;
+  background: #fff; color: #4040C8; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.ob-browse:hover { background: #F4F5FF; }
+.ob-up-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px; border: 1px solid #E8EAF3; border-radius: 12px; background: #FAFBFE;
+}
+.ob-req {
+  font-size: 10px; font-weight: 700; color: #4040C8;
+  background: #E5E7FF; padding: 2px 7px; border-radius: 5px;
+}
+.ob-upload-btn {
+  flex-shrink: 0; padding: 8px 16px;
+  border: 1.5px solid #C7CBF0; border-radius: 8px;
+  background: #fff; color: #4040C8; font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.ob-upload-btn:hover { background: #F4F5FF; }
+.ob-skip {
+  display: block; width: 100%; margin-top: 12px; padding: 11px;
+  background: #fff; border: 1.5px solid #C7CBF0; border-radius: 10px;
+  cursor: pointer; font-size: 13px; font-weight: 700; color: #4040C8;
+  font-family: inherit; text-align: center;
+}
+.ob-skip:hover { background: #F4F5FF; }
+.ai-badge {
+  font-size: 11px; font-weight: 700; color: #16A34A;
+  background: #DCFCE7; padding: 4px 10px; border-radius: 999px;
+}
+.ai-chip {
+  font-size: 9px; font-weight: 800; color: #4040C8;
+  background: #E5E7FF; padding: 2px 5px; border-radius: 4px; letter-spacing: .3px;
+}
+.ob-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.ob-review-grid .fl { margin-bottom: 0; }
+
 /* Misc */
 .av {
   width: 28px; height: 28px; border-radius: 50%;

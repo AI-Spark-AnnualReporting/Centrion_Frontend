@@ -202,10 +202,10 @@ export default function SetupInProgressAnimation({
             animation: 'onb-sheen 5s linear infinite',
           }}
         >
-          {allDone ? 'Your workspace is ready' : 'Setting up your AI-powered platform'}
+          {allDone ? 'Your workspace is ready' : 'Processing Your Reports'}
         </h1>
         <p style={{ fontSize: 12, color: '#9BA3C4', margin: '0 0 22px' }}>
-          {allDone ? 'Taking you to your dashboard…' : 'This usually takes under a minute.'}
+          {allDone ? 'Taking you to your dashboard…' : 'Building your intelligence dashboard from your documents.'}
         </p>
 
         <div style={{ background: '#FAFBFE', border: '1px solid #ECEEF8', borderRadius: 14, padding: '10px 20px', textAlign: 'left' }}>

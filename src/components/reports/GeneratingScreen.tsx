@@ -3,7 +3,7 @@ import { AgentTimeline } from './AgentTimeline';
 import { EXPECTED_AGENTS } from '@/lib/agent-labels';
 import type { AgentNode } from '@/types/report';
 
-const STEPS = [
+const DEFAULT_STEPS = [
   'Uploading & reading documents',
   'Extracting ESG data points',
   'Mapping to GRI / IFRS / SAMA metrics',
@@ -31,6 +31,13 @@ interface GeneratingScreenProps {
   // legacy timer-driven stepper. Omit to keep the old UX (ReportsPage's
   // existing-report flow does this).
   nodes?: AgentNode[];
+
+  // Copy / checklist overrides — let the onboarding wizard reuse this loader for
+  // its "Analysing" interstitial. Default to the report-generation copy so
+  // existing callers are unchanged.
+  title?: string;
+  subtitle?: string;
+  steps?: string[];
 }
 
 export function GeneratingScreen({
@@ -42,7 +49,11 @@ export function GeneratingScreen({
   onKeepWaiting,
   fileName,
   nodes,
+  title,
+  subtitle,
+  steps,
 }: GeneratingScreenProps) {
+  const STEPS = steps ?? DEFAULT_STEPS;
   const isExternallyDriven = phase !== undefined;
   const [activeIdx, setActiveIdx] = useState(0);
   const [doneSteps, setDoneSteps] = useState<number[]>([]);
@@ -155,9 +166,9 @@ export function GeneratingScreen({
   return (
     <div className="card" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', animation: 'fade-in .4s ease-out' }}>
       <div className="proc-ring" style={{ marginBottom: 18 }} />
-      <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1D2E', marginBottom: 4 }}>Generating ESG Report</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: '#1A1D2E', marginBottom: 4 }}>{title ?? 'Generating ESG Report'}</div>
       <div style={{ fontSize: 12, color: '#5A6080', marginBottom: fileName ? 6 : 22 }}>
-        Extracting, mapping & scoring metrics from your documents
+        {subtitle ?? 'Extracting, mapping & scoring metrics from your documents'}
       </div>
       {fileName && (
         <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 18, fontFamily: "'DM Mono',monospace" }}>
