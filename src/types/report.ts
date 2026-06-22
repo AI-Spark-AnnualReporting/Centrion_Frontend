@@ -111,24 +111,46 @@ export interface DocumentBankDocument {
   download_expires_at: string | null;
 }
 
-// GET /api/v1/documents/{company_id} — flat "all documents" view. Unlike the
-// by-report shape, this includes ad-hoc documents not tied to any report, sorted
-// newest first. `report_id`/`report_type` are null for ad-hoc uploads.
-export interface CompanyDocument {
+// GET /api/v1/documents/{company_id}/company-document-bank — Company Document
+// Bank as a 3-level hierarchy: Category (report type) → Report (a specific
+// report or reporting cycle) → Documents. Cycle-uploaded docs surface as named
+// report nodes under the "annual" category; anything tied to neither a report
+// nor a cycle falls into a trailing "Unassigned" category. Each document carries
+// a time-limited signed `download_url` (null when the storage object is missing).
+export interface BankDocument {
   id: string;
   filename: string;
-  file_type: string;
-  file_size_bytes: number;
+  file_type: string;            // ".pdf" / "pdf" — strip leading dot for the badge
+  file_size_bytes: number | null;
   extraction_status: string;
-  report_id: string | null;
-  report_type: 'annual' | 'esg' | null;
   created_at: string;
   download_url: string | null;
   download_expires_at: string | null;
 }
 
-export interface CompanyDocumentsResponse {
-  documents: CompanyDocument[];
+export interface ReportGroup {
+  report_id: string | null;     // null for cycle nodes and the Unassigned node
+  cycle_id: string | null;      // set when this node is a reporting cycle
+  report_name: string;
+  report_type: string | null;
+  period: string | number | null; // report period string, or cycle fiscal_year
+  status: string | null;
+  document_count: number;
+  documents: BankDocument[];
+}
+
+export interface ReportCategory {
+  category: string | null;      // report type key; null => "Unassigned" (last)
+  category_name: string;
+  report_count: number;
+  document_count: number;
+  reports: ReportGroup[];
+}
+
+export interface CompanyDocumentBankResponse {
+  company_id: string;
+  company_name: string;
+  categories: ReportCategory[];
   total: number;
 }
 

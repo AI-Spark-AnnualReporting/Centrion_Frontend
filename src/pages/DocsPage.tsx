@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { documents as documentsApi } from '@/lib/api';
+import { documents as documentsApi, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
-  CompanyDocument,
-  CompanyDocumentsResponse,
+  BankDocument,
+  ReportGroup,
+  ReportCategory,
+  CompanyDocumentBankResponse,
 } from '@/types/report';
 
-function formatBytes(bytes: number): string {
+function formatBytes(bytes: number | null): string {
+  if (bytes == null) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -20,18 +23,25 @@ function formatDate(iso: string): string {
   });
 }
 
-// Human label for where a document came from. Ad-hoc uploads have no report.
-function sourceLabel(doc: CompanyDocument): string {
-  if (doc.report_type === 'annual') return 'Annual report';
-  if (doc.report_type === 'esg') return 'ESG report';
-  return 'Ad-hoc upload';
+// `file_type` arrives as ".pdf" — drop the leading dot for the icon badge.
+function fileExt(fileType: string): string {
+  return fileType.replace(/^\./, '');
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return "You don't have access to this company.";
+    if (err.status === 404) return 'Company not found.';
+  }
+  return err instanceof Error ? err.message : 'Failed to load documents.';
 }
 
 export default function DocsPage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
 
-  const [data, setData] = useState<CompanyDocumentsResponse | null>(null);
+  const [data, setData] = useState<CompanyDocumentBankResponse | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -46,7 +56,7 @@ export default function DocsPage() {
     setLoading(true);
     setError(null);
     documentsApi
-      .list<CompanyDocumentsResponse>(companyId)
+      .companyDocumentBank<CompanyDocumentBankResponse>(companyId)
       .then((res) => {
         if (requestId !== requestIdRef.current) return;
         setData(res);
@@ -55,7 +65,7 @@ export default function DocsPage() {
       .catch((err: unknown) => {
         if (requestId !== requestIdRef.current) return;
         setLoading(false);
-        setError(err instanceof Error ? err.message : 'Failed to load documents.');
+        setError(errorMessage(err));
       });
   };
 
@@ -64,17 +74,20 @@ export default function DocsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
 
-  const docs = data?.documents ?? [];
-  const total = data?.total ?? docs.length;
+  const categories = data?.categories ?? [];
+  const total = data?.total ?? 0;
+  // Active tab: the selected category if it still exists, else the first one.
+  const activeCategory =
+    categories.find((c) => categoryKey(c) === activeKey) ?? categories[0] ?? null;
 
   return (
-    <div>
+    <div style={{ paddingBottom: 80 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>Document Bank</h2>
           <p style={{ fontSize: 11, color: '#5A6080', marginTop: 4 }}>
-            Every document uploaded for your company, newest first.
+            Every uploaded document, grouped by category and report.
             {data && (
               <> &middot; {total} document{total === 1 ? '' : 's'}</>
             )}
@@ -126,7 +139,7 @@ export default function DocsPage() {
       )}
 
       {/* Empty */}
-      {!loading && !error && data && docs.length === 0 && (
+      {!loading && !error && data && categories.length === 0 && (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 13, color: '#9BA3C4' }}>
             No documents yet. Files you upload will appear here.
@@ -134,26 +147,188 @@ export default function DocsPage() {
         </div>
       )}
 
-      {/* Document list */}
-      {!loading && data && docs.length > 0 && (
-        <div
-          style={{
-            background: '#fff',
-            borderRadius: 14,
-            border: '1px solid #E2E4F0',
-            overflow: 'hidden',
-          }}
-        >
-          {docs.map((doc) => (
-            <DocumentRow key={doc.id} doc={doc} />
-          ))}
+      {/* Category tabs → active category's reports → documents */}
+      {!loading && data && categories.length > 0 && activeCategory && (
+        <div>
+          {/* Tabs — pill bar with a gradient active tab */}
+          <div
+            style={{
+              display: 'inline-flex',
+              flexWrap: 'wrap',
+              gap: 4,
+              marginBottom: 18,
+              padding: 5,
+              borderRadius: 999,
+              background: '#F0F1F8',
+            }}
+          >
+            {categories.map((category) => {
+              const key = categoryKey(category);
+              const isActive = key === categoryKey(activeCategory);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setActiveKey(key)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    padding: '8px 16px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: isActive ? '#fff' : '#5A6080',
+                    background: isActive
+                      ? 'linear-gradient(135deg, #5B5BE6 0%, #9B59D0 100%)'
+                      : 'transparent',
+                    border: 'none',
+                    borderRadius: 999,
+                    boxShadow: isActive ? '0 2px 8px rgba(91,91,230,.35)' : 'none',
+                    cursor: 'pointer',
+                    transition: 'background .15s ease, color .15s ease',
+                  }}
+                >
+                  {category.category_name}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      color: isActive ? '#fff' : '#9BA3C4',
+                      background: isActive ? 'rgba(255,255,255,.25)' : '#fff',
+                    }}
+                  >
+                    {category.document_count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active category's reports */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {activeCategory.reports.map((report) => (
+              <ReportCard
+                key={report.cycle_id ?? report.report_id ?? 'unassigned'}
+                report={report}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function DocumentRow({ doc }: { doc: CompanyDocument }) {
+// Stable tab key for a category — `category` is null for the Unassigned group.
+function categoryKey(category: ReportCategory): string {
+  return category.category ?? 'unassigned';
+}
+
+function ReportCard({ report }: { report: ReportGroup }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      style={{
+        background: '#fff',
+        borderRadius: 14,
+        border: '1px solid #E2E4F0',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Report header — click to expand its documents */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          width: '100%',
+          textAlign: 'left',
+          padding: '14px 18px',
+          borderBottom: expanded ? '1px solid #ECEEF8' : 'none',
+          background: '#F8F9FE',
+          border: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 800,
+                color: '#1A1D2E',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={report.report_name}
+            >
+              {report.report_name}
+            </span>
+          </div>
+          {report.period && (
+            <div style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>{report.period}</div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#9BA3C4' }}>
+            {report.document_count} {report.document_count === 1 ? 'document' : 'documents'}
+          </span>
+          {/* Chevron in a circular outline */}
+          <span
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: '50%',
+              border: '1.5px solid #C7CAF0',
+              background: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              style={{
+                transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform .15s ease',
+              }}
+            >
+              <path d="M4.5 3L7.5 6L4.5 9" stroke="#4040C8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        </div>
+      </button>
+
+      {/* Documents — revealed on expand */}
+      {expanded &&
+        (report.documents.length === 0 ? (
+          <div style={{ padding: '14px 18px', fontSize: 11, color: '#9BA3C4' }}>
+            No documents in this group.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {report.documents.map((doc) => (
+              <DocumentRow key={doc.id} doc={doc} />
+            ))}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function DocumentRow({ doc }: { doc: BankDocument }) {
   return (
     <div
       style={{
@@ -177,7 +352,7 @@ function DocumentRow({ doc }: { doc: CompanyDocument }) {
         }}
       >
         <span style={{ fontSize: 9, fontWeight: 800, color: '#4040C8', textTransform: 'uppercase' }}>
-          {doc.file_type}
+          {fileExt(doc.file_type)}
         </span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -195,7 +370,7 @@ function DocumentRow({ doc }: { doc: CompanyDocument }) {
           {doc.filename}
         </div>
         <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-          {formatBytes(doc.file_size_bytes)} · {sourceLabel(doc)} · Uploaded {formatDate(doc.created_at)}
+          {formatBytes(doc.file_size_bytes)} · Uploaded {formatDate(doc.created_at)}
         </div>
       </div>
       {doc.download_url ? (
