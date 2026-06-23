@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -452,17 +453,7 @@ export default function CycleDetailPage() {
   );
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="skel" style={{ height: 70, borderRadius: 12 }} />
-        <div style={{ display: 'flex', gap: 14 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skel" style={{ flex: 1, height: 90, borderRadius: 12 }} />
-          ))}
-        </div>
-        <div className="skel" style={{ height: 240, borderRadius: 12 }} />
-      </div>
-    );
+    return <Spinner pad={80} />;
   }
 
   if (error || !overview) {

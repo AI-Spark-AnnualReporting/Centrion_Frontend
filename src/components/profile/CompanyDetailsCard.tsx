@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { companies, getSectors } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Company, CompanyEditableFields, Sector } from '@/types/company';
@@ -131,11 +132,7 @@ export function CompanyDetailsCard() {
 
       <div className="cb">
         {loading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skel" style={{ height: 56, borderRadius: 10 }} />
-            ))}
-          </div>
+          <Spinner pad={32} />
         ) : error && !company ? (
           <div
             role="alert"

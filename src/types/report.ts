@@ -159,6 +159,7 @@ export interface DocumentBankReport {
   title: string;
   period: string;
   status: string;
+  report_type?: string | null;
   created_at: string;
   documents: DocumentBankDocument[];
 }

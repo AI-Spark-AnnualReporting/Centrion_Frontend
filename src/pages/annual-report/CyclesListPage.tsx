@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
 import { sarCycles } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -155,7 +156,7 @@ export default function CyclesListPage() {
   const td: React.CSSProperties = { fontSize: 12, color: '#1A1D2E', padding: '14px 16px' };
 
   return (
-    <div>
+    <div style={{ paddingBottom: 96 }}>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E' }}>Reporting Cycles</h1>
@@ -240,11 +241,7 @@ export default function CyclesListPage() {
         </div>
 
         {loading ? (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="skel" style={{ height: 48, borderRadius: 8 }} />
-            ))}
-          </div>
+          <Spinner />
         ) : error ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>{error}</div>
         ) : filtered.length === 0 ? (

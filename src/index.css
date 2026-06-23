@@ -529,6 +529,21 @@ body {
   border-radius: 6px;
 }
 
+/* Loading spinner — shown in place of skeleton placeholders while content loads */
+.spinner-wrap {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%;
+}
+.spinner {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 3px solid #ECEEF8; border-top-color: #4040C8;
+  animation: spin .8s linear infinite;
+  flex-shrink: 0;
+}
+.spinner-dark {
+  border-color: rgba(255,255,255,.25); border-top-color: #fff;
+}
+
 /* ═══════════════════════════════════════════
    CHAT
 ═══════════════════════════════════════════ */

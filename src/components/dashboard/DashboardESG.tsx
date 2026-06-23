@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
 import { lookups, reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -861,64 +862,7 @@ function ScoreRing({ score }: { score: number }) {
 }
 
 function DashboardESGSkeleton() {
-  return (
-    <div>
-      <div
-        style={{
-          background: '#3535B5',
-          borderRadius: 20,
-          padding: '24px 28px',
-          marginBottom: 16,
-          minHeight: 150,
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          className="skel-dark"
-          style={{ height: 14, width: '40%', marginBottom: 10 }}
-        />
-        <div
-          className="skel-dark"
-          style={{ height: 18, width: '60%', marginBottom: 14 }}
-        />
-        <div className="skel-dark" style={{ height: 11, width: '50%' }} />
-      </div>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3,minmax(0,1fr))',
-          gap: 14,
-          marginBottom: 16,
-        }}
-      >
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="card"
-            style={{ overflow: 'hidden', minHeight: 360 }}
-          >
-            <div style={{ background: '#5A6080', height: 130, padding: 18 }}>
-              <div className="skel-dark" style={{ height: 10, width: '40%' }} />
-              <div
-                className="skel-dark"
-                style={{ height: 28, width: 60, marginTop: 12 }}
-              />
-            </div>
-            <div style={{ padding: 16 }}>
-              {[0, 1, 2, 3, 4].map((j) => (
-                <div key={j} style={{ display: 'flex', gap: 10, padding: '7px 0' }}>
-                  <div className="skel" style={{ height: 11, width: 50 }} />
-                  <div className="skel" style={{ height: 11, flex: 1 }} />
-                  <div className="skel" style={{ height: 11, width: 60 }} />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return <Spinner pad={80} />;
 }
 
 function EmptyHero({
@@ -973,25 +917,7 @@ function FrameworkCatalogue({ scopes }: FrameworkCatalogueProps) {
         <div className="ch">
           <div className="ct">Framework Catalogue</div>
         </div>
-        <div style={{ padding: '10px 16px' }}>
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 0',
-                borderBottom: i < 5 ? '1px solid #ECEEF8' : 'none',
-              }}
-            >
-              <div className="skel" style={{ width: 8, height: 8, borderRadius: '50%' }} />
-              <div className="skel" style={{ height: 11, flex: 1 }} />
-              <div className="skel" style={{ height: 5, flex: 1, borderRadius: 3 }} />
-              <div className="skel" style={{ height: 11, width: 26 }} />
-            </div>
-          ))}
-        </div>
+        <Spinner pad={40} />
       </div>
     );
   }

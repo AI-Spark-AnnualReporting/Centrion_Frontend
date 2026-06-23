@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { auth } from '@/lib/api';
 import type { DepartmentCategory, DepartmentOption } from '@/types/auth';
 
@@ -158,11 +159,7 @@ export default function DepartmentSelectionStep({
       </p>
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skel" style={{ height: 64, borderRadius: 10 }} />
-          ))}
-        </div>
+        <Spinner pad={32} />
       ) : error ? (
         <div style={{ marginTop: 8, textAlign: 'center', padding: '24px 12px' }}>
           <div style={{ fontSize: 12, color: '#DC2626', fontWeight: 600, marginBottom: 10 }}>{error}</div>

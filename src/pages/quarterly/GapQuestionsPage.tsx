@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
@@ -47,41 +48,9 @@ function goToNextUnanswered(gaps: GapState[], from: number): number {
   return Math.min(from + 1, gaps.length - 1);
 }
 
-// ─── Loading skeleton ─────────────────────────────────────────────────────────
-function Skel({ w, h }: { w: string | number; h?: number }) {
-  return (
-    <div
-      className="skel"
-      style={{ width: w, height: h ?? 14, borderRadius: 6, display: 'inline-block' }}
-    />
-  );
-}
-
+// ─── Loading state ────────────────────────────────────────────────────────────
 function LoadingState() {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, padding: '0 28px 16px' }}>
-      {/* Rail skeleton */}
-      <div className="card" style={{ padding: '16px 14px' }}>
-        <div style={{ marginBottom: 14 }}><Skel w="60%" h={12} /></div>
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-          <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center' }}>
-            <Skel w={22} h={22} />
-            <div style={{ flex: 1 }}><Skel w="80%" /></div>
-          </div>
-        ))}
-      </div>
-      {/* Card skeleton */}
-      <div className="card" style={{ padding: '22px 24px', alignSelf: 'start' }}>
-        <div style={{ marginBottom: 16 }}><Skel w="40%" h={12} /></div>
-        <div className="card" style={{ padding: '16px', marginBottom: 20, background: '#F8F9FC' }}>
-          <Skel w="50%" h={14} />
-          <div style={{ marginTop: 10 }}><Skel w="60%" h={28} /></div>
-        </div>
-        <Skel w="90%" h={14} />
-        <div style={{ marginTop: 16 }}><Skel w="100%" h={80} /></div>
-      </div>
-    </div>
-  );
+  return <Spinner pad={80} />;
 }
 
 // ─── Change badge (unit-agnostic) ─────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { admin, adminConsole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -648,11 +649,7 @@ function UsersView(props: {
           <span style={{ fontSize: 11, color: '#9BA3C4' }}>Click a row to manage</span>
         </div>
         {loading ? (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="skel" style={{ height: 52, borderRadius: 10 }} />
-            ))}
-          </div>
+          <Spinner />
         ) : error ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>
             {error}
@@ -945,10 +942,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
 
   if (loading) {
     return (
-      <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {Array.from({ length: 9 }).map((_, i) => (
-          <div key={i} className="skel" style={{ height: 34, borderRadius: 8 }} />
-        ))}
+      <div className="card">
+        <Spinner />
       </div>
     );
   }

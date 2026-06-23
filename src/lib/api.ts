@@ -727,6 +727,18 @@ export interface EsgEvidenceResponse {
   total?: number;
 }
 
+// `GET /reports/{company_id}/quarterly/{report_id}/figures` mirrors the evidence
+// envelope. Rows reuse the EsgEvidenceItem shape; they may arrive bare or inside
+// a `raw_evidence` wrapper, so callers unwrap defensively.
+export interface QuarterlyFigureRow extends Partial<EsgEvidenceItem> {
+  raw_evidence?: EsgEvidenceItem | null;
+}
+
+export interface QuarterlyFiguresResponse {
+  figures: QuarterlyFigureRow[];
+  total?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Compliance
 // ---------------------------------------------------------------------------
@@ -899,6 +911,31 @@ export const quarterlyReports = {
     request<GapsResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
     ),
+
+  // Raw financial_figures rows for a quarterly report. Same envelope/row shape
+  // as the ESG evidence endpoint, so the KPI Normalizer can render both with
+  // one table. statement_type is the pillar analog (income_statement /
+  // balance_sheet); document_id / fields mirror evidence. Omit any to get all.
+  getFigures: <T = QuarterlyFiguresResponse>(
+    companyId: string,
+    reportId: string,
+    opts?: {
+      statement_type?: string;
+      document_id?: string;
+      fields?: string | string[];
+      signal?: AbortSignal;
+    },
+  ) => {
+    const { statement_type, document_id, fields, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (statement_type != null) query.statement_type = statement_type;
+    if (document_id != null) query.document_id = document_id;
+    if (fields != null) query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    return request<T>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures`,
+      { query, signal },
+    );
+  },
 
   addDriver: (
     companyId: string,
@@ -1521,6 +1558,37 @@ export const lookups = {
     });
     return extractIndicatorList(raw);
   },
+
+  // Financial metrics catalogue — mirrors framework-indicators. Auth-only (not
+  // company-scoped), ordered by sort_order. Used by the KPI Normalizer's
+  // Quarterly tab.
+  financialMetrics: async (opts?: {
+    statement?: string | string[];
+    statement_type?: string | string[];
+    fields?: string | string[];
+    is_active?: boolean;
+    signal?: AbortSignal;
+  }): Promise<FinancialMetric[]> => {
+    const { statement, statement_type, fields, is_active, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (statement != null) {
+      query.statement = Array.isArray(statement) ? statement.join(",") : statement;
+    }
+    if (statement_type != null) {
+      query.statement_type = Array.isArray(statement_type)
+        ? statement_type.join(",")
+        : statement_type;
+    }
+    if (fields != null) {
+      query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    }
+    if (is_active != null) query.is_active = is_active;
+    const raw = await request<unknown>("/api/v1/lookups/financial-metrics", {
+      query,
+      signal,
+    });
+    return extractFinancialMetricList(raw);
+  },
 };
 
 // The endpoint may return the array under a wrapper key (`framework_indicators`,
@@ -1550,6 +1618,51 @@ function extractIndicatorList(raw: unknown): FrameworkIndicator[] {
     }
   }
   return [];
+}
+
+// The financial-metrics endpoint may wrap the array under `financial_metrics`
+// (or `data` / `items` / `results`) or return a bare array. Normalise to
+// FinancialMetric[] so callers don't have to second-guess the shape.
+function extractFinancialMetricList(raw: unknown): FinancialMetric[] {
+  if (Array.isArray(raw)) return raw as FinancialMetric[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of [
+      "financial_metrics",
+      "financialMetrics",
+      "metrics",
+      "data",
+      "items",
+      "results",
+    ]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as FinancialMetric[];
+      if (v && typeof v === "object") {
+        const inner = v as Record<string, unknown>;
+        for (const k2 of ["financial_metrics", "metrics", "items", "results"]) {
+          if (Array.isArray(inner[k2])) return inner[k2] as FinancialMetric[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+export interface FinancialMetric {
+  id?: string;
+  metric_key?: string | null;
+  code?: string | null;
+  label?: string | null;
+  statement?: string | null;
+  statement_type?: string | null;
+  unit_type?: string | null;
+  sort_order?: number | null;
+  is_active?: boolean;
+}
+
+export interface FinancialMetricsResponse {
+  financial_metrics: FinancialMetric[];
+  total: number;
 }
 
 export interface FrameworkIndicator {

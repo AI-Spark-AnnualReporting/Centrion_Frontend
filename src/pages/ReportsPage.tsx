@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ApiError, getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
 import {
@@ -876,7 +877,7 @@ export default function ReportsPage() {
                           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                               {coveragePending ? (
-                                <span className="skel-dark" style={{ display: 'inline-block', width: 52, height: 26, borderRadius: 6 }} />
+                                <Spinner size={20} pad={0} dark />
                               ) : (
                                 <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
                               )}
@@ -1482,55 +1483,8 @@ export default function ReportsPage() {
       </div>
 
       {/* Recent Reports — driven by GET /api/v1/reports/{company_id}.
-          While the list is loading we render skeleton placeholder cards
-          matching the real card shape rather than a spinner — keeps the
-          layout stable and avoids the jarring loading-circle pattern. */}
-      {periodsLoading && existingReports.length === 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              aria-hidden="true"
-              style={{
-                background: '#fff',
-                borderRadius: 14,
-                overflow: 'hidden',
-                border: '1px solid #E2E4F0',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <div style={{ background: '#3535B5', padding: '16px 18px', position: 'relative', overflow: 'hidden' }}>
-                <div className="skel-dark" style={{ height: 9, width: '55%', marginBottom: 10 }} />
-                <div className="skel-dark" style={{ height: 13, width: '70%', marginBottom: 16 }} />
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div className="skel-dark" style={{ height: 28, width: 80 }} />
-                  <div className="skel-dark" style={{ height: 10, width: 28 }} />
-                </div>
-                <div className="skel-dark" style={{ height: 4, width: '100%', borderRadius: 4 }} />
-                <div className="skel-dark" style={{ height: 8, width: '40%', marginTop: 8 }} />
-              </div>
-              <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-                  {[0, 1, 2].map((j) => (
-                    <div key={j} style={{ background: '#F5F6FB', borderRadius: 8, padding: '10px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                      <div className="skel" style={{ height: 16, width: 28 }} />
-                      <div className="skel" style={{ height: 8, width: 22 }} />
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 'auto' }}>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <div className="skel" style={{ height: 16, width: 70, borderRadius: 999 }} />
-                    <div className="skel" style={{ height: 16, width: 50, borderRadius: 999 }} />
-                  </div>
-                  <div className="skel" style={{ height: 10, width: 90 }} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+          While the list is loading we show a centered spinner. */}
+      {periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
 
       {existingReports.filter((r) => !isQuarterlyReport(r)).length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
