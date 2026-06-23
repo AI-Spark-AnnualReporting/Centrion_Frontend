@@ -556,6 +556,17 @@ body {
 }
 .ob-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .ob-review-grid .fl { margin-bottom: 0; }
+.inp-error, .inp-error:focus { border-color: #E5484D !important; }
+.fl-err { font-size: 11px; color: #E5484D; font-weight: 600; margin-top: 5px; }
+.ob-yesno-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; margin-top: 14px; }
+.ob-yesno { display: inline-flex; border: 1.5px solid #E8EAF3; border-radius: 9px; overflow: hidden; width: fit-content; }
+.ob-yesno button {
+  padding: 8px 20px; border: none; background: #fff; color: #5A6080;
+  font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.ob-yesno button + button { border-left: 1.5px solid #E8EAF3; }
+.ob-yesno button.on { background: #4040C8; color: #fff; }
+.ob-yesno-error { border-color: #E5484D; }
 
 /* Misc */
 .av {

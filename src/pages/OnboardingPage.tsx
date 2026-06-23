@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DepartmentOption, OnboardingPayload } from '@/types/auth';
+import type { Sector } from '@/types/company';
 import DepartmentSelectionStep from '@/pages/onboarding/DepartmentSelectionStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
 import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
-import { extractCompanyProfile, type ExtractedCompanyProfile } from '@/lib/api';
+import { extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -24,13 +25,16 @@ const MONTHS = [
 const CURRENCIES: OnboardingPayload['reporting_currency'][] = [
   'SAR', 'AED', 'BHD', 'KWD', 'OMR', 'QAR', 'USD',
 ];
+const COMPANY_PROFILES: { value: OnboardingPayload['company_profile']; label: string }[] = [
+  { value: 'listed', label: 'Listed' },
+  { value: 'private', label: 'Private' },
+];
 
 const ANALYSE_STEPS = [
-  'Fetching website content',
+  'Reading your sources',
   'Extracting company overview',
   'Identifying sector & jurisdiction',
   'Detecting fiscal year & currency',
-  'Mapping regulatory frameworks',
   'Finalising company profile',
 ];
 
@@ -44,8 +48,8 @@ const LEFT_CARDS: Record<'intel' | 'review' | 'departments' | 'upload', { t: str
     { t: '⚡ Pre-configured', s: 'GRI, SAMA & CMA mapped automatically' },
   ],
   review: [
-    { t: '✅ 9 fields extracted', s: 'From website & public records' },
-    { t: '✏️ All editable', s: 'Correct anything before continuing' },
+    { t: '✅ Auto-filled for you', s: 'Description, sector & details from your sources' },
+    { t: '🔒 You confirm the rest', s: 'Profile, Shariah, subsidiaries & sukuk' },
   ],
   departments: [
     { t: 'Tailored to your org', s: 'Currency, fiscal year & language' },
@@ -58,21 +62,36 @@ const LEFT_CARDS: Record<'intel' | 'review' | 'departments' | 'upload', { t: str
   ],
 };
 
-// Uppercase field label with an "AI" chip (Review Details step).
-const AiLabel = ({ children }: { children: React.ReactNode }) => (
+// Field label + a red "*" when required. `ai` adds the small AI-picked chip.
+const FieldLabel = ({ children, required, ai }: { children: React.ReactNode; required?: boolean; ai?: boolean }) => (
   <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
     {children}
-    <span className="ai-chip">AI</span>
+    {required && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}
+    {ai && <span className="ai-chip">AI</span>}
   </label>
+);
+
+// Required Yes/No control (no default — must be answered).
+const YesNo = ({
+  value, onChange, error,
+}: { value: boolean | null; onChange: (v: boolean) => void; error?: boolean }) => (
+  <div className={`ob-yesno${error ? ' ob-yesno-error' : ''}`}>
+    <button type="button" className={value === true ? 'on' : ''} onClick={() => onChange(true)}>Yes</button>
+    <button type="button" className={value === false ? 'on' : ''} onClick={() => onChange(false)}>No</button>
+  </div>
 );
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<Step>('intel');
-  const [error, setError] = useState('');
+  const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
 
   // Company details (Review Details step)
   const [description, setDescription] = useState('');
-  const [sector, setSector] = useState(''); // display-only for now (not in payload)
+  const [sectorId, setSectorId] = useState('');               // ESG sector (UUID) — AI-picked, mandatory
+  const [companyProfile, setCompanyProfile] = useState('');   // listed/private — mandatory, manual
+  const [isShariah, setIsShariah] = useState<boolean | null>(null);
+  const [hasSubsidiaries, setHasSubsidiaries] = useState<boolean | null>(null);
+  const [hasSukuk, setHasSukuk] = useState<boolean | null>(null);
   const [employeeCount, setEmployeeCount] = useState('');
   const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState('12');
   const [reportingCurrency, setReportingCurrency] = useState<OnboardingPayload['reporting_currency']>('SAR');
@@ -81,34 +100,26 @@ export default function OnboardingPage() {
   const [headquarterCity, setHeadquarterCity] = useState('');
   const [listedExchange, setListedExchange] = useState('');
 
+  // Sector options (mirrors the ESG report form's dropdown).
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  useEffect(() => {
+    getSectors().then(setSectors).catch(() => setSectors([]));
+  }, []);
+
   // Department selection
   const [selectedDeptCodes, setSelectedDeptCodes] = useState<string[]>([]);
   const [deptOptions, setDeptOptions] = useState<DepartmentOption[]>([]);
 
-  // Company-Intel extraction (real, doc-upload path).
-  const [analyseFile, setAnalyseFile] = useState<File | null>(null);
+  // Company-Intel extraction (single combined doc+URL call).
   const [extractPhase, setExtractPhase] = useState<'running' | 'completed' | null>(null);
+  const [analyseError, setAnalyseError] = useState('');
 
-  // Mock "AI extraction" — fills the Review form with sample data (used only on
-  // the no-file / URL path until website scraping is wired).
-  const prefillFromAnalysis = () => {
-    setDescription(
-      'Al-Noor Capital is a leading Saudi investment bank providing comprehensive financial advisory, asset management, and capital markets services to institutional and high-net-worth clients across the GCC and MENA region.',
-    );
-    setSector('Financial Services');
-    setEmployeeCount('1247');
-    setFoundedYear('1987');
-    setHeadquarterCity('Riyadh');
-    setFiscalYearEndMonth('12');
-    setReportingCurrency('SAR');
-    setPrimaryLanguage('en');
-    setListedExchange('Tadawul (1010)');
-  };
-
-  // Apply LLM-extracted fields onto the Review form (defaults are kept for nulls).
+  // Apply LLM-extracted fields onto the Review form. Only AI-derived fields are
+  // pre-filled; the sensitive fields (profile / shariah / subsidiaries / sukuk)
+  // stay manual.
   const applyExtracted = (d: ExtractedCompanyProfile) => {
     if (d.description) setDescription(d.description);
-    if (d.sector) setSector(d.sector);
+    if (d.sector_id) setSectorId(d.sector_id);
     if (d.employee_count != null) setEmployeeCount(String(d.employee_count));
     if (d.founded_year != null) setFoundedYear(String(d.founded_year));
     if (d.headquarter_city) setHeadquarterCity(d.headquarter_city);
@@ -118,23 +129,25 @@ export default function OnboardingPage() {
     if (d.listed_exchange) setListedExchange(d.listed_exchange);
   };
 
-  // "Analyse Company": with a file → real backend extraction (phase-driven
-  // loader); without → keep the mock prefill path (URL scraping comes later).
-  const handleAnalyse = (file: File | null) => {
-    setAnalyseFile(file);
+  // "Analyse Company": one combined call (document and/or URL → single LLM pass).
+  const handleAnalyse = (file: File | null, url: string) => {
+    setAnalyseError('');
     setStep('analysing');
-    if (!file) {
-      setExtractPhase(null);
-      return;
-    }
     setExtractPhase('running');
-    extractCompanyProfile(file)
+    extractCompanyProfile(file, url)
       .then((data) => {
         applyExtracted(data);
         setExtractPhase('completed');
       })
-      // On extraction failure, fall through to the Review form for manual entry.
-      .catch(() => setStep('review'));
+      .catch((err) => {
+        const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
+        setAnalyseError(
+          typeof detail === 'string'
+            ? detail
+            : "We couldn't read that document or website. Try another, or fill the details in manually.",
+        );
+        setStep('intel');
+      });
   };
 
   const buildPayload = (): OnboardingPayload => {
@@ -145,6 +158,11 @@ export default function OnboardingPage() {
       fiscal_year_end_month: Number(fiscalYearEndMonth),
       reporting_currency: reportingCurrency,
       primary_language: primaryLanguage,
+      sector_id: sectorId,
+      company_profile: companyProfile as OnboardingPayload['company_profile'],
+      is_shariah: !!isShariah,
+      has_subsidiaries: !!hasSubsidiaries,
+      has_sukuk: !!hasSukuk,
       selected_department_codes: selectedDeptCodes,
       founded_year: trimmedFounded ? Number(trimmedFounded) : null,
       website_url: null,
@@ -153,18 +171,28 @@ export default function OnboardingPage() {
     };
   };
 
+  const clearReviewError = (key: string) =>
+    setReviewErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
   const onReviewContinue = () => {
-    setError('');
-    if (description.trim().length < 20) {
-      setError('Description must be at least 20 characters');
-      return;
-    }
+    const errs: Record<string, string> = {};
+    if (description.trim().length < 20) errs.description = 'Description must be at least 20 characters.';
     const count = Number(employeeCount);
-    if (!Number.isFinite(count) || count < 1) {
-      setError('Number of employees must be at least 1');
-      return;
+    if (!employeeCount.trim() || !Number.isFinite(count) || count < 1) {
+      errs.employeeCount = 'Number of employees is required (at least 1).';
     }
-    setStep('departments');
+    if (!sectorId) errs.sectorId = 'Sector is required.';
+    if (!companyProfile) errs.companyProfile = 'Company profile is required.';
+    if (isShariah === null) errs.isShariah = 'Required.';
+    if (hasSubsidiaries === null) errs.hasSubsidiaries = 'Required.';
+    if (hasSukuk === null) errs.hasSukuk = 'Required.';
+    setReviewErrors(errs);
+    if (Object.keys(errs).length === 0) setStep('departments');
   };
 
   // ---- Full-screen interstitials (no shell) -------------------------------
@@ -174,13 +202,10 @@ export default function OnboardingPage() {
         <div style={{ width: 'min(520px, 100%)' }}>
           <GeneratingScreen
             title="Analysing Your Company"
-            subtitle="Extracting key information from your company profile."
+            subtitle="Extracting key information from your sources."
             steps={ANALYSE_STEPS}
             phase={extractPhase ?? undefined}
-            onComplete={() => {
-              if (!analyseFile) prefillFromAnalysis(); // mock path (no file)
-              setStep('review');
-            }}
+            onComplete={() => setStep('review')}
           />
         </div>
       </div>
@@ -230,6 +255,7 @@ export default function OnboardingPage() {
             <CompanyIntelStep
               onAnalyse={handleAnalyse}
               onSkipManual={() => setStep('review')}
+              serverError={analyseError}
             />
           )}
 
@@ -239,39 +265,65 @@ export default function OnboardingPage() {
                 <h2 style={{ marginBottom: 0 }}>Review Company Details</h2>
                 <span className="ai-badge">AI extracted</span>
               </div>
-              <p>Review and edit anything — then continue.</p>
+              <p>Review the auto-filled details and complete the required fields — then continue.</p>
 
               <div className="fl">
-                <AiLabel>Company description</AiLabel>
+                <FieldLabel required ai>Company description</FieldLabel>
                 <textarea
-                  className="inp"
+                  className={`inp${reviewErrors.description ? ' inp-error' : ''}`}
                   rows={3}
                   placeholder="Brief description of your company"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => { setDescription(e.target.value); clearReviewError('description'); }}
                   style={{ resize: 'vertical' }}
                 />
+                {reviewErrors.description && <div className="fl-err">{reviewErrors.description}</div>}
               </div>
 
               <div className="ob-review-grid">
                 <div className="fl">
-                  <AiLabel>Sector</AiLabel>
-                  <input className="inp" placeholder="e.g. Financial Services" value={sector} onChange={(e) => setSector(e.target.value)} />
+                  <FieldLabel required ai>Sector</FieldLabel>
+                  <select
+                    className={`inp sel${reviewErrors.sectorId ? ' inp-error' : ''}`}
+                    value={sectorId}
+                    onChange={(e) => { setSectorId(e.target.value); clearReviewError('sectorId'); }}
+                  >
+                    <option value="">Select a sector</option>
+                    {sectors.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  {reviewErrors.sectorId && <div className="fl-err">{reviewErrors.sectorId}</div>}
                 </div>
                 <div className="fl">
-                  <AiLabel>Employees</AiLabel>
-                  <input type="number" min={1} className="inp" placeholder="e.g. 120" value={employeeCount} onChange={(e) => setEmployeeCount(e.target.value)} />
+                  <FieldLabel required>Company profile</FieldLabel>
+                  <select
+                    className={`inp sel${reviewErrors.companyProfile ? ' inp-error' : ''}`}
+                    value={companyProfile}
+                    onChange={(e) => { setCompanyProfile(e.target.value); clearReviewError('companyProfile'); }}
+                  >
+                    <option value="">Select a profile</option>
+                    {COMPANY_PROFILES.map((p) => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
+                  </select>
+                  {reviewErrors.companyProfile && <div className="fl-err">{reviewErrors.companyProfile}</div>}
                 </div>
                 <div className="fl">
-                  <AiLabel>Founded year</AiLabel>
+                  <FieldLabel required ai>Employees</FieldLabel>
+                  <input type="number" min={1} className={`inp${reviewErrors.employeeCount ? ' inp-error' : ''}`} placeholder="e.g. 120" value={employeeCount} onChange={(e) => { setEmployeeCount(e.target.value); clearReviewError('employeeCount'); }} />
+                  {reviewErrors.employeeCount && <div className="fl-err">{reviewErrors.employeeCount}</div>}
+                </div>
+                <div className="fl">
+                  <FieldLabel ai>Founded year</FieldLabel>
                   <input type="number" className="inp" placeholder="e.g. 1995" value={foundedYear} onChange={(e) => setFoundedYear(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <AiLabel>HQ city</AiLabel>
+                  <FieldLabel ai>HQ city</FieldLabel>
                   <input className="inp" placeholder="e.g. Riyadh" value={headquarterCity} onChange={(e) => setHeadquarterCity(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <AiLabel>Fiscal year</AiLabel>
+                  <FieldLabel required ai>Fiscal year</FieldLabel>
                   <select className="inp sel" value={fiscalYearEndMonth} onChange={(e) => setFiscalYearEndMonth(e.target.value)}>
                     {MONTHS.map((m, i) => (
                       <option key={m} value={i + 1}>{m}</option>
@@ -279,7 +331,7 @@ export default function OnboardingPage() {
                   </select>
                 </div>
                 <div className="fl">
-                  <AiLabel>Currency</AiLabel>
+                  <FieldLabel required ai>Currency</FieldLabel>
                   <select className="inp sel" value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value as OnboardingPayload['reporting_currency'])}>
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -287,25 +339,40 @@ export default function OnboardingPage() {
                   </select>
                 </div>
                 <div className="fl">
-                  <AiLabel>Language</AiLabel>
+                  <FieldLabel required ai>Language</FieldLabel>
                   <select className="inp sel" value={primaryLanguage} onChange={(e) => setPrimaryLanguage(e.target.value as OnboardingPayload['primary_language'])}>
                     <option value="en">English</option>
                     <option value="ar">Arabic</option>
                   </select>
                 </div>
                 <div className="fl">
-                  <AiLabel>Exchange</AiLabel>
+                  <FieldLabel ai>Exchange</FieldLabel>
                   <input className="inp" placeholder="e.g. Tadawul (1010)" value={listedExchange} onChange={(e) => setListedExchange(e.target.value)} />
                 </div>
               </div>
 
-              {error && (
-                <div style={{ fontSize: '11px', color: '#E5484D', marginTop: '4px', marginBottom: '8px' }} role="alert">
-                  {error}
+              <div className="ob-yesno-row">
+                <div className="fl" style={{ marginBottom: 0 }}>
+                  <FieldLabel required>Shariah-compliant</FieldLabel>
+                  <YesNo value={isShariah} error={!!reviewErrors.isShariah}
+                    onChange={(v) => { setIsShariah(v); clearReviewError('isShariah'); }} />
+                  {reviewErrors.isShariah && <div className="fl-err">{reviewErrors.isShariah}</div>}
                 </div>
-              )}
+                <div className="fl" style={{ marginBottom: 0 }}>
+                  <FieldLabel required>Has subsidiaries</FieldLabel>
+                  <YesNo value={hasSubsidiaries} error={!!reviewErrors.hasSubsidiaries}
+                    onChange={(v) => { setHasSubsidiaries(v); clearReviewError('hasSubsidiaries'); }} />
+                  {reviewErrors.hasSubsidiaries && <div className="fl-err">{reviewErrors.hasSubsidiaries}</div>}
+                </div>
+                <div className="fl" style={{ marginBottom: 0 }}>
+                  <FieldLabel required>Has sukuk</FieldLabel>
+                  <YesNo value={hasSukuk} error={!!reviewErrors.hasSukuk}
+                    onChange={(v) => { setHasSukuk(v); clearReviewError('hasSukuk'); }} />
+                  {reviewErrors.hasSukuk && <div className="fl-err">{reviewErrors.hasSukuk}</div>}
+                </div>
+              </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
                 <button type="button" className="btn bs" onClick={() => setStep('intel')}>← Back</button>
                 <button type="button" className="btn bp" onClick={onReviewContinue}>Looks good, Continue →</button>
               </div>

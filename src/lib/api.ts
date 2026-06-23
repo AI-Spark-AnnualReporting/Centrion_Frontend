@@ -1686,11 +1686,13 @@ export async function getSectors(): Promise<Sector[]> {
   return data.sectors;
 }
 
-// Onboarding "Company Intel": upload a company-profile doc (PDF/DOCX); the
-// backend LLM-extracts the Review-Details fields. Nulls for anything not found.
+// Onboarding "Company Intel": the backend LLM-extracts the Review-Details fields
+// from a profile doc and/or a website URL. `sector_id` is the AI's constrained
+// pick from the sectors lookup (null if unsure). Nulls for anything not found.
 export interface ExtractedCompanyProfile {
   description: string | null;
-  sector: string | null;
+  sector_id: string | null;
+  sector_name: string | null;
   employee_count: number | null;
   founded_year: number | null;
   headquarter_city: string | null;
@@ -1701,9 +1703,15 @@ export interface ExtractedCompanyProfile {
   website_url: string | null;
 }
 
-export async function extractCompanyProfile(file: File): Promise<ExtractedCompanyProfile> {
+// Single combined extraction — pass a document, a URL, or both; when both are
+// given the backend merges their text and makes ONE LLM call.
+export async function extractCompanyProfile(
+  file: File | null,
+  url?: string,
+): Promise<ExtractedCompanyProfile> {
   const form = new FormData();
-  form.append("file", file);
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
   const { fields } = await postForm<{ fields: ExtractedCompanyProfile }>(
     "/api/v1/auth/onboarding/extract-profile",
     form,

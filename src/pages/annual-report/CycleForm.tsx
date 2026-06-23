@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { sarCycles, adminConsole } from '@/lib/api';
 import type { ContentLanguage, CreateCyclePayload, Cycle } from '@/types/cycles';
-import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow } from '@/types/admin';
 
 const PRIMARY = '#4040C8';
@@ -30,50 +30,6 @@ function GroupHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function FlagToggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 12px',
-        borderRadius: 10,
-        border: `1.5px solid ${value ? PRIMARY : '#E2E4F0'}`,
-        background: value ? '#EEEEFF' : '#fff',
-        cursor: 'pointer',
-        fontSize: 12,
-        fontWeight: 600,
-        color: value ? PRIMARY : '#5A6080',
-      }}
-    >
-      <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 5,
-          flexShrink: 0,
-          border: value ? 'none' : '1.5px solid #C9CDE4',
-          background: value ? PRIMARY : '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {value && (
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
-      {label}
-    </button>
-  );
-}
-
 // Collapsible "Create Reporting Cycle" card — mirrors the ESG Validator form on
 // the Reports page. Sits above the cycles list; calls onCreated after a
 // successful create so the parent can refresh the list.
@@ -87,11 +43,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [submissionDeadline, setSubmissionDeadline] = useState('');
-  const [companyProfile, setCompanyProfile] = useState('');
-  const [sectorId, setSectorId] = useState('');
-  const [shariah, setShariah] = useState(false);
-  const [subsidiaries, setSubsidiaries] = useState(false);
-  const [sukuk, setSukuk] = useState(false);
+  const [sectorId, setSectorId] = useState('');  // reporting sector (5-code SAR set)
 
   const [pms, setPms] = useState<AdminUserRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -125,8 +77,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
     if (startDate === '') return 'Cycle Start Date';
     if (endDate === '') return 'Cycle End Date';
     if (submissionDeadline === '') return 'Submission Deadline';
-    if (companyProfile === '') return 'Company Profile';
-    if (sectorId === '') return 'Sector';
+    if (sectorId === '') return 'Reporting Sector';
     return null;
   };
 
@@ -138,11 +89,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
     setStartDate('');
     setEndDate('');
     setSubmissionDeadline('');
-    setCompanyProfile('');
     setSectorId('');
-    setShariah(false);
-    setSubsidiaries(false);
-    setSukuk(false);
   };
 
   const submit = async () => {
@@ -162,11 +109,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
-        company_profile: companyProfile,
         sector: sectorId,
-        is_shariah: shariah,
-        has_subsidiaries: subsidiaries,
-        has_sukuk: sukuk,
       };
       const cycle = await sarCycles.create(payload);
       reset();
@@ -281,32 +224,18 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             </div>
           </div>
 
-          {/* Company Profile */}
-          <GroupHeading>Company Profile</GroupHeading>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div className="fl" style={{ marginBottom: 0 }}>
-              <label className="fl-label">Company Profile *</label>
-              <select className="inp sel" value={companyProfile} onChange={(e) => setCompanyProfile(e.target.value)}>
-                <option value="">Select a company profile</option>
-                {COMPANY_PROFILE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="fl" style={{ marginBottom: 0 }}>
-              <label className="fl-label">Sector *</label>
-              <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
-                <option value="">Select a sector</option>
-                {CYCLE_SECTOR_OPTIONS.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
-            <FlagToggle label="Shariah-compliant" value={shariah} onChange={setShariah} />
-            <FlagToggle label="Has subsidiaries" value={subsidiaries} onChange={setSubsidiaries} />
-            <FlagToggle label="Has sukuk" value={sukuk} onChange={setSukuk} />
+          {/* Reporting sector — the company profile attributes (listed/private,
+              Shariah, subsidiaries, sukuk) are now set once at onboarding and the
+              cycle inherits them from the company. */}
+          <GroupHeading>Reporting Sector</GroupHeading>
+          <div className="fl" style={{ marginBottom: 4 }}>
+            <label className="fl-label">Reporting Sector *</label>
+            <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
+              <option value="">Select a reporting sector</option>
+              {CYCLE_SECTOR_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
 
           {err && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: 12 }}>{err}</div>}

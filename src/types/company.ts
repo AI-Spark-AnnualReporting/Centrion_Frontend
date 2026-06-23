@@ -51,6 +51,12 @@ export interface Company {
   reporting_currency: string | null;
   primary_language: string | null;
   fiscal_year_end_month: number | null;
+  // Company-profile attributes (also editable on the Profile page). The
+  // annual-report cycle inherits these from the company.
+  company_profile: string | null;
+  is_shariah: boolean | null;
+  has_subsidiaries: boolean | null;
+  has_sukuk: boolean | null;
   plan_name: string | null;
   plan_renewal_date: string | null;
   max_seats: number | null;
@@ -72,4 +78,8 @@ export type CompanyEditableFields = Pick<
   | "reporting_currency"
   | "primary_language"
   | "fiscal_year_end_month"
+  | "company_profile"
+  | "is_shariah"
+  | "has_subsidiaries"
+  | "has_sukuk"
 >;

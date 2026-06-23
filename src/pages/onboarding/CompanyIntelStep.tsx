@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 
 const ACCEPTED_EXTS = ['pdf', 'docx'];
+const MAX_MB = 50;
 
 // Step 1 — "Set Up Your Workspace". Collects a website URL or an uploaded
 // company-profile document (PDF/DOCX only), then hands the file up to be analysed
@@ -8,15 +9,31 @@ const ACCEPTED_EXTS = ['pdf', 'docx'];
 export default function CompanyIntelStep({
   onAnalyse,
   onSkipManual,
+  serverError,
 }: {
-  onAnalyse: (file: File | null) => void;
+  onAnalyse: (file: File | null, url: string) => void;
   onSkipManual: () => void;
+  serverError?: string | null;
 }) {
   const [website, setWebsite] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [invalid, setInvalid] = useState(false); // mandatory check failed (neither input)
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // At least one of {document, URL} is required.
+  const handleAnalyse = () => {
+    const url = website.trim();
+    if (!file && !url) {
+      setError('Upload a document or enter your website URL.');
+      setInvalid(true);
+      return;
+    }
+    setError(null);
+    setInvalid(false);
+    onAnalyse(file, url);
+  };
 
   const pickFile = (f: File | null) => {
     if (!f) {
@@ -29,7 +46,13 @@ export default function CompanyIntelStep({
       setFile(null);
       return;
     }
+    if (f.size > MAX_MB * 1024 * 1024) {
+      setError(`File is too large (max ${MAX_MB} MB).`);
+      setFile(null);
+      return;
+    }
     setError(null);
+    setInvalid(false);
     setFile(f);
   };
 
@@ -42,10 +65,10 @@ export default function CompanyIntelStep({
         <label>Company website</label>
         <input
           type="text"
-          className="inp"
+          className={`inp${invalid ? ' inp-error' : ''}`}
           placeholder="https://www.yourcompany.com"
           value={website}
-          onChange={(e) => setWebsite(e.target.value)}
+          onChange={(e) => { setWebsite(e.target.value); setInvalid(false); }}
         />
       </div>
 
@@ -55,6 +78,7 @@ export default function CompanyIntelStep({
 
       <div
         className={`ob-drop${dragOver ? ' over' : ''}`}
+        style={{ borderColor: invalid ? '#E5484D' : undefined }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -75,7 +99,7 @@ export default function CompanyIntelStep({
               Drop your company profile here
             </div>
             <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>
-              PDF, DOCX — up to 20 MB
+              PDF, DOCX — up to 50 MB
             </div>
           </>
         )}
@@ -91,13 +115,13 @@ export default function CompanyIntelStep({
         />
       </div>
 
-      {error && (
+      {(error || serverError) && (
         <div style={{ fontSize: 12, color: '#E5484D', marginTop: 10, fontWeight: 600 }} role="alert">
-          {error}
+          {error || serverError}
         </div>
       )}
 
-      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={() => onAnalyse(file)}>
+      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={handleAnalyse}>
         Analyse Company →
       </button>
 

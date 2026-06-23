@@ -10,7 +10,7 @@ import type {
   SARUser,
   SectionMode,
 } from '@/types/cycles';
-import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import {
@@ -50,11 +50,7 @@ function EditCycleModal({
   const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
   const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
-  const [companyProfile, setCompanyProfile] = useState(cycle.company_profile ?? '');
   const [sectorId, setSectorId] = useState(cycle.sector ?? cycle.sector_id ?? '');
-  const [shariah, setShariah] = useState(cycle.is_shariah ?? cycle.is_shariah_compliant ?? false);
-  const [subsidiaries, setSubsidiaries] = useState(cycle.has_subsidiaries);
-  const [sukuk, setSukuk] = useState(cycle.has_sukuk);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -64,7 +60,6 @@ function EditCycleModal({
     startDate !== '' &&
     endDate !== '' &&
     submissionDeadline !== '' &&
-    companyProfile !== '' &&
     sectorId !== '';
 
   const submit = async () => {
@@ -79,11 +74,7 @@ function EditCycleModal({
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
-        company_profile: companyProfile,
         sector: sectorId,
-        is_shariah: shariah,
-        has_subsidiaries: subsidiaries,
-        has_sukuk: sukuk,
       };
       await sarCycles.update(cycle.id, payload);
       onSaved();
@@ -92,48 +83,6 @@ function EditCycleModal({
       setBusy(false);
     }
   };
-
-  const flag = (label: string, value: boolean, set: (v: boolean) => void) => (
-    <button
-      type="button"
-      onClick={() => set(!value)}
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 7,
-        padding: '9px 11px',
-        borderRadius: 10,
-        border: `1.5px solid ${value ? PRIMARY : '#E2E4F0'}`,
-        background: value ? '#EEEEFF' : '#fff',
-        cursor: 'pointer',
-        fontSize: 11.5,
-        fontWeight: 600,
-        color: value ? PRIMARY : '#5A6080',
-      }}
-    >
-      <span
-        style={{
-          width: 15,
-          height: 15,
-          borderRadius: 4,
-          flexShrink: 0,
-          border: value ? 'none' : '1.5px solid #C9CDE4',
-          background: value ? PRIMARY : '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {value && (
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
-      {label}
-    </button>
-  );
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -170,25 +119,12 @@ function EditCycleModal({
           </div>
 
           <div style={{ borderTop: '1px solid #ECEEF8', paddingTop: 12, fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>
-            🏢 Company Profile
+            📊 Reporting Sector
           </div>
           <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Company Profile *</label>
-            <select className="inp sel" value={companyProfile} onChange={(e) => setCompanyProfile(e.target.value)}>
-              <option value="">Select a company profile</option>
-              {/* Surface the saved value even if it's not in our known option list */}
-              {companyProfile && !COMPANY_PROFILE_OPTIONS.some((o) => o.value === companyProfile) && (
-                <option value={companyProfile}>{companyProfile}</option>
-              )}
-              {COMPANY_PROFILE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Sector *</label>
+            <label className="fl-label">Reporting Sector *</label>
             <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
-              <option value="">Select a sector</option>
+              <option value="">Select a reporting sector</option>
               {sectorId && !CYCLE_SECTOR_OPTIONS.some((s) => s.value === sectorId) && (
                 <option value={sectorId}>{cycle.sector_name ?? sectorId}</option>
               )}
@@ -197,10 +133,8 @@ function EditCycleModal({
               ))}
             </select>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {flag('Shariah-compliant', shariah, setShariah)}
-            {flag('Has subsidiaries', subsidiaries, setSubsidiaries)}
-            {flag('Has sukuk', sukuk, setSukuk)}
+          <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: -4 }}>
+            Company profile, Shariah, subsidiaries &amp; sukuk are set on the company at onboarding.
           </div>
 
           {err && <div role="alert" style={{ fontSize: 11, color: '#DC2626' }}>{err}</div>}
