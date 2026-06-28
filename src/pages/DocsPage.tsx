@@ -6,6 +6,19 @@ import type {
   DocumentBankResponse,
 } from '@/types/report';
 
+// Raw row shape from GET /documents/{companyId} (the flat list). Onboarding
+// uploads have report_id = null and so are excluded from the by-report grouping.
+interface RawDoc {
+  id: string;
+  filename: string;
+  file_type?: string;
+  file_size_bytes?: number;
+  extraction_status?: string;
+  uploaded_at?: string;
+  created_at?: string;
+  report_id?: string | null;
+}
+
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
 }
@@ -35,6 +48,8 @@ export default function DocsPage() {
   const companyId = user?.company_id ?? null;
 
   const [data, setData] = useState<DocumentBankResponse | null>(null);
+  // Onboarding uploads (report_id = null) — not part of the by-report grouping.
+  const [adhoc, setAdhoc] = useState<DocumentBankDocument[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -48,18 +63,33 @@ export default function DocsPage() {
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
-    documentsApi
-      .byReport<DocumentBankResponse>(companyId)
-      .then((res) => {
-        if (requestId !== requestIdRef.current) return;
-        setData(res);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (requestId !== requestIdRef.current) return;
-        setLoading(false);
-        setError(err instanceof Error ? err.message : 'Failed to load documents.');
-      });
+    Promise.allSettled([
+      documentsApi.byReport<DocumentBankResponse>(companyId),
+      documentsApi.list<{ documents: RawDoc[] }>(companyId),
+    ]).then(([byReportRes, flatRes]) => {
+      if (requestId !== requestIdRef.current) return;
+      if (byReportRes.status === 'fulfilled') {
+        setData(byReportRes.value);
+      } else {
+        setError(byReportRes.reason instanceof Error ? byReportRes.reason.message : 'Failed to load documents.');
+      }
+      const flat = flatRes.status === 'fulfilled' ? (flatRes.value.documents ?? []) : [];
+      setAdhoc(
+        flat
+          .filter((d) => !d.report_id)
+          .map((d) => ({
+            id: d.id,
+            filename: d.filename,
+            file_type: d.file_type ?? '',
+            file_size_bytes: d.file_size_bytes ?? 0,
+            extraction_status: d.extraction_status ?? 'processing',
+            uploaded_at: d.uploaded_at ?? d.created_at ?? '',
+            download_url: null,
+            download_expires_at: null,
+          })),
+      );
+      setLoading(false);
+    });
   };
 
   useEffect(() => {
@@ -128,10 +158,43 @@ export default function DocsPage() {
       )}
 
       {/* Empty */}
-      {!loading && !error && data && data.reports.length === 0 && (
+      {!loading && !error && data && data.reports.length === 0 && adhoc.length === 0 && (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 13, color: '#9BA3C4' }}>
-            No reports yet. Documents you upload while generating reports will appear here.
+            No documents yet. Files you upload during onboarding or while generating reports will appear here.
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding uploads (not tied to a report) */}
+      {!loading && adhoc.length > 0 && (
+        <div
+          style={{ background: '#fff', borderRadius: 14, border: '1px solid #E2E4F0', overflow: 'hidden', marginBottom: 14 }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 18px',
+              borderBottom: '1px solid #ECEEF8',
+              background: '#F8F9FE',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Uploaded documents</div>
+              <div style={{ fontSize: 10, color: '#5A6080', marginTop: 2 }}>
+                Added during onboarding · not yet tied to a report
+              </div>
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
+              {adhoc.length} {adhoc.length === 1 ? 'document' : 'documents'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {adhoc.map((doc) => (
+              <DocumentRow key={doc.id} doc={doc} />
+            ))}
           </div>
         </div>
       )}

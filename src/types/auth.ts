@@ -61,6 +61,8 @@ export interface OnboardingPayload {
   is_shariah: boolean;
   has_subsidiaries: boolean;
   has_sukuk: boolean;
+  // SAR reporting sector (bank/insurance/general/reit/finance_co) — inherited by the cycle.
+  reporting_sector: string;
   // Default departments the admin chose to create (their AI agents get
   // generated server-side). Sent with the onboarding completion.
   selected_department_codes: string[];

@@ -8,6 +8,9 @@ export interface StepOneState {
 export interface StepTwoState {
   companyName: string;
   jurisdiction: string;
+  // Optional sources for background profile extraction (kicked off on submit).
+  website?: string;
+  file?: File | null;
 }
 
 export interface RegisterRequest {

@@ -3,37 +3,25 @@ import { useRef, useState } from 'react';
 const ACCEPTED_EXTS = ['pdf', 'docx'];
 const MAX_MB = 50;
 
-// Step 1 — "Set Up Your Workspace". Collects a website URL or an uploaded
-// company-profile document (PDF/DOCX only), then hands the file up to be analysed
-// (onAnalyse) or lets the user fill the form by hand (onSkipManual).
+// Step 1 — document-only. Shown when there's no extracted data yet: either the
+// admin gave nothing at signup (normal manual onboarding), or their website
+// couldn't be scraped (`urlFailed`). They upload a profile doc to auto-fill, or
+// fall through to filling the Review form by hand.
 export default function CompanyIntelStep({
   onAnalyse,
   onSkipManual,
   serverError,
+  urlFailed,
 }: {
-  onAnalyse: (file: File | null, url: string) => void;
+  onAnalyse: (file: File | null) => void;
   onSkipManual: () => void;
   serverError?: string | null;
+  urlFailed?: boolean;
 }) {
-  const [website, setWebsite] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [invalid, setInvalid] = useState(false); // mandatory check failed (neither input)
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // At least one of {document, URL} is required.
-  const handleAnalyse = () => {
-    const url = website.trim();
-    if (!file && !url) {
-      setError('Upload a document or enter your website URL.');
-      setInvalid(true);
-      return;
-    }
-    setError(null);
-    setInvalid(false);
-    onAnalyse(file, url);
-  };
 
   const pickFile = (f: File | null) => {
     if (!f) {
@@ -52,33 +40,30 @@ export default function CompanyIntelStep({
       return;
     }
     setError(null);
-    setInvalid(false);
     setFile(f);
+  };
+
+  const handleAnalyse = () => {
+    if (!file) {
+      setError('Upload a document, or fill the details in manually below.');
+      return;
+    }
+    setError(null);
+    onAnalyse(file);
   };
 
   return (
     <>
-      <h2>Set Up Your Workspace</h2>
-      <p>Paste your website URL or upload a company profile — our AI will extract the details.</p>
-
-      <div className="fl" style={{ marginTop: 8 }}>
-        <label>Company website</label>
-        <input
-          type="text"
-          className={`inp${invalid ? ' inp-error' : ''}`}
-          placeholder="https://www.yourcompany.com"
-          value={website}
-          onChange={(e) => { setWebsite(e.target.value); setInvalid(false); }}
-        />
-      </div>
-
-      <div className="ob-or">
-        <span>or upload a file</span>
-      </div>
+      <h2>{urlFailed ? "We couldn't read your website" : 'Set Up Your Workspace'}</h2>
+      <p>
+        {urlFailed
+          ? "We couldn't pull your details from your website. Upload a company profile document and we'll extract them — or just fill them in manually."
+          : "Upload a company profile document and we'll auto-fill your details — or fill them in manually."}
+      </p>
 
       <div
         className={`ob-drop${dragOver ? ' over' : ''}`}
-        style={{ borderColor: invalid ? '#E5484D' : undefined }}
+        style={{ marginTop: 10 }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -98,9 +83,7 @@ export default function CompanyIntelStep({
             <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E', marginTop: 8 }}>
               Drop your company profile here
             </div>
-            <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>
-              PDF, DOCX — up to 50 MB
-            </div>
+            <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>PDF, DOCX — up to 50 MB</div>
           </>
         )}
         <button type="button" className="ob-browse" onClick={() => inputRef.current?.click()}>
@@ -122,19 +105,12 @@ export default function CompanyIntelStep({
       )}
 
       <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={handleAnalyse}>
-        Analyse Company →
+        Analyse Document →
       </button>
 
-      <div style={{ textAlign: 'center', fontSize: 12, color: '#9BA3C4', marginTop: 14 }}>
-        Takes ~10 seconds ·{' '}
-        <button
-          type="button"
-          onClick={onSkipManual}
-          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#5A6080', fontWeight: 600, textDecoration: 'underline' }}
-        >
-          Skip and fill manually
-        </button>
-      </div>
+      <button type="button" className="ob-skip" onClick={onSkipManual}>
+        {urlFailed ? 'Fill in manually instead' : 'Skip and fill in manually'}
+      </button>
     </>
   );
 }

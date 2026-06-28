@@ -496,9 +496,10 @@ body {
 
 /* ─── Onboarding wizard ───────────────────────────────── */
 /* Wider card than the 900px login/signup shell — the wizard (esp. the
-   department grid + upload rows) needs more horizontal room. */
-.auth-card-wide { width: 1180px; max-width: 95vw; }
-.auth-card-wide .auth-r { padding: 48px 56px; }
+   department grid + upload rows) needs more horizontal room. Fixed height keeps
+   every step the same size; tall steps (Review) scroll inside the right panel. */
+.auth-card-wide { width: 1180px; max-width: 95vw; height: min(720px, 90vh); }
+.auth-card-wide .auth-r { padding: 36px 56px; justify-content: flex-start; overflow-y: auto; }
 .ob-loader-screen {
   position: fixed; inset: 0; z-index: 100;
   display: flex; align-items: center; justify-content: center; padding: 20px;

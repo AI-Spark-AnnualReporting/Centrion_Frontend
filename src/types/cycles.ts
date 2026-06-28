@@ -49,11 +49,9 @@ export interface Cycle {
 }
 
 // Exact request body for POST/PUT /api/v1/admin/cycles. Do NOT add company_id
-// (derived from JWT), content_language (no such field on SAR), or sector_id
-// (use `sector` code). `sector` is the reporting sector, one of
-// bank|insurance|general|reit|finance_co. The company-profile attributes
-// (listed/private, Shariah, subsidiaries, sukuk) are set at onboarding and the
-// cycle inherits them from the company — they are NOT sent here.
+// (derived from JWT) or content_language. The reporting sector AND the
+// company-profile attributes (listed/private, Shariah, subsidiaries, sukuk) are
+// set at onboarding and the cycle inherits them from the company — NOT sent here.
 export interface CreateCyclePayload {
   cycle_name: string;
   fiscal_year: number;
@@ -62,7 +60,6 @@ export interface CreateCyclePayload {
   end_date: string;
   submission_deadline: string;
   kickoff_brief?: string;
-  sector?: string;
 }
 
 export type SessionStatus =

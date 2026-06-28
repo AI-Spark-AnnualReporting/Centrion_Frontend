@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sarCycles, adminConsole } from '@/lib/api';
 import type { ContentLanguage, CreateCyclePayload, Cycle } from '@/types/cycles';
-import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow } from '@/types/admin';
 
 const PRIMARY = '#4040C8';
@@ -43,7 +42,6 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [submissionDeadline, setSubmissionDeadline] = useState('');
-  const [sectorId, setSectorId] = useState('');  // reporting sector (5-code SAR set)
 
   const [pms, setPms] = useState<AdminUserRow[]>([]);
   const [busy, setBusy] = useState(false);
@@ -77,7 +75,6 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
     if (startDate === '') return 'Cycle Start Date';
     if (endDate === '') return 'Cycle End Date';
     if (submissionDeadline === '') return 'Submission Deadline';
-    if (sectorId === '') return 'Reporting Sector';
     return null;
   };
 
@@ -89,7 +86,6 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
     setStartDate('');
     setEndDate('');
     setSubmissionDeadline('');
-    setSectorId('');
   };
 
   const submit = async () => {
@@ -109,7 +105,6 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
-        sector: sectorId,
       };
       const cycle = await sarCycles.create(payload);
       reset();
@@ -224,19 +219,9 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             </div>
           </div>
 
-          {/* Reporting sector — the company profile attributes (listed/private,
-              Shariah, subsidiaries, sukuk) are now set once at onboarding and the
-              cycle inherits them from the company. */}
-          <GroupHeading>Reporting Sector</GroupHeading>
-          <div className="fl" style={{ marginBottom: 4 }}>
-            <label className="fl-label">Reporting Sector *</label>
-            <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
-              <option value="">Select a reporting sector</option>
-              {CYCLE_SECTOR_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-          </div>
+          {/* Reporting sector + company profile (listed/private, Shariah,
+              subsidiaries, sukuk) are set once at onboarding and the cycle
+              inherits them from the company — no longer collected here. */}
 
           {err && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: 12 }}>{err}</div>}
 

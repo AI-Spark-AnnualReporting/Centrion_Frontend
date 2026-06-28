@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { companies, getSectors } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Company, CompanyEditableFields, Sector } from '@/types/company';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 
 // Fields an admin may PATCH. Save diffs these against the loaded company so we
 // only send what actually changed.
@@ -21,6 +22,7 @@ const EDITABLE_FIELDS: (keyof CompanyEditableFields)[] = [
   'is_shariah',
   'has_subsidiaries',
   'has_sukuk',
+  'reporting_sector',
 ];
 
 const CURRENCIES: { code: string; label: string }[] = [
@@ -358,7 +360,20 @@ export function CompanyDetailsCard() {
                   <option value="private">Private</option>
                 </select>
               </div>
-              <div className="fl" />
+              <div className="fl">
+                <label className="fl-label">Reporting Sector</label>
+                <select
+                  className="inp sel"
+                  value={form.reporting_sector ?? ''}
+                  onChange={(e) => updateField('reporting_sector', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select a reporting sector</option>
+                  {CYCLE_SECTOR_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="fl" style={{ marginBottom: 4 }}>
               <label className="fl-label">Structure</label>

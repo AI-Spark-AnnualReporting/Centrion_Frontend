@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { createCompany, getSectors, register } from '@/lib/api';
+import { createCompany, extractProfileAtSignup, register } from '@/lib/api';
 import { isSarRole, redirectToSar } from '@/lib/sar';
 import type { StepOneState, StepTwoState } from '@/types/register';
 import { StepIndicator } from '@/components/registration/StepIndicator';
@@ -207,17 +207,6 @@ export function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  // Sector is no longer collected on signup (it's captured in onboarding), but
-  // the backend still requires one to create the company — so we send a default
-  // (first available) behind the scenes. Temporary stopgap until the backend
-  // allows creating a company without a sector.
-  const [defaultSectorId, setDefaultSectorId] = useState<string | null>(null);
-
-  useEffect(() => {
-    getSectors()
-      .then((list) => setDefaultSectorId(list[0]?.id ?? null))
-      .catch(() => setDefaultSectorId(null));
-  }, []);
 
   const handleStepOneSubmit = (data: StepOneState) => {
     setError('');
@@ -262,10 +251,17 @@ export function SignupPage() {
     try {
       const companyRes = await createCompany({
         name: data.companyName,
-        sector_id: defaultSectorId ?? undefined,
         jurisdiction: data.jurisdiction || undefined,
       });
       const companyId = companyRes.company.id;
+
+      // Kick off background profile extraction from the doc / website (best-effort
+      // — never block account creation on it).
+      try {
+        await extractProfileAtSignup(companyId, data.file ?? null, data.website);
+      } catch {
+        /* extraction is best-effort; onboarding falls back to manual */
+      }
 
       await register({
         email: stepOne.email,

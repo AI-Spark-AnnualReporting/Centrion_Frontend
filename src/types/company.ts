@@ -57,6 +57,15 @@ export interface Company {
   is_shariah: boolean | null;
   has_subsidiaries: boolean | null;
   has_sukuk: boolean | null;
+  // SAR reporting sector (bank/insurance/general/reit/finance_co) — inherited by the cycle.
+  reporting_sector: string | null;
+  // Status of the signup-time background profile extraction (processing | done).
+  profile_extraction_status?: string | null;
+  // Report style extracted (background) from the docs uploaded at onboarding —
+  // tone/theme are prose; outline is the merged table-of-contents.
+  report_tone?: string | null;
+  report_theme?: string | null;
+  report_outline?: string[] | null;
   plan_name: string | null;
   plan_renewal_date: string | null;
   max_seats: number | null;
@@ -82,4 +91,5 @@ export type CompanyEditableFields = Pick<
   | "is_shariah"
   | "has_subsidiaries"
   | "has_sukuk"
+  | "reporting_sector"
 >;

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { DepartmentOption, OnboardingPayload } from '@/types/auth';
-import type { Sector } from '@/types/company';
+import type { OnboardingPayload } from '@/types/auth';
+import type { Company, Sector } from '@/types/company';
 import DepartmentSelectionStep from '@/pages/onboarding/DepartmentSelectionStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
 import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
-import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
-import { extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
+import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
+import { companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -31,19 +32,25 @@ const COMPANY_PROFILES: { value: OnboardingPayload['company_profile']; label: st
 ];
 
 const ANALYSE_STEPS = [
-  'Reading your sources',
+  'Reading your document',
   'Extracting company overview',
   'Identifying sector & jurisdiction',
   'Detecting fiscal year & currency',
   'Finalising company profile',
 ];
+const PREPARE_STEPS = [
+  'Loading your company',
+  'Checking your profile document',
+  'Reading your website',
+  'Organising your details',
+];
 
-type Step = 'intel' | 'analysing' | 'review' | 'departments' | 'upload' | 'processing';
+type Step = 'loading' | 'intel' | 'analysing' | 'review' | 'departments' | 'upload' | 'processing';
 
 // Left-panel benefit cards per step.
 const LEFT_CARDS: Record<'intel' | 'review' | 'departments' | 'upload', { t: string; s: string }[]> = {
   intel: [
-    { t: '🔍 Smart extraction', s: 'We read your website or company profile' },
+    { t: '🔍 Smart extraction', s: 'We read your company profile document' },
     { t: '✏️ Fully editable', s: 'Review and correct before you continue' },
     { t: '⚡ Pre-configured', s: 'GRI, SAMA & CMA mapped automatically' },
   ],
@@ -71,27 +78,42 @@ const FieldLabel = ({ children, required, ai }: { children: React.ReactNode; req
   </label>
 );
 
-// Required Yes/No control (no default — must be answered).
-const YesNo = ({
-  value, onChange, error,
-}: { value: boolean | null; onChange: (v: boolean) => void; error?: boolean }) => (
-  <div className={`ob-yesno${error ? ' ob-yesno-error' : ''}`}>
-    <button type="button" className={value === true ? 'on' : ''} onClick={() => onChange(true)}>Yes</button>
-    <button type="button" className={value === false ? 'on' : ''} onClick={() => onChange(false)}>No</button>
-  </div>
+// Checkbox in its own bordered box (highlights when checked).
+const Checkbox = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
+  <label
+    style={{
+      display: 'flex', alignItems: 'center', gap: 11,
+      padding: '13px 16px', borderRadius: 10,
+      border: `1.5px solid ${checked ? '#4040C8' : '#E2E4F0'}`,
+      background: checked ? '#F4F5FF' : '#fff',
+      cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
+      color: checked ? '#4040C8' : '#1A1D2E',
+      transition: 'border-color .15s, background .15s',
+    }}
+  >
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      style={{ width: 17, height: 17, accentColor: '#4040C8', cursor: 'pointer', flexShrink: 0 }}
+    />
+    {label}
+  </label>
 );
 
 export default function OnboardingPage() {
-  const [step, setStep] = useState<Step>('intel');
+  const [step, setStep] = useState<Step>('loading');
+  const [urlFailed, setUrlFailed] = useState(false);
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
 
   // Company details (Review Details step)
   const [description, setDescription] = useState('');
   const [sectorId, setSectorId] = useState('');               // ESG sector (UUID) — AI-picked, mandatory
   const [companyProfile, setCompanyProfile] = useState('');   // listed/private — mandatory, manual
-  const [isShariah, setIsShariah] = useState<boolean | null>(null);
-  const [hasSubsidiaries, setHasSubsidiaries] = useState<boolean | null>(null);
-  const [hasSukuk, setHasSukuk] = useState<boolean | null>(null);
+  const [reportingSector, setReportingSector] = useState(''); // SAR 5-code — mandatory, manual
+  const [isShariah, setIsShariah] = useState(false);
+  const [hasSubsidiaries, setHasSubsidiaries] = useState(false);
+  const [hasSukuk, setHasSukuk] = useState(false);
   const [employeeCount, setEmployeeCount] = useState('');
   const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState('12');
   const [reportingCurrency, setReportingCurrency] = useState<OnboardingPayload['reporting_currency']>('SAR');
@@ -99,6 +121,7 @@ export default function OnboardingPage() {
   const [foundedYear, setFoundedYear] = useState('');
   const [headquarterCity, setHeadquarterCity] = useState('');
   const [listedExchange, setListedExchange] = useState('');
+  const [websiteUrl, setWebsiteUrl] = useState('');
 
   // Sector options (mirrors the ESG report form's dropdown).
   const [sectors, setSectors] = useState<Sector[]>([]);
@@ -108,15 +131,70 @@ export default function OnboardingPage() {
 
   // Department selection
   const [selectedDeptCodes, setSelectedDeptCodes] = useState<string[]>([]);
-  const [deptOptions, setDeptOptions] = useState<DepartmentOption[]>([]);
 
-  // Company-Intel extraction (single combined doc+URL call).
-  const [extractPhase, setExtractPhase] = useState<'running' | 'completed' | null>(null);
+  // Report documents picked on the final step — uploaded to the Document Bank +
+  // run through report-style extraction during the processing screen.
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+
+  // Company-Intel extraction (onboarding doc-upload path).
   const [analyseError, setAnalyseError] = useState('');
 
-  // Apply LLM-extracted fields onto the Review form. Only AI-derived fields are
-  // pre-filled; the sensitive fields (profile / shariah / subsidiaries / sukuk)
-  // stay manual.
+  // Seed the Review form from the company record (loaded on entry — signup may
+  // have already extracted the profile in the background).
+  const applyCompany = (c: Company) => {
+    if (c.description) setDescription(c.description);
+    if (c.sector_id) setSectorId(c.sector_id);
+    if (c.employee_count != null) setEmployeeCount(String(c.employee_count));
+    if (c.founded_year != null) setFoundedYear(String(c.founded_year));
+    if (c.headquarter_city) setHeadquarterCity(c.headquarter_city);
+    if (c.fiscal_year_end_month != null) setFiscalYearEndMonth(String(c.fiscal_year_end_month));
+    if (c.reporting_currency) setReportingCurrency(c.reporting_currency as OnboardingPayload['reporting_currency']);
+    if (c.primary_language) setPrimaryLanguage(c.primary_language as OnboardingPayload['primary_language']);
+    if (c.listed_exchange) setListedExchange(c.listed_exchange);
+    if (c.website_url) setWebsiteUrl(c.website_url);
+    if (c.company_profile) setCompanyProfile(c.company_profile);
+    if (c.reporting_sector) setReportingSector(c.reporting_sector);
+    if (typeof c.is_shariah === 'boolean') setIsShariah(c.is_shariah);
+    if (typeof c.has_subsidiaries === 'boolean') setHasSubsidiaries(c.has_subsidiaries);
+    if (typeof c.has_sukuk === 'boolean') setHasSukuk(c.has_sukuk);
+  };
+
+  // On entry: load the company. If signup extraction is still running, poll;
+  // once ready, route to Review (we have data) or step 1 (no data / URL failed).
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempts = 0;
+    const load = () => {
+      companies
+        .getMyCompany()
+        .then((c) => {
+          if (cancelled) return;
+          if (c.profile_extraction_status === 'processing' && attempts < 20) {
+            attempts += 1;                       // keep polling (~40s cap)
+            timer = window.setTimeout(load, 2000);
+            return;
+          }
+          applyCompany(c);
+          if (c.description && c.description.trim()) {
+            setStep('review');                 // extraction gave us data
+          } else {
+            setUrlFailed(!!c.website_url);      // URL provided but nothing came back
+            setStep('intel');
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setStep('intel');
+        });
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  // Apply LLM-extracted fields onto the Review form (onboarding doc-upload path).
   const applyExtracted = (d: ExtractedCompanyProfile) => {
     if (d.description) setDescription(d.description);
     if (d.sector_id) setSectorId(d.sector_id);
@@ -129,22 +207,21 @@ export default function OnboardingPage() {
     if (d.listed_exchange) setListedExchange(d.listed_exchange);
   };
 
-  // "Analyse Company": one combined call (document and/or URL → single LLM pass).
-  const handleAnalyse = (file: File | null, url: string) => {
+  // "Analyse" on step 1 — upload a document and extract from it (single LLM call).
+  const handleAnalyse = (file: File | null) => {
     setAnalyseError('');
     setStep('analysing');
-    setExtractPhase('running');
-    extractCompanyProfile(file, url)
+    extractCompanyProfile(file, undefined)
       .then((data) => {
         applyExtracted(data);
-        setExtractPhase('completed');
+        setStep('review');
       })
       .catch((err) => {
         const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
         setAnalyseError(
           typeof detail === 'string'
             ? detail
-            : "We couldn't read that document or website. Try another, or fill the details in manually.",
+            : "We couldn't read that document. Try another, or fill the details in manually.",
         );
         setStep('intel');
       });
@@ -160,12 +237,13 @@ export default function OnboardingPage() {
       primary_language: primaryLanguage,
       sector_id: sectorId,
       company_profile: companyProfile as OnboardingPayload['company_profile'],
-      is_shariah: !!isShariah,
-      has_subsidiaries: !!hasSubsidiaries,
-      has_sukuk: !!hasSukuk,
+      reporting_sector: reportingSector,
+      is_shariah: isShariah,
+      has_subsidiaries: hasSubsidiaries,
+      has_sukuk: hasSukuk,
       selected_department_codes: selectedDeptCodes,
       founded_year: trimmedFounded ? Number(trimmedFounded) : null,
-      website_url: null,
+      website_url: websiteUrl.trim() || null,
       headquarter_city: headquarterCity.trim() || null,
       listed_exchange: listedExchange.trim() || null,
     };
@@ -188,35 +266,34 @@ export default function OnboardingPage() {
     }
     if (!sectorId) errs.sectorId = 'Sector is required.';
     if (!companyProfile) errs.companyProfile = 'Company profile is required.';
-    if (isShariah === null) errs.isShariah = 'Required.';
-    if (hasSubsidiaries === null) errs.hasSubsidiaries = 'Required.';
-    if (hasSukuk === null) errs.hasSukuk = 'Required.';
+    if (!reportingSector) errs.reportingSector = 'Reporting sector is required.';
     setReviewErrors(errs);
     if (Object.keys(errs).length === 0) setStep('departments');
   };
 
   // ---- Full-screen interstitials (no shell) -------------------------------
+  if (step === 'loading') {
+    return (
+      <AiLoadingScreen
+        title="Preparing Your Workspace"
+        subtitle="Getting your company details ready…"
+        milestones={PREPARE_STEPS}
+      />
+    );
+  }
+
   if (step === 'analysing') {
     return (
-      <div className="ob-loader-screen">
-        <div style={{ width: 'min(520px, 100%)' }}>
-          <GeneratingScreen
-            title="Analysing Your Company"
-            subtitle="Extracting key information from your sources."
-            steps={ANALYSE_STEPS}
-            phase={extractPhase ?? undefined}
-            onComplete={() => setStep('review')}
-          />
-        </div>
-      </div>
+      <AiLoadingScreen
+        title="Analysing Your Company"
+        subtitle="Extracting key information from your document."
+        milestones={ANALYSE_STEPS}
+      />
     );
   }
 
   if (step === 'processing') {
-    const selected = deptOptions
-      .filter((d) => selectedDeptCodes.includes(d.code))
-      .map((d) => ({ code: d.code, name: d.name }));
-    return <SetupInProgressAnimation payload={buildPayload()} departments={selected} />;
+    return <SetupInProgressAnimation payload={buildPayload()} files={uploadedFiles} />;
   }
 
   const stepNumber = { intel: 1, review: 2, departments: 3, upload: 4 }[step];
@@ -253,6 +330,7 @@ export default function OnboardingPage() {
 
           {step === 'intel' && (
             <CompanyIntelStep
+              urlFailed={urlFailed}
               onAnalyse={handleAnalyse}
               onSkipManual={() => setStep('review')}
               serverError={analyseError}
@@ -310,6 +388,20 @@ export default function OnboardingPage() {
                   {reviewErrors.companyProfile && <div className="fl-err">{reviewErrors.companyProfile}</div>}
                 </div>
                 <div className="fl">
+                  <FieldLabel required>Reporting sector</FieldLabel>
+                  <select
+                    className={`inp sel${reviewErrors.reportingSector ? ' inp-error' : ''}`}
+                    value={reportingSector}
+                    onChange={(e) => { setReportingSector(e.target.value); clearReviewError('reportingSector'); }}
+                  >
+                    <option value="">Select a reporting sector</option>
+                    {CYCLE_SECTOR_OPTIONS.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                  {reviewErrors.reportingSector && <div className="fl-err">{reviewErrors.reportingSector}</div>}
+                </div>
+                <div className="fl">
                   <FieldLabel required ai>Employees</FieldLabel>
                   <input type="number" min={1} className={`inp${reviewErrors.employeeCount ? ' inp-error' : ''}`} placeholder="e.g. 120" value={employeeCount} onChange={(e) => { setEmployeeCount(e.target.value); clearReviewError('employeeCount'); }} />
                   {reviewErrors.employeeCount && <div className="fl-err">{reviewErrors.employeeCount}</div>}
@@ -351,25 +443,10 @@ export default function OnboardingPage() {
                 </div>
               </div>
 
-              <div className="ob-yesno-row">
-                <div className="fl" style={{ marginBottom: 0 }}>
-                  <FieldLabel required>Shariah-compliant</FieldLabel>
-                  <YesNo value={isShariah} error={!!reviewErrors.isShariah}
-                    onChange={(v) => { setIsShariah(v); clearReviewError('isShariah'); }} />
-                  {reviewErrors.isShariah && <div className="fl-err">{reviewErrors.isShariah}</div>}
-                </div>
-                <div className="fl" style={{ marginBottom: 0 }}>
-                  <FieldLabel required>Has subsidiaries</FieldLabel>
-                  <YesNo value={hasSubsidiaries} error={!!reviewErrors.hasSubsidiaries}
-                    onChange={(v) => { setHasSubsidiaries(v); clearReviewError('hasSubsidiaries'); }} />
-                  {reviewErrors.hasSubsidiaries && <div className="fl-err">{reviewErrors.hasSubsidiaries}</div>}
-                </div>
-                <div className="fl" style={{ marginBottom: 0 }}>
-                  <FieldLabel required>Has sukuk</FieldLabel>
-                  <YesNo value={hasSukuk} error={!!reviewErrors.hasSukuk}
-                    onChange={(v) => { setHasSukuk(v); clearReviewError('hasSukuk'); }} />
-                  {reviewErrors.hasSukuk && <div className="fl-err">{reviewErrors.hasSukuk}</div>}
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 14 }}>
+                <Checkbox label="Shariah-compliant" checked={isShariah} onChange={setIsShariah} />
+                <Checkbox label="Has subsidiaries" checked={hasSubsidiaries} onChange={setHasSubsidiaries} />
+                <Checkbox label="Has sukuk" checked={hasSukuk} onChange={setHasSukuk} />
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
@@ -385,14 +462,25 @@ export default function OnboardingPage() {
               onSelect={setSelectedDeptCodes}
               onBack={() => setStep('review')}
               onSubmit={() => setStep('upload')}
-              onOptionsLoaded={setDeptOptions}
+              onOptionsLoaded={() => {}}
             />
           )}
 
           {step === 'upload' && (
             <UploadReportsStep
-              onProcess={() => setStep('processing')}
-              onSkip={() => setStep('processing')}
+              onProcess={(files) => {
+                // Persist intent across the post-onboarding ProtectedRoute redirect
+                // (which strips router state) so the dashboard lands on the
+                // personal workspace, not the welcome screen.
+                if (files.length) sessionStorage.setItem('centriyon:freshUpload', '1');
+                setUploadedFiles(files);
+                setStep('processing');
+              }}
+              onSkip={() => {
+                sessionStorage.removeItem('centriyon:freshUpload');
+                setUploadedFiles([]);
+                setStep('processing');
+              }}
             />
           )}
         </div>

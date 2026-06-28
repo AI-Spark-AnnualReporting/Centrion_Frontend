@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { DashboardESG } from '@/components/dashboard/DashboardESG';
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard';
 import { DashboardWelcome } from '@/components/dashboard/DashboardWelcome';
+import { DashboardWorkspace } from '@/components/dashboard/DashboardWorkspace';
 import { ESGModal } from '@/components/shared/ESGModal';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
-import { reports as reportsApi } from '@/lib/api';
+import { reports as reportsApi, documents as documentsApi, companies as companiesApi } from '@/lib/api';
+import type { Company } from '@/types/company';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
@@ -17,38 +20,59 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const company = user?.company_name ?? 'Your company';
   const companyId = user?.company_id ?? null;
+  const location = useLocation();
+  // Set when the user just finished onboarding having uploaded docs — shows the
+  // workspace dashboard immediately, before the upload pipeline has inserted the
+  // documents rows that the persistent `hasDocs` check relies on. Captured ONCE:
+  // ProtectedRoute redirects onboarding→dashboard with no router state, so we
+  // also honour a sessionStorage flag set during onboarding (and clear it).
+  const [justUploaded] = useState(() => {
+    const fromState = Boolean((location.state as { justUploaded?: boolean } | null)?.justUploaded);
+    const fromSession = sessionStorage.getItem('centriyon:freshUpload') === '1';
+    if (fromSession) sessionStorage.removeItem('centriyon:freshUpload');
+    return fromState || fromSession;
+  });
 
-  // First-run gate: while we don't know yet it's null; false → no reports →
-  // show the welcome screen instead of an empty dashboard.
-  const [hasReports, setHasReports] = useState<boolean | null>(null);
+  // First-run gate (null until known): reports drive the ESG Command Center;
+  // otherwise uploaded docs / extracted report-style drive the personal workspace
+  // dashboard, else the welcome.
+  const [gate, setGate] = useState<{ hasReports: boolean; hasDocs: boolean; companyData: Company | null } | null>(null);
   useEffect(() => {
     if (!companyId) {
-      setHasReports(false);
+      setGate({ hasReports: false, hasDocs: false, companyData: null });
       return;
     }
     let cancelled = false;
-    reportsApi
-      .list<{ reports?: unknown[] }>(companyId)
-      .then((data) => {
-        if (!cancelled) setHasReports((data?.reports ?? []).length > 0);
-      })
-      // On error, fall back to the normal dashboard rather than the welcome.
-      .catch(() => {
-        if (!cancelled) setHasReports(true);
-      });
+    Promise.allSettled([
+      reportsApi.list<{ reports?: unknown[] }>(companyId),
+      documentsApi.list<{ documents?: unknown[] }>(companyId),
+      companiesApi.getMyCompany(),
+    ]).then(([r, d, c]) => {
+      if (cancelled) return;
+      // On a reports-list error, fall back to the normal dashboard (not welcome).
+      const hasReports = r.status === 'fulfilled' ? (r.value?.reports ?? []).length > 0 : true;
+      const hasDocs = d.status === 'fulfilled' ? (d.value?.documents ?? []).length > 0 : false;
+      const companyData = c.status === 'fulfilled' ? c.value : null;
+      setGate({ hasReports, hasDocs, companyData });
+    });
     return () => {
       cancelled = true;
     };
   }, [companyId]);
 
-  if (hasReports === null) {
+  if (gate === null) {
     return (
       <div style={{ padding: 48, textAlign: 'center', fontSize: 13, color: '#5A6080' }}>Loading…</div>
     );
   }
 
-  if (!hasReports) {
-    return <DashboardWelcome company={company} />;
+  if (!gate.hasReports) {
+    // No reports yet: personal workspace dashboard once docs were uploaded (just
+    // now or previously) or report-style was extracted; otherwise the welcome.
+    const hasStyle = Boolean(gate.companyData?.report_tone);
+    return justUploaded || gate.hasDocs || hasStyle
+      ? <DashboardWorkspace company={gate.companyData} companyName={company} />
+      : <DashboardWelcome company={company} />;
   }
 
   return (

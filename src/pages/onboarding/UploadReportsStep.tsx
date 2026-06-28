@@ -14,8 +14,7 @@ const ROWS: RowDef[] = [
   { icon: '📋', title: 'Other Documents', desc: 'Board packs, governance docs, MD&A · any format' },
 ];
 
-function UploadRow({ row }: { row: RowDef }) {
-  const [file, setFile] = useState<File | null>(null);
+function UploadRow({ row, file, onPick }: { row: RowDef; file: File | null; onPick: (f: File | null) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="ob-up-row">
@@ -36,21 +35,25 @@ function UploadRow({ row }: { row: RowDef }) {
         ref={inputRef}
         type="file"
         style={{ display: 'none' }}
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
     </div>
   );
 }
 
-// Step 4 — visual only. Both "Process" and "Skip" advance to the processing
-// loader (which fires the real onboarding completion).
+// Step 4 — collects the report documents. "Process" hands the picked files up
+// (uploaded to the Document Bank + run through report-style extraction, then the
+// new workspace dashboard opens); "Skip" passes nothing (→ welcome dashboard).
 export default function UploadReportsStep({
   onProcess,
   onSkip,
 }: {
-  onProcess: () => void;
+  onProcess: (files: File[]) => void;
   onSkip: () => void;
 }) {
+  const [picked, setPicked] = useState<Record<string, File | null>>({});
+  const collected = ROWS.map((r) => picked[r.title]).filter((f): f is File => !!f);
+
   return (
     <>
       <h2>Upload Your Reports</h2>
@@ -58,11 +61,16 @@ export default function UploadReportsStep({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
         {ROWS.map((r) => (
-          <UploadRow key={r.title} row={r} />
+          <UploadRow
+            key={r.title}
+            row={r}
+            file={picked[r.title] ?? null}
+            onPick={(f) => setPicked((prev) => ({ ...prev, [r.title]: f }))}
+          />
         ))}
       </div>
 
-      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={onProcess}>
+      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={() => onProcess(collected)}>
         Process Reports &amp; Build Dashboard →
       </button>
 

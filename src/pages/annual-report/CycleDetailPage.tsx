@@ -10,7 +10,6 @@ import type {
   SARUser,
   SectionMode,
 } from '@/types/cycles';
-import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import {
@@ -50,7 +49,6 @@ function EditCycleModal({
   const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
   const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
-  const [sectorId, setSectorId] = useState(cycle.sector ?? cycle.sector_id ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -59,8 +57,7 @@ function EditCycleModal({
     fiscalYear.trim() !== '' &&
     startDate !== '' &&
     endDate !== '' &&
-    submissionDeadline !== '' &&
-    sectorId !== '';
+    submissionDeadline !== '';
 
   const submit = async () => {
     if (busy || !canSubmit) return;
@@ -74,7 +71,6 @@ function EditCycleModal({
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
-        sector: sectorId,
       };
       await sarCycles.update(cycle.id, payload);
       onSaved();
@@ -118,23 +114,9 @@ function EditCycleModal({
             <input className="inp" type="date" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} />
           </div>
 
-          <div style={{ borderTop: '1px solid #ECEEF8', paddingTop: 12, fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>
-            📊 Reporting Sector
-          </div>
-          <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Reporting Sector *</label>
-            <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
-              <option value="">Select a reporting sector</option>
-              {sectorId && !CYCLE_SECTOR_OPTIONS.some((s) => s.value === sectorId) && (
-                <option value={sectorId}>{cycle.sector_name ?? sectorId}</option>
-              )}
-              {CYCLE_SECTOR_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: -4 }}>
-            Company profile, Shariah, subsidiaries &amp; sukuk are set on the company at onboarding.
+          <div style={{ fontSize: 11, color: '#9BA3C4', paddingTop: 4 }}>
+            Reporting sector, company profile, Shariah, subsidiaries &amp; sukuk are set on the
+            company (Profile page / onboarding) and inherited by each cycle.
           </div>
 
           {err && <div role="alert" style={{ fontSize: 11, color: '#DC2626' }}>{err}</div>}

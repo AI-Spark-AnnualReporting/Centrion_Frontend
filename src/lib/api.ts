@@ -474,6 +474,17 @@ export const companies = {
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/questions`, {
       query: filters,
     }),
+
+  // Onboarding-time: kick off BACKGROUND tone/theme/outline extraction from the
+  // uploaded report documents. Authenticated; returns { status }. Non-fatal.
+  extractReportStyle: (companyId: string, files: File[]): Promise<{ status: string }> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/extract-report-style`,
+      form,
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1717,6 +1728,20 @@ export async function extractCompanyProfile(
     form,
   );
   return fields;
+}
+
+// Signup-time: kick off BACKGROUND profile extraction from a doc and/or URL.
+// Unauthenticated (the company is created before login). No-ops if neither given.
+export async function extractProfileAtSignup(
+  companyId: string,
+  file: File | null,
+  url?: string,
+): Promise<void> {
+  if (!file && !(url && url.trim())) return;
+  const form = new FormData();
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
+  await postForm(`/api/v1/companies/${encodeURIComponent(companyId)}/extract-profile`, form);
 }
 
 // Spec-named createCompany() — raw fetch per .claude/specs/2step_register.md.
