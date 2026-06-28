@@ -141,9 +141,9 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   const sectorLabel = CYCLE_SECTOR_OPTIONS.find((s) => s.value === company?.reporting_sector)?.label ?? '—';
 
   const tone = company?.report_tone ?? null;
-  const theme = company?.report_theme ?? null;
-  const styleReady = Boolean(tone || theme);
-  const themeChips = theme ? theme.split(',').map((t) => t.trim()).filter(Boolean) : [];
+  // Themes are stored as {name, explanation}; the dashboard shows only the names.
+  const themeChips = (company?.report_theme ?? []).map((t) => t.name).filter(Boolean);
+  const styleReady = Boolean(tone || themeChips.length);
 
   const frameworks = company?.esg_frameworks ?? [];
 
@@ -174,28 +174,28 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
             {companyName}'s workspace is live and ready.
           </h1>
           <p style={{ fontSize: 13, opacity: 0.88, margin: 0 }}>{subline}</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 18 }}>
-            {[
-              { label: 'Generate Report', go: '/reports' },
-              { label: 'Ask AI', go: '/ai' },
-              { label: 'Upload Document', go: '/docs' },
-              { label: 'Start Annual Report', go: '/annual-report' },
-            ].map((a) => (
-              <button
-                key={a.label}
-                type="button"
-                onClick={() => navigate(a.go)}
-                style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', background: 'rgba(255,255,255,.14)', border: '1px solid rgba(255,255,255,.22)', borderRadius: 9, padding: '9px 16px', cursor: 'pointer' }}
-              >
-                {a.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
-      {/* Choose a report to start — slim tiles, right under the hero */}
-      <ReportStartCards mini />
+      {/* Quick-action tiles, right under the hero (report cards + Ask AI Agent) */}
+      <ReportStartCards
+        mini
+        extraCards={[{
+          key: 'ask-ai',
+          category: 'AI Assistant',
+          title: 'Ask AI Agent',
+          accent: '#0D9488',
+          headerGradient: 'linear-gradient(135deg,#0E7490,#14B8A6)',
+          icon: (
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+              <path d="M4 4h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8l-3 3v-3H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
+              <circle cx="8" cy="9.2" r="1" fill="#fff" />
+              <circle cx="12" cy="9.2" r="1" fill="#fff" />
+            </svg>
+          ),
+          onOpen: (nav) => nav('/ai'),
+        }]}
+      />
 
       {/* Stat cards — real */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
@@ -205,84 +205,60 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         <StatCard accent="#E8A33D" label="Documents Indexed" value={String(docs.length)} sub="Source files" />
       </div>
 
-      {/* What we learned | agents + documents */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-        {/* What we learned from your reports */}
-        <div className="card" style={{ padding: '22px 24px' }}>
+      {/* Content row — description (left) | documents + frameworks (right), aligned fixed height + internal scroll */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: 16, height: 440 }}>
+        {/* What we learned */}
+        <div className="card" style={{ padding: '22px 24px', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={CARD_TITLE}>What we learned from your reports</div>
             {styleReady && <span style={{ fontSize: 11, fontWeight: 700, color: '#3B52E0', background: '#ECEEFF', padding: '3px 10px', borderRadius: 20 }}>AI</span>}
           </div>
-          <div style={{ height: 1, background: '#ECEEF8', margin: '16px 0' }} />
-
-          {!styleReady ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
-              <div className="proc-ring" style={{ width: 26, height: 26, borderWidth: 2.5, flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>Analysing your documents…</div>
-                <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
-                  We're reading your uploaded reports to learn their tone, themes and structure. This appears here shortly.
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {company?.description && (
-                <p style={{ fontSize: 13.5, color: '#3A3F58', lineHeight: 1.6, margin: '0 0 18px' }}>{company.description}</p>
-              )}
-
-              {themeChips.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 8 }}>Key themes</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {themeChips.map((t) => (
-                      <span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#3B52E0', background: '#ECEEFF', padding: '5px 12px', borderRadius: 20 }}>{t}</span>
-                    ))}
+          <div style={{ height: 1, background: '#ECEEF8', margin: '14px 0' }} />
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 6 }}>
+            {!styleReady ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
+                <div className="proc-ring" style={{ width: 26, height: 26, borderWidth: 2.5, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>Analysing your documents…</div>
+                  <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
+                    We're reading your uploaded reports to learn their tone, themes and structure. This appears here shortly.
                   </div>
                 </div>
-              )}
-
-            </>
-          )}
+              </div>
+            ) : (
+              <>
+                {company?.description && (
+                  <p style={{ fontSize: 13.5, color: '#3A3F58', lineHeight: 1.65, margin: '0 0 18px' }}>{company.description}</p>
+                )}
+                {themeChips.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 8 }}>Key themes</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {themeChips.map((t) => (
+                        <span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#3B52E0', background: '#ECEEFF', padding: '5px 12px', borderRadius: 20 }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Right column: agents + documents */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {departments.length > 0 && (
-            <div className="card" style={{ padding: '22px 24px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <div style={CARD_TITLE}>Your Departments</div>
-                {isAdmin && <button type="button" onClick={() => navigate('/admin-console/departments')} style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>Manage →</button>}
-              </div>
-              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginBottom: 12 }}>{departments.length} departments configured for {companyName}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {departments.slice(0, 6).map((d, i) => (
-                  <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: AGENT_COLORS[i % AGENT_COLORS.length], background: `${AGENT_COLORS[i % AGENT_COLORS.length]}14`, padding: '3px 7px', borderRadius: 6, flexShrink: 0 }}>
-                      {(d.department_code || d.department_name || '?').slice(0, 3).toUpperCase()}
-                    </span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.department_name}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: '#10B981', fontWeight: 600, flexShrink: 0 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} /> Ready
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="card" style={{ padding: '22px 24px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        {/* Documents (top) + Regulatory Frameworks (bottom) — stacked, scroll internally */}
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }}>
+          <div className="card" style={{ padding: '18px 20px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <div style={CARD_TITLE}>Your Documents</div>
               <button type="button" onClick={() => navigate('/docs')} style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>View all →</button>
             </div>
-            {docs.length === 0 ? (
-              <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0' }}>
-                No documents yet. <button type="button" onClick={() => navigate('/docs')} style={{ color: ACCENT, fontWeight: 700, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>Upload your reports →</button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', marginTop: 6 }}>
-                {docs.slice(0, 5).map((doc, i) => {
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              {docs.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0' }}>
+                  No documents yet. <button type="button" onClick={() => navigate('/docs')} style={{ color: ACCENT, fontWeight: 700, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>Upload your reports →</button>
+                </div>
+              ) : (
+                docs.map((doc, i) => {
                   const sc = docStatusColor(doc.extraction_status);
                   return (
                     <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
@@ -291,18 +267,20 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                       <span style={{ fontSize: 9, fontWeight: 700, color: sc.color, background: sc.bg, padding: '3px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '.4px', flexShrink: 0 }}>{doc.extraction_status || 'processing'}</span>
                     </div>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
           </div>
 
           {frameworks.length > 0 && (
-            <div className="card" style={{ padding: '22px 24px' }}>
-              <div style={CARD_TITLE}>⚖️ Regulatory Frameworks</div>
-              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginBottom: 6 }}>Referenced in your ESG report</div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="card" style={{ padding: '18px 20px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ marginBottom: 6 }}>
+                <div style={CARD_TITLE}>⚖️ Regulatory Frameworks</div>
+                <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>Referenced in your ESG report</div>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 {frameworks.map((f, i) => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none', fontSize: 13, color: '#1A1D2E', fontWeight: 600 }}>
+                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 0', borderTop: i ? '1px solid #F4F5FA' : 'none', fontSize: 13, color: '#1A1D2E', fontWeight: 600 }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981', flexShrink: 0 }} />
                     {f}
                   </div>
@@ -313,49 +291,50 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         </div>
       </div>
 
-      {/* Quick Actions + Recent Activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-        {/* Quick Actions */}
+      {/* Your Departments — full width, below the content row */}
+      {departments.length > 0 && (
         <div className="card" style={{ padding: '22px 24px' }}>
-          <div style={CARD_TITLE}>⚡ Quick Actions</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-            {[
-              { emoji: '🌱', label: 'Generate ESG Report', go: '/reports' },
-              { emoji: '📊', label: 'Start Annual Report', go: '/annual-report' },
-              { emoji: '🤖', label: 'Ask AI Agent', go: '/ai' },
-              { emoji: '📁', label: 'Upload Document', go: '/docs' },
-            ].map((q) => (
-              <button
-                key={q.label}
-                type="button"
-                onClick={() => navigate(q.go)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', background: '#fff', border: '1px solid #ECEEF8', borderRadius: 10, padding: '13px 14px', cursor: 'pointer', textAlign: 'left' }}
-              >
-                <span aria-hidden style={{ fontSize: 16, flexShrink: 0 }}>{q.emoji}</span> {q.label}
-              </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={CARD_TITLE}>Your Departments</div>
+              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{departments.length} departments configured for {companyName}</div>
+            </div>
+            {isAdmin && <button type="button" onClick={() => navigate('/admin-console/departments')} style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>Manage →</button>}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 10, marginTop: 14 }}>
+            {departments.map((d, i) => (
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid #ECEEF8', borderRadius: 10, padding: '11px 13px' }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: AGENT_COLORS[i % AGENT_COLORS.length], background: `${AGENT_COLORS[i % AGENT_COLORS.length]}14`, padding: '3px 7px', borderRadius: 6, flexShrink: 0 }}>
+                  {(d.department_code || d.department_name || '?').slice(0, 3).toUpperCase()}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.department_name}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: '#10B981', fontWeight: 600, flexShrink: 0 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} /> Ready
+                </span>
+              </div>
             ))}
           </div>
         </div>
+      )}
 
-        {/* Recent Activity — real workspace events */}
-        <div className="card" style={{ padding: '22px 24px' }}>
-          <div style={CARD_TITLE}>🕘 Recent Activity</div>
-          {activity.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0', marginTop: 6 }}>Nothing here yet.</div>
-          ) : (
-            <div style={{ marginTop: 8 }}>
-              {activity.map((a, i) => (
-                <div key={a.text} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
-                  <span style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: a.bg }}>{a.icon}</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: '#1A1D2E', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.text}</div>
-                    <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{a.when}</div>
-                  </div>
+      {/* Recent Activity — real workspace events, full width */}
+      <div className="card" style={{ padding: '22px 24px' }}>
+        <div style={CARD_TITLE}>🕘 Recent Activity</div>
+        {activity.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0', marginTop: 6 }}>Nothing here yet.</div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            {activity.map((a, i) => (
+              <div key={a.text} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
+                <span style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: a.bg }}>{a.icon}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: '#1A1D2E', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.text}</div>
+                  <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{a.when}</div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

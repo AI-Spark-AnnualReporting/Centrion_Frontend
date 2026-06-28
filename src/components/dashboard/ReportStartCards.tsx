@@ -81,7 +81,19 @@ function Check({ color }: { color: string }) {
   );
 }
 
-export function ReportStartCards({ mini = false }: { mini?: boolean }) {
+// Extra mini tiles appended after the 3 report cards (e.g. "Ask AI Agent" on the
+// workspace dashboard). Same shape the mini tile needs from a ReportCard.
+export interface MiniExtraCard {
+  key: string;
+  category: string;
+  title: string;
+  accent: string;
+  headerGradient: string;
+  icon: React.ReactNode;
+  onOpen: (navigate: ReturnType<typeof useNavigate>) => void;
+}
+
+export function ReportStartCards({ mini = false, extraCards = [] }: { mini?: boolean; extraCards?: MiniExtraCard[] }) {
   const navigate = useNavigate();
 
   // Mini — slim horizontal tiles (icon + title + Open). Minimal screen area;
@@ -89,7 +101,7 @@ export function ReportStartCards({ mini = false }: { mini?: boolean }) {
   if (mini) {
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
-        {CARDS.map((c) => (
+        {[...CARDS, ...extraCards].map((c) => (
           <div key={c.key} className="card" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px' }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: c.headerGradient, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               {c.icon}

@@ -67,7 +67,8 @@ export interface Company {
   // outline = merged table-of-contents.
   report_tone?: string | null;
   report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
-  report_theme?: string | null;
+  // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
+  report_theme?: { name: string; explanation?: string }[] | null;
   report_outline?: string[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
   esg_frameworks?: string[] | null;

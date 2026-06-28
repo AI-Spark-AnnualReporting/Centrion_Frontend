@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import type { OnboardingPayload } from '@/types/auth';
-import { companies, documents } from '@/lib/api';
+import { companies } from '@/lib/api';
 import type { UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 
@@ -42,12 +42,14 @@ export default function SetupInProgressAnimation({
         if (files.length && companyId) {
           const justFiles = files.map((f) => f.file);
           const docTypes = files.map((f) => f.docType);
-          // Independent + non-fatal: a failure saving to the Document Bank must
-          // NOT skip the report-style extraction (and vice versa).
-          await Promise.allSettled([
-            documents.upload(companyId, { files: justFiles }),
-            companies.extractReportStyle(companyId, justFiles, docTypes),
-          ]);
+          // Single store-only + extract call: the backend saves each doc to the
+          // Document Bank and extracts tone/themes/frameworks — no heavy GRI
+          // pipeline. Non-fatal: still open the dashboard if it fails.
+          try {
+            await companies.extractReportStyle(companyId, justFiles, docTypes);
+          } catch {
+            // ignore — docs can be re-uploaded later
+          }
         }
         setApiComplete(true);
       })
