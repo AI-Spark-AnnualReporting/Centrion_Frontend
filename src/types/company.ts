@@ -69,6 +69,8 @@ export interface Company {
   report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
   report_theme?: string | null;
   report_outline?: string[] | null;
+  // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
+  esg_frameworks?: string[] | null;
   plan_name: string | null;
   plan_renewal_date: string | null;
   max_seats: number | null;

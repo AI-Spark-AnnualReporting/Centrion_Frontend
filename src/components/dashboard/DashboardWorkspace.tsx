@@ -52,6 +52,21 @@ function docStatusColor(status?: string): { color: string; bg: string } {
   return { color: '#B45309', bg: 'rgba(245,158,11,.15)' };
 }
 
+function timeAgo(iso?: string | null): string {
+  if (!iso) return 'recently';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'recently';
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return 'Just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} day${d === 1 ? '' : 's'} ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 export function DashboardWorkspace({ company: companyProp, companyName }: { company: Company | null; companyName: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -130,11 +145,23 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   const styleReady = Boolean(tone || theme);
   const themeChips = theme ? theme.split(',').map((t) => t.trim()).filter(Boolean) : [];
 
+  const frameworks = company?.esg_frameworks ?? [];
+
   const subParts: string[] = [];
-  if (departments.length) subParts.push(`${departments.length} AI agent${departments.length === 1 ? '' : 's'} active`);
+  if (departments.length) subParts.push(`${departments.length} department${departments.length === 1 ? '' : 's'} active`);
   if (docs.length) subParts.push(`${docs.length} document${docs.length === 1 ? '' : 's'} indexed`);
   if (sectorLabel !== '—') subParts.push(sectorLabel);
   const subline = subParts.length ? subParts.join('  ·  ') : 'Your workspace is being set up.';
+
+  // Recent Activity — real workspace events from data we already fetched.
+  const recentDoc = docs.length
+    ? [...docs].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
+    : null;
+  const activity: { icon: string; bg: string; text: string; when: string }[] = [];
+  if (company?.created_at) activity.push({ icon: '✅', bg: '#E7F7F0', text: `Workspace created for ${companyName}`, when: timeAgo(company.created_at) });
+  if (departments.length) activity.push({ icon: '🤖', bg: '#ECEEFF', text: `${departments.length} department agent${departments.length === 1 ? '' : 's'} activated`, when: timeAgo(company?.created_at) });
+  if (docs.length) activity.push({ icon: '📄', bg: '#FDF3E2', text: `${docs.length} document${docs.length === 1 ? '' : 's'} indexed`, when: timeAgo(recentDoc?.created_at) });
+  if (recentDoc) activity.push({ icon: '📊', bg: '#F1F2F8', text: `Indexed ${recentDoc.filename}`, when: timeAgo(recentDoc.created_at) });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -204,13 +231,6 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                 <p style={{ fontSize: 13.5, color: '#3A3F58', lineHeight: 1.6, margin: '0 0 18px' }}>{company.description}</p>
               )}
 
-              {tone && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 6 }}>Tone of voice</div>
-                  <p style={{ fontSize: 13, color: '#3A3F58', lineHeight: 1.55, margin: 0 }}>{tone}</p>
-                </div>
-              )}
-
               {themeChips.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 8 }}>Key themes</div>
@@ -231,10 +251,10 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
           {departments.length > 0 && (
             <div className="card" style={{ padding: '22px 24px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <div style={CARD_TITLE}>Your AI Agents</div>
+                <div style={CARD_TITLE}>Your Departments</div>
                 {isAdmin && <button type="button" onClick={() => navigate('/admin-console/departments')} style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>Manage →</button>}
               </div>
-              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginBottom: 12 }}>{departments.length} agents trained on {companyName} context</div>
+              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginBottom: 12 }}>{departments.length} departments configured for {companyName}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {departments.slice(0, 6).map((d, i) => (
                   <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
@@ -275,27 +295,66 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
               </div>
             )}
           </div>
+
+          {frameworks.length > 0 && (
+            <div className="card" style={{ padding: '22px 24px' }}>
+              <div style={CARD_TITLE}>⚖️ Regulatory Frameworks</div>
+              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginBottom: 6 }}>Referenced in your ESG report</div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {frameworks.map((f, i) => (
+                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none', fontSize: 13, color: '#1A1D2E', fontWeight: 600 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10B981', flexShrink: 0 }} />
+                    {f}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Next steps */}
-      <div className="card" style={{ padding: '22px 24px' }}>
-        <div style={CARD_TITLE}>Next steps</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 14 }}>
-          {[
-            { label: 'Review your company profile', dot: '#3B52E0', go: '/profile' },
-            { label: 'Upload more documents', dot: '#E8A33D', go: '/docs' },
-            ...(isAdmin ? [{ label: 'Invite your team', dot: '#0F9D6B', go: '/admin-console/users' }] : [{ label: 'View your leadership', dot: '#0F9D6B', go: '/stakeholders' }]),
-          ].map((q) => (
-            <button
-              key={q.label}
-              type="button"
-              onClick={() => navigate(q.go)}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', background: '#fff', border: '1px solid #ECEEF8', borderRadius: 10, padding: '13px 14px', cursor: 'pointer', textAlign: 'left' }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: q.dot, flexShrink: 0 }} /> {q.label}
-            </button>
-          ))}
+      {/* Quick Actions + Recent Activity */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+        {/* Quick Actions */}
+        <div className="card" style={{ padding: '22px 24px' }}>
+          <div style={CARD_TITLE}>⚡ Quick Actions</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+            {[
+              { emoji: '🌱', label: 'Generate ESG Report', go: '/reports' },
+              { emoji: '📊', label: 'Start Annual Report', go: '/annual-report' },
+              { emoji: '🤖', label: 'Ask AI Agent', go: '/ai' },
+              { emoji: '📁', label: 'Upload Document', go: '/docs' },
+            ].map((q) => (
+              <button
+                key={q.label}
+                type="button"
+                onClick={() => navigate(q.go)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', background: '#fff', border: '1px solid #ECEEF8', borderRadius: 10, padding: '13px 14px', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <span aria-hidden style={{ fontSize: 16, flexShrink: 0 }}>{q.emoji}</span> {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Activity — real workspace events */}
+        <div className="card" style={{ padding: '22px 24px' }}>
+          <div style={CARD_TITLE}>🕘 Recent Activity</div>
+          {activity.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0', marginTop: 6 }}>Nothing here yet.</div>
+          ) : (
+            <div style={{ marginTop: 8 }}>
+              {activity.map((a, i) => (
+                <div key={a.text} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
+                  <span style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: a.bg }}>{a.icon}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: '#1A1D2E', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.text}</div>
+                    <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{a.when}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
