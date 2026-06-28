@@ -61,9 +61,12 @@ export interface Company {
   reporting_sector: string | null;
   // Status of the signup-time background profile extraction (processing | done).
   profile_extraction_status?: string | null;
-  // Report style extracted (background) from the docs uploaded at onboarding —
-  // tone/theme are prose; outline is the merged table-of-contents.
+  // Report style extracted (background) from the docs uploaded at onboarding.
+  // report_tone = the prose style "directive"; report_tone_profile = the
+  // structured dimensions + verbatim exemplar sentences; theme = prose;
+  // outline = merged table-of-contents.
   report_tone?: string | null;
+  report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
   report_theme?: string | null;
   report_outline?: string[] | null;
   plan_name: string | null;

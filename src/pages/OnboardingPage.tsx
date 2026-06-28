@@ -4,7 +4,7 @@ import type { Company, Sector } from '@/types/company';
 import DepartmentSelectionStep from '@/pages/onboarding/DepartmentSelectionStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
 import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
-import UploadReportsStep from '@/pages/onboarding/UploadReportsStep';
+import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import { companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
@@ -132,9 +132,9 @@ export default function OnboardingPage() {
   // Department selection
   const [selectedDeptCodes, setSelectedDeptCodes] = useState<string[]>([]);
 
-  // Report documents picked on the final step — uploaded to the Document Bank +
-  // run through report-style extraction during the processing screen.
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  // Report documents picked on the final step (with their doc-type labels) —
+  // uploaded to the Document Bank + run through report-style extraction.
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedReportFile[]>([]);
 
   // Company-Intel extraction (onboarding doc-upload path).
   const [analyseError, setAnalyseError] = useState('');

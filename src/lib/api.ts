@@ -476,10 +476,16 @@ export const companies = {
     }),
 
   // Onboarding-time: kick off BACKGROUND tone/theme/outline extraction from the
-  // uploaded report documents. Authenticated; returns { status }. Non-fatal.
-  extractReportStyle: (companyId: string, files: File[]): Promise<{ status: string }> => {
+  // uploaded report documents. `docTypes` is parallel to `files` (annual / esg /
+  // financial / other) and drives the source rules. Returns { status }. Non-fatal.
+  extractReportStyle: (
+    companyId: string,
+    files: File[],
+    docTypes: string[] = [],
+  ): Promise<{ status: string }> => {
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
+    docTypes.forEach((t) => form.append("doc_types", t));
     return postForm(
       `/api/v1/companies/${encodeURIComponent(companyId)}/extract-report-style`,
       form,

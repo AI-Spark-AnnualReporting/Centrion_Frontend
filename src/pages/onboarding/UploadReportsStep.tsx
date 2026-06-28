@@ -1,17 +1,27 @@
 import { useRef, useState } from 'react';
 
+// Doc-type label sent to the backend so it can apply the tone-extraction source
+// rules (annual → tone+theme+outline; financial statements excluded for tone).
+export type ReportDocType = 'annual' | 'esg' | 'financial' | 'other';
+
+export interface UploadedReportFile {
+  file: File;
+  docType: ReportDocType;
+}
+
 interface RowDef {
   icon: string;
   title: string;
   desc: string;
+  docType: ReportDocType;
   required?: boolean;
 }
 
 const ROWS: RowDef[] = [
-  { icon: '📊', title: 'Annual Report', desc: 'Most recent full-year report · PDF, DOCX up to 50 MB', required: true },
-  { icon: '🌱', title: 'Sustainability / ESG Report', desc: 'GRI, TCFD or integrated report · PDF up to 50 MB' },
-  { icon: '📈', title: 'Financial Statements', desc: 'Audited financials, P&L, balance sheet · PDF up to 50 MB' },
-  { icon: '📋', title: 'Other Documents', desc: 'Board packs, governance docs, MD&A · any format' },
+  { icon: '📊', title: 'Annual Report', desc: 'Most recent full-year report · PDF, DOCX up to 50 MB', docType: 'annual', required: true },
+  { icon: '🌱', title: 'Sustainability / ESG Report', desc: 'GRI, TCFD or integrated report · PDF up to 50 MB', docType: 'esg' },
+  { icon: '📈', title: 'Financial Statements', desc: 'Audited financials, P&L, balance sheet · PDF up to 50 MB', docType: 'financial' },
+  { icon: '📋', title: 'Other Documents', desc: 'Board packs, governance docs, MD&A · any format', docType: 'other' },
 ];
 
 function UploadRow({ row, file, onPick }: { row: RowDef; file: File | null; onPick: (f: File | null) => void }) {
@@ -48,11 +58,13 @@ export default function UploadReportsStep({
   onProcess,
   onSkip,
 }: {
-  onProcess: (files: File[]) => void;
+  onProcess: (files: UploadedReportFile[]) => void;
   onSkip: () => void;
 }) {
   const [picked, setPicked] = useState<Record<string, File | null>>({});
-  const collected = ROWS.map((r) => picked[r.title]).filter((f): f is File => !!f);
+  const collected: UploadedReportFile[] = ROWS
+    .map((r) => (picked[r.title] ? { file: picked[r.title] as File, docType: r.docType } : null))
+    .filter((x): x is UploadedReportFile => !!x);
 
   return (
     <>

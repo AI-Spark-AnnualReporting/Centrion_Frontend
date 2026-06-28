@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import type { OnboardingPayload } from '@/types/auth';
 import { companies, documents } from '@/lib/api';
+import type { UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 
 const SETUP_MILESTONES = [
@@ -21,7 +22,7 @@ export default function SetupInProgressAnimation({
   files = [],
 }: {
   payload: OnboardingPayload;
-  files?: File[];
+  files?: UploadedReportFile[];
 }) {
   const navigate = useNavigate();
   const { completeOnboarding, user } = useAuth();
@@ -39,12 +40,13 @@ export default function SetupInProgressAnimation({
       .then(async () => {
         const companyId = user?.company_id;
         if (files.length && companyId) {
+          const justFiles = files.map((f) => f.file);
+          const docTypes = files.map((f) => f.docType);
           // Independent + non-fatal: a failure saving to the Document Bank must
-          // NOT skip the report-style extraction (and vice versa). Running them
-          // sequentially in one try meant an upload error swallowed the second.
+          // NOT skip the report-style extraction (and vice versa).
           await Promise.allSettled([
-            documents.upload(companyId, { files }),
-            companies.extractReportStyle(companyId, files),
+            documents.upload(companyId, { files: justFiles }),
+            companies.extractReportStyle(companyId, justFiles, docTypes),
           ]);
         }
         setApiComplete(true);
