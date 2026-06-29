@@ -70,6 +70,8 @@ export interface Company {
   // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
   report_theme?: { name: string; explanation?: string }[] | null;
   report_outline?: string[] | null;
+  // AI-extracted key highlights from the uploaded reports ({category, text}); shown on the workspace dashboard.
+  report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
   esg_frameworks?: string[] | null;
   plan_name: string | null;

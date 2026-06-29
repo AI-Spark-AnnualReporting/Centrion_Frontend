@@ -23,6 +23,17 @@ const MONTHS = [
 const ACCENT = '#4040C8';
 const AGENT_COLORS = ['#3B52E0', '#0F9D6B', '#7C3AED', '#B7791F', '#E5484D', '#5A6080'];
 
+// Key-highlight categories → icon + colours. The backend tags each highlight with one of
+// these categories (unknown → 'strategy'); the frontend owns the icon/colour for consistency.
+const HIGHLIGHT_STYLE: Record<string, { icon: string; color: string; bg: string }> = {
+  financial: { icon: '📈', color: '#0F9D6B', bg: '#E7F7F0' },
+  esg: { icon: '🌱', color: '#0D9488', bg: '#E2F6F3' },
+  governance: { icon: '🏛️', color: '#4040C8', bg: '#ECEEFF' },
+  compliance: { icon: '⚠️', color: '#B45309', bg: '#FDF3E2' },
+  strategy: { icon: '🎯', color: '#7C3AED', bg: '#F1ECFE' },
+};
+const HIGHLIGHT_FALLBACK = { icon: '•', color: '#5A6080', bg: '#F1F2F8' };
+
 interface WorkspaceDoc {
   id: string;
   filename: string;
@@ -76,6 +87,10 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   const [company, setCompany] = useState<Company | null>(companyProp);
   const [docs, setDocs] = useState<WorkspaceDoc[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  // Report-style extraction runs in the background after onboarding; these drive the
+  // "wait for it to land" poll so the card never spins forever.
+  const [stylePollDone, setStylePollDone] = useState(false); // budget elapsed without report_tone
+  const [styleRetry, setStyleRetry] = useState(0);           // bump to restart the poll
 
   // Use the company the gate fetched; fall back to fetching it ourselves.
   useEffect(() => {
@@ -96,13 +111,23 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   }, [companyId]);
 
   // Self-heal: right after onboarding the uploaded docs + report_tone are still
-  // being processed in the background, so they're absent on first render. Poll a
-  // few times until report_tone lands, updating company + docs live (no reload).
+  // being processed in the background, so they're absent on first render. Poll with a
+  // slow backoff for up to a few minutes (large reports + the LLM can be slow),
+  // updating company + docs live (no reload). If the budget elapses without
+  // report_tone, flip to a soft "taking longer" state instead of spinning forever.
   useEffect(() => {
     if (!companyId || companyProp?.report_tone) return;
     let cancelled = false;
-    let attempts = 0;
     let timer: ReturnType<typeof setTimeout>;
+    const startedAt = Date.now();
+    const MAX_WAIT_MS = 4 * 60 * 1000;
+    setStylePollDone(false);
+    const nextDelay = () => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 30_000) return 3000;   // snappy for the first 30s
+      if (elapsed < 90_000) return 6000;   // then ease off
+      return 12000;                        // slow heartbeat
+    };
     const tick = () => {
       Promise.allSettled([
         companiesApi.getMyCompany(),
@@ -112,13 +137,21 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         const fresh = c.status === 'fulfilled' ? c.value : null;
         if (fresh) setCompany(fresh);
         if (d.status === 'fulfilled') setDocs(d.value?.documents ?? []);
-        attempts += 1;
-        if (!fresh?.report_tone && attempts < 8) timer = setTimeout(tick, 3000);
+        if (fresh?.report_tone) return;                                  // done — styleReady flips
+        if (Date.now() - startedAt >= MAX_WAIT_MS) { setStylePollDone(true); return; }
+        timer = setTimeout(tick, nextDelay());
       });
     };
-    timer = setTimeout(tick, 3000);
+    timer = setTimeout(tick, nextDelay());
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [companyId, companyProp?.report_tone]);
+  }, [companyId, companyProp?.report_tone, styleRetry]);
+
+  // "Check again" from the card's taking-longer state: re-check now and restart the poll.
+  const recheckStyle = () => {
+    setStylePollDone(false);
+    setStyleRetry((n) => n + 1);
+    if (companyId) companiesApi.getMyCompany().then(setCompany).catch(() => {});
+  };
 
   // Real department agents — endpoint is admin-gated, so only admins fetch it.
   useEffect(() => {
@@ -146,6 +179,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   const styleReady = Boolean(tone || themeChips.length);
 
   const frameworks = company?.esg_frameworks ?? [];
+  const highlights = company?.report_highlights ?? [];
 
   const subParts: string[] = [];
   if (departments.length) subParts.push(`${departments.length} department${departments.length === 1 ? '' : 's'} active`);
@@ -216,15 +250,30 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
           <div style={{ height: 1, background: '#ECEEF8', margin: '14px 0' }} />
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 6 }}>
             {!styleReady ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
-                <div className="proc-ring" style={{ width: 26, height: 26, borderWidth: 2.5, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>Analysing your documents…</div>
-                  <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
-                    We're reading your uploaded reports to learn their tone, themes and structure. This appears here shortly.
+              stylePollDone ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '6px 0' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <span style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: '#FDF3E2' }}>⏳</span>
+                    <div>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>This is taking longer than usual</div>
+                      <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2, lineHeight: 1.55 }}>
+                        Large reports can take a few minutes to analyse. You can keep working — the summary appears here automatically once it's ready.
+                      </div>
+                    </div>
+                  </div>
+                  <button type="button" onClick={recheckStyle} style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: ACCENT, background: '#ECEEFF', border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer' }}>Check again</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
+                  <div className="proc-ring" style={{ width: 26, height: 26, borderWidth: 2.5, flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>Analysing your documents…</div>
+                    <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
+                      We're reading your uploaded reports to learn their tone, themes and structure. This appears here shortly.
+                    </div>
                   </div>
                 </div>
-              </div>
+              )
             ) : (
               <>
                 {company?.description && (
@@ -237,6 +286,23 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                       {themeChips.map((t) => (
                         <span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#3B52E0', background: '#ECEEFF', padding: '5px 12px', borderRadius: 20 }}>{t}</span>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {highlights.length > 0 && (
+                  <div style={{ marginTop: (company?.description || themeChips.length) ? 20 : 0 }}>
+                    <div style={{ height: 1, background: '#ECEEF8', margin: '0 0 14px' }} />
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 12 }}>Key highlights</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+                      {highlights.map((h, i) => {
+                        const s = HIGHLIGHT_STYLE[h.category] ?? HIGHLIGHT_FALLBACK;
+                        return (
+                          <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+                            <span style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: s.bg, border: `1px solid ${s.color}22` }}>{s.icon}</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#3A3F58', lineHeight: 1.5, paddingTop: 5 }}>{h.text}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
