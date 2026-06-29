@@ -47,6 +47,9 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // YYYY-MM-DD in local time — used as the deadline input's `min` so past dates can't be picked
+  const today = new Date().toLocaleDateString('en-CA');
+
   useEffect(() => {
     // Company-scoped PMs via the Centriyon admin endpoint (the SAR endpoint
     // returned PMs across every company). These user IDs are shared with SAR,
@@ -93,6 +96,10 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
     const missing = missingField();
     if (missing) {
       setErr(`${missing} is required.`);
+      return;
+    }
+    if (submissionDeadline < today) {
+      setErr('Submission Deadline must be today or later.');
       return;
     }
     setErr('');
@@ -215,7 +222,13 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             </div>
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Submission Deadline *</label>
-              <input className="inp" type="date" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} />
+              <input
+                className="inp"
+                type="date"
+                min={today}
+                value={submissionDeadline}
+                onChange={(e) => setSubmissionDeadline(e.target.value && e.target.value < today ? '' : e.target.value)}
+              />
             </div>
           </div>
 
