@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { auth } from '@/lib/api';
 import type { DepartmentCategory, DepartmentOption } from '@/types/auth';
 

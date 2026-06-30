@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useMemo } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
@@ -65,64 +66,9 @@ function ChartIcon() {
   );
 }
 
-// ─── Loading skeleton ─────────────────────────────────────────────────────────
-function Skel({ w, h }: { w: string | number; h?: number }) {
-  return (
-    <div
-      className="skel"
-      style={{ width: w, height: h ?? 16, borderRadius: 6, display: 'inline-block' }}
-    />
-  );
-}
-
+// ─── Loading state ────────────────────────────────────────────────────────────
 function LoadingState() {
-  return (
-    <div>
-      {/* Cards skeleton */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 20 }}>
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="card" style={{ padding: '16px 20px' }}>
-            <div style={{ marginBottom: 12 }}><Skel w={32} h={32} /></div>
-            <div style={{ marginBottom: 6 }}><Skel w="40%" h={26} /></div>
-            <div style={{ marginBottom: 4 }}><Skel w="60%" h={12} /></div>
-            <Skel w="70%" h={11} />
-          </div>
-        ))}
-      </div>
-      {/* Bar skeleton */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Skel w={120} h={11} />
-          <Skel w={28} h={11} />
-        </div>
-        <Skel w="100%" h={8} />
-        <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-          <Skel w={100} h={11} />
-          <Skel w={110} h={11} />
-        </div>
-      </div>
-      {/* Table skeleton */}
-      <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid #F3F4F6', display: 'flex', gap: 8 }}>
-          <Skel w={100} h={28} />
-          <Skel w={120} h={28} />
-          <Skel w={110} h={28} />
-        </div>
-        <div style={{ padding: '12px 18px' }}>
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} style={{ display: 'flex', gap: 14, marginBottom: 14, alignItems: 'center' }}>
-              <Skel w={60} h={22} />
-              <Skel w="22%" h={13} />
-              <Skel w="10%" h={13} />
-              <Skel w="10%" h={13} />
-              <Skel w="8%" h={13} />
-              <Skel w={110} h={24} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  return <Spinner pad={80} />;
 }
 
 // ─── Code tag ─────────────────────────────────────────────────────────────────

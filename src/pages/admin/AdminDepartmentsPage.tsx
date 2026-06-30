@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { adminConsole } from '@/lib/api';
 import type { Department } from '@/types/admin';
 
@@ -388,11 +389,7 @@ export default function AdminDepartmentsPage() {
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skel" style={{ height: 44, borderRadius: 8 }} />
-            ))}
-          </div>
+          <Spinner />
         ) : error ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>{error}</div>
         ) : departments.length === 0 ? (

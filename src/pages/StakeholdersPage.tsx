@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { team, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
@@ -621,42 +622,7 @@ export default function StakeholdersPage() {
 }
 
 function PeopleSkeleton() {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 14,
-        marginBottom: 18,
-      }}
-    >
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          style={{
-            background: '#fff',
-            borderRadius: 14,
-            border: '1px solid #E2E4F0',
-            padding: 18,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-            minHeight: 168,
-          }}
-        >
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div className="skel" style={{ width: 44, height: 44, borderRadius: 10 }} />
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div className="skel" style={{ height: 12, width: '70%' }} />
-              <div className="skel" style={{ height: 10, width: '50%' }} />
-              <div className="skel" style={{ height: 9, width: '40%' }} />
-            </div>
-          </div>
-          <div className="skel" style={{ height: 11, width: '60%' }} />
-        </div>
-      ))}
-    </div>
-  );
+  return <Spinner pad={60} />;
 }
 
 interface CredentialBannerProps {

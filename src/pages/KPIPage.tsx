@@ -3,10 +3,13 @@ import {
   documents as documentsApi,
   esg,
   lookups,
+  quarterlyReports,
   ApiError,
   type EsgEvidenceItem,
   type EsgEvidenceResponse,
+  type FinancialMetric,
   type FrameworkIndicator,
+  type QuarterlyFiguresResponse,
 } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { DocumentBankReport, DocumentBankResponse } from '@/types/report';
@@ -592,6 +595,273 @@ function SectionCardHeader({
   );
 }
 
+// Turn a snake/kebab key like "net_income" into "Net income" for display.
+function humanizeKey(value?: string | null): string {
+  if (!value) return '—';
+  const spaced = value.replace(/[_-]+/g, ' ').trim();
+  if (!spaced) return '—';
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+type Tone = { color: string; bg: string };
+const NEUTRAL_TONE: Tone = { color: '#5A6080', bg: 'rgba(90,96,128,.12)' };
+
+// Colour a financial statement (Income / Balance / Cash flow / Equity) so the
+// table reads at a glance, mirroring the ESG category pills.
+const STATEMENT_TONES: Record<string, Tone> = {
+  income: { color: '#2563EB', bg: 'rgba(37,99,235,.12)' },
+  balance: { color: '#0D9488', bg: 'rgba(13,148,136,.12)' },
+  cash_flow: { color: '#7C3AED', bg: 'rgba(124,58,237,.12)' },
+  cash: { color: '#7C3AED', bg: 'rgba(124,58,237,.12)' },
+  equity: { color: '#B45309', bg: 'rgba(180,83,9,.12)' },
+};
+
+const UNIT_TONES: Record<string, Tone> = {
+  currency: { color: '#059669', bg: 'rgba(5,150,105,.12)' },
+  percent: { color: '#B45309', bg: 'rgba(245,158,11,.14)' },
+  percentage: { color: '#B45309', bg: 'rgba(245,158,11,.14)' },
+  ratio: { color: '#2563EB', bg: 'rgba(37,99,235,.12)' },
+  shares: { color: '#7C3AED', bg: 'rgba(124,58,237,.12)' },
+  count: { color: '#7C3AED', bg: 'rgba(124,58,237,.12)' },
+};
+
+function toneFor(map: Record<string, Tone>, value?: string | null): Tone {
+  const key = (value ?? '').toLowerCase().replace(/[\s-]+/g, '_');
+  return map[key] ?? NEUTRAL_TONE;
+}
+
+function Pill({ text, tone }: { text: string; tone: Tone }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        fontSize: 10,
+        fontWeight: 700,
+        color: tone.color,
+        background: tone.bg,
+        padding: '3px 10px',
+        borderRadius: 999,
+        whiteSpace: 'nowrap',
+        letterSpacing: '.2px',
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+function FinMetricRow({ metric, last }: { metric: FinancialMetric; last: boolean }) {
+  const [hover, setHover] = useState(false);
+  const sTone = toneFor(STATEMENT_TONES, metric.statement);
+  const uTone = toneFor(UNIT_TONES, metric.unit_type);
+  const dash = <span style={{ color: '#9BA3C4' }}>—</span>;
+  return (
+    <tr
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        borderBottom: last ? 'none' : '1px solid #F2F3FA',
+        background: hover ? '#F8F9FF' : 'transparent',
+        transition: 'background .12s',
+      }}
+    >
+      <td style={{ padding: '11px 12px', color: '#1A1D2E', fontWeight: 600, whiteSpace: 'nowrap' }}>
+        {metric.label?.trim() || humanizeKey(metric.metric_key)}
+      </td>
+      <td style={{ padding: '11px 12px' }}>
+        {metric.code ? (
+          <span
+            style={{
+              fontFamily: "'DM Mono',monospace",
+              fontSize: 11,
+              fontWeight: 700,
+              color: sTone.color,
+              background: sTone.bg,
+              padding: '3px 8px',
+              borderRadius: 6,
+              letterSpacing: '.02em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {metric.code}
+          </span>
+        ) : (
+          dash
+        )}
+      </td>
+      <td style={{ padding: '11px 12px' }}>
+        {metric.statement ? <Pill text={humanizeKey(metric.statement)} tone={sTone} /> : dash}
+      </td>
+      <td style={{ padding: '11px 12px', color: '#5A6080', fontSize: 11.5, whiteSpace: 'nowrap' }}>
+        {humanizeKey(metric.statement_type)}
+      </td>
+      <td style={{ padding: '11px 12px' }}>
+        {metric.unit_type ? <Pill text={humanizeKey(metric.unit_type)} tone={uTone} /> : dash}
+      </td>
+    </tr>
+  );
+}
+
+// Financial-metrics catalogue table — the Quarterly-tab counterpart to the
+// GRI / IFRS indicator cards. Driven by GET /api/v1/lookups/financial-metrics.
+function FinancialMetricsCard({
+  metrics,
+  loading,
+  error,
+}: {
+  metrics: FinancialMetric[];
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <SectionCardHeader
+        icon={
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M1.5 12h11M3 12V6M6.5 12V3M10 12V8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        }
+        iconGradient="linear-gradient(135deg,#2E2E9E,#4747CC)"
+        title="Financial Metrics"
+        subtitle="Standard income, balance sheet & cash-flow line items"
+        meta={loading ? 'Loading…' : `${metrics.length} ${metrics.length === 1 ? 'metric' : 'metrics'}`}
+      />
+
+      <div style={{ padding: 18 }}>
+        {error ? (
+          <div style={{ padding: '24px 0', color: '#DC2626', fontSize: 12, textAlign: 'center' }}>
+            {error}
+          </div>
+        ) : loading ? (
+          <div style={{ padding: '32px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
+            <div className="proc-ring" style={{ margin: '0 auto 10px', width: 28, height: 28, borderWidth: 2 }} />
+            Loading financial metrics…
+          </div>
+        ) : metrics.length === 0 ? (
+          <div style={{ padding: '24px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
+            No financial metrics returned.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto', maxHeight: 460, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {['Metric', 'Code', 'Statement', 'Type', 'Unit'].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: 'left',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#5A6080',
+                        textTransform: 'uppercase',
+                        letterSpacing: '.6px',
+                        padding: '10px 12px',
+                        whiteSpace: 'nowrap',
+                        position: 'sticky',
+                        top: 0,
+                        background: '#F8F9FC',
+                        borderBottom: '1px solid #ECEEF8',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((m, i) => (
+                  <FinMetricRow
+                    key={m.id ?? m.metric_key ?? m.code ?? i}
+                    metric={m}
+                    last={i === metrics.length - 1}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The KPI Normalizer scopes to ESG and Quarterly reports; each gets a tab.
+type ReportTypeTab = 'esg' | 'quarterly';
+
+const REPORT_TYPE_TABS: { key: ReportTypeTab; label: string }[] = [
+  { key: 'esg', label: 'ESG Report' },
+  { key: 'quarterly', label: 'Quarterly Report' },
+];
+
+// Pill-bar tabs with a gradient active tab and a count badge, matching the
+// Document Bank category tabs.
+function ReportTypeTabs({
+  active,
+  counts,
+  onSelect,
+}: {
+  active: ReportTypeTab;
+  counts: Record<ReportTypeTab, number>;
+  onSelect: (tab: ReportTypeTab) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        flexWrap: 'wrap',
+        gap: 4,
+        padding: 5,
+        borderRadius: 999,
+        background: '#F0F1F8',
+      }}
+    >
+      {REPORT_TYPE_TABS.map(({ key, label }) => {
+        const isActive = key === active;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onSelect(key)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              padding: '8px 16px',
+              fontSize: 12,
+              fontWeight: 700,
+              color: isActive ? '#fff' : '#5A6080',
+              background: isActive
+                ? 'linear-gradient(135deg, #5B5BE6 0%, #9B59D0 100%)'
+                : 'transparent',
+              border: 'none',
+              borderRadius: 999,
+              boxShadow: isActive ? '0 2px 8px rgba(91,91,230,.35)' : 'none',
+              cursor: 'pointer',
+              transition: 'background .15s ease, color .15s ease',
+            }}
+          >
+            {label}
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '1px 7px',
+                borderRadius: 999,
+                color: isActive ? '#fff' : '#9BA3C4',
+                background: isActive ? 'rgba(255,255,255,.25)' : '#fff',
+              }}
+            >
+              {counts[key]}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function KPIPage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
@@ -642,11 +912,44 @@ export default function KPIPage() {
     [indicators],
   );
 
+  // ── Financial metrics catalogue (Quarterly tab) ────────────────────────
+  const [financialMetrics, setFinancialMetrics] = useState<FinancialMetric[]>([]);
+  const [financialMetricsLoading, setFinancialMetricsLoading] = useState(true);
+  const [financialMetricsError, setFinancialMetricsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setFinancialMetricsLoading(true);
+    setFinancialMetricsError(null);
+
+    lookups
+      .financialMetrics({
+        fields: ['metric_key', 'code', 'statement', 'statement_type', 'unit_type'],
+        is_active: true,
+        signal: ctrl.signal,
+      })
+      .then((list) => setFinancialMetrics(list))
+      .catch((err: unknown) => {
+        if ((err as { name?: string })?.name === 'AbortError') return;
+        setFinancialMetricsError(
+          err instanceof ApiError
+            ? `Failed to load financial metrics (${err.status})`
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load financial metrics',
+        );
+      })
+      .finally(() => setFinancialMetricsLoading(false));
+
+    return () => ctrl.abort();
+  }, []);
+
   // ── Reports / tabs ─────────────────────────────────────────────────────
   const [reports, setReports] = useState<DocumentBankReport[]>([]);
   const [reportsLoading, setReportsLoading] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
+  const [reportTypeTab, setReportTypeTab] = useState<ReportTypeTab>('esg');
 
   useEffect(() => {
     if (!companyId) {
@@ -660,13 +963,15 @@ export default function KPIPage() {
     documentsApi
       .byReport<DocumentBankResponse>(companyId)
       .then((res) => {
-        // Only keep reports that have at least one document — without a
-        // document_id we can't query the evidence endpoint for that tab.
-        const usable = (res.reports ?? []).filter((r) => r.documents.length > 0);
+        // ESG reports need a document (evidence is doc-scoped); quarterly
+        // figures are report-scoped, so quarterly reports show regardless. The
+        // two types are split into tabs; the active tab drives the picker below.
+        const usable = (res.reports ?? []).filter((r) => {
+          const t = (r.report_type ?? '').toLowerCase();
+          if (t === 'quarterly') return true;
+          return t === 'esg' && r.documents.length > 0;
+        });
         setReports(usable);
-        if (usable.length > 0) {
-          setActiveReportId((curr) => curr ?? usable[0].report_id);
-        }
       })
       .catch((err: unknown) => {
         if ((err as { name?: string })?.name === 'AbortError') return;
@@ -682,6 +987,33 @@ export default function KPIPage() {
 
     return () => ctrl.abort();
   }, [companyId]);
+
+  // Split the usable reports by type so each tab shows its own list + count.
+  const reportsByTab = useMemo(() => {
+    const groups: Record<ReportTypeTab, DocumentBankReport[]> = { esg: [], quarterly: [] };
+    for (const r of reports) {
+      const t = (r.report_type ?? '').toLowerCase();
+      if (t === 'esg') groups.esg.push(r);
+      else if (t === 'quarterly') groups.quarterly.push(r);
+    }
+    return groups;
+  }, [reports]);
+
+  const reportsForTab = reportsByTab[reportTypeTab];
+
+  // Keep the active report in sync with the selected tab: default to the tab's
+  // first report unless the current selection already belongs to it.
+  useEffect(() => {
+    if (reportsForTab.length === 0) {
+      setActiveReportId(null);
+      return;
+    }
+    setActiveReportId((curr) =>
+      curr && reportsForTab.some((r) => r.report_id === curr)
+        ? curr
+        : reportsForTab[0].report_id,
+    );
+  }, [reportsForTab]);
 
   const activeReport = useMemo(
     () => reports.find((r) => r.report_id === activeReportId) ?? null,
@@ -723,8 +1055,12 @@ export default function KPIPage() {
       setEvidence([]);
       return;
     }
+
+    const isQuarterly = (activeReport.report_type ?? '').toLowerCase() === 'quarterly';
     const documentId = activeReport.documents[0]?.id;
-    if (!documentId) {
+    // ESG evidence is keyed on a document; quarterly figures are keyed on the
+    // report itself, so only the ESG path is blocked by a missing document.
+    if (!isQuarterly && !documentId) {
       setEvidence([]);
       return;
     }
@@ -734,19 +1070,31 @@ export default function KPIPage() {
     setEvidenceLoading(true);
     setEvidenceError(null);
 
-    esg
-      .getEvidence<EsgEvidenceResponse>(companyId, {
-        document_id: documentId,
-        // The endpoint accepts an empty `pillar` to mean "all pillars".
-        pillar: '',
-        signal: ctrl.signal,
-      })
-      .then((res) => {
+    // Quarterly → financial figures (report-scoped); ESG → evidence (doc-scoped).
+    // Both share the EsgEvidenceItem row shape, so one table renders either.
+    const load: Promise<Array<{ raw_evidence?: EsgEvidenceItem | null } & Partial<EsgEvidenceItem>>> =
+      isQuarterly
+        ? quarterlyReports
+            .getFigures<QuarterlyFiguresResponse>(companyId, activeReport.report_id, {
+              signal: ctrl.signal,
+            })
+            .then((res) => res.figures ?? [])
+        : esg
+            .getEvidence<EsgEvidenceResponse>(companyId, {
+              document_id: documentId,
+              // The endpoint accepts an empty `pillar` to mean "all pillars".
+              pillar: '',
+              signal: ctrl.signal,
+            })
+            .then((res) => res.evidence ?? []);
+
+    load
+      .then((list) => {
         if (requestId !== evidenceRequestIdRef.current) return;
-        // Each row is wrapped in `{ raw_evidence: {...} }` — unwrap to the
-        // inner object that holds the actual values.
-        const rows = (res.evidence ?? [])
-          .map((e) => e?.raw_evidence)
+        // Rows may be wrapped in `{ raw_evidence: {...} }` (evidence) or be the
+        // figure object directly (figures) — unwrap to the inner object.
+        const rows = list
+          .map((e) => (e && 'raw_evidence' in e && e.raw_evidence ? e.raw_evidence : (e as EsgEvidenceItem)))
           .filter((v): v is EsgEvidenceItem => Boolean(v));
         setEvidence(rows);
         setPage(1);
@@ -755,12 +1103,13 @@ export default function KPIPage() {
       .catch((err: unknown) => {
         if ((err as { name?: string })?.name === 'AbortError') return;
         if (requestId !== evidenceRequestIdRef.current) return;
+        const label = isQuarterly ? 'figures' : 'evidence';
         setEvidenceError(
           err instanceof ApiError
-            ? `Failed to load evidence (${err.status})`
+            ? `Failed to load ${label} (${err.status})`
             : err instanceof Error
               ? err.message
-              : 'Failed to load evidence',
+              : `Failed to load ${label}`,
         );
         setEvidence([]);
       })
@@ -792,6 +1141,11 @@ export default function KPIPage() {
     setPage(1);
   };
 
+  const handleReportTypeTab = (tab: ReportTypeTab) => {
+    setReportTypeTab(tab);
+    setPage(1);
+  };
+
   return (
     <div style={{ paddingBottom: 80 }}>
       <div
@@ -810,6 +1164,16 @@ export default function KPIPage() {
           </p>
         </div>
       </div>
+
+      {!reportsLoading && !reportsError && reports.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <ReportTypeTabs
+            active={reportTypeTab}
+            counts={{ esg: reportsByTab.esg.length, quarterly: reportsByTab.quarterly.length }}
+            onSelect={handleReportTypeTab}
+          />
+        </div>
+      )}
 
       <div className="card">
         <SectionCardHeader
@@ -840,10 +1204,14 @@ export default function KPIPage() {
           <div style={{ padding: '24px 18px', color: '#9BA3C4', fontSize: 12 }}>
             No processed reports yet.
           </div>
+        ) : reportsForTab.length === 0 ? (
+          <div style={{ padding: '24px 18px', color: '#9BA3C4', fontSize: 12 }}>
+            No {reportTypeTab === 'esg' ? 'ESG' : 'Quarterly'} reports yet.
+          </div>
         ) : (
           <>
             <ReportPicker
-              reports={reports}
+              reports={reportsForTab}
               activeReportId={activeReportId}
               onSelect={handleTabClick}
             />
@@ -1079,41 +1447,51 @@ export default function KPIPage() {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14, marginTop: 14 }}>
-        <div className="card">
-          <FrameworkCardHeader
-            badge="GRI"
-            badgeGradient="linear-gradient(135deg,#065F46,#10B981)"
-            title="GRI Standards"
-            subtitle="Global Reporting Initiative"
-            count={indicatorsLoading ? null : griIndicators.length}
-            countTone="green"
-          />
-          <IndicatorList
-            indicators={griIndicators}
-            loading={indicatorsLoading}
-            error={indicatorsError}
-            emptyLabel="No GRI indicators returned."
-          />
-        </div>
+      {/* Catalogue section — ESG shows the GRI / IFRS indicator cards;
+          Quarterly shows the financial-metrics table instead. */}
+      {reportTypeTab === 'esg' ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14, marginTop: 14 }}>
+          <div className="card">
+            <FrameworkCardHeader
+              badge="GRI"
+              badgeGradient="linear-gradient(135deg,#065F46,#10B981)"
+              title="GRI Standards"
+              subtitle="Global Reporting Initiative"
+              count={indicatorsLoading ? null : griIndicators.length}
+              countTone="green"
+            />
+            <IndicatorList
+              indicators={griIndicators}
+              loading={indicatorsLoading}
+              error={indicatorsError}
+              emptyLabel="No GRI indicators returned."
+            />
+          </div>
 
-        <div className="card">
-          <FrameworkCardHeader
-            badge="IFRS"
-            badgeGradient="linear-gradient(135deg,#1E3A8A,#3B82F6)"
-            title="IFRS Sustainability"
-            subtitle="IFRS S1 · IFRS S2 disclosures"
-            count={indicatorsLoading ? null : ifrsIndicators.length}
-            countTone="blue"
-          />
-          <IndicatorList
-            indicators={ifrsIndicators}
-            loading={indicatorsLoading}
-            error={indicatorsError}
-            emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
-          />
+          <div className="card">
+            <FrameworkCardHeader
+              badge="IFRS"
+              badgeGradient="linear-gradient(135deg,#1E3A8A,#3B82F6)"
+              title="IFRS Sustainability"
+              subtitle="IFRS S1 · IFRS S2 disclosures"
+              count={indicatorsLoading ? null : ifrsIndicators.length}
+              countTone="blue"
+            />
+            <IndicatorList
+              indicators={ifrsIndicators}
+              loading={indicatorsLoading}
+              error={indicatorsError}
+              emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <FinancialMetricsCard
+          metrics={financialMetrics}
+          loading={financialMetricsLoading}
+          error={financialMetricsError}
+        />
+      )}
     </div>
   );
 }
