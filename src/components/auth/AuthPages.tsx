@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { createCompany, getSectors, register } from '@/lib/api';
+import { createCompany, extractProfileAtSignup, register } from '@/lib/api';
 import { isSarRole, redirectToSar } from '@/lib/sar';
 import type { StepOneState, StepTwoState } from '@/types/register';
-import type { Sector } from '@/types/company';
 import { StepIndicator } from '@/components/registration/StepIndicator';
 import { StepOneForm } from '@/components/registration/StepOneForm';
 import { StepTwoForm } from '@/components/registration/StepTwoForm';
@@ -203,21 +202,11 @@ export function SignupPage() {
   });
   const [stepTwo, setStepTwo] = useState<StepTwoState>({
     companyName: '',
-    sector_id: '',
     jurisdiction: 'KSA',
   });
-  const [sectors, setSectors] = useState<Sector[]>([]);
-  const [sectorsLoading, setSectorsLoading] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-
-  useEffect(() => {
-    getSectors()
-      .then((data) => setSectors(data))
-      .catch(() => setSectors([]))
-      .finally(() => setSectorsLoading(false));
-  }, []);
 
   const handleStepOneSubmit = (data: StepOneState) => {
     setError('');
@@ -256,20 +245,23 @@ export function SignupPage() {
       setError('Company name is required');
       return;
     }
-    if (!data.sector_id) {
-      setError('Please select a sector');
-      return;
-    }
 
     setStepTwo(data);
     setLoading(true);
     try {
       const companyRes = await createCompany({
         name: data.companyName,
-        sector_id: data.sector_id,
         jurisdiction: data.jurisdiction || undefined,
       });
       const companyId = companyRes.company.id;
+
+      // Kick off background profile extraction from the doc / website (best-effort
+      // — never block account creation on it).
+      try {
+        await extractProfileAtSignup(companyId, data.file ?? null, data.website);
+      } catch {
+        /* extraction is best-effort; onboarding falls back to manual */
+      }
 
       await register({
         email: stepOne.email,
@@ -306,14 +298,13 @@ export function SignupPage() {
               <span className="text-[17px] font-extrabold text-white tracking-tight">Centriyon</span>
             </div>
             <p style={{ fontSize: '11px', color: 'rgba(255,255,255,.4)', lineHeight: 1.65, marginBottom: '32px', maxWidth: '240px' }}>
-              Get started in minutes. Centriyon turns your source documents into board- and investor-ready
-              reports — GRI 2021, IFRS S1/S2, SAMA &amp; CMA pre-configured.
+              Turn your source documents into board- and investor-ready reports — GRI 2021,
+              IFRS S1/S2, SAMA &amp; CMA pre-configured.
             </p>
           </div>
           <div className="flex flex-col gap-[10px]">
-            <div className="auth-stat"><div className="auth-sv">ESG Disclosure Report</div><div className="auth-sl">CMA / Tadawul-aligned ESG disclosures</div></div>
-            <div className="auth-stat"><div className="auth-sv">Quarterly Report</div><div className="auth-sl">Document-first quarterly results</div></div>
-            <div className="auth-stat"><div className="auth-sv">Annual Report</div><div className="auth-sl">Full-year report, end-to-end</div></div>
+            <div className="auth-stat"><div className="auth-sv">One setup, always ready</div><div className="auth-sl">GRI 2021, SAMA &amp; CMA pre-configured</div></div>
+            <div className="auth-stat"><div className="auth-sv">AI per department</div><div className="auth-sl">Each dept gets its own trained agent</div></div>
           </div>
         </div>
         <div className="auth-r">
@@ -340,8 +331,6 @@ export function SignupPage() {
           ) : (
             <StepTwoForm
               initialValues={stepTwo}
-              sectors={sectors}
-              sectorsLoading={sectorsLoading}
               onSubmit={handleStepTwoSubmit}
               onBack={handleBack}
               error={error}

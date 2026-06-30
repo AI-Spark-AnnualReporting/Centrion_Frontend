@@ -3,6 +3,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { companies, getSectors } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Company, CompanyEditableFields, Sector } from '@/types/company';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 
 // Fields an admin may PATCH. Save diffs these against the loaded company so we
 // only send what actually changed.
@@ -18,6 +19,11 @@ const EDITABLE_FIELDS: (keyof CompanyEditableFields)[] = [
   'reporting_currency',
   'primary_language',
   'fiscal_year_end_month',
+  'company_profile',
+  'is_shariah',
+  'has_subsidiaries',
+  'has_sukuk',
+  'reporting_sector',
 ];
 
 const CURRENCIES: { code: string; label: string }[] = [
@@ -50,6 +56,40 @@ function fmtDate(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+}
+
+// On/off pill toggle for the company-structure booleans.
+function Toggle({
+  label, value, onChange, disabled,
+}: { label: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onChange(!value)}
+      style={{
+        flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 12px', borderRadius: 10,
+        border: `1.5px solid ${value ? '#4040C8' : '#E2E4F0'}`,
+        background: value ? '#EEEEFF' : '#fff',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontSize: 12, fontWeight: 600, color: value ? '#4040C8' : '#5A6080',
+      }}
+    >
+      <span style={{
+        width: 16, height: 16, borderRadius: 5, flexShrink: 0,
+        border: value ? 'none' : '1.5px solid #C9CDE4', background: value ? '#4040C8' : '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {value && (
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </span>
+      {label}
+    </button>
+  );
 }
 
 export function CompanyDetailsCard() {
@@ -300,6 +340,45 @@ export function CompanyDetailsCard() {
                 </select>
               </div>
               <div className="fl" />
+            </div>
+
+            {/* Section 3b — Company Profile & Structure (drives annual-report sections) */}
+            <div className="fl-row">
+              <div className="fl">
+                <label className="fl-label">Company Profile</label>
+                <select
+                  className="inp sel"
+                  value={form.company_profile ?? ''}
+                  onChange={(e) => updateField('company_profile', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select profile</option>
+                  <option value="listed">Listed</option>
+                  <option value="private">Private</option>
+                </select>
+              </div>
+              <div className="fl">
+                <label className="fl-label">Reporting Sector</label>
+                <select
+                  className="inp sel"
+                  value={form.reporting_sector ?? ''}
+                  onChange={(e) => updateField('reporting_sector', e.target.value || null)}
+                  disabled={!canEdit}
+                >
+                  <option value="">Select a reporting sector</option>
+                  {CYCLE_SECTOR_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="fl" style={{ marginBottom: 4 }}>
+              <label className="fl-label">Structure</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Toggle label="Shariah-compliant" value={!!form.is_shariah} onChange={(v) => updateField('is_shariah', v)} disabled={!canEdit} />
+                <Toggle label="Has subsidiaries" value={!!form.has_subsidiaries} onChange={(v) => updateField('has_subsidiaries', v)} disabled={!canEdit} />
+                <Toggle label="Has sukuk" value={!!form.has_sukuk} onChange={(v) => updateField('has_sukuk', v)} disabled={!canEdit} />
+              </div>
             </div>
 
             {/* Section 4 — Description (read-only for everyone) */}

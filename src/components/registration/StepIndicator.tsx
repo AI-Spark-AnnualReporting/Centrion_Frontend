@@ -5,6 +5,7 @@ interface StepIndicatorProps {
 }
 
 const ACCENT = '#4040C8';
+const SUCCESS = '#30A46C';
 const MUTED_BG = '#F1F2F6';
 const MUTED_BORDER = '#E5E7EF';
 const MUTED_TEXT = '#8A90A8';
@@ -12,14 +13,16 @@ const LABEL_ACTIVE = '#1F2340';
 
 function Circle({ state, label }: { state: 'active' | 'done' | 'inactive'; label: string }) {
   const filled = state !== 'inactive';
+  // Completed steps go green; the current step uses the accent indigo.
+  const fillColor = state === 'done' ? SUCCESS : ACCENT;
   return (
     <div
       style={{
         width: 22,
         height: 22,
         borderRadius: '50%',
-        background: filled ? ACCENT : MUTED_BG,
-        border: filled ? `1px solid ${ACCENT}` : `1px solid ${MUTED_BORDER}`,
+        background: filled ? fillColor : MUTED_BG,
+        border: filled ? `1px solid ${fillColor}` : `1px solid ${MUTED_BORDER}`,
         color: filled ? '#fff' : MUTED_TEXT,
         display: 'flex',
         alignItems: 'center',
@@ -43,7 +46,7 @@ function Circle({ state, label }: { state: 'active' | 'done' | 'inactive'; label
 
 export function StepIndicator({
   currentStep,
-  labels = ['Your Details', 'Company Setup'],
+  labels = ['Your Details', 'Company'],
 }: StepIndicatorProps) {
   const step1State: 'active' | 'done' = currentStep === 1 ? 'active' : 'done';
   const step2State: 'active' | 'inactive' = currentStep === 2 ? 'active' : 'inactive';
