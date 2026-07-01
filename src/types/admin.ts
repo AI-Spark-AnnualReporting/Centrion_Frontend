@@ -165,7 +165,7 @@ export interface InviteUserPayload {
   full_name: string;
   email: string;
   role: BackendRole;
-  // Required when role is `department_user`; omitted for every other role.
+  // Required when role is `department_user` or `hod`; omitted for every other role.
   department_id?: string | null;
 }
 
@@ -205,6 +205,12 @@ export interface Department {
   is_system?: boolean | null;
   initial_prompt?: string | null;
   system_prompt?: string | null;
+  // Head of Department for this department (SAR HOD flow). Populated by
+  // GET /admin/departments; set when an admin creates/edits an `hod` user.
+  hod_user_id?: string | null;
+  hod_name?: string | null;
+  hod_email?: string | null;
+  has_hod?: boolean | null;
 }
 
 export interface DepartmentPayload {

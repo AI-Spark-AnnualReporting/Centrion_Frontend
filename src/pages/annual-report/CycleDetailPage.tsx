@@ -11,6 +11,7 @@ import type {
   SARUser,
   SectionMode,
 } from '@/types/cycles';
+import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import {
@@ -183,7 +184,6 @@ export default function CycleDetailPage() {
 
   // Draft-state department assignment.
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-  const [departmentUsers, setDepartmentUsers] = useState<AdminUserRow[]>([]);
   const [assigned, setAssigned] = useState<DepartmentAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
@@ -275,26 +275,13 @@ export default function CycleDetailPage() {
       })
       .catch(() => setAllDepartments([]));
 
-    adminConsole
-      .listUsers({ role: 'department_user' })
-      .then((res: unknown) => {
-        const list = Array.isArray(res)
-          ? res
-          : Array.isArray((res as { users?: AdminUserRow[] })?.users)
-            ? (res as { users: AdminUserRow[] }).users
-            : [];
-        setDepartmentUsers(list);
-      })
-      .catch(() => setDepartmentUsers([]));
-
     // Hydrate from any existing assignments on the cycle (usually empty for a
-    // fresh draft).
+    // fresh draft). The dept's HOD comes from allDepartments, not the assignment.
     setAssigned(
       (overview?.departments ?? []).map((d) => ({
         department_id: d.department_id,
         department_name: d.department_name,
         department_code: d.department_code,
-        assigned_user_id: d.assigned_user_id ?? null,
       })),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -310,7 +297,6 @@ export default function CycleDetailPage() {
               department_id: dept.id,
               department_name: dept.department_name,
               department_code: dept.department_code,
-              assigned_user_id: null,
             },
           ],
     );
@@ -318,15 +304,13 @@ export default function CycleDetailPage() {
   const removeDepartment = (departmentId: string) =>
     setAssigned((prev) => prev.filter((a) => a.department_id !== departmentId));
 
-  const changeAssignedUser = (departmentId: string, userId: string) =>
-    setAssigned((prev) =>
-      prev.map((a) =>
-        a.department_id === departmentId ? { ...a, assigned_user_id: userId || null } : a,
-      ),
-    );
+  const deptHasHod = (departmentId: string) => {
+    const d = allDepartments.find((x) => x.id === departmentId);
+    return d?.has_hod ?? !!d?.hod_user_id;
+  };
 
-  const canSubmit =
-    assigned.length > 0 && assigned.every((a) => !!a.assigned_user_id);
+  // Every added department must have a Head of Department before the cycle can be submitted.
+  const canSubmit = assigned.length > 0 && assigned.every((a) => deptHasHod(a.department_id));
 
   // Submit = assign departments (bulk) THEN activate, in sequence.
   const handleSubmitCycle = async () => {
@@ -336,10 +320,7 @@ export default function CycleDetailPage() {
     setSubmitting(true);
     try {
       await sarCycles.assignDepartments(cycleId, {
-        assignments: assigned.map((a) => ({
-          department_id: a.department_id,
-          user_id: a.assigned_user_id as string,
-        })),
+        assignments: assigned.map((a) => ({ department_id: a.department_id })),
       });
       await sarCycles.activate(cycleId);
       setSubmitMsg('Cycle activated. AI-generated questions are being prepared.');
@@ -432,7 +413,7 @@ export default function CycleDetailPage() {
                 type="button"
                 onClick={handleSubmitCycle}
                 disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Assign at least one department, each with a responsible user' : undefined}
+                title={!canSubmit ? 'Add at least one department, and each must have a Head of Department assigned' : undefined}
               >
                 {submitting ? 'Submitting…' : '✓ Submit'}
               </button>
@@ -465,11 +446,9 @@ export default function CycleDetailPage() {
         <div style={{ marginBottom: 16 }}>
           <AssignDepartmentsSection
             allDepartments={allDepartments}
-            departmentUsers={departmentUsers}
             assigned={assigned}
             onAdd={addDepartment}
             onRemove={removeDepartment}
-            onChangeUser={changeAssignedUser}
           />
         </div>
       )}
