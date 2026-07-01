@@ -507,6 +507,16 @@ export const documents = {
     return postPipeline("/api/v1/documents/upload", fd, { company_id: companyId });
   },
 
+  // All documents for the company — a flat, newest-first list that INCLUDES
+  // ad-hoc uploads not tied to any report (unlike `byReport`). Each carries a
+  // time-limited signed `download_url` (null when the file is missing from
+  // storage). `expiresInSeconds` controls link lifetime (60–86400, default 1h).
+  // Backs the dashboard's has-docs gate + the post-onboarding self-heal poll.
+  list: <T = unknown>(companyId: string, expiresInSeconds = 3600) =>
+    request<T>(`/api/v1/documents/${encodeURIComponent(companyId)}`, {
+      query: { expires_in: expiresInSeconds },
+    }),
+
   get: <T = unknown>(companyId: string, documentId: string) =>
     request<T>(
       `/api/v1/documents/${encodeURIComponent(companyId)}/${encodeURIComponent(documentId)}`,
