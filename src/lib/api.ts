@@ -475,6 +475,23 @@ export const companies = {
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/questions`, {
       query: filters,
     }),
+
+  // Onboarding-time: kick off BACKGROUND tone/theme/outline extraction from the
+  // uploaded report documents. `docTypes` is parallel to `files` (annual / esg /
+  // financial / other) and drives the source rules. Returns { status }. Non-fatal.
+  extractReportStyle: (
+    companyId: string,
+    files: File[],
+    docTypes: string[] = [],
+  ): Promise<{ status: string }> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    docTypes.forEach((t) => form.append("doc_types", t));
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/extract-report-style`,
+      form,
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1866,15 +1883,60 @@ export async function getSectors(): Promise<Sector[]> {
   return data.sectors;
 }
 
+// Onboarding "Company Intel": the backend LLM-extracts the Review-Details fields
+// from a profile doc and/or a website URL. `sector_id` is the AI's constrained
+// pick from the sectors lookup (null if unsure). Nulls for anything not found.
+export interface ExtractedCompanyProfile {
+  description: string | null;
+  sector_id: string | null;
+  sector_name: string | null;
+  employee_count: number | null;
+  founded_year: number | null;
+  headquarter_city: string | null;
+  fiscal_year_end_month: number | null;
+  reporting_currency: string | null;
+  primary_language: string | null;
+  listed_exchange: string | null;
+  website_url: string | null;
+}
+
+// Single combined extraction — pass a document, a URL, or both; when both are
+// given the backend merges their text and makes ONE LLM call.
+export async function extractCompanyProfile(
+  file: File | null,
+  url?: string,
+): Promise<ExtractedCompanyProfile> {
+  const form = new FormData();
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
+  const { fields } = await postForm<{ fields: ExtractedCompanyProfile }>(
+    "/api/v1/auth/onboarding/extract-profile",
+    form,
+  );
+  return fields;
+}
+
+// Signup-time: kick off BACKGROUND profile extraction from a doc and/or URL.
+// Unauthenticated (the company is created before login). No-ops if neither given.
+export async function extractProfileAtSignup(
+  companyId: string,
+  file: File | null,
+  url?: string,
+): Promise<void> {
+  if (!file && !(url && url.trim())) return;
+  const form = new FormData();
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
+  await postForm(`/api/v1/companies/${encodeURIComponent(companyId)}/extract-profile`, form);
+}
+
 // Spec-named createCompany() — raw fetch per .claude/specs/2step_register.md.
 // Typed companies.create() namespace remains for future callers.
 export async function createCompany(
   params: CreateCompanyRequest,
 ): Promise<CreateCompanyResponse> {
-  const query = new URLSearchParams({
-    name: params.name,
-    sector_id: params.sector_id,
-  });
+  const query = new URLSearchParams({ name: params.name });
+  if (params.sector_id) query.append("sector_id", params.sector_id);
   if (params.jurisdiction) query.append("jurisdiction", params.jurisdiction);
 
   let res: Response;

@@ -1,11 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { StepTwoState } from '@/types/register';
-import type { Sector } from '@/types/company';
 
 interface StepTwoFormProps {
   initialValues: StepTwoState;
-  sectors: Sector[];
-  sectorsLoading: boolean;
   onSubmit: (data: StepTwoState) => void;
   onBack: () => void;
   error: string;
@@ -32,20 +29,34 @@ function Spinner() {
 
 export function StepTwoForm({
   initialValues,
-  sectors,
-  sectorsLoading,
   onSubmit,
   onBack,
   error,
   loading,
 }: StepTwoFormProps) {
   const [companyName, setCompanyName] = useState(initialValues.companyName);
-  const [sector_id, setSectorId] = useState(initialValues.sector_id);
   const [jurisdiction, setJurisdiction] = useState(initialValues.jurisdiction || 'KSA');
+  const [website, setWebsite] = useState(initialValues.website ?? '');
+  const [file, setFile] = useState<File | null>(initialValues.file ?? null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const pickFile = (f: File | null) => {
+    if (!f) { setFile(null); return; }
+    const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!['pdf', 'docx'].includes(ext)) {
+      setFileError('Only PDF and DOCX files are supported.');
+      setFile(null);
+      return;
+    }
+    setFileError(null);
+    setFile(f);
+  };
 
   const handleCreate = () => {
     if (loading) return;
-    onSubmit({ companyName, sector_id, jurisdiction });
+    onSubmit({ companyName, jurisdiction, website: website.trim(), file });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -67,36 +78,9 @@ export function StepTwoForm({
       </div>
 
       <div className="fl">
-        <label>Sector</label>
-        <select
-          className="inp"
-          value={sector_id}
-          onChange={(e) => setSectorId(e.target.value)}
-          disabled={sectorsLoading}
-        >
-          {sectorsLoading ? (
-            <option value="" disabled>
-              Loading sectors…
-            </option>
-          ) : (
-            <>
-              <option value="" disabled>
-                Select a sector
-              </option>
-              {sectors.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </>
-          )}
-        </select>
-      </div>
-
-      <div className="fl">
         <label>Jurisdiction</label>
         <select
-          className="inp"
+          className="inp sel"
           value={jurisdiction}
           onChange={(e) => setJurisdiction(e.target.value)}
         >
@@ -106,6 +90,55 @@ export function StepTwoForm({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="fl">
+        <label>Company website <span style={{ color: '#9BA3C4', fontWeight: 500 }}>(optional)</span></label>
+        <input
+          type="text"
+          className="inp"
+          placeholder="https://www.yourcompany.com"
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </div>
+
+      <div className="fl">
+        <label>Company profile document <span style={{ color: '#9BA3C4', fontWeight: 500 }}>(optional · PDF / DOCX)</span></label>
+        {file ? (
+          <div className="upload-z" style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '13px 16px', borderColor: '#4040C8', background: 'rgba(64,64,200,.04)' }}>
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+              <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+              <path d="M12 2v4h4" stroke="#4040C8" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</div>
+            <button type="button" onClick={() => inputRef.current?.click()} style={{ fontSize: 11, fontWeight: 700, color: '#4040C8', background: 'transparent', border: 'none', cursor: 'pointer' }}>Replace</button>
+          </div>
+        ) : (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => inputRef.current?.click()}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); pickFile(e.dataTransfer.files?.[0] ?? null); }}
+            className="upload-z"
+            style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '14px 16px', cursor: 'pointer', borderColor: dragOver ? '#4040C8' : undefined, background: dragOver ? 'rgba(64,64,200,.06)' : undefined }}
+          >
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+              <path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <span style={{ fontSize: 12, color: '#5A6080' }}>Click to upload or drag &amp; drop — PDF, DOCX</span>
+          </div>
+        )}
+        <input ref={inputRef} type="file" accept=".pdf,.docx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+        <p style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 6 }}>
+          We'll read your website / document to pre-fill your company details — review them after signing in.
+        </p>
+        {fileError && <div style={{ fontSize: 11, color: '#E5484D', marginTop: 4, fontWeight: 600 }} role="alert">{fileError}</div>}
       </div>
 
       {error && (
@@ -146,7 +179,7 @@ export function StepTwoForm({
               Creating account…
             </>
           ) : (
-            'Create Account'
+            'Create Account →'
           )}
         </button>
       </div>

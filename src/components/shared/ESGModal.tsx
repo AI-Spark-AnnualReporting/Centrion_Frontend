@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { companies, getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import type { Sector } from '@/types/company';
 import type {
   CountriesResponse,
@@ -101,6 +101,16 @@ export function ESGModal({ onClose }: ESGModalProps) {
       .then((data) => setSectors(data))
       .catch(() => setSectors([]))
       .finally(() => setSectorsLoading(false));
+  }, []);
+
+  // Pre-select the company's saved sector (set once at onboarding) — still changeable.
+  useEffect(() => {
+    companies
+      .getMyCompany()
+      .then((c) => {
+        if (c?.sector_id) setSelectedSectorId((prev) => prev || c.sector_id!);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
