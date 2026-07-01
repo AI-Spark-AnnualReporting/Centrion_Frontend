@@ -312,7 +312,8 @@ export default function CycleDetailPage() {
   // Every added department must have a Head of Department before the cycle can be submitted.
   const canSubmit = assigned.length > 0 && assigned.every((a) => deptHasHod(a.department_id));
 
-  // Submit = assign departments (bulk) THEN activate, in sequence.
+  // Submit = assign departments (bulk). The cycle stays in draft; it only goes
+  // active when the PM submits the kickoff brief and generates questions.
   const handleSubmitCycle = async () => {
     if (submitting || !canSubmit) return;
     setSubmitErr('');
@@ -322,8 +323,7 @@ export default function CycleDetailPage() {
       await sarCycles.assignDepartments(cycleId, {
         assignments: assigned.map((a) => ({ department_id: a.department_id })),
       });
-      await sarCycles.activate(cycleId);
-      setSubmitMsg('Cycle activated. AI-generated questions are being prepared.');
+      setSubmitMsg('Departments assigned. The project manager can now kick off the cycle.');
       await fetchOverview();
     } catch (e) {
       const status = e instanceof ApiError ? e.status : undefined;
@@ -332,7 +332,7 @@ export default function CycleDetailPage() {
           ? (e.body as { detail: string }).detail
           : e instanceof Error
             ? e.message
-            : 'Failed to activate cycle.';
+            : 'Failed to save departments.';
       if (status === 400 && /draft/i.test(msg)) {
         setSubmitErr('This cycle is no longer in draft. Refreshing…');
         await fetchOverview();
