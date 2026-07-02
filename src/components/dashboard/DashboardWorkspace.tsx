@@ -4,7 +4,6 @@ import { adminConsole, companies as companiesApi, documents as documentsApi } fr
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Department } from '@/types/admin';
-import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import { ReportStartCards } from '@/components/dashboard/ReportStartCards';
 
 /**
@@ -152,11 +151,9 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
     return () => { cancelled = true; };
   }, [isAdmin]);
 
-  const firstName = (user?.full_name ?? '').trim().split(' ')[0] || 'there';
   const fiscalMonth = company?.fiscal_year_end_month ? MONTHS[company.fiscal_year_end_month - 1] : '—';
   const employees = company?.employee_count ? company.employee_count.toLocaleString() : '—';
   const exchange = company?.listed_exchange || 'Not listed';
-  const sectorLabel = CYCLE_SECTOR_OPTIONS.find((s) => s.value === company?.reporting_sector)?.label ?? '—';
 
   const tone = company?.report_tone ?? null;
   // Themes are stored as {name, explanation}; the dashboard shows only the names.
@@ -169,20 +166,23 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   const subParts: string[] = [];
   if (departments.length) subParts.push(`${departments.length} department${departments.length === 1 ? '' : 's'} active`);
   if (docs.length) subParts.push(`${docs.length} document${docs.length === 1 ? '' : 's'} indexed`);
-  if (sectorLabel !== '—') subParts.push(sectorLabel);
   const subline = subParts.length ? subParts.join('  ·  ') : 'Your workspace is being set up.';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Hero */}
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '30px 32px', color: '#fff', background: 'linear-gradient(135deg, #4A47D4 0%, #3736AE 100%)', boxShadow: '0 18px 40px rgba(53,53,181,.28)' }}>
-        <div style={{ position: 'absolute', top: -60, right: -40, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.14), transparent 70%)' }} />
+      {/* Hero — company workspace masthead */}
+      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '34px 36px', color: '#fff', background: 'linear-gradient(135deg, #4A47D4 0%, #3736AE 55%, #2E2D93 100%)', boxShadow: '0 18px 40px rgba(53,53,181,.28)' }}>
+        {/* Soft depth glows */}
+        <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
+        <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
         <div style={{ position: 'relative' }}>
-          <div style={{ fontSize: 13, opacity: 0.82, fontWeight: 500 }}>Good day, {firstName} 👋</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-.6px', margin: '6px 0 8px' }}>
-            {companyName}'s workspace is live and ready.
+          <h1 style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
+            {companyName}
           </h1>
-          <p style={{ fontSize: 13, opacity: 0.88, margin: 0 }}>{subline}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, fontSize: 13, fontWeight: 500, opacity: 0.92 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
+            <span>{subline}</span>
+          </div>
         </div>
       </div>
 
