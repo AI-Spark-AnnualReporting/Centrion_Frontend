@@ -63,21 +63,6 @@ function docStatusColor(status?: string): { color: string; bg: string } {
   return { color: '#B45309', bg: 'rgba(245,158,11,.15)' };
 }
 
-function timeAgo(iso?: string | null): string {
-  if (!iso) return 'recently';
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return 'recently';
-  const s = Math.floor((Date.now() - t) / 1000);
-  if (s < 60) return 'Just now';
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d} day${d === 1 ? '' : 's'} ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
 export function DashboardWorkspace({ company: companyProp, companyName }: { company: Company | null; companyName: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -186,16 +171,6 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   if (docs.length) subParts.push(`${docs.length} document${docs.length === 1 ? '' : 's'} indexed`);
   if (sectorLabel !== '—') subParts.push(sectorLabel);
   const subline = subParts.length ? subParts.join('  ·  ') : 'Your workspace is being set up.';
-
-  // Recent Activity — real workspace events from data we already fetched.
-  const recentDoc = docs.length
-    ? [...docs].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
-    : null;
-  const activity: { icon: string; bg: string; text: string; when: string }[] = [];
-  if (company?.created_at) activity.push({ icon: '✅', bg: '#E7F7F0', text: `Workspace created for ${companyName}`, when: timeAgo(company.created_at) });
-  if (departments.length) activity.push({ icon: '🤖', bg: '#ECEEFF', text: `${departments.length} department agent${departments.length === 1 ? '' : 's'} activated`, when: timeAgo(company?.created_at) });
-  if (docs.length) activity.push({ icon: '📄', bg: '#FDF3E2', text: `${docs.length} document${docs.length === 1 ? '' : 's'} indexed`, when: timeAgo(recentDoc?.created_at) });
-  if (recentDoc) activity.push({ icon: '📊', bg: '#F1F2F8', text: `Indexed ${recentDoc.filename}`, when: timeAgo(recentDoc.created_at) });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -383,25 +358,6 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         </div>
       )}
 
-      {/* Recent Activity — real workspace events, full width */}
-      <div className="card" style={{ padding: '22px 24px' }}>
-        <div style={CARD_TITLE}>🕘 Recent Activity</div>
-        {activity.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: '#9BA3C4', padding: '8px 0', marginTop: 6 }}>Nothing here yet.</div>
-        ) : (
-          <div style={{ marginTop: 8 }}>
-            {activity.map((a, i) => (
-              <div key={a.text} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
-                <span style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: a.bg }}>{a.icon}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: '#1A1D2E', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.text}</div>
-                  <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{a.when}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
