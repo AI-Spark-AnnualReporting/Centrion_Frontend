@@ -11,13 +11,15 @@ import type { Company } from '@/types/company';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'esg' | 'brd'>('esg');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  // Admins default to the Home (workspace) tab; other roles (e.g. ir) keep ESG.
+  const [activeTab, setActiveTab] = useState<'home' | 'esg' | 'brd'>(isAdmin ? 'home' : 'esg');
   const [esgModalOpen, setEsgModalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   // Bumped on every successful schedule so the Board dashboard re-fetches its
   // meetings list and the new meeting shows up in the cards immediately.
   const [meetingsRefresh, setMeetingsRefresh] = useState(0);
-  const { user } = useAuth();
   const company = user?.company_name ?? 'Your company';
   const companyId = user?.company_id ?? null;
   const location = useLocation();
@@ -85,11 +87,14 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div className="tabs" style={{ marginBottom: 0 }}>
+            {/* Home (workspace) tab — admin only, sits to the left of ESG. */}
+            {isAdmin && <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>}
             <button className={`tab ${activeTab === 'esg' ? 'act' : ''}`} onClick={() => setActiveTab('esg')}>ESG</button>
             {/* Financial tab hidden until the financial dashboard is wired up. */}
             <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
           </div>
-          {activeTab === 'brd' ? (
+          {/* Board → Schedule Meeting, ESG → Generate Report, Home → no button. */}
+          {activeTab === 'brd' && (
             <button
               className="btn bp bsm"
               onClick={() => setScheduleOpen(true)}
@@ -100,7 +105,8 @@ export default function DashboardPage() {
               </svg>
               Schedule Meeting
             </button>
-          ) : (
+          )}
+          {activeTab === 'esg' && (
             <button
               className="btn bp bsm"
               onClick={() => setEsgModalOpen(true)}
@@ -115,6 +121,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {isAdmin && activeTab === 'home' && <DashboardWorkspace company={gate.companyData} companyName={company} />}
       {activeTab === 'esg' && <DashboardESG />}
       {activeTab === 'brd' && <DashboardBoard refreshKey={meetingsRefresh} />}
 
