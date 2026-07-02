@@ -19,7 +19,8 @@ const initials = (name?: string | null) =>
 
 // Draft-only section: admin picks the departments that participate. Each department's
 // questions route to that department's HOD (Head of Department), set in the admin console.
-// A department with no HOD is blocked. Nothing persists until the page's Submit (assign + activate).
+// A department with no HOD is blocked. Nothing persists until the page's Submit (assign only;
+// the cycle stays draft and only goes active when the PM kicks off).
 export default function AssignDepartmentsSection({
   allDepartments,
   assigned,
