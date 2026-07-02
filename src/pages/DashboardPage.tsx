@@ -85,7 +85,8 @@ export default function DashboardPage() {
           <h2 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.5px', marginBottom: 3 }}>Command Center</h2>
           <p style={{ fontSize: 12, color: '#5A6080' }}>{company} &nbsp;·&nbsp; ESG &amp; IR Intelligence Overview</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {/* Right — tab switcher with the action button stacked just beneath it (close, right-aligned) */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
           <div className="tabs" style={{ marginBottom: 0 }}>
             {/* Home (workspace) tab — admin only, sits to the left of ESG. */}
             {isAdmin && <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>}
@@ -93,7 +94,7 @@ export default function DashboardPage() {
             {/* Financial tab hidden until the financial dashboard is wired up. */}
             <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
           </div>
-          {/* Board → Schedule Meeting, ESG → Generate Report, Home → no button. */}
+          {/* ESG → Generate Report, Board → Schedule Meeting, Home → nothing. */}
           {activeTab === 'brd' && (
             <button
               className="btn bp bsm"
