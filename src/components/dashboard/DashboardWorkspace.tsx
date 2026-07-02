@@ -4,6 +4,7 @@ import { adminConsole, companies as companiesApi, documents as documentsApi } fr
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Department } from '@/types/admin';
+import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import { ReportStartCards } from '@/components/dashboard/ReportStartCards';
 
 /**
@@ -168,6 +169,48 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   if (docs.length) subParts.push(`${docs.length} document${docs.length === 1 ? '' : 's'} indexed`);
   const subline = subParts.length ? subParts.join('  ·  ') : 'Your workspace is being set up.';
 
+  // Company profile "fact sheet" — each field is added only when it has a value, so
+  // the hero panel is rich for a fully-filled company and stays tidy for a sparse one.
+  const LANG_LABELS: Record<string, string> = { en: 'English', ar: 'Arabic' };
+  const OWNERSHIP_LABELS: Record<string, string> = { listed: 'Listed', private: 'Private' };
+  // Each fact gets a dot in a rotating accent colour.
+  const DOT_COLORS = ['#4ADE80', '#5EEAD4', '#818CF8', '#FCD34D', '#F87171', '#C4B5FD', '#38BDF8', '#FB923C'];
+  const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+  const hostOf = (url: string) => url.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  const reportingSectorLabel = CYCLE_SECTOR_OPTIONS.find((s) => s.value === company?.reporting_sector)?.label ?? null;
+
+  // Ordered most→least important so that, if a company has more fields than the
+  // card should hold, the least-important ones (Website / Reporting Sector /
+  // Exchange) drop off via the slice below.
+  const facts: { label: string; value: React.ReactNode }[] = [];
+  if (company?.company_profile) facts.push({ label: 'Ownership', value: OWNERSHIP_LABELS[company.company_profile] ?? titleCase(company.company_profile) });
+  if (company?.jurisdiction) facts.push({ label: 'Jurisdiction', value: company.jurisdiction });
+  if (company?.headquarter_city) facts.push({ label: 'Headquarters', value: titleCase(company.headquarter_city) });
+  if (company?.founded_year) facts.push({ label: 'Founded', value: company.founded_year });
+  if (company?.employee_count) facts.push({ label: 'Employees', value: company.employee_count.toLocaleString() });
+  if (company?.sector_name) facts.push({ label: 'Sector', value: company.sector_name });
+  if (company?.reporting_currency) facts.push({ label: 'Currency', value: company.reporting_currency });
+  if (company?.primary_language) facts.push({ label: 'Language', value: LANG_LABELS[company.primary_language] ?? company.primary_language });
+  if (company?.fiscal_year_end_month) facts.push({ label: 'Fiscal Year End', value: MONTHS[company.fiscal_year_end_month - 1] });
+  if (company?.listed_exchange) facts.push({ label: 'Exchange', value: company.listed_exchange });
+  if (reportingSectorLabel) facts.push({ label: 'Reporting Sector', value: reportingSectorLabel });
+  if (company?.website_url) facts.push({
+    label: 'Website',
+    value: (
+      <a href={company.website_url} target="_blank" rel="noreferrer" style={{ color: '#fff', textDecoration: 'none', borderBottom: '1px solid rgba(255,255,255,.4)' }}>
+        {hostOf(company.website_url)}
+      </a>
+    ),
+  });
+  // Keep it to a 4×2 grid (2 columns, 4 rows); least-important facts drop off.
+  const MAX_FACTS = 8;
+  const shownFacts = facts.slice(0, MAX_FACTS);
+
+  const flags: string[] = [];
+  if (company?.is_shariah) flags.push('Shariah-compliant');
+  if (company?.has_sukuk) flags.push('Sukuk');
+  if (company?.has_subsidiaries) flags.push('Subsidiaries');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Hero — company workspace masthead */}
@@ -175,14 +218,42 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         {/* Soft depth glows */}
         <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
         <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
-        <div style={{ position: 'relative' }}>
-          <h1 style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
-            {companyName}
-          </h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, fontSize: 13, fontWeight: 500, opacity: 0.92 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
-            <span>{subline}</span>
+        <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 28 }}>
+          {/* Left — company identity */}
+          <div>
+            <h1 style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
+              {companyName}
+            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, fontSize: 13, fontWeight: 500, opacity: 0.92 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
+              <span>{subline}</span>
+            </div>
           </div>
+
+          {/* Right — company profile: 2-column (4×2) single-line rows, colored dot per item, no card */}
+          {(shownFacts.length > 0 || flags.length > 0) && (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, auto)', columnGap: 36, rowGap: 13 }}>
+                {shownFacts.map((f, i) => (
+                  <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 92, flexShrink: 0 }}>{f.label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                  </div>
+                ))}
+              </div>
+              {flags.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
+                  {flags.map((fl) => (
+                    <span key={fl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.16)', padding: '3px 10px', borderRadius: 20 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ADE80' }} />
+                      {fl}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
