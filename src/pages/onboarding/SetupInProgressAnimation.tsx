@@ -54,7 +54,6 @@ export default function SetupInProgressAnimation({
 }) {
   const navigate = useNavigate();
   const { completeOnboarding, user } = useAuth();
-  const companyId = user?.company_id ?? null;
 
   const [detail, setDetail] = useState('Getting your workspace ready…');
   const [percent, setPercent] = useState(0);
@@ -62,80 +61,105 @@ export default function SetupInProgressAnimation({
   const [tip, setTip] = useState(0);
   const [finishing, setFinishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const firedRef = useRef(false);
+  const [retryTick, setRetryTick] = useState(0);
+
   const doneRef = useRef(false);
+  // company_id may only land after completeOnboarding — keep the latest known one in a ref
+  // so the poll never depends on a value that's null at mount.
+  const companyIdRef = useRef<string | null>(user?.company_id ?? null);
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
+  useEffect(() => {
+    if (user?.company_id) companyIdRef.current = user.company_id;
+  }, [user?.company_id]);
 
   const enterDashboard = useCallback(() => {
     if (doneRef.current) return;
     doneRef.current = true;
-    navigate('/dashboard', { replace: true, state: { justUploaded: files.length > 0 } });
-  }, [navigate, files.length]);
+    navigate('/dashboard', { replace: true, state: { justUploaded: filesRef.current.length > 0 } });
+  }, [navigate]);
 
-  // Complete onboarding, then kick off the deep-ingest for the validated docs.
-  const fire = useCallback(() => {
-    setError(null);
-    completeOnboarding(payload)
-      .then(async () => {
-        const items = files
-          .filter((f) => f.documentId)
-          .map((f) => ({ document_id: f.documentId as string, doc_type: f.docType, period: f.period }));
-        if (!companyId || !items.length) {
-          enterDashboard(); // nothing to process → straight into the app
-          return;
-        }
-        try {
-          await companies.ingestOnboarding(companyId, items);
-        } catch {
-          enterDashboard(); // couldn't start the ingest → don't trap the user
-        }
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Setup failed.'));
-  }, [completeOnboarding, payload, companyId, files, enterDashboard]);
-
+  // One robust flow: complete onboarding → kick off the ingest → poll the REAL progress
+  // (companies.onboarding_progress / report_extraction_status) → open the dashboard.
   useEffect(() => {
-    if (firedRef.current) return;
-    firedRef.current = true;
-    fire();
-  }, [fire]);
-
-  // Poll the real backend progress off companies.onboarding_progress / status.
-  useEffect(() => {
-    if (!companyId || error) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const startedAt = Date.now();
-    const poll = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const run = async () => {
       try {
-        const c = await companies.getMyCompany();
-        if (cancelled) return;
-        const prog = c.onboarding_progress;
-        if (prog?.detail) setDetail(prog.detail);
-        if (typeof prog?.percent === 'number') setPercent((p) => Math.max(p, prog.percent as number));
-        if (c.report_extraction_status === 'done' || c.report_extraction_status === 'failed') {
-          setPercent(100);
-          setFinishing(true);
-          setTimeout(enterDashboard, 1000);
-          return;
-        }
-      } catch {
-        /* transient — keep polling */
-      }
-      if (Date.now() - startedAt >= MAX_WAIT_MS) {
-        enterDashboard();
+        await completeOnboarding(payloadRef.current);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
         return;
       }
-      timer = setTimeout(poll, 2000);
-    };
-    timer = setTimeout(poll, 1500);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [companyId, error, enterDashboard]);
+      if (cancelled) return;
 
-  // Rotate the playful gerund + the tips.
+      const cid = companyIdRef.current;
+      const items = filesRef.current
+        .filter((f) => f.documentId)
+        .map((f) => ({ document_id: f.documentId as string, doc_type: f.docType, period: f.period }));
+      if (!cid || !items.length) {
+        enterDashboard(); // nothing to process → straight into the app
+        return;
+      }
+
+      try {
+        await companies.ingestOnboarding(cid, items);
+      } catch {
+        enterDashboard(); // couldn't start the ingest → don't trap the user
+        return;
+      }
+      if (cancelled) return;
+
+      const startedAt = Date.now();
+      const poll = async () => {
+        if (cancelled) return;
+        try {
+          const c = await companies.getMyCompany();
+          if (cancelled) return;
+          const prog = c.onboarding_progress;
+          if (prog?.detail) setDetail(prog.detail);
+          if (typeof prog?.percent === 'number') setPercent((p) => Math.max(p, prog.percent as number));
+          if (c.report_extraction_status === 'done' || c.report_extraction_status === 'failed') {
+            setPercent(100);
+            setFinishing(true);
+            timer = setTimeout(() => { if (!cancelled) enterDashboard(); }, 1000);
+            return;
+          }
+        } catch {
+          /* transient — keep polling */
+        }
+        if (Date.now() - startedAt >= MAX_WAIT_MS) {
+          enterDashboard();
+          return;
+        }
+        timer = setTimeout(poll, 2000);
+      };
+      timer = setTimeout(poll, 1500);
+    };
+
+    run();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [retryTick, completeOnboarding, enterDashboard]);
+
+  // Rotate the playful gerund + the tips (text updates in place — no remount).
   useEffect(() => {
     const g = setInterval(() => setGerund((n) => (n + 1) % GERUNDS.length), 1600);
     const t = setInterval(() => setTip((n) => (n + 1) % TIPS.length), 6000);
     return () => { clearInterval(g); clearInterval(t); };
   }, []);
+
+  const retry = () => {
+    doneRef.current = false;
+    setError(null);
+    setDetail('Getting your workspace ready…');
+    setPercent(0);
+    setFinishing(false);
+    setRetryTick((t) => t + 1);
+  };
 
   if (error) {
     return (
@@ -143,7 +167,7 @@ export default function SetupInProgressAnimation({
         <div className="card" style={{ maxWidth: 440, padding: 32, textAlign: 'center' }}>
           <div style={{ fontSize: 17, fontWeight: 800, color: '#1A1D2E', marginBottom: 8 }}>Setup encountered an issue</div>
           <div style={{ fontSize: 12, color: '#5A6080', marginBottom: 18 }}>{error}</div>
-          <button type="button" className="btn bp" onClick={fire}>Try again</button>
+          <button type="button" className="btn bp" onClick={retry}>Try again</button>
         </div>
       </div>
     );
@@ -172,9 +196,9 @@ export default function SetupInProgressAnimation({
         <div style={{ fontSize: 14.5, fontWeight: 700, color: '#1A1D2E', minHeight: 20, transition: 'color .3s' }}>
           {detail}
         </div>
-        {/* Playful rotating word */}
+        {/* One playful rotating word — updates in place */}
         {!finishing && (
-          <div key={gerund} style={{ fontSize: 12.5, color: PRIMARY, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginTop: 6, animation: 'onb-rise .45s ease' }}>
+          <div style={{ fontSize: 12.5, color: PRIMARY, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginTop: 6 }}>
             {GERUNDS[gerund]}<span style={{ opacity: 0.6 }}>…</span>
           </div>
         )}
@@ -186,7 +210,7 @@ export default function SetupInProgressAnimation({
           {pct}% complete
         </div>
 
-        <div key={tip} style={{ display: 'flex', gap: 11, textAlign: 'left', padding: '13px 16px', background: 'linear-gradient(180deg,#FAFAFE,#F4F5FF)', border: '1px solid #E5E7FF', borderRadius: 12, fontSize: 12, color: '#5A6080', lineHeight: 1.55, animation: 'onb-rise .5s ease' }}>
+        <div style={{ display: 'flex', gap: 11, textAlign: 'left', padding: '13px 16px', background: 'linear-gradient(180deg,#FAFAFE,#F4F5FF)', border: '1px solid #E5E7FF', borderRadius: 12, fontSize: 12, color: '#5A6080', lineHeight: 1.55 }}>
           <span aria-hidden style={{ flexShrink: 0, fontSize: 14 }}>💡</span>
           <span><strong style={{ color: '#1A1D2E' }}>Did you know?</strong> {TIPS[tip]}</span>
         </div>
