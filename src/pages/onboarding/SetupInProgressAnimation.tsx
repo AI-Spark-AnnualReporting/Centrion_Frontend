@@ -10,7 +10,7 @@ const MAX_WAIT_MS = 6 * 60 * 1000; // fallback: open the app anyway if the job r
 
 // Playful status words that rotate under the real backend stage (Claude-Code style).
 const GERUNDS = [
-  'Booping', 'Splunking', 'Skedaddling', 'Noodling', 'Rummaging', 'Wrangling',
+  'Booping', 'Splunking', 'Skedaddling', 'Noodling', 'Rummaging', 'Wrangling', 'Purring', 'Fiddling', 'Juggling', 'Sprocketing', 'Doodling',
   'Percolating', 'Marinating', 'Tinkering', 'Untangling', 'Conjuring', 'Finagling',
   'Whittling', 'Simmering', 'Puttering', 'Schlepping', 'Bamboozling', 'Kerfuffling',
 ];
