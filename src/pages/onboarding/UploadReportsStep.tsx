@@ -38,7 +38,13 @@ type SlotState =
   | { status: 'invalid'; message: string }
   | { status: 'error'; message: string };
 
-function StatusLine({ state }: { state: SlotState | undefined }) {
+// Label the confirmed report by the SLOT the user chose (not the classifier's
+// detected_type — an integrated report can read as both annual & ESG).
+function slotLabel(docType: ReportDocType): string {
+  return docType === 'annual' ? 'Annual report' : docType === 'esg' ? 'ESG report' : 'Document';
+}
+
+function StatusLine({ state, docType }: { state: SlotState | undefined; docType: ReportDocType }) {
   if (!state) return null;
   if (state.status === 'validating') {
     return (
@@ -49,9 +55,17 @@ function StatusLine({ state }: { state: SlotState | undefined }) {
     );
   }
   const ok = state.status === 'ok';
-  const msg = state.status === 'ok'
-    ? (state.result.period ? `${labelFor(state.result.detected_type)} · ${state.result.period}` : state.result.message)
-    : state.message;
+  let msg: string;
+  if (state.status === 'ok') {
+    if (docType === 'annual' || docType === 'esg') {
+      const lbl = slotLabel(docType);
+      msg = state.result.period ? `${lbl} · ${state.result.period}` : `${lbl} confirmed`;
+    } else {
+      msg = state.result.message; // financial/other → "Ready."
+    }
+  } else {
+    msg = state.message;
+  }
   const color = ok ? '#0F9D6B' : '#DC2626';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5, fontWeight: 600, color }}>
@@ -59,10 +73,6 @@ function StatusLine({ state }: { state: SlotState | undefined }) {
       <span style={{ minWidth: 0 }}>{msg}</span>
     </div>
   );
-}
-
-function labelFor(detected: string): string {
-  return detected === 'annual' ? 'Annual report' : detected === 'esg' ? 'ESG report' : 'Document';
 }
 
 function UploadRow({
@@ -85,7 +95,7 @@ function UploadRow({
         <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {file ? file.name : row.desc}
         </div>
-        <StatusLine state={state} />
+        <StatusLine state={state} docType={row.docType} />
       </div>
       <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
         {file ? 'Replace' : 'Upload'}
