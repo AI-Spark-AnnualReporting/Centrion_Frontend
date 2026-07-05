@@ -68,13 +68,17 @@ export default function DashboardPage() {
     );
   }
 
+  // Display name: prefer the fetched company's real name over the (often empty) JWT
+  // company_name, which otherwise falls back to "Your company".
+  const displayName = gate.companyData?.name || company;
+
   if (!gate.hasReports) {
     // No reports yet: personal workspace dashboard once docs were uploaded (just
     // now or previously) or report-style was extracted; otherwise the welcome.
     const hasStyle = Boolean(gate.companyData?.report_tone);
     return justUploaded || gate.hasDocs || hasStyle
-      ? <DashboardWorkspace company={gate.companyData} companyName={company} />
-      : <DashboardWelcome company={company} />;
+      ? <DashboardWorkspace company={gate.companyData} companyName={displayName} />
+      : <DashboardWelcome company={displayName} />;
   }
 
   return (
@@ -83,7 +87,7 @@ export default function DashboardPage() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.5px', marginBottom: 3 }}>Command Center</h2>
-          <p style={{ fontSize: 12, color: '#5A6080' }}>{company} &nbsp;·&nbsp; ESG &amp; IR Intelligence Overview</p>
+          <p style={{ fontSize: 12, color: '#5A6080' }}>{displayName} &nbsp;·&nbsp; ESG &amp; IR Intelligence Overview</p>
         </div>
         {/* Right — tab switcher with the action button stacked just beneath it (close, right-aligned) */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
@@ -122,7 +126,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {isAdmin && activeTab === 'home' && <DashboardWorkspace company={gate.companyData} companyName={company} />}
+      {isAdmin && activeTab === 'home' && <DashboardWorkspace company={gate.companyData} companyName={displayName} />}
       {activeTab === 'esg' && <DashboardESG />}
       {activeTab === 'brd' && <DashboardBoard refreshKey={meetingsRefresh} />}
 

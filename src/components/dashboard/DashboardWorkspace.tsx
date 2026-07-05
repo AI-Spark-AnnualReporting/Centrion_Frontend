@@ -218,11 +218,11 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         {/* Soft depth glows */}
         <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
         <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
-        <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 28 }}>
+        <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 28 }}>
           {/* Left — company identity */}
           <div>
-            <h1 style={{ fontSize: 34, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
-              {companyName}
+            <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
+              {company?.name || companyName}
             </h1>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, fontSize: 13, fontWeight: 500, opacity: 0.92 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
