@@ -10,9 +10,9 @@ const MAX_WAIT_MS = 6 * 60 * 1000; // fallback: open the app anyway if the job r
 
 // Playful status words that rotate under the real backend stage (Claude-Code style).
 const GERUNDS = [
-  'Booping', 'Splunking', 'Skedaddling', 'Noodling', 'Rummaging', 'Wrangling', 'Purring', 'Fiddling', 'Juggling', 'Sprocketing', 'Doodling',
-  'Percolating', 'Marinating', 'Tinkering', 'Untangling', 'Conjuring', 'Finagling',
-  'Whittling', 'Simmering', 'Puttering', 'Schlepping', 'Bamboozling', 'Kerfuffling',
+  'Booping', 'Splunking', 'Skedaddling', 'Noodling', 'Rummaging', 'Wrangling', 'Purring', 'Fiddling', 'Juggling', 'Plup-Fictioning', 'Doodling',
+  'Percolating', 'Breakfast-clubbing', 'Tinkering', 'Untangling', 'Conjuring', 'Finagling',
+  'Whittling', 'Simmering', 'Puttering', 'Schlepping', 'Bamboozling', 'Meowing',
 ];
 
 const TIPS = [
@@ -163,7 +163,7 @@ export default function SetupInProgressAnimation({
 
   // Rotate the playful gerund + the tips (text updates in place — no remount).
   useEffect(() => {
-    const g = setInterval(() => setGerund((n) => (n + 1) % GERUNDS.length), 2000);
+    const g = setInterval(() => setGerund((n) => (n + 1) % GERUNDS.length), 3300);
     const t = setInterval(() => setTip((n) => (n + 1) % TIPS.length), 6000);
     return () => { clearInterval(g); clearInterval(t); };
   }, []);
