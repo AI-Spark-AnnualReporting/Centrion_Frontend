@@ -89,27 +89,44 @@ export default function SetupInProgressAnimation({
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const run = async () => {
-      try {
-        await completeOnboarding(payloadRef.current);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
-        return;
-      }
-      if (cancelled) return;
-
       const cid = companyIdRef.current;
       const items = filesRef.current
         .filter((f) => f.documentId)
         .map((f) => ({ document_id: f.documentId as string, doc_type: f.docType, period: f.period }));
+
+      // Finalize onboarding (departments etc.) + open the dashboard. Run LAST so the
+      // onboarding_completed flag — which makes ProtectedRoute redirect /onboarding →
+      // /dashboard — only flips once the ingest is done and the dashboard is a fetch.
+      const finalizeAndEnter = async () => {
+        if (cancelled) return;
+        setFinishing(true);
+        setDetail('Setting up your workspace…');
+        try {
+          await completeOnboarding(payloadRef.current);
+        } catch {
+          /* still enter — onboarding is best-effort at this point */
+        }
+        if (!cancelled) enterDashboard();
+      };
+
+      // Nothing to ingest → just finalize + enter.
       if (!cid || !items.length) {
-        enterDashboard(); // nothing to process → straight into the app
+        try {
+          await completeOnboarding(payloadRef.current);
+        } catch (e) {
+          if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
+          return;
+        }
+        if (!cancelled) enterDashboard();
         return;
       }
 
+      // Kick off the heavy ingest FIRST so the real backend stages show immediately
+      // (onboarding stays "incomplete" meanwhile, so ProtectedRoute doesn't redirect).
       try {
         await companies.ingestOnboarding(cid, items);
       } catch {
-        enterDashboard(); // couldn't start the ingest → don't trap the user
+        await finalizeAndEnter(); // couldn't start the ingest → don't trap the user
         return;
       }
       if (cancelled) return;
@@ -125,15 +142,14 @@ export default function SetupInProgressAnimation({
           if (typeof prog?.percent === 'number') setPercent((p) => Math.max(p, prog.percent as number));
           if (c.report_extraction_status === 'done' || c.report_extraction_status === 'failed') {
             setPercent(100);
-            setFinishing(true);
-            timer = setTimeout(() => { if (!cancelled) enterDashboard(); }, 1000);
+            await finalizeAndEnter();
             return;
           }
         } catch {
           /* transient — keep polling */
         }
         if (Date.now() - startedAt >= MAX_WAIT_MS) {
-          enterDashboard();
+          await finalizeAndEnter();
           return;
         }
         timer = setTimeout(poll, 2000);
@@ -147,7 +163,7 @@ export default function SetupInProgressAnimation({
 
   // Rotate the playful gerund + the tips (text updates in place — no remount).
   useEffect(() => {
-    const g = setInterval(() => setGerund((n) => (n + 1) % GERUNDS.length), 1600);
+    const g = setInterval(() => setGerund((n) => (n + 1) % GERUNDS.length), 2000);
     const t = setInterval(() => setTip((n) => (n + 1) % TIPS.length), 6000);
     return () => { clearInterval(g); clearInterval(t); };
   }, []);
@@ -196,10 +212,11 @@ export default function SetupInProgressAnimation({
         <div style={{ fontSize: 14.5, fontWeight: 700, color: '#1A1D2E', minHeight: 20, transition: 'color .3s' }}>
           {detail}
         </div>
-        {/* One playful rotating word — updates in place */}
+        {/* One playful rotating word with a little spinner beside it — updates in place */}
         {!finishing && (
-          <div style={{ fontSize: 12.5, color: PRIMARY, fontFamily: "'DM Mono', monospace", fontWeight: 700, marginTop: 6 }}>
-            {GERUNDS[gerund]}<span style={{ opacity: 0.6 }}>…</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8, fontSize: 12.5, color: PRIMARY, fontFamily: "'DM Mono', monospace", fontWeight: 700 }}>
+            <span className="proc-ring" style={{ width: 13, height: 13, borderWidth: 2, flexShrink: 0 }} />
+            <span>{GERUNDS[gerund]}<span style={{ opacity: 0.6 }}>…</span></span>
           </div>
         )}
 
