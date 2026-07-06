@@ -37,6 +37,8 @@ import type {
   PreviewSentenceUpdateResponse,
   ChatHistoryResponse,
   ChatStreamEvent,
+  QuarterlyContextPatch,
+  QuarterlyContextSaveResponse,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -957,6 +959,19 @@ export const quarterlyReports = {
   getGaps: (companyId: string, reportId: string) =>
     request<GapsResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
+    ),
+
+  // ── Confirm Context ──
+  // Persist the confirm-context answers (company_type, reporting_basis, voices)
+  // collected on the setup form, on submit and before processing runs.
+  saveContext: (
+    companyId: string,
+    reportId: string,
+    body: QuarterlyContextPatch,
+  ) =>
+    request<QuarterlyContextSaveResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/context`,
+      { method: "PATCH", body },
     ),
 
   // Raw financial_figures rows for a quarterly report. Same envelope/row shape

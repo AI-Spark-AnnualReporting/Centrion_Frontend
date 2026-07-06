@@ -1,3 +1,28 @@
+// ─────────────────────────── Confirm Context ───────────────────────────
+// The confirm-context Q/A answers, collected on the quarterly setup form and
+// persisted (before processing) via PATCH .../context. Selections are manual —
+// nothing is auto-detected or pre-selected.
+export type CompanyType = "bank" | "investment" | "energy" | "telecom";
+export type ReportingBasis =
+  | "consolidated_sar_mn"
+  | "standalone_sar_mn"
+  | "consolidated_sar_thousands";
+export type Voice = "ceo" | "chairman" | "cfo";
+
+// PATCH body — ceo is always included even though its pill is locked on.
+export interface QuarterlyContextPatch {
+  company_type: CompanyType;
+  reporting_basis: ReportingBasis;
+  voices: Voice[];
+}
+
+// PATCH response.
+export interface QuarterlyContextSaveResponse {
+  report_id: string;
+  generation_config: Record<string, unknown>;
+}
+
+// ─────────────────────────────── Coverage ──────────────────────────────
 export interface CoverageDriver {
   text: string;
   quote: string | null;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
 import type { QuarterlyReportArea, QuarterlyQuestion } from '@/lib/api';
+import type { CompanyType, ReportingBasis, Voice } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import QuarterlyQuestionnaire from '@/components/reports/QuarterlyQuestionnaire';
 
@@ -103,6 +104,135 @@ function formatPeriod(period: string): string {
 // Sentinel value for the "+ Add new…" option in the reporting-year select.
 const ADD_NEW_SENTINEL = '__add_new__';
 
+// ─── Confirm-context Q/A (embedded on this form) ──────────────────────────────
+const CTX_COMPANY_TYPES: { label: string; value: CompanyType }[] = [
+  { label: 'Bank / Financial', value: 'bank' },
+  { label: 'Investment / Capital Markets', value: 'investment' },
+  { label: 'Energy / Industrial', value: 'energy' },
+  { label: 'Telecom / Tech', value: 'telecom' },
+];
+
+// Reporting basis + presentation unit. The label carries only the basis; the
+// period prefix (e.g. "Q3 2026 · ") is added at render time from the picker.
+const CTX_BASIS: { label: string; value: ReportingBasis }[] = [
+  { label: 'consolidated · SAR mn', value: 'consolidated_sar_mn' },
+  { label: 'standalone · SAR mn', value: 'standalone_sar_mn' },
+  { label: 'consolidated · SAR thousands', value: 'consolidated_sar_thousands' },
+];
+
+const CTX_VOICES: { label: string; value: Voice; locked?: boolean }[] = [
+  { label: 'CEO statement · always', value: 'ceo', locked: true },
+  { label: 'Chairman statement', value: 'chairman' },
+  { label: 'CFO statement', value: 'cfo' },
+];
+
+// Capsule pill — indigo border + light fill when selected; locked pills (CEO)
+// render dashed/muted and are non-interactive.
+function CtxPill({
+  label,
+  selected,
+  locked,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  locked?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      aria-pressed={selected}
+      onClick={locked ? undefined : onClick}
+      style={{
+        padding: '9px 16px',
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        transition: 'border-color .15s, background .15s, color .15s',
+        cursor: locked ? 'default' : 'pointer',
+        background: locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
+        color: locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
+        border: locked
+          ? '1.5px dashed #4040C8'
+          : `1.5px solid ${selected ? '#4040C8' : '#E4E6F1'}`,
+      }}
+      onMouseEnter={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#C4C7F0';
+          e.currentTarget.style.background = '#FAFAFF';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#E4E6F1';
+          e.currentTarget.style.background = '#fff';
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Numbered question card — mirrors the QuarterlyQuestionnaire sub-card style.
+function CtxCard({
+  n,
+  title,
+  helper,
+  children,
+}: {
+  n: number;
+  title: string;
+  helper?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: '1px solid #ECEEF8',
+        borderRadius: 14,
+        padding: '14px 16px 16px',
+        background: '#fff',
+        marginBottom: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+        <span
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 8,
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12,
+            fontWeight: 800,
+            color: '#4040C8',
+            background: '#EEEEFF',
+          }}
+        >
+          {n}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E', lineHeight: 1.4 }}>
+            {title}
+          </div>
+          {helper && (
+            <div style={{ fontSize: 12, color: '#5A6080', marginTop: 3, lineHeight: 1.4 }}>
+              {helper}
+            </div>
+          )}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginLeft: 34 }}>{children}</div>
+    </div>
+  );
+}
+
 // Minimal shape of an existing quarterly report needed by the year dropdown.
 interface QuarterlyReportOption {
   id: string;
@@ -185,6 +315,19 @@ export default function QuarterlyReportForm({
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [questionsError, setQuestionsError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  // Confirm-context answers (embedded cards). Manual selection — nothing is
+  // auto-detected or pre-selected. company_type + reporting_basis are required
+  // to generate; voices defaults to the always-on CEO statement. Saved via the
+  // context PATCH on submit, before processing.
+  const [companyType, setCompanyType] = useState<CompanyType | null>(null);
+  const [reportingBasis, setReportingBasis] = useState<ReportingBasis | null>(null);
+  const [voices, setVoices] = useState<Voice[]>(['ceo']);
+
+  const toggleVoice = (v: Voice) => {
+    if (v === 'ceo') return; // always on, locked
+    setVoices((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+  };
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -529,12 +672,21 @@ export default function QuarterlyReportForm({
   const hasFiles = files.length > 0;
   const hasAreas = selectedAreas.length > 0;
 
+  // New-report submit also requires the confirm-context answers (company type +
+  // reporting basis; voices always has CEO).
+  const contextComplete = companyType != null && reportingBasis != null;
+
   const canGenerate =
     !!companyId &&
     !isSubmittingGenerate &&
     (isOpenMode ||
       (isUploadMode && hasFiles) ||
-      (!selectedReportId && customYear != null && hasFiles && hasAreas && !langBlocked));
+      (!selectedReportId &&
+        customYear != null &&
+        hasFiles &&
+        hasAreas &&
+        !langBlocked &&
+        contextComplete));
 
   const disabledReason = isOpenMode
     ? undefined
@@ -552,7 +704,11 @@ export default function QuarterlyReportForm({
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : undefined;
+                : companyType == null
+                  ? 'Select the company type to continue'
+                  : reportingBasis == null
+                    ? 'Select the reporting basis to continue'
+                    : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -611,8 +767,9 @@ export default function QuarterlyReportForm({
       return;
     }
 
-    // Branch C — new report.
-    if (customYear == null) return;
+    // Branch C — new report. Requires the confirm-context answers (guaranteed by
+    // `canGenerate`, re-checked here to narrow the nullable state types).
+    if (customYear == null || companyType == null || reportingBasis == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
@@ -628,7 +785,16 @@ export default function QuarterlyReportForm({
         areas: selectedAreas,
         content_language: language,
       })
-      .then((handle) => {
+      .then(async (handle) => {
+        if (requestId !== genRequestIdRef.current) return;
+        // Persist the confirm-context answers against the freshly created report
+        // before processing runs. Required — a failure here blocks navigation so
+        // the user can retry (surfaced via the shared generate error banner).
+        await quarterlyReportsApi.saveContext(companyId, handle.reportId, {
+          company_type: companyType,
+          reporting_basis: reportingBasis,
+          voices,
+        });
         if (requestId !== genRequestIdRef.current) return;
         const processingState: ProcessingPageState = {
           runId: handle.runId,
@@ -1357,6 +1523,79 @@ export default function QuarterlyReportForm({
             }}
           >
             {languageWarning}
+          </div>
+        )}
+
+        {/* Confirm context — new-report mode only. Manual selection; saved via
+            the context PATCH on submit, before processing. */}
+        {!selectedReportId && (
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              <span style={{ width: 18, height: 2, background: '#4040C8', borderRadius: 2 }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: 1.2,
+                  textTransform: 'uppercase',
+                  color: '#4040C8',
+                }}
+              >
+                Confirm Context
+              </span>
+            </div>
+
+            {/* Card 1 — company type (required) */}
+            <CtxCard
+              n={1}
+              title="What kind of company is this report for?"
+              helper="Sets which sections are required — banks vs non-banks differ."
+            >
+              {CTX_COMPANY_TYPES.map((c) => (
+                <CtxPill
+                  key={c.value}
+                  label={c.label}
+                  selected={companyType === c.value}
+                  onClick={() => setCompanyType(c.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 2 — reporting period & basis (required) */}
+            <CtxCard n={2} title="Confirm the reporting period & basis.">
+              {CTX_BASIS.map((b) => (
+                <CtxPill
+                  key={b.value}
+                  label={customYear != null ? `${quarter} ${customYear} · ${b.label}` : b.label}
+                  selected={reportingBasis === b.value}
+                  onClick={() => setReportingBasis(b.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 3 — executive voices (multi-select; CEO locked-on) */}
+            <CtxCard
+              n={3}
+              title="Which executive voices will the report carry?"
+              helper="CEO statement is always included; add the others if your report uses them."
+            >
+              {CTX_VOICES.map((v) => (
+                <CtxPill
+                  key={v.value}
+                  label={v.label}
+                  locked={v.locked}
+                  selected={v.locked ? true : voices.includes(v.value)}
+                  onClick={() => toggleVoice(v.value)}
+                />
+              ))}
+            </CtxCard>
           </div>
         )}
 
