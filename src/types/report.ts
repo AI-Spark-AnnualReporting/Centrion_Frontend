@@ -320,6 +320,33 @@ export interface PipelineInputSummary {
   trigger: string;
 }
 
+// Terminal payload the quarterly pipeline emits on `status: "failed"` when the
+// requested reporting period isn't present in the uploaded document(s). This is
+// a RECOVERABLE user-input error, not a crash: the backend has already wiped the
+// half-built report and its uploads server-side (`cleaned_up: true`), so the
+// frontend must NOT call any cleanup/delete endpoint — it only routes the user
+// back to the first screen to correct the quarter/year and re-upload. Detect by
+// `error_code`, never by matching the message text.
+export interface PeriodNotFoundSummary {
+  error_code: "period_not_found";
+  requested_period: string;
+  available_periods: string[];
+  user_action: "correct_input" | (string & {});
+  cleaned_up: boolean;
+  message: string;
+}
+
+// Narrow an AgentRun's output_summary to the period_not_found payload. Keys off
+// `error_code` so it's independent of the human-readable message.
+export function isPeriodNotFound(
+  summary: PipelineOutputSummary | PeriodNotFoundSummary | null | undefined,
+): summary is PeriodNotFoundSummary {
+  return (
+    !!summary &&
+    (summary as PeriodNotFoundSummary).error_code === "period_not_found"
+  );
+}
+
 export interface AgentRun {
   run_id: string;
   agent_name: string;
@@ -329,7 +356,7 @@ export interface AgentRun {
   elapsed_seconds: number;
   completed_at: string | null;
   input_summary: PipelineInputSummary | null;
-  output_summary: PipelineOutputSummary | null;
+  output_summary: PipelineOutputSummary | PeriodNotFoundSummary | null;
   error_message: string | null;
 }
 

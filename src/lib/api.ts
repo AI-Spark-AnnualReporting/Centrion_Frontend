@@ -342,6 +342,19 @@ export interface QuarterlyReportAreasResponse {
   areas: QuarterlyReportArea[];
 }
 
+// One single-select questionnaire item on the Generate Quarterly Report screen.
+// The API is the source of truth: `id` is the answer key, `options` are the
+// (up to 4) mutually-exclusive choices. Render dynamically — never hardcode.
+export interface QuarterlyQuestion {
+  id: string;
+  text: string;
+  options: string[];
+}
+
+export interface QuarterlyQuestionsResponse {
+  questions: QuarterlyQuestion[];
+}
+
 // Loose aliases for values sourced from API lookups.
 export type Jurisdiction = string;
 export type AgentClass =
@@ -861,6 +874,13 @@ export const reports = {
   getQuarterlyReportAreas: () =>
     request<QuarterlyReportAreasResponse>(
       `/api/v1/reports/quarterly/report-areas`,
+    ),
+
+  // Source of truth for the on-form questionnaire (single-select). Company-
+  // scoped so the backend can tailor questions to the company's context.
+  getQuarterlyQuestions: (companyId: string) =>
+    request<QuarterlyQuestionsResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/questions`,
     ),
 
   // Async: see generate(). Stamps report_type='quarterly' server-side so the

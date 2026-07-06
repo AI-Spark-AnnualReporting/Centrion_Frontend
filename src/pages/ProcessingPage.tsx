@@ -9,7 +9,37 @@ import { reports as reportsApi } from "@/lib/api";
 import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
 import { QuarterlyGeneratingScreen } from "@/components/reports/QuarterlyGeneratingScreen";
 import { useAuth } from "@/context/AuthContext";
+import { isPeriodNotFound } from "@/types/report";
 import type { CoverageResponse } from "@/types/report";
+
+// Payload the quarterly first screen reads to pop the period_not_found modal
+// and pre-fill the pickers. Handed over via router state on redirect.
+export interface QuarterlyPeriodErrorState {
+  requestedPeriod: string;
+  availablePeriods: string[];
+  message: string;
+}
+
+// State handed to the quarterly first screen when the user is sent back to
+// correct a period_not_found error. `prefill*` seeds the pickers (parsed from
+// `available_periods[0]`); `periodError` drives the modal shown over the form.
+export interface QuarterlyPrefillState {
+  prefillQuarter?: string;
+  prefillYear?: number;
+  periodError?: QuarterlyPeriodErrorState;
+}
+
+// "Q1-2026" / "Q1 2026" → { prefillQuarter: "Q1", prefillYear: 2026 }. Returns an
+// empty object when the string doesn't match, so a malformed period is harmless.
+function parsePeriod(period: string | undefined): {
+  prefillQuarter?: string;
+  prefillYear?: number;
+} {
+  if (!period) return {};
+  const m = period.match(/Q([1-4])[-\s]?(\d{4})/i);
+  if (!m) return {};
+  return { prefillQuarter: `Q${m[1]}`, prefillYear: Number(m[2]) };
+}
 
 export interface ProcessingPageState {
   runId: string;
@@ -62,6 +92,31 @@ export default function ProcessingPage() {
       clearActivePipeline();
     }
   }, [poll.phase]);
+
+  // period_not_found handler — recoverable user-input error. The backend has
+  // already wiped the report + uploads (cleaned_up: true), so we make NO cleanup
+  // call. We route back to the quarterly first screen, handing over the error
+  // (for a modal shown over the form) and a prefill parsed from the first
+  // available period. The dead report_id/run_id are simply discarded.
+  useEffect(() => {
+    if (poll.phase !== "failed" || handedOffRef.current) return;
+    const summary = poll.run?.output_summary ?? null;
+    if (!isPeriodNotFound(summary)) return;
+
+    handedOffRef.current = true;
+    clearActivePipeline();
+    navigate("/reports/quarterly", {
+      replace: true,
+      state: {
+        ...parsePeriod(summary.available_periods?.[0]),
+        periodError: {
+          requestedPeriod: summary.requested_period,
+          availablePeriods: summary.available_periods ?? [],
+          message: summary.message,
+        },
+      } satisfies QuarterlyPrefillState,
+    });
+  }, [poll, navigate]);
 
   // Completion handler — fetch coverage, then navigate.
   useEffect(() => {
@@ -139,9 +194,16 @@ export default function ProcessingPage() {
   // Quarterly reports get the financial-extraction screen (progress ring +
   // figures/drivers/comparatives + step checklist). Same poll, different skin.
   if (state.reportType === "quarterly") {
+    const summary = poll.run?.output_summary ?? null;
+    const periodError = isPeriodNotFound(summary);
+    // Narrowed pipeline metrics (never the period_not_found payload).
+    const metrics = periodError ? null : summary;
+
     return (
       <QuarterlyGeneratingScreen
-        phase={phase}
+        // On period_not_found the redirect effect is navigating away this same
+        // tick — keep the running skin so the generic failure card never flashes.
+        phase={periodError ? "running" : phase}
         errorMessage={phase === "failed" ? poll.run.error_message : null}
         // "Run in background" returns to the Quarterly reports page.
         onCancel={() => navigate("/reports/quarterly", { replace: true })}
@@ -150,7 +212,7 @@ export default function ProcessingPage() {
         period={state.period ?? null}
         companyName={user?.company_name ?? null}
         nodes={poll.nodes}
-        outputSummary={poll.run?.output_summary ?? null}
+        outputSummary={metrics}
       />
     );
   }

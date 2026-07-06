@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea } from '@/lib/api';
+import type { QuarterlyReportArea, QuarterlyQuestion } from '@/lib/api';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
+import QuarterlyQuestionnaire from '@/components/reports/QuarterlyQuestionnaire';
 
 // Quarter options for the reporting-period selector.
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -122,17 +123,40 @@ export default function QuarterlyReportForm({
   periodsLoading = false,
 }: QuarterlyReportFormProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Handed over when the user is routed back here to correct a period_not_found
+  // error: `prefill*` seeds the pickers (parsed from the first available period)
+  // and `periodError` drives the modal shown over this form. Read once.
+  const nav = location.state as {
+    prefillQuarter?: string;
+    prefillYear?: number;
+    periodError?: {
+      requestedPeriod: string;
+      availablePeriods: string[];
+      message: string;
+    };
+  } | null;
+  const prefillQuarter = QUARTERS.includes(nav?.prefillQuarter as Quarter)
+    ? (nav?.prefillQuarter as Quarter)
+    : null;
+  const prefillYear =
+    typeof nav?.prefillYear === 'number' ? nav.prefillYear : null;
+
+  // The period_not_found modal shown over the form. Seeded from router state and
+  // dismissible; once closed it stays closed for this mount.
+  const [periodError, setPeriodError] = useState(nav?.periodError ?? null);
 
   // Collapsible card — mirrors the ESG "Validate Report" card, open by default.
   const [genOpen, setGenOpen] = useState(true);
 
   // Reporting-year dropdown state — mirrors the ESG flow: pick an existing
   // report or "+ Add new…" → year picker.
-  const [customYear, setCustomYear] = useState<number | null>(null);
+  const [customYear, setCustomYear] = useState<number | null>(prefillYear);
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
-    existingReports.length === 0,
+    prefillYear == null && existingReports.length === 0,
   );
-  const [quarter, setQuarter] = useState<Quarter>('Q1');
+  const [quarter, setQuarter] = useState<Quarter>(prefillQuarter ?? 'Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
   // Language the generated report is written in. UI stays English/LTR — this
@@ -153,6 +177,14 @@ export default function QuarterlyReportForm({
   const [areasError, setAreasError] = useState<string | null>(null);
   // Area whose full metric list is shown in the popup (null = closed).
   const [metricsModal, setMetricsModal] = useState<AreaCard | null>(null);
+
+  // On-form questionnaire (single-select). Questions come from the API; answers
+  // are kept here as questionId → chosen option. UI-only for now — see the
+  // TODO in triggerGenerate for wiring these into the payload later.
+  const [questions, setQuestions] = useState<QuarterlyQuestion[]>([]);
+  const [questionsLoading, setQuestionsLoading] = useState(true);
+  const [questionsError, setQuestionsError] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -206,6 +238,42 @@ export default function QuarterlyReportForm({
     };
   }, []);
 
+  // Fetch the questionnaire once the company is known. Fail-soft: on error we
+  // keep an empty list so the section simply doesn't render (never blocks the
+  // form). `companyId` scopes the questions to the company.
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    setQuestionsLoading(true);
+    setQuestionsError(null);
+    reportsApi
+      .getQuarterlyQuestions(companyId)
+      .then((res) => {
+        if (cancelled) return;
+        setQuestions(res.questions ?? []);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setQuestions([]);
+        setQuestionsError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load questions. Please retry.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setQuestionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  // Record a single-select answer (replaces any prior choice for that question).
+  const selectAnswer = (questionId: string, option: string) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: option }));
+  };
+
   // Fetch coverage for the selected existing report to get doc count + period label.
   useEffect(() => {
     if (!selectedReportId || !companyId) return;
@@ -254,6 +322,26 @@ export default function QuarterlyReportForm({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [metricsModal]);
+
+  // Close the period_not_found modal on Escape.
+  useEffect(() => {
+    if (!periodError) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPeriodError(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [periodError]);
+
+  // Router state lives in window.history.state, which SURVIVES a page refresh —
+  // so without this the modal (and prefill) would re-appear on every reload. We
+  // captured everything into local state / initial state above, so strip the
+  // history entry's state once on mount.
+  useEffect(() => {
+    if (nav) navigate(location.pathname, { replace: true, state: null });
+    // Mount-only: `nav` is read once and cleared here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Drop any selected codes that the API no longer returns (defensive — keeps
   // the generate payload in sync with the rendered cards).
@@ -529,6 +617,9 @@ export default function QuarterlyReportForm({
     setGenError(null);
     setIsSubmittingGenerate(true);
 
+    // TODO(questionnaire): the single-select answers are captured in `answers`
+    // (questionId → option). Once the backend accepts them, add e.g.
+    // `questionnaire: answers` to this payload and to GenerateQuarterlyBody.
     reportsApi
       .generateQuarterly(companyId, {
         files,
@@ -1030,6 +1121,18 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
+        {/* Questionnaire — new-report mode only (mirrors Report Areas). Renders
+            nothing when there are no questions. */}
+        {!selectedReportId && (questionsLoading || questions.length > 0) && (
+          <QuarterlyQuestionnaire
+            questions={questions}
+            answers={answers}
+            onSelect={selectAnswer}
+            loading={questionsLoading}
+            error={questionsError}
+          />
+        )}
+
         {/* Upload — shown for new reports and upload-to-existing mode */}
         {!isOpenMode && (
           <div style={{ marginBottom: 18 }}>
@@ -1490,6 +1593,157 @@ export default function QuarterlyReportForm({
                   </>
                 )}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Period-not-found modal — shown over the (pre-filled) form when a run
+          failed because the requested quarter/year wasn't in the documents. */}
+      {periodError && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Requested period not found"
+          onClick={() => setPeriodError(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M10 6v5M10 14h.01"
+                    stroke="#D97706"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                That period isn't in your documents
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 13,
+                  color: '#3A3F5C',
+                  lineHeight: 1.6,
+                }}
+              >
+                {periodError.message ||
+                  `The uploaded document doesn't contain data for ${formatPeriod(
+                    periodError.requestedPeriod,
+                  )}. Correct the quarter/year and upload again.`}
+              </p>
+
+              {periodError.availablePeriods.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '.5px',
+                      textTransform: 'uppercase',
+                      color: '#9BA3C4',
+                      marginBottom: 8,
+                    }}
+                  >
+                    Available period
+                    {periodError.availablePeriods.length === 1 ? '' : 's'}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {periodError.availablePeriods.map((p) => (
+                      <span
+                        key={p}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '6px 12px',
+                          borderRadius: 999,
+                          background: '#EEF0FB',
+                          border: '1px solid #DDE0F2',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#3A3F5C',
+                        }}
+                      >
+                        {formatPeriod(p)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  marginTop: 22,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPeriodError(null)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Correct &amp; re-upload
+                </button>
+              </div>
             </div>
           </div>
         </div>
