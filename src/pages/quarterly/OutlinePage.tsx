@@ -1,0 +1,827 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { GripVertical, Lock } from 'lucide-react';
+import { Spinner } from '@/components/shared/Spinner';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
+import { quarterlyReports, ApiError } from '@/lib/api';
+import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
+import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
+
+// ─── colours (matches CoverageMapPage / GapQuestionsPage conventions) ─────────
+const ACCENT = '#4040C8';
+const GREEN = '#10B981';
+const MUTED = '#6B7280';
+const DARK = '#1F2340';
+
+type Preset = 'required' | 'recommended' | 'everything';
+type SaveState = 'idle' | 'saving' | 'saved';
+
+// ─── Feeder badge — the per-section "where the content comes from" signal ─────
+function FeederBadge({ feeder }: { feeder: OutlineSection['feeder'] }) {
+  switch (feeder.status) {
+    case 'ready':
+      return (
+        <span className="badge b-gn">
+          From {feeder.document_name ?? 'document'}
+        </span>
+      );
+    case 'template':
+      return <span className="badge b-gy">System template</span>;
+    case 'external':
+      return <span className="badge b-am">External data</span>;
+    case 'needs_input':
+      // No orange badge class exists — inline it.
+      return (
+        <span
+          className="badge"
+          style={{ background: 'rgba(249,115,22,.12)', color: '#EA580C' }}
+        >
+          Needs input{feeder.message ? `: ${feeder.message}` : ''}
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
+// ─── Custom checkbox button (mirrors QuarterlyReportForm's report-area check) ──
+function CheckBox({
+  checked,
+  disabled,
+  onToggle,
+  label,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle?: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-disabled={disabled || undefined}
+      aria-label={label}
+      onClick={
+        disabled
+          ? undefined
+          : (e) => {
+              e.stopPropagation();
+              onToggle?.();
+            }
+      }
+      style={{
+        width: 18,
+        height: 18,
+        padding: 0,
+        borderRadius: 5,
+        flexShrink: 0,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        border: checked ? 'none' : '1.5px solid #C9CDE4',
+        background: checked ? ACCENT : '#fff',
+        opacity: disabled && !checked ? 0.6 : 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {checked && (
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+          <path
+            d="M2.5 6.2l2.2 2.2L9.5 3.6"
+            stroke="#fff"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+// ─── Page shell (stepper + bounded flex column) ───────────────────────────────
+function Shell({
+  reportId,
+  children,
+}: {
+  reportId?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100% - 48px)',
+        background: '#fff',
+        borderRadius: 12,
+        overflow: 'hidden',
+      }}
+    >
+      {reportId && <QuarterlyReportStepper activeStep={6} reportId={reportId} />}
+      {children}
+    </div>
+  );
+}
+
+// A single row (used for both required and optional groups).
+function SectionRow({
+  section,
+  number,
+  locked,
+  isRequired,
+  dragging,
+  dragOver,
+  onToggle,
+  dragHandleProps,
+}: {
+  section: OutlineSection;
+  number: number;
+  locked: boolean; // whole-outline frozen
+  isRequired: boolean;
+  dragging?: boolean;
+  dragOver?: boolean;
+  onToggle?: () => void;
+  dragHandleProps?: React.HTMLAttributes<HTMLSpanElement> & {
+    draggable?: boolean;
+  };
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '11px 14px',
+        borderRadius: 12,
+        border: `1px solid ${dragOver ? ACCENT : '#E8EAF3'}`,
+        background: dragOver ? 'rgba(64,64,200,.05)' : isRequired ? '#FAFBFE' : '#fff',
+        opacity: dragging ? 0.4 : 1,
+        transition: 'border-color .12s, background .12s, opacity .12s',
+      }}
+    >
+      {/* Lead: lock icon (required) or grip handle (optional) */}
+      {isRequired ? (
+        <Lock size={14} color="#9BA3C4" style={{ flexShrink: 0 }} aria-hidden />
+      ) : (
+        <span
+          {...dragHandleProps}
+          role="button"
+          tabIndex={locked ? -1 : 0}
+          aria-label={`Reorder ${section.title}`}
+          title={locked ? undefined : 'Drag to reorder (or use arrow keys)'}
+          style={{
+            display: 'inline-flex',
+            flexShrink: 0,
+            cursor: locked ? 'default' : 'grab',
+            color: locked ? '#C9CDE4' : '#9BA3C4',
+            outlineOffset: 2,
+          }}
+        >
+          <GripVertical size={16} aria-hidden />
+        </span>
+      )}
+
+      <CheckBox
+        checked={section.included}
+        disabled={locked || isRequired}
+        onToggle={onToggle}
+        label={
+          section.included
+            ? `Exclude ${section.title}`
+            : `Include ${section.title}`
+        }
+      />
+
+      <span
+        style={{
+          width: 22,
+          fontSize: 12,
+          fontWeight: 700,
+          color: '#9BA3C4',
+          flexShrink: 0,
+          fontVariantNumeric: 'tabular-nums',
+          textAlign: 'right',
+        }}
+      >
+        {number}
+      </span>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13.5,
+            fontWeight: 700,
+            color: DARK,
+            lineHeight: 1.35,
+          }}
+        >
+          {section.title}
+        </div>
+        <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
+          {section.part_label}
+        </div>
+      </div>
+
+      {/* Badges */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <FeederBadge feeder={section.feeder} />
+        {isRequired && <span className="badge b-gy">REQUIRED</span>}
+        {isRequired && <span className="badge b-gy">LOCKED</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+export default function OutlinePage() {
+  const { reportId } = useParams<{ reportId: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? null;
+
+  // Required sections are pinned+sorted; optionals are user-orderable.
+  const [required, setRequired] = useState<OutlineSection[]>([]);
+  const [optionals, setOptionals] = useState<OutlineSection[]>([]);
+  const [totalCatalogue, setTotalCatalogue] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [submitting, setSubmitting] = useState(false);
+
+  // Snapshot of the backend's default `included` flags (for the Recommended preset).
+  const defaultIncludedRef = useRef<Record<string, boolean>>({});
+  // Debounce + latest-wins guards for autosave.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveSeqRef = useRef(0);
+  // Drag state.
+  const dragIndexRef = useRef<number | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  // ── Load ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!companyId || !reportId) return;
+    let cancelled = false;
+    setLoading(true);
+    setFetchError(null);
+    quarterlyReports
+      .getOutline(companyId, reportId)
+      .then((res) => {
+        if (cancelled) return;
+        applyResponse(res);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setFetchError(
+          err instanceof Error ? err.message : 'Failed to load the outline.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, reportId, retryKey]);
+
+  // Split a response into pinned required + ordered optionals.
+  const applyResponse = (res: OutlineResponse) => {
+    const byOrder = (a: OutlineSection, b: OutlineSection) =>
+      (a.display_order ?? 0) - (b.display_order ?? 0);
+    const req = res.sections
+      .filter((s) => s.requirement === 'required')
+      .sort(byOrder)
+      .map((s) => ({ ...s, included: true }));
+    const opt = res.sections
+      .filter((s) => s.requirement === 'optional')
+      .sort(byOrder);
+    setRequired(req);
+    setOptionals(opt);
+    setTotalCatalogue(res.total_catalogue ?? res.sections.length);
+    // Whole-outline freeze: explicit flag, or every section locked.
+    setIsLocked(
+      res.locked === true ||
+        (res.sections.length > 0 && res.sections.every((s) => s.locked)),
+    );
+    defaultIncludedRef.current = Object.fromEntries(
+      opt.map((s) => [s.section_code, s.included]),
+    );
+  };
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  const includedCount =
+    required.length + optionals.filter((o) => o.included).length;
+
+  // ── Persist (debounced PUT) ───────────────────────────────────────────────
+  const buildPayload = useCallback(
+    (opts: OutlineSection[]) => {
+      const ordered = [...required, ...opts];
+      return {
+        sections: ordered.map((s, i) => ({
+          section_code: s.section_code,
+          included: s.included,
+          display_order: i,
+        })),
+      };
+    },
+    [required],
+  );
+
+  // Handle a 409 uniformly: the outline was locked elsewhere → go read-only,
+  // re-fetch, and swallow (no toast).
+  const handleLocked409 = useCallback(() => {
+    setIsLocked(true);
+    setSaveState('idle');
+    if (companyId && reportId) {
+      quarterlyReports
+        .getOutline(companyId, reportId)
+        .then(applyResponse)
+        .catch(() => {
+          /* keep current state read-only */
+        });
+    }
+  }, [companyId, reportId]);
+
+  const scheduleSave = useCallback(
+    (opts: OutlineSection[]) => {
+      if (isLocked || !companyId || !reportId) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveState('saving');
+      saveTimerRef.current = setTimeout(() => {
+        const seq = ++saveSeqRef.current;
+        quarterlyReports
+          .saveOutline(companyId, reportId, buildPayload(opts))
+          .then(() => {
+            if (seq === saveSeqRef.current) setSaveState('saved');
+          })
+          .catch((err: unknown) => {
+            if (seq !== saveSeqRef.current) return;
+            if (err instanceof ApiError && err.status === 409) {
+              handleLocked409();
+              return;
+            }
+            // Non-lock error: surface softly in the indicator, keep local state.
+            setSaveState('idle');
+          });
+      }, 700);
+    },
+    [isLocked, companyId, reportId, buildPayload, handleLocked409],
+  );
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const toggleOptional = (code: string) => {
+    if (isLocked) return;
+    setOptionals((prev) => {
+      const next = prev.map((o) =>
+        o.section_code === code ? { ...o, included: !o.included } : o,
+      );
+      scheduleSave(next);
+      return next;
+    });
+  };
+
+  const applyPreset = (preset: Preset) => {
+    if (isLocked) return;
+    setOptionals((prev) => {
+      const next = prev.map((o) => {
+        let included = o.included;
+        if (preset === 'required') included = false;
+        else if (preset === 'everything') included = true;
+        else included = defaultIncludedRef.current[o.section_code] ?? false;
+        return { ...o, included };
+      });
+      scheduleSave(next);
+      return next;
+    });
+  };
+
+  const moveOptional = (from: number, to: number) => {
+    if (isLocked || to < 0 || to >= optionals.length || from === to) return;
+    setOptionals((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      scheduleSave(next);
+      return next;
+    });
+  };
+
+  // Which quick-select preset the current optional set matches (for highlight).
+  const activePreset: Preset | null = (() => {
+    if (optionals.length === 0) return null;
+    if (optionals.every((o) => o.included)) return 'everything';
+    if (optionals.every((o) => !o.included)) return 'required';
+    if (
+      optionals.every(
+        (o) => o.included === (defaultIncludedRef.current[o.section_code] ?? false),
+      )
+    )
+      return 'recommended';
+    return null;
+  })();
+
+  // ── Continue: flush save, lock, advance ───────────────────────────────────
+  const onGenerate = async () => {
+    if (!companyId || !reportId) return;
+    if (isLocked) {
+      navigate(`/quarterly-report/${reportId}/preview`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      await quarterlyReports.saveOutline(
+        companyId,
+        reportId,
+        buildPayload(optionals),
+      );
+      await quarterlyReports.lockOutline(companyId, reportId);
+      navigate(`/quarterly-report/${reportId}/preview`);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Already locked — just proceed to the (read-only) report.
+        navigate(`/quarterly-report/${reportId}/preview`);
+        return;
+      }
+      setSubmitting(false);
+      setFetchError(
+        err instanceof Error ? err.message : 'Failed to lock the outline.',
+      );
+    }
+  };
+
+  // ── Drag handlers (optionals only) ────────────────────────────────────────
+  const onDragStart = (index: number) => (e: React.DragEvent) => {
+    if (isLocked) return;
+    dragIndexRef.current = index;
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const onDragOver = (index: number) => (e: React.DragEvent) => {
+    if (isLocked || dragIndexRef.current === null) return;
+    e.preventDefault();
+    if (index !== overIndex) setOverIndex(index);
+  };
+  const onDrop = (index: number) => (e: React.DragEvent) => {
+    if (isLocked || dragIndexRef.current === null) return;
+    e.preventDefault();
+    moveOptional(dragIndexRef.current, index);
+    dragIndexRef.current = null;
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+  const onDragEnd = () => {
+    dragIndexRef.current = null;
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+  const onGripKeyDown = (index: number) => (e: React.KeyboardEvent) => {
+    if (isLocked) return;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveOptional(index, index - 1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveOptional(index, index + 1);
+    }
+  };
+
+  // ── Loading / error ───────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <Shell reportId={reportId}>
+        <Spinner pad={80} />
+      </Shell>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <Shell reportId={reportId}>
+        <div style={{ padding: '24px 28px' }}>
+          <div
+            style={{
+              padding: '16px 20px',
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+            }}
+          >
+            <span style={{ fontSize: 13, color: '#DC2626' }}>{fetchError}</span>
+            <button
+              className="bs"
+              style={{ fontSize: 12, padding: '6px 14px' }}
+              onClick={() => {
+                setFetchError(null);
+                setRetryKey((k) => k + 1);
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (required.length === 0 && optionals.length === 0) {
+    return (
+      <Shell reportId={reportId}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '60px 20px',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 36, marginBottom: 14 }}>📄</div>
+          <h2
+            style={{
+              fontSize: 17,
+              fontWeight: 800,
+              color: DARK,
+              margin: '0 0 8px',
+            }}
+          >
+            No outline available yet
+          </h2>
+          <p style={{ fontSize: 13, color: MUTED, marginBottom: 24 }}>
+            The report catalogue hasn't been prepared for this report.
+          </p>
+          <button
+            className="btn bs"
+            style={{ padding: '10px 20px' }}
+            onClick={() => navigate('/reports/quarterly')}
+          >
+            ← Back to Reports
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  const PRESETS: { key: Preset; label: string }[] = [
+    { key: 'required', label: 'Required only' },
+    { key: 'recommended', label: 'Recommended' },
+    { key: 'everything', label: 'Everything' },
+  ];
+
+  return (
+    <Shell reportId={reportId}>
+      {/* Header */}
+      <div
+        style={{
+          padding: '22px 28px 14px',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: 20,
+              fontWeight: 800,
+              color: DARK,
+              margin: '0 0 4px',
+              lineHeight: 1.2,
+            }}
+          >
+            Report outline
+          </h1>
+          <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 560 }}>
+            Required sections are locked at the top. Tick optional ones to include
+            them, then drag to set their order.
+          </p>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: 11, color: '#9BA3C4', fontWeight: 600 }}>
+            Template · {totalCatalogue}
+          </div>
+          <div style={{ fontSize: 13, color: ACCENT, fontWeight: 800, marginTop: 2 }}>
+            {includedCount} in report
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Select + locked banner */}
+      <div
+        style={{
+          padding: '0 28px 14px',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 14,
+        }}
+      >
+        {isLocked ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#6B72A0',
+              background: '#F2F3FA',
+              border: '1px solid #E2E4F0',
+              borderRadius: 20,
+              padding: '6px 14px',
+            }}
+          >
+            <Lock size={13} aria-hidden />
+            Outline locked
+          </span>
+        ) : (
+          <>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '.5px',
+                textTransform: 'uppercase',
+                color: '#9BA3C4',
+              }}
+            >
+              Quick select
+            </span>
+            <div className="tabs" style={{ marginBottom: 0 }}>
+              {PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={`tab ${activePreset === p.key ? 'act' : ''}`}
+                  onClick={() => applyPreset(p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Scrollable body */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 28px 20px' }}>
+        {/* REQUIRED group */}
+        {required.length > 0 && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="ch">
+              <span className="ct">
+                REQUIRED — always at the top · {required.length} locked
+              </span>
+            </div>
+            <div
+              className="cb"
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              {required.map((s, i) => (
+                <SectionRow
+                  key={s.section_code}
+                  section={s}
+                  number={i + 1}
+                  locked={isLocked}
+                  isRequired
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* OPTIONAL group */}
+        {optionals.length > 0 && (
+          <div className="card">
+            <div className="ch">
+              <span className="ct">
+                OPTIONAL{isLocked ? '' : ' — drag to reorder'}
+              </span>
+            </div>
+            <div
+              className="cb"
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              {optionals.map((s, i) => (
+                <div
+                  key={s.section_code}
+                  onDragOver={onDragOver(i)}
+                  onDrop={onDrop(i)}
+                >
+                  <SectionRow
+                    section={s}
+                    number={required.length + i + 1}
+                    locked={isLocked}
+                    isRequired={false}
+                    dragging={dragIndex === i}
+                    dragOver={overIndex === i && dragIndex !== i}
+                    onToggle={() => toggleOptional(s.section_code)}
+                    dragHandleProps={{
+                      draggable: !isLocked,
+                      onDragStart: onDragStart(i),
+                      onDragEnd,
+                      onKeyDown: onGripKeyDown(i),
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div
+        style={{
+          flexShrink: 0,
+          background: '#fff',
+          borderTop: '1px solid #E5E7EF',
+          padding: '12px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <button
+          className="btn bs"
+          style={{ fontSize: 13, padding: '10px 18px' }}
+          onClick={() => navigate(`/quarterly-report/${reportId}/gaps`)}
+        >
+          ← Back
+        </button>
+
+        <span
+          style={{
+            fontSize: 13,
+            color: MUTED,
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          {includedCount} sections · in your order
+          {!isLocked && saveState !== 'idle' && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: saveState === 'saved' ? GREEN : '#9BA3C4',
+              }}
+            >
+              {saveState === 'saving' ? 'Saving…' : '✓ Saved'}
+            </span>
+          )}
+        </span>
+
+        <button
+          className="bp"
+          disabled={submitting}
+          style={{
+            fontSize: 14,
+            padding: '10px 24px',
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            opacity: submitting ? 0.6 : 1,
+            cursor: submitting ? 'not-allowed' : 'pointer',
+          }}
+          onClick={onGenerate}
+        >
+          {isLocked ? 'View report' : submitting ? 'Locking…' : 'Generate & Preview'}
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+            <path
+              d="M8 4l6 6-6 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+    </Shell>
+  );
+}

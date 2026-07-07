@@ -39,6 +39,9 @@ import type {
   ChatStreamEvent,
   QuarterlyContextPatch,
   QuarterlyContextSaveResponse,
+  OutlineResponse,
+  OutlineSavePayload,
+  OutlineLockResponse,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -959,6 +962,31 @@ export const quarterlyReports = {
   getGaps: (companyId: string, reportId: string) =>
     request<GapsResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
+    ),
+
+  // ── Outline (step 6) ──
+  // The report's section catalogue. saveOutline persists include+order (PUT);
+  // lockOutline freezes it (POST). Backend returns 409 on edits after lock.
+  getOutline: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
+      { signal },
+    ),
+
+  saveOutline: (
+    companyId: string,
+    reportId: string,
+    body: OutlineSavePayload,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
+      { method: "PUT", body },
+    ),
+
+  lockOutline: (companyId: string, reportId: string) =>
+    request<OutlineLockResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline/lock`,
+      { method: "POST" },
     ),
 
   // ── Confirm Context ──

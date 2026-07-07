@@ -952,9 +952,9 @@ export default function CoverageMapPage() {
             <button
               className="bp"
               style={{ fontSize: 14, padding: '10px 24px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}
-              onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}
+              onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}
             >
-              Continue to preview
+              Continue to outline
               <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                 <path d="M8 4l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>

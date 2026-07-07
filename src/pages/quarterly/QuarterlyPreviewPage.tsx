@@ -41,7 +41,7 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={6} reportId={reportId} />}
+      {reportId && <QuarterlyReportStepper activeStep={7} reportId={reportId} />}
       {children}
     </div>
   );
@@ -854,8 +854,8 @@ export default function QuarterlyPreviewPage() {
             {error ?? 'Something went wrong while generating the preview.'}
           </p>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button className="btn bs" style={{ padding: '9px 18px', fontSize: 13 }} onClick={() => navigate(`/quarterly-report/${reportId}/gaps`)}>
-              ← Back to gaps
+            <button className="btn bs" style={{ padding: '9px 18px', fontSize: 13 }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
+              ← Back to outline
             </button>
             <button className="btn bp" style={{ padding: '9px 18px', fontSize: 13 }} onClick={() => setRetryKey((k) => k + 1)}>
               Try again
@@ -939,7 +939,7 @@ export default function QuarterlyPreviewPage() {
 
       {/* Footer */}
       <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #E5E7EF', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/gaps`)}>
+        <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
           ← Back
         </button>
 

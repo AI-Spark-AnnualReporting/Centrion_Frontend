@@ -9,6 +9,7 @@ const STEPS = [
   { label: 'Extraction' },
   { label: 'Coverage' },
   { label: 'Gaps' },
+  { label: 'Outline' },
   { label: 'Preview' },
 ];
 

@@ -104,6 +104,60 @@ export interface GapsResponse {
   gaps: GapItem[];
 }
 
+// ─── Outline (step 6) ───────────────────────────────────────────────────────
+// The report's section catalogue: mandatory sections locked at the top, optional
+// ones the user ticks + drag-reorders. Each section carries a "feeder" telling
+// the user where its content comes from. The outline reflects the confirm-context
+// Q/A (company_type + voices). See PUT/lock endpoints in `quarterlyReports`.
+export type FeederStatus = 'ready' | 'template' | 'external' | 'needs_input';
+
+// Where a section's content comes from — the key per-section signal.
+export interface OutlineFeeder {
+  status: FeederStatus;
+  document_id: string | null;
+  document_name?: string;
+  message: string;
+}
+
+export interface OutlineSection {
+  section_code: string;
+  title: string;
+  part_label: string;
+  requirement: 'required' | 'optional';
+  included: boolean;
+  // Per-section lock: a required section can't be unticked. Distinct from the
+  // whole-outline freeze on OutlineResponse.locked.
+  locked: boolean;
+  source_type: string;
+  mode: string;
+  display_order?: number;
+  feeder: OutlineFeeder;
+}
+
+export interface OutlineResponse {
+  report_id: string;
+  company_id: string;
+  total_catalogue?: number;
+  // Whole-outline freeze — true once the outline is locked (read-only).
+  locked?: boolean;
+  sections: OutlineSection[];
+}
+
+// PUT body — only the mutable fields per section.
+export interface OutlineSavePayload {
+  sections: Array<{
+    section_code: string;
+    included: boolean;
+    display_order: number;
+  }>;
+}
+
+// POST /outline/lock response.
+export interface OutlineLockResponse {
+  report_id: string;
+  locked: boolean;
+}
+
 // ─── Preview (step 6) ─────────────────────────────────────────────────────────
 // The AI-composed quarterly report. The backend generates it synchronously and
 // persists it; the page reads it back and supports per-sentence inline edits.

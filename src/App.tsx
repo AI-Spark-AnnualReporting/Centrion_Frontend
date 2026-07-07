@@ -20,6 +20,7 @@ import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
 import CoverageMapPage from "./pages/quarterly/CoverageMapPage";
 import GapQuestionsPage from "./pages/quarterly/GapQuestionsPage";
+import OutlinePage from "./pages/quarterly/OutlinePage";
 import QuarterlyPreviewPage from "./pages/quarterly/QuarterlyPreviewPage";
 
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
@@ -58,6 +59,7 @@ const App = () => (
           <Route path="/reports/:reportId" element={<ReportDetailPage />} />
           <Route path="/quarterly-report/:reportId/coverage" element={<CoverageMapPage />} />
           <Route path="/quarterly-report/:reportId/gaps" element={<GapQuestionsPage />} />
+          <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
           <Route path="/quarterly-report/:reportId/preview" element={<QuarterlyPreviewPage />} />
           <Route path="/kpi" element={<KPIPage />} />
           <Route path="/compliance" element={<CompliancePage />} />

@@ -329,8 +329,8 @@ export default function GapQuestionsPage() {
           <p style={{ fontSize: 13, color: MUTED, marginBottom: 24 }}>
             The Coverage Map found drivers for all extracted figures.
           </p>
-          <button className="btn bp" style={{ padding: '10px 20px' }} onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
-            Continue to preview →
+          <button className="btn bp" style={{ padding: '10px 20px' }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
+            Continue to outline →
           </button>
         </div>
       </Shell>
@@ -544,7 +544,7 @@ export default function GapQuestionsPage() {
         <button
           className="bp"
           style={{ fontSize: 14, padding: '10px 24px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}
-          onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}
+          onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}
         >
           {allAnswered ? 'Continue' : `Continue with ${answeredCount} answered`}
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
