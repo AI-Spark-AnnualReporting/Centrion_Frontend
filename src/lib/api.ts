@@ -389,7 +389,6 @@ export interface LoginParams {
 }
 
 export interface ChangePasswordParams {
-  old_password: string;
   new_password: string;
 }
 
@@ -446,6 +445,22 @@ export interface CreateCompanyParams {
   name: string;
   sector: string;
   jurisdiction?: Jurisdiction; // default "KSA"
+}
+
+// Verdict from the inline Annual/ESG upload check (POST /companies/{id}/validate-report).
+export interface ReportValidation {
+  valid: boolean;
+  detected_type: string;
+  fiscal_year: string | null;
+  period: string | null;      // "FY-2025" | null
+  document_id: string | null; // banked doc the submit step will process
+  message: string;
+}
+
+export interface OnboardingIngestItem {
+  document_id: string;
+  doc_type: string;
+  period: string | null;
 }
 
 export const companies = {
@@ -505,6 +520,33 @@ export const companies = {
       form,
     );
   },
+
+  // Inline onboarding validation: LLM-check one Annual/ESG file, bank it, and return the
+  // verdict + detected fiscal year + a document_id the submit step will process.
+  validateReport: (
+    companyId: string,
+    file: File,
+    docType: string,
+  ): Promise<ReportValidation> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("doc_type", docType);
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/validate-report`,
+      form,
+    );
+  },
+
+  // Onboarding submit: kick off the heavy ingest (reports + chunks + embeddings + all
+  // dashboard data) for the already-validated docs. Non-blocking — returns { status }.
+  ingestOnboarding: (
+    companyId: string,
+    items: OnboardingIngestItem[],
+  ): Promise<{ status: string }> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/ingest-onboarding`, {
+      method: "POST",
+      body: { items },
+    }),
 };
 
 // ---------------------------------------------------------------------------
