@@ -9,7 +9,8 @@ const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: b
   // `end` → highlight only on an exact path match, so ESG isn't also "active"
   // on /reports/quarterly (which startsWith('/reports')).
   { key: 'esg', label: 'ESG Validator', path: '/reports', end: true },
-  { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly' },
+  // Hidden for demo — Quarterly reports not shown to viewers.
+  // { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly' },
   // Annual: admins manage cycles in-app at /annual-report; PMs/departments
   // still go to the external workspace app (routed by role in goAnnual()).
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
