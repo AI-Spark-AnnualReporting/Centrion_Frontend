@@ -211,6 +211,13 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   if (company?.has_sukuk) flags.push('Sukuk');
   if (company?.has_subsidiaries) flags.push('Subsidiaries');
 
+  // Fill the hero's empty left column: the last 3 facts + the flag pills sit under the
+  // website (left); the rest stay in the right column. Dot colours stay keyed to each
+  // fact's ORIGINAL index so nothing recolours.
+  const RIGHT_COUNT = Math.max(0, facts.length - 3);
+  const rightFacts = facts.slice(0, RIGHT_COUNT);
+  const leftFacts = facts.slice(RIGHT_COUNT);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Top row — company hero (left, ~60%) + disclosure timeline (right, ~40%) */}
@@ -248,21 +255,21 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                 )}
               </div>
 
-            </div>
-
-            {/* Right — metadata list pushed to the right edge, pills stacked directly beneath */}
-            {(facts.length > 0 || flags.length > 0) && (
-              <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-                <div>
-                  {facts.length > 0 && (
+              {/* Moved from the right column to fill the left space: last 3 facts + pills */}
+              {(leftFacts.length > 0 || flags.length > 0) && (
+                <div style={{ marginTop: 22 }}>
+                  {leftFacts.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', rowGap: 11 }}>
-                      {facts.map((f, i) => (
-                        <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
-                          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
-                          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
-                        </div>
-                      ))}
+                      {leftFacts.map((f, j) => {
+                        const idx = RIGHT_COUNT + j;
+                        return (
+                          <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[idx % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[idx % DOT_COLORS.length]}40`, flexShrink: 0 }} />
+                            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {flags.length > 0 && (
@@ -275,6 +282,21 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Right — remaining facts, right-aligned single column */}
+            {rightFacts.length > 0 && (
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', rowGap: 11 }}>
+                  {rightFacts.map((f, i) => (
+                    <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
