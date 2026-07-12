@@ -61,7 +61,8 @@ export function AppLayout() {
           </Suspense>
         </div>
       </div>
-      <FloatingChatbot />
+      {/* Home has its own Ask Copilot card, so hide the floating chat there. */}
+      {location.pathname !== '/dashboard' && <FloatingChatbot />}
     </div>
   );
 }

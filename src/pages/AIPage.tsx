@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chat, type ChatHistoryMessage, type ChatToolCall } from '@/lib/api';
@@ -42,6 +43,9 @@ function hydrateTools(calls: ChatToolCall[] | null | undefined) {
 
 export default function AIPage() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialSent = useRef(false);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -198,6 +202,19 @@ export default function AIPage() {
       abortRef.current = null;
     }
   };
+
+  // Auto-send a question handed in via route state (e.g. the Home "Ask Copilot"
+  // card) once the session has hydrated. Ref-guarded + state cleared so a refresh
+  // doesn't resend.
+  useEffect(() => {
+    if (initialSent.current || sessionLoading || isStreaming) return;
+    const q = (location.state as { q?: string } | null)?.q;
+    if (!q) return;
+    initialSent.current = true;
+    void sendMessage(q);
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoading, location.state]);
 
   const handleSendClick = () => {
     if (isStreaming) stopStreaming();

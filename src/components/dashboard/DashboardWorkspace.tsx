@@ -5,9 +5,14 @@ import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Department } from '@/types/admin';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
-import { ReportStartCards } from '@/components/dashboard/ReportStartCards';
 import { DisclosureTimeline } from '@/components/dashboard/DisclosureTimeline';
 import { KpiCards } from '@/components/dashboard/KpiCards';
+import { ActiveReportsCard } from '@/components/dashboard/ActiveReportsCard';
+import { BoardMeetingsCard } from '@/components/dashboard/BoardMeetingsCard';
+import { ShareholderCommsCard } from '@/components/dashboard/ShareholderCommsCard';
+import { ComplianceSnapshotCard } from '@/components/dashboard/ComplianceSnapshotCard';
+import { EsgComparisonsCard } from '@/components/dashboard/EsgComparisonsCard';
+import { AskCopilotCard } from '@/components/dashboard/AskCopilotCard';
 
 /**
  * Personal welcome dashboard — shown after onboarding once report documents have
@@ -283,25 +288,21 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
       {/* KPI row — Revenue / Net Profit / ESG Score / Disclosure Index (honest: real data or "not enough data yet") */}
       <KpiCards company={company} />
 
-      {/* Quick-action tiles, right under the hero (report cards + Ask AI Agent) */}
-      <ReportStartCards
-        mini
-        extraCards={[{
-          key: 'ask-ai',
-          category: 'AI Assistant',
-          title: 'Ask AI Agent',
-          accent: '#0D9488',
-          headerGradient: 'linear-gradient(135deg,#0E7490,#14B8A6)',
-          icon: (
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-              <path d="M4 4h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8l-3 3v-3H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
-              <circle cx="8" cy="9.2" r="1" fill="#fff" />
-              <circle cx="12" cy="9.2" r="1" fill="#fff" />
-            </svg>
-          ),
-          onOpen: (nav) => nav('/ai'),
-        }]}
-      />
+      {/* Row A — Active Reports · Board Meetings · Shareholder Comms */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+        <ActiveReportsCard />
+        <BoardMeetingsCard />
+        <ShareholderCommsCard />
+      </div>
+
+      {/* Row B — Compliance Snapshot (left) | ESG Comparisons + Ask Copilot (right) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 16, alignItems: 'stretch' }}>
+        <ComplianceSnapshotCard />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+          <EsgComparisonsCard />
+          <AskCopilotCard />
+        </div>
+      </div>
 
       {/* Stat cards — real */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
