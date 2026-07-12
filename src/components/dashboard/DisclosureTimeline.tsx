@@ -61,7 +61,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E8A33D', flexShrink: 0 }} />
-          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.6px', textTransform: 'uppercase', color: '#5A6080' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: '#5A6080' }}>
             Disclosure Timeline
           </span>
         </div>
@@ -75,7 +75,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
       </div>
       <div style={{ height: 1, background: '#ECEEF8', margin: '10px 0 2px' }} />
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingLeft: 6, paddingRight: 4 }}>
         {events === null ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px 0' }}>
             <div className="proc-ring" style={{ width: 22, height: 22, borderWidth: 2.5, flexShrink: 0 }} />
@@ -116,7 +116,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
               </div>
               <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 0 : 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>{e.title}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1D2E' }}>{e.title}</span>
                   {e.tone === 'urgent' && (
                     <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>URGENT</span>
                   )}
