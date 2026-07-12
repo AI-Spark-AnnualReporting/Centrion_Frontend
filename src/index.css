@@ -473,6 +473,9 @@ body {
   box-shadow: 0 4px 12px rgba(64,64,200,.25); font-weight: 700;
 }
 
+/* Communication Hub — channel action buttons */
+.ch-btn:hover { border-color: #C9CDE4; background: #FAFBFF; }
+
 /* Inputs */
 .inp {
   width: 100%; padding: 10px 13px;

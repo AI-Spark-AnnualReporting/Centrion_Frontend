@@ -1295,6 +1295,215 @@ export const meetings = {
 };
 
 // ---------------------------------------------------------------------------
+// Communication Hub
+// ---------------------------------------------------------------------------
+
+// A report-type pill in the "Start a communication" modal. `count` is the
+// number of threadless reports of this type and stays constant regardless of
+// the active filter (it always reflects the unfiltered set).
+export interface ThreadlessReportType {
+  code: string;
+  label: string;
+  count: number;
+}
+
+// A report that doesn't have a communication thread yet.
+export interface ThreadlessReport {
+  id: string;
+  report_type: string;
+  period: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ThreadlessReportsResponse {
+  types: ThreadlessReportType[];
+  reports: ThreadlessReport[];
+}
+
+// A company member eligible to be @mentioned. `id` is the UUID the write
+// endpoint expects; `user_id` (usr_… string) is display-only — never send it.
+export interface CommunicationMember {
+  id: string;
+  user_id: string;
+  full_name: string;
+  role: string;
+  department: string | null;
+}
+
+export interface CommunicationMembersResponse {
+  members: CommunicationMember[];
+}
+
+export interface StartThreadBody {
+  report_id: string;
+  message: string;
+  // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface CommunicationThread {
+  id: string;
+  company_id: string;
+  report_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunicationMessage {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface StartThreadResponse {
+  thread: CommunicationThread;
+  message: CommunicationMessage;
+}
+
+// ── Communication Hub list (Communication tab) ────────────────────────────
+
+export interface ThreadReport {
+  id: string;
+  report_type: string;
+  // Display strings — use directly; report_type/status are the raw codes.
+  type_label: string;
+  period: string;
+  title: string;
+  status: string;
+  status_label: string;
+}
+
+export interface ThreadOwner {
+  user_id: string;
+  full_name: string;
+  is_you: boolean;
+}
+
+export interface ThreadLastMessage {
+  sender_full_name: string;
+  is_you: boolean;
+  preview: string;
+  created_at: string;
+}
+
+// One row in the Communication tab. Rows arrive pre-sorted (updated_at desc) —
+// don't re-sort. `owner` and `last_message` can both be null.
+export interface ThreadSummary {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  updated_at: string;
+  last_message: ThreadLastMessage | null;
+  internal_count: number;
+  unread_count: number;
+}
+
+export interface ThreadListResponse {
+  threads: ThreadSummary[];
+}
+
+export interface MarkThreadReadResponse {
+  ok: boolean;
+}
+
+// ── Thread view (message list + reply) ────────────────────────────────────
+
+export interface MessageSender {
+  user_id: string;
+  full_name: string;
+  // Raw role code (e.g. "ir") — label it on the frontend.
+  role: string;
+  is_you: boolean;
+}
+
+export interface ThreadMessage {
+  id: string;
+  sender: MessageSender;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface ThreadDetail {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Messages arrive oldest→newest, already sorted — render in order.
+export interface ThreadDetailResponse {
+  thread: ThreadDetail;
+  messages: ThreadMessage[];
+}
+
+export interface SendMessageBody {
+  message: string;
+  // Members' `id` UUIDs (NOT usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface SendMessageResponse {
+  message: ThreadMessage;
+}
+
+// company_id is never sent — the backend derives it from the JWT.
+export const communications = {
+  // Communication tab list. limit (1–200, default 50) / offset (default 0) are
+  // only needed for pagination.
+  listThreads: (params?: { limit?: number; offset?: number }) =>
+    request<ThreadListResponse>("/api/v1/communications/threads", {
+      query: params,
+    }),
+
+  // Move the caller's read watermark to now for this thread → clears "N new".
+  // Fire when the user opens a thread. 404 → thread gone / not in company.
+  markThreadRead: (threadId: string) =>
+    request<MarkThreadReadResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/read`,
+      { method: "POST" },
+    ),
+
+  // Thread header + full message list (oldest→newest). 404 → thread gone.
+  getThread: (threadId: string) =>
+    request<ThreadDetailResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+    ),
+
+  // Post a reply. Bumps the thread's updated_at (reorders the list).
+  sendMessage: (threadId: string, body: SendMessageBody) =>
+    request<SendMessageResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+      { method: "POST", body },
+    ),
+
+  // All threadless reports + the type pills. `type` narrows only the reports
+  // list; the pills always reflect the full unfiltered set.
+  threadlessReports: (type?: string) =>
+    request<ThreadlessReportsResponse>(
+      "/api/v1/communications/threadless-reports",
+      { query: type ? { type } : undefined },
+    ),
+
+  // Members eligible for the @mention picker. Loaded once and filtered client-side.
+  members: () =>
+    request<CommunicationMembersResponse>("/api/v1/communications/members"),
+
+  // Start a thread on a report with a first message + optional mentions.
+  startThread: (body: StartThreadBody) =>
+    request<StartThreadResponse>("/api/v1/communications/threads", {
+      method: "POST",
+      body,
+    }),
+};
+
+// ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------
 
