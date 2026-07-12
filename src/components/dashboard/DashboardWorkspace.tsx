@@ -289,7 +289,8 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
             {/* Right — remaining facts, right-aligned single column */}
             {rightFacts.length > 0 && (
               <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', rowGap: 11 }}>
+                {/* Start the list around the vertical middle of the company name. */}
+                <div style={{ display: 'flex', flexDirection: 'column', rowGap: 11, marginTop: 18 }}>
                   {rightFacts.map((f, i) => (
                     <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
