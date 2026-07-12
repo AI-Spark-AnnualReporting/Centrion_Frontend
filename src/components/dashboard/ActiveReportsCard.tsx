@@ -18,6 +18,8 @@ interface ReportRow {
   generated_at?: string | null;
   title?: string | null;
   coverage?: { percentage?: number | null } | null;
+  // Set only when the app generated the report; null for docs uploaded at onboarding.
+  generation_config?: Record<string, unknown> | null;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -94,10 +96,13 @@ export function ActiveReportsCard() {
       ) : (
         rows.map((r, i) => {
           const pct = coveragePct(r);
-          const ready = Boolean(r.generated_at);
-          const status = ready
-            ? { text: 'READY', color: '#16A34A', bg: 'rgba(34,197,94,.12)' }
-            : { text: 'DRAFT', color: '#B45309', bg: 'rgba(245,158,11,.15)' };
+          // Reports uploaded at onboarding carry no generation_config (the app didn't
+          // generate them) — mark those UPLOADED (indigo), not READY.
+          const gc = r.generation_config;
+          const uploaded = !gc || Object.keys(gc).length === 0;
+          const status = uploaded
+            ? { text: 'UPLOADED', color: '#4040C8', bg: 'rgba(64,64,200,.12)' }
+            : { text: 'READY', color: '#16A34A', bg: 'rgba(34,197,94,.12)' };
           return (
             <div key={r.id} style={{ display: 'flex', gap: 11, alignItems: 'center', padding: '11px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
               <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)' }}>{initials(r.report_type)}</span>
