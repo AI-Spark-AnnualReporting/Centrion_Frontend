@@ -6,6 +6,8 @@ import type { Company } from '@/types/company';
 import type { Department } from '@/types/admin';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import { ReportStartCards } from '@/components/dashboard/ReportStartCards';
+import { DisclosureTimeline } from '@/components/dashboard/DisclosureTimeline';
+import { KpiCards } from '@/components/dashboard/KpiCards';
 
 /**
  * Personal welcome dashboard — shown after onboarding once report documents have
@@ -194,17 +196,10 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   if (company?.fiscal_year_end_month) facts.push({ label: 'Fiscal Year End', value: MONTHS[company.fiscal_year_end_month - 1] });
   if (company?.listed_exchange) facts.push({ label: 'Exchange', value: company.listed_exchange });
   if (reportingSectorLabel) facts.push({ label: 'Reporting Sector', value: reportingSectorLabel });
-  if (company?.website_url) facts.push({
-    label: 'Website',
-    value: (
-      <a href={company.website_url} target="_blank" rel="noreferrer" style={{ color: '#fff', textDecoration: 'none', borderBottom: '1px solid rgba(255,255,255,.4)' }}>
-        {hostOf(company.website_url)}
-      </a>
-    ),
-  });
-  // Keep it to a 4×2 grid (2 columns, 4 rows); least-important facts drop off.
-  const MAX_FACTS = 8;
-  const shownFacts = facts.slice(0, MAX_FACTS);
+  // Website is NOT in this list — it renders on the left identity column (with a
+  // globe glyph) rather than as a dotted fact row.
+  // The hero sits in a narrower-but-taller top-row slot (beside the Disclosure
+  // Timeline), so there's room to show every fact as one vertical column.
 
   const flags: string[] = [];
   if (company?.is_shariah) flags.push('Shariah-compliant');
@@ -213,49 +208,80 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Hero — company workspace masthead */}
-      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '34px 36px', color: '#fff', background: 'linear-gradient(135deg, #4A47D4 0%, #3736AE 55%, #2E2D93 100%)', boxShadow: '0 18px 40px rgba(53,53,181,.28)' }}>
-        {/* Soft depth glows */}
-        <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
-        <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
-        <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 28 }}>
-          {/* Left — company identity */}
-          <div>
-            <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: '-.9px', lineHeight: 1.08, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)' }}>
-              {company?.name || companyName}
-            </h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, fontSize: 13, fontWeight: 500, opacity: 0.92 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
-              <span>{subline}</span>
-            </div>
-          </div>
-
-          {/* Right — company profile: 2-column (4×2) single-line rows, colored dot per item, no card */}
-          {(shownFacts.length > 0 || flags.length > 0) && (
-            <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, auto)', columnGap: 36, rowGap: 13 }}>
-                {shownFacts.map((f, i) => (
-                  <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
-                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 92, flexShrink: 0 }}>{f.label}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
-                  </div>
-                ))}
-              </div>
-              {flags.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
-                  {flags.map((fl) => (
-                    <span key={fl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.16)', padding: '3px 10px', borderRadius: 20 }}>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ADE80' }} />
-                      {fl}
-                    </span>
-                  ))}
+      {/* Top row — company hero (left, ~60%) + disclosure timeline (right, ~40%) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 20, alignItems: 'stretch' }}>
+        {/* Hero — company workspace masthead (reshaped: narrower + taller, stacked) */}
+        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '26px 28px', color: '#fff', background: 'linear-gradient(135deg, #4A47D4 0%, #3736AE 55%, #2E2D93 100%)', boxShadow: '0 18px 40px rgba(53,53,181,.28)' }}>
+          {/* Soft depth glows */}
+          <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
+          <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
+          {/* Split: identity (left) · metadata list + pills as a right-aligned block */}
+          <div style={{ position: 'relative', display: 'flex', height: '100%', gap: 28, alignItems: 'flex-start' }}>
+            {/* Left — identity: name, status, website */}
+            <div style={{ flex: '0 0 40%', minWidth: 0 }}>
+              <div>
+                <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-.6px', lineHeight: 1.12, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)', overflowWrap: 'break-word' }}>
+                  {company?.name || companyName}
+                </h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, fontSize: 12.5, fontWeight: 500, opacity: 0.92 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
+                  <span>{subline}</span>
                 </div>
-              )}
+                {company?.website_url && (
+                  <a
+                    href={company.website_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                      <circle cx="7" cy="7" r="5.6" stroke="rgba(255,255,255,.75)" strokeWidth="1.3" />
+                      <path d="M1.4 7h11.2M7 1.4c1.7 1.6 2.5 3.5 2.5 5.6S8.7 11 7 12.6C5.3 11 4.5 9.1 4.5 7S5.3 3 7 1.4z" stroke="rgba(255,255,255,.75)" strokeWidth="1.3" strokeLinejoin="round" />
+                    </svg>
+                    <span style={{ borderBottom: '1px solid rgba(255,255,255,.4)', paddingBottom: 1 }}>{hostOf(company.website_url)}</span>
+                  </a>
+                )}
+              </div>
+
             </div>
-          )}
+
+            {/* Right — metadata list pushed to the right edge, pills stacked directly beneath */}
+            {(facts.length > 0 || flags.length > 0) && (
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end' }}>
+                <div>
+                  {facts.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', rowGap: 11 }}>
+                      {facts.map((f, i) => (
+                        <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
+                          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {flags.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
+                      {flags.map((fl) => (
+                        <span key={fl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.16)', padding: '3px 10px', borderRadius: 20 }}>
+                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ADE80' }} />
+                          {fl}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Disclosure timeline — read-only upcoming deadlines / meetings / milestones */}
+        <DisclosureTimeline company={company} />
       </div>
+
+      {/* KPI row — Revenue / Net Profit / ESG Score / Disclosure Index (honest: real data or "not enough data yet") */}
+      <KpiCards company={company} />
 
       {/* Quick-action tiles, right under the hero (report cards + Ask AI Agent) */}
       <ReportStartCards
