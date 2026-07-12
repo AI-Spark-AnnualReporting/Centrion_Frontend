@@ -4,7 +4,7 @@ import { reports as reportsApi, meetings as meetingsApi, sarCycles } from '@/lib
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Cycle } from '@/types/cycles';
-import { deriveEvents, splitEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 
 /**
  * Disclosure Timeline — top-right card on the Home dashboard. Read-only: shows a
@@ -52,9 +52,8 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
   }, [companyId, fye, user?.role]);
 
   // Compose the compact list: up to 2 most-recent filed reports, then upcoming.
-  const now = new Date();
-  const { upcoming, filed } = splitEvents(events ?? [], now);
-  const rows = [...filed.slice(0, 2), ...upcoming].slice(0, 6);
+  // Newest/latest date on top, oldest at the bottom.
+  const rows = [...(events ?? [])].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 6);
 
   return (
     <div className="card" style={{ padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>

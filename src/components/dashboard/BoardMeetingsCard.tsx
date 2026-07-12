@@ -41,8 +41,9 @@ export function BoardMeetingsCard() {
     .filter((m) => m.status === 'scheduled')
     .map((m) => ({ m, date: toLocalDate(m.meeting_date, m.meeting_time) }))
     .filter((x) => x.date >= startToday)
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .slice(0, 3);
+    .sort((a, b) => a.date.getTime() - b.date.getTime()) // soonest first — pick the next 3
+    .slice(0, 3)
+    .reverse(); // then display latest on top, soonest at the bottom
 
   return (
     <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>

@@ -114,18 +114,31 @@ export function deriveEvents(input: DeriveInput, now: Date = new Date()): Timeli
     });
   }
 
-  // 2) Filed / generated reports (real generated_at only).
+  // 2) Filed reports — dated by their reporting period (the fiscal year-end of the
+  //    report's year), NOT the upload/created date. e.g. an FY-2025 report with a
+  //    December FYE reads "December 2025". Falls back to generated_at only when the
+  //    period has no detectable year ("FY-unknown").
   for (const r of reports) {
-    if (!r.generated_at) continue;
-    const d = new Date(r.generated_at);
-    if (Number.isNaN(d.getTime())) continue;
+    const year = yearFromPeriod(r.period);
+    let d: Date;
+    let when: string;
+    if (year) {
+      d = new Date(year, fye, 0); // last day of the FYE month, report's fiscal year
+      when = `${MONTHS[fye - 1]} ${year} · Completed`;
+    } else if (r.generated_at) {
+      d = new Date(r.generated_at);
+      if (Number.isNaN(d.getTime())) continue;
+      when = `${formatDayMonth(d)} · Completed`;
+    } else {
+      continue;
+    }
     const type = (r.report_type ?? '').toLowerCase();
     const label = r.title || `${type ? type.toUpperCase() : 'Report'} ${r.period}`.trim();
     events.push({
       id: `filed-${r.id}`,
       date: d,
       title: label,
-      subtitle: `${formatDayMonth(d)} · Completed`,
+      subtitle: when,
       kind: 'filed',
       dotColor: '#0F9D6B',
       tone: 'done',
