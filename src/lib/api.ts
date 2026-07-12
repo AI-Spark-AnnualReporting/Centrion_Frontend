@@ -42,6 +42,20 @@ import type {
   OutlineResponse,
   OutlineSavePayload,
   OutlineLockResponse,
+  ProducedSection,
+  ProducedSectionResponse,
+  ProduceAllHandle,
+  CompanyType,
+  Voice,
+  ReportTone,
+  DetectCompanyTypeResponse,
+  CoverTemplatesResponse,
+  ColorPalettesResponse,
+  CoverSelectionPayload,
+  CoverSelectionResponse,
+  AssembledReportResponse,
+  SaveSectionContentPayload,
+  SaveSectionContentResponse,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -331,6 +345,11 @@ export interface GenerateQuarterlyBody {
   quarter: string; // "Q1".."Q4"
   areas?: string[]; // snake_case slugs; omit/empty when none selected
   content_language?: "english" | "arabic"; // report language; defaults to english
+  // Confirm-context answers — sent in the same creation call so the report is
+  // created already configured (no separate PATCH /context at creation).
+  company_type?: CompanyType;
+  voices?: Voice[];
+  report_tone?: ReportTone;
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -902,6 +921,12 @@ export const reports = {
       body.areas.forEach((v) => fd.append("areas", v));
     }
     if (body.content_language) fd.append("content_language", body.content_language);
+    // Confirm-context answers — configure the report at creation time.
+    if (body.company_type) fd.append("company_type", body.company_type);
+    if (body.voices && body.voices.length > 0) {
+      body.voices.forEach((v) => fd.append("voices", v));
+    }
+    if (body.report_tone) fd.append("report_tone", body.report_tone);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
@@ -953,6 +978,14 @@ export const reports = {
 // Quarterly reports — coverage map and figure driver endpoints.
 // ---------------------------------------------------------------------------
 
+// The producer endpoints return the section either at the top level or wrapped
+// as { section }. Normalise to the bare ProducedSection. The response omits
+// feeder_status/title/display_order — callers merge onto the outline seed, whose
+// spread preserves those fields.
+function unwrapProducedSection(r: ProducedSectionResponse): ProducedSection {
+  return (r as { section?: ProducedSection }).section ?? (r as ProducedSection);
+}
+
 export const quarterlyReports = {
   getCoverage: (companyId: string, reportId: string) =>
     request<QuarterlyCoverageResponse>(
@@ -989,9 +1022,65 @@ export const quarterlyReports = {
       { method: "POST" },
     ),
 
+  // ── Produced sections (step 7 — Part 5 Preview) ──
+  // The section-by-section producer. getSection reads one section's status +
+  // content; produceSection composes it (optionally with supplied user_input for
+  // needs_input sections); refineSection rewrites AI prose from an instruction;
+  // produceAll kicks the batch async job (202 → poll via usePipelinePoll).
+  getSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    signal?: AbortSignal,
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}`,
+      { signal },
+    ).then(unwrapProducedSection),
+
+  produceSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body?: { user_input?: string },
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/produce`,
+      { method: "POST", body: body ?? {} },
+    ).then(unwrapProducedSection),
+
+  refineSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    instruction: string,
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then(unwrapProducedSection),
+
+  // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
+  // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive
+  // the returned handle with usePipelinePoll and refresh getSection per tick.
+  produceAll: (companyId: string, reportId: string) =>
+    request<ProduceAllHandle>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: {} },
+    ),
+
   // ── Confirm Context ──
-  // Persist the confirm-context answers (company_type, reporting_basis, voices)
-  // collected on the setup form, on submit and before processing runs.
+  // Company-scoped detection (form time — no reportId). Derives the company type
+  // from the company's sector so the setup form can pre-select the pill + show a
+  // DETECTED badge. A UI hint only; the chosen value is sent in the generate call.
+  detectCompanyType: (companyId: string) =>
+    request<DetectCompanyTypeResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/detect-company-type`,
+    ),
+
+  // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit
+  // screen. NOT used during creation: at creation the confirm-context answers
+  // ride in the single generate call (see GenerateQuarterlyBody).
   saveContext: (
     companyId: string,
     reportId: string,
@@ -999,6 +1088,33 @@ export const quarterlyReports = {
   ) =>
     request<QuarterlyContextSaveResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/context`,
+      { method: "PATCH", body },
+    ),
+
+  // ── Cover template picker (Part 6) ──
+  // Cover-page designs + the current selection (so the preview can render the
+  // saved cover/colors on load). reportId is an optional query scope.
+  getCoverTemplates: (companyId: string, reportId?: string) =>
+    request<CoverTemplatesResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/cover-templates`,
+      { query: reportId ? { report_id: reportId } : undefined },
+    ),
+
+  // Preset brand palettes (primary + secondary swatch pairs).
+  getColorPalettes: (companyId: string) =>
+    request<ColorPalettesResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/color-palettes`,
+    ),
+
+  // Persist the chosen cover design + brand colors; re-renders the cover +
+  // report accents. Colors apply to accents/headings only (body stays dark).
+  selectCoverTemplate: (
+    companyId: string,
+    reportId: string,
+    body: CoverSelectionPayload,
+  ) =>
+    request<CoverSelectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/cover-template`,
       { method: "PATCH", body },
     ),
 
@@ -1055,6 +1171,41 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview`,
       { signal },
     ),
+
+  // ── Assembled report (Part 7) ──
+  // The full report as one document: cover + produced sections in display_order
+  // (needs_input/empty excluded server-side).
+  getAssembled: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<AssembledReportResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/assemble`,
+      { signal },
+    ),
+
+  // Inline-edit a section's content (prose text, or JSON-stringified table content).
+  saveSectionContent: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body: SaveSectionContentPayload,
+  ) =>
+    request<SaveSectionContentResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/content`,
+      { method: "PATCH", body },
+    ),
+
+  // needs_input document: upload a file for a Template/AI-written section. The
+  // backend extracts PLAIN TEXT (pdfplumber/python-docx/decode — NOT financial
+  // extraction) and runs it through produce as the user_input (verbatim for
+  // Template, an LLM steer for AI-written). Returns the produced section. 422 for
+  // Extraction/Hybrid sections (they don't take a text steer).
+  uploadSectionDocument: (companyId: string, reportId: string, code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    ).then(unwrapProducedSection);
+  },
 
   // ── Export (step 7) ──
   // Download the rendered report as a pdf or docx file. Auth-required and returns

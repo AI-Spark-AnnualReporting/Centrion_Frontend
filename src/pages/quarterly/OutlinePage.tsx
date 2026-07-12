@@ -5,9 +5,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports, ApiError } from '@/lib/api';
 import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
+import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 
-// ─── colours (matches CoverageMapPage / GapQuestionsPage conventions) ─────────
+// ─── colours (shared quarterly conventions) ──────────────────────────────────
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
 const MUTED = '#6B7280';
@@ -120,7 +121,7 @@ function Shell({
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={6} reportId={reportId} />}
+      {reportId && <QuarterlyReportStepper activeStep={3} reportId={reportId} />}
       {children}
     </div>
   );
@@ -162,27 +163,24 @@ function SectionRow({
         transition: 'border-color .12s, background .12s, opacity .12s',
       }}
     >
-      {/* Lead: lock icon (required) or grip handle (optional) */}
-      {isRequired ? (
-        <Lock size={14} color="#9BA3C4" style={{ flexShrink: 0 }} aria-hidden />
-      ) : (
-        <span
-          {...dragHandleProps}
-          role="button"
-          tabIndex={locked ? -1 : 0}
-          aria-label={`Reorder ${section.title}`}
-          title={locked ? undefined : 'Drag to reorder (or use arrow keys)'}
-          style={{
-            display: 'inline-flex',
-            flexShrink: 0,
-            cursor: locked ? 'default' : 'grab',
-            color: locked ? '#C9CDE4' : '#9BA3C4',
-            outlineOffset: 2,
-          }}
-        >
-          <GripVertical size={16} aria-hidden />
-        </span>
-      )}
+      {/* Lead: grip handle — required and optional rows are both reorderable.
+          (Required-ness is conveyed by the disabled checkbox + badges.) */}
+      <span
+        {...dragHandleProps}
+        role="button"
+        tabIndex={locked ? -1 : 0}
+        aria-label={`Reorder ${section.title}`}
+        title={locked ? undefined : 'Drag to reorder (or use arrow keys)'}
+        style={{
+          display: 'inline-flex',
+          flexShrink: 0,
+          cursor: locked ? 'default' : 'grab',
+          color: locked ? '#C9CDE4' : '#9BA3C4',
+          outlineOffset: 2,
+        }}
+      >
+        <GripVertical size={16} aria-hidden />
+      </span>
 
       <CheckBox
         checked={section.included}
@@ -260,9 +258,12 @@ export default function OutlinePage() {
   // Debounce + latest-wins guards for autosave.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
-  // Drag state.
+  // Drag state. `dragGroup` scopes highlight + drop to the group being dragged
+  // (required or optional) so the two lists reorder independently.
   const dragIndexRef = useRef<number | null>(null);
+  const dragGroupRef = useRef<'required' | 'optional' | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragGroup, setDragGroup] = useState<'required' | 'optional' | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -326,8 +327,8 @@ export default function OutlinePage() {
 
   // ── Persist (debounced PUT) ───────────────────────────────────────────────
   const buildPayload = useCallback(
-    (opts: OutlineSection[]) => {
-      const ordered = [...required, ...opts];
+    (req: OutlineSection[], opts: OutlineSection[]) => {
+      const ordered = [...req, ...opts];
       return {
         sections: ordered.map((s, i) => ({
           section_code: s.section_code,
@@ -336,7 +337,7 @@ export default function OutlinePage() {
         })),
       };
     },
-    [required],
+    [],
   );
 
   // Handle a 409 uniformly: the outline was locked elsewhere → go read-only,
@@ -355,14 +356,14 @@ export default function OutlinePage() {
   }, [companyId, reportId]);
 
   const scheduleSave = useCallback(
-    (opts: OutlineSection[]) => {
+    (req: OutlineSection[], opts: OutlineSection[]) => {
       if (isLocked || !companyId || !reportId) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       setSaveState('saving');
       saveTimerRef.current = setTimeout(() => {
         const seq = ++saveSeqRef.current;
         quarterlyReports
-          .saveOutline(companyId, reportId, buildPayload(opts))
+          .saveOutline(companyId, reportId, buildPayload(req, opts))
           .then(() => {
             if (seq === saveSeqRef.current) setSaveState('saved');
           })
@@ -387,7 +388,7 @@ export default function OutlinePage() {
       const next = prev.map((o) =>
         o.section_code === code ? { ...o, included: !o.included } : o,
       );
-      scheduleSave(next);
+      scheduleSave(required, next);
       return next;
     });
   };
@@ -402,7 +403,18 @@ export default function OutlinePage() {
         else included = defaultIncludedRef.current[o.section_code] ?? false;
         return { ...o, included };
       });
-      scheduleSave(next);
+      scheduleSave(required, next);
+      return next;
+    });
+  };
+
+  const moveRequired = (from: number, to: number) => {
+    if (isLocked || to < 0 || to >= required.length || from === to) return;
+    setRequired((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      scheduleSave(next, optionals);
       return next;
     });
   };
@@ -413,7 +425,7 @@ export default function OutlinePage() {
       const next = [...prev];
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
-      scheduleSave(next);
+      scheduleSave(required, next);
       return next;
     });
   };
@@ -432,11 +444,40 @@ export default function OutlinePage() {
     return null;
   })();
 
-  // ── Continue: flush save, lock, advance ───────────────────────────────────
+  // ── Continue: flush save, lock, produce all sections, advance ─────────────
+  // Locking freezes the outline; produceAll kicks batch section production and
+  // we hand off to the shared processing loader, which polls to completion then
+  // redirects to Preview (so the user never presses Produce per section).
+  const goProduceOrPreview = async () => {
+    if (!companyId || !reportId) return;
+    try {
+      const handle = await quarterlyReports.produceAll(companyId, reportId);
+      if (handle?.run_id && handle?.poll_url) {
+        const processingState: ProcessingPageState = {
+          runId: handle.run_id,
+          pollUrl: handle.poll_url,
+          reportId,
+          companyId,
+          estimatedDurationSeconds: null,
+          fileName: null,
+          isExisting: false,
+          reportType: 'quarterly',
+          quarterlyNext: 'preview',
+        };
+        navigate('/reports/processing', { state: processingState });
+        return;
+      }
+    } catch {
+      // Batch produce couldn't be kicked — fall through to Preview, where each
+      // section can still be produced individually.
+    }
+    navigate(`/quarterly-report/${reportId}/preview`);
+  };
+
   const onGenerate = async () => {
     if (!companyId || !reportId) return;
     if (isLocked) {
-      navigate(`/quarterly-report/${reportId}/preview`);
+      await goProduceOrPreview();
       return;
     }
     setSubmitting(true);
@@ -445,14 +486,14 @@ export default function OutlinePage() {
       await quarterlyReports.saveOutline(
         companyId,
         reportId,
-        buildPayload(optionals),
+        buildPayload(required, optionals),
       );
       await quarterlyReports.lockOutline(companyId, reportId);
-      navigate(`/quarterly-report/${reportId}/preview`);
+      await goProduceOrPreview();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
-        // Already locked — just proceed to the (read-only) report.
-        navigate(`/quarterly-report/${reportId}/preview`);
+        // Already locked — still kick production and proceed.
+        await goProduceOrPreview();
         return;
       }
       setSubmitting(false);
@@ -462,39 +503,48 @@ export default function OutlinePage() {
     }
   };
 
-  // ── Drag handlers (optionals only) ────────────────────────────────────────
-  const onDragStart = (index: number) => (e: React.DragEvent) => {
+  // ── Drag handlers — group-aware (required and optional both reorderable, each
+  //    within its own group). `group` scopes the drag so a required row can't be
+  //    dropped into the optional list or vice versa. ─────────────────────────
+  type DragGroup = 'required' | 'optional';
+  const moveInGroup = (group: DragGroup, from: number, to: number) =>
+    group === 'required' ? moveRequired(from, to) : moveOptional(from, to);
+
+  const resetDrag = () => {
+    dragIndexRef.current = null;
+    dragGroupRef.current = null;
+    setDragIndex(null);
+    setDragGroup(null);
+    setOverIndex(null);
+  };
+  const onDragStart = (group: DragGroup, index: number) => (e: React.DragEvent) => {
     if (isLocked) return;
     dragIndexRef.current = index;
+    dragGroupRef.current = group;
     setDragIndex(index);
+    setDragGroup(group);
     e.dataTransfer.effectAllowed = 'move';
   };
-  const onDragOver = (index: number) => (e: React.DragEvent) => {
-    if (isLocked || dragIndexRef.current === null) return;
+  const onDragOver = (group: DragGroup, index: number) => (e: React.DragEvent) => {
+    if (isLocked || dragIndexRef.current === null || dragGroupRef.current !== group) return;
     e.preventDefault();
     if (index !== overIndex) setOverIndex(index);
   };
-  const onDrop = (index: number) => (e: React.DragEvent) => {
-    if (isLocked || dragIndexRef.current === null) return;
+  const onDrop = (group: DragGroup, index: number) => (e: React.DragEvent) => {
+    if (isLocked || dragIndexRef.current === null || dragGroupRef.current !== group) return;
     e.preventDefault();
-    moveOptional(dragIndexRef.current, index);
-    dragIndexRef.current = null;
-    setDragIndex(null);
-    setOverIndex(null);
+    moveInGroup(group, dragIndexRef.current, index);
+    resetDrag();
   };
-  const onDragEnd = () => {
-    dragIndexRef.current = null;
-    setDragIndex(null);
-    setOverIndex(null);
-  };
-  const onGripKeyDown = (index: number) => (e: React.KeyboardEvent) => {
+  const onDragEnd = () => resetDrag();
+  const onGripKeyDown = (group: DragGroup, index: number) => (e: React.KeyboardEvent) => {
     if (isLocked) return;
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      moveOptional(index, index - 1);
+      moveInGroup(group, index, index - 1);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      moveOptional(index, index + 1);
+      moveInGroup(group, index, index + 1);
     }
   };
 
@@ -690,7 +740,7 @@ export default function OutlinePage() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="ch">
               <span className="ct">
-                REQUIRED — always at the top · {required.length} locked
+                REQUIRED — always included{isLocked ? '' : ' · drag to reorder'}
               </span>
             </div>
             <div
@@ -698,13 +748,26 @@ export default function OutlinePage() {
               style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
             >
               {required.map((s, i) => (
-                <SectionRow
+                <div
                   key={s.section_code}
-                  section={s}
-                  number={i + 1}
-                  locked={isLocked}
-                  isRequired
-                />
+                  onDragOver={onDragOver('required', i)}
+                  onDrop={onDrop('required', i)}
+                >
+                  <SectionRow
+                    section={s}
+                    number={i + 1}
+                    locked={isLocked}
+                    isRequired
+                    dragging={dragGroup === 'required' && dragIndex === i}
+                    dragOver={dragGroup === 'required' && overIndex === i && dragIndex !== i}
+                    dragHandleProps={{
+                      draggable: !isLocked,
+                      onDragStart: onDragStart('required', i),
+                      onDragEnd,
+                      onKeyDown: onGripKeyDown('required', i),
+                    }}
+                  />
+                </div>
               ))}
             </div>
           </div>
@@ -725,22 +788,22 @@ export default function OutlinePage() {
               {optionals.map((s, i) => (
                 <div
                   key={s.section_code}
-                  onDragOver={onDragOver(i)}
-                  onDrop={onDrop(i)}
+                  onDragOver={onDragOver('optional', i)}
+                  onDrop={onDrop('optional', i)}
                 >
                   <SectionRow
                     section={s}
                     number={required.length + i + 1}
                     locked={isLocked}
                     isRequired={false}
-                    dragging={dragIndex === i}
-                    dragOver={overIndex === i && dragIndex !== i}
+                    dragging={dragGroup === 'optional' && dragIndex === i}
+                    dragOver={dragGroup === 'optional' && overIndex === i && dragIndex !== i}
                     onToggle={() => toggleOptional(s.section_code)}
                     dragHandleProps={{
                       draggable: !isLocked,
-                      onDragStart: onDragStart(i),
+                      onDragStart: onDragStart('optional', i),
                       onDragEnd,
-                      onKeyDown: onGripKeyDown(i),
+                      onKeyDown: onGripKeyDown('optional', i),
                     }}
                   />
                 </div>
@@ -766,7 +829,7 @@ export default function OutlinePage() {
         <button
           className="btn bs"
           style={{ fontSize: 13, padding: '10px 18px' }}
-          onClick={() => navigate(`/quarterly-report/${reportId}/gaps`)}
+          onClick={() => navigate('/reports/quarterly')}
         >
           ← Back
         </button>

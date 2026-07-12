@@ -1,19 +1,36 @@
 // ─────────────────────────── Confirm Context ───────────────────────────
 // The confirm-context Q/A answers, collected on the quarterly setup form and
-// persisted (before processing) via PATCH .../context. Selections are manual —
-// nothing is auto-detected or pre-selected.
-export type CompanyType = "bank" | "investment" | "energy" | "telecom";
-export type ReportingBasis =
-  | "consolidated_sar_mn"
-  | "standalone_sar_mn"
-  | "consolidated_sar_thousands";
+// persisted (before processing) via PATCH .../context. company_type is
+// pre-selected from a detected value (derived from the company's sector) and can
+// be overridden; reporting_basis + voices are chosen manually.
+export type CompanyType = "bank" | "non_bank";
 export type Voice = "ceo" | "chairman" | "cfo";
+// Prose style of the narrative — the "Report tone" question. Default:
+// formal_corporate.
+export type ReportTone =
+  | "formal_corporate"
+  | "investor_focused"
+  | "data_driven"
+  | "executive_summary"
+  | "compliance_focused"
+  | "strategic_visionary"
+  | "simple_direct";
 
-// PATCH body — ceo is always included even though its pill is locked on.
+// GET .../{companyId}/quarterly/detect-company-type — company-scoped detection
+// (no reportId; runs at form time). The backend derives the company type from
+// the company's sector so the setup form can pre-select the pill + show a
+// DETECTED badge. NOT part of the creation flow — purely a UI hint.
+export interface DetectCompanyTypeResponse {
+  detected_company_type: CompanyType | null;
+}
+
+// PATCH body — kept for a later edit-context screen. At creation the same fields
+// ride in the single generate call instead (see GenerateQuarterlyBody). ceo is
+// always included even though its pill is locked on.
 export interface QuarterlyContextPatch {
   company_type: CompanyType;
-  reporting_basis: ReportingBasis;
   voices: Voice[];
+  report_tone: ReportTone;
 }
 
 // PATCH response.
@@ -158,6 +175,44 @@ export interface OutlineLockResponse {
   locked: boolean;
 }
 
+// ─── Produced sections (step 7 — Part 5 Preview) ────────────────────────────
+// The section-by-section produced content shown on the Preview screen. Derived
+// from the locked OutlineSection (section_code/title/order/source_type/mode/
+// feeder) plus a production lifecycle (status + rendered content).
+//
+// `content` is keyed by `mode`:
+//   - mode 'table' | 'kpi'  → a JSON string; parse and render a real table/block.
+//   - mode 'generate'       → analytical prose text.
+//   - mode 'template'       → filled boilerplate text.
+//   - null                  → not produced yet.
+export type SectionStatus = "pending" | "drafting" | "done";
+
+export interface ProducedSection {
+  section_code: string;
+  title: string;
+  display_order: number;
+  source_type: string;
+  mode: string;
+  status: SectionStatus;
+  content: string | null;
+  feeder_status: FeederStatus;
+  // Carried through so needs_input sections can show what they require.
+  message?: string;
+}
+
+// GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.
+// The backend returns the section object either at the top level or wrapped as
+// { section }. The api layer normalises both via unwrapProducedSection. Note the
+// producer response omits feeder_status/title/display_order — those are carried
+// from the locked outline seed and preserved on merge.
+export type ProducedSectionResponse = ProducedSection | { section: ProducedSection };
+
+// POST .../produce — async 202 handle, driven by usePipelinePoll.
+export interface ProduceAllHandle {
+  run_id: string;
+  poll_url: string;
+}
+
 // ─── Preview (step 6) ─────────────────────────────────────────────────────────
 // The AI-composed quarterly report. The backend generates it synchronously and
 // persists it; the page reads it back and supports per-sentence inline edits.
@@ -276,4 +331,90 @@ export interface ChatStreamEvent {
   name?: string;
   args?: Record<string, unknown>;
   message?: string;
+}
+
+// ─── Cover template picker (Part 6) ──────────────────────────────────────────
+// The cover section's design + brand color. Colors apply to accents/headings
+// only; body text stays dark. Persisted via PATCH .../cover-template.
+export interface CoverTemplate {
+  id?: string;
+  key: string;
+  name: string;
+  description?: string;
+  preview_image_url?: string | null; // when absent, CoverRenderer draws a mini-preview
+  layout?: Record<string, unknown>;
+  is_default?: boolean;
+}
+
+export interface ColorPalette {
+  key: string;
+  name: string;
+  primary: string;
+  secondary: string;
+}
+
+// palette_key is 'custom' (or '') when the primary/secondary are custom hex values.
+export interface BrandColors {
+  primary: string;
+  secondary: string;
+  palette_key: string;
+}
+
+// PATCH body.
+export interface CoverSelectionPayload {
+  cover_template_key: string;
+  brand: BrandColors;
+}
+
+// GET .../cover-templates — the catalogue. `selected` is optional (if the
+// backend echoes the saved selection); otherwise the `is_default` template seeds
+// the initial design.
+export interface CoverTemplatesResponse {
+  cover_templates: CoverTemplate[];
+  total?: number;
+  selected?: CoverSelectionPayload | null;
+}
+
+// GET .../color-palettes
+export interface ColorPalettesResponse {
+  color_palettes: ColorPalette[];
+  total?: number;
+}
+
+// PATCH .../cover-template response (echoes the saved selection).
+export interface CoverSelectionResponse {
+  cover_template_key: string;
+  brand: BrandColors;
+}
+
+// ─── Assembled Report (Part 7) ───────────────────────────────────────────────
+// GET .../assemble — the full report: cover + produced sections in display_order
+// (needs_input/empty sections are excluded server-side). PATCH .../sections/{code}
+// /content saves inline edits (prose or JSON-stringified table content).
+export interface AssembledSection {
+  section_code: string;
+  title: string;
+  display_order: number;
+  source_type?: string;
+  mode: string; // table | kpi | generate | template
+  content: string | null; // same keying as ProducedSection.content
+}
+
+export interface AssembledReportResponse {
+  report_id: string;
+  company_id: string;
+  // Real company + period for the cover. Reuse PreviewHeader shape.
+  header?: PreviewHeader | null;
+  // The chosen cover design + brand (drives CoverRenderer + the brand CSS vars).
+  cover?: CoverSelectionPayload | null;
+  brand?: BrandColors | null; // some backends put brand at top level
+  sections: AssembledSection[];
+}
+
+// PATCH .../sections/{code}/content — inline edits.
+export interface SaveSectionContentPayload {
+  content: string;
+}
+export interface SaveSectionContentResponse {
+  section: ProducedSection;
 }

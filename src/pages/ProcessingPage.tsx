@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { usePipelinePoll } from "@/hooks/use-pipeline-poll";
 import {
@@ -7,10 +7,79 @@ import {
 } from "@/lib/active-pipeline";
 import { reports as reportsApi } from "@/lib/api";
 import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
-import { QuarterlyGeneratingScreen } from "@/components/reports/QuarterlyGeneratingScreen";
+import {
+  QuarterlyGeneratingScreen,
+  computeProgress,
+} from "@/components/reports/QuarterlyGeneratingScreen";
+import AiLoadingScreen from "@/pages/onboarding/AiLoadingScreen";
 import { useAuth } from "@/context/AuthContext";
 import { isPeriodNotFound } from "@/types/report";
 import type { CoverageResponse } from "@/types/report";
+
+// The quarterly "Generate Report" loader reuses the onboarding workspace loader
+// (AiLoadingScreen). These milestones/tips are the quarterly-flavoured copy.
+const QUARTERLY_MILESTONES = [
+  "Parsing your documents",
+  "Extracting the financial figures",
+  "Linking drivers and reasons",
+  "Loading prior-period comparatives",
+];
+const QUARTERLY_TIPS = [
+  "We read your financial statements to extract the key figures automatically.",
+  "Every extracted figure is linked back to the page it came from.",
+  "Movements without a stated reason are flagged for you to fill in.",
+  "Prior-period comparatives are matched so the narrative can explain changes.",
+];
+
+// Section-production loader (kicked from the Outline → lands on Preview).
+const PRODUCE_MILESTONES = [
+  "Composing narrative sections",
+  "Filling the report tables",
+  "Applying your tone and voices",
+  "Finalizing the report",
+];
+const PRODUCE_TIPS = [
+  "Each section is written from your extracted figures and drivers.",
+  "Table and KPI sections are rendered directly from the numbers.",
+  "Sections that still need your input stay editable on the next screen.",
+  "You can refine any AI-written section's tone right in the preview.",
+];
+
+// Backend-provided counts shown in the loader — only rendered once the pipeline
+// has populated them (never fabricated). Mirrors QuarterlyGeneratingScreen.
+function QuarterlyStatTiles({ summary }: { summary: unknown }) {
+  const s = (summary ?? {}) as {
+    figures_extracted?: number;
+    figures_total?: number;
+    drivers_linked?: number;
+    drivers_total?: number;
+    comparatives_matched?: number;
+    comparatives_total?: number;
+  };
+  const tiles: { value: number; total: number | null; label: string }[] = [];
+  if (s.figures_extracted != null)
+    tiles.push({ value: s.figures_extracted, total: s.figures_total ?? null, label: "Figures extracted" });
+  if (s.drivers_linked != null)
+    tiles.push({ value: s.drivers_linked, total: s.drivers_total ?? null, label: "Drivers linked" });
+  if (s.comparatives_matched != null)
+    tiles.push({ value: s.comparatives_matched, total: s.comparatives_total ?? null, label: "Comparatives matched" });
+  if (tiles.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 22, justifyContent: "center", flexWrap: "wrap" }}>
+      {tiles.map((t) => (
+        <div key={t.label} style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#4040C8" }}>
+            {t.value}
+            {t.total != null && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#9BA3C4" }}>/{t.total}</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "#9BA3C4", marginTop: 2 }}>{t.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // Payload the quarterly first screen reads to pop the period_not_found modal
 // and pre-fill the pickers. Handed over via router state on redirect.
@@ -55,6 +124,9 @@ export interface ProcessingPageState {
   reportType?: string;
   // Display-only label for the quarterly hero, e.g. "Q1 2025".
   period?: string;
+  // Where a completed quarterly run hands off. Extraction → "outline" (default);
+  // section-production (produceAll, kicked from the Outline) → "preview".
+  quarterlyNext?: "outline" | "preview";
 }
 
 export default function ProcessingPage() {
@@ -71,6 +143,18 @@ export default function ProcessingPage() {
   // /reports renders the report immediately (no intermediate loader flash).
   const [coverageFetchError, setCoverageFetchError] = useState<string | null>(null);
   const handedOffRef = useRef(false);
+  // Quarterly: report_id resolved on completion. Setting it flips the onboarding
+  // loader to its "done" state; the loader's onDone then navigates to coverage.
+  const [readyReportId, setReadyReportId] = useState<string | null>(null);
+
+  // Stable so AiLoadingScreen's progress animation isn't restarted on each poll
+  // tick (its effect depends on onDone identity).
+  const handleQuarterlyLoaderDone = useCallback(() => {
+    if (readyReportId) {
+      const next = state?.quarterlyNext ?? "outline";
+      navigate(`/quarterly-report/${readyReportId}/${next}`, { replace: true });
+    }
+  }, [readyReportId, navigate, state?.quarterlyNext]);
 
   // Persist the active run so the user can resume from /reports if they leave.
   useEffect(() => {
@@ -134,10 +218,11 @@ export default function ProcessingPage() {
 
     handedOffRef.current = true;
 
-    // Quarterly reports go to the Coverage Map page (step 4); it fetches its own data.
+    // Quarterly: don't navigate here — flip the onboarding loader to "done" and
+    // let its onDone finish the animation, then hand off to the Coverage Map.
     if (state.reportType === "quarterly") {
       clearActivePipeline();
-      navigate(`/quarterly-report/${resolvedReportId}/coverage`, { replace: true });
+      setReadyReportId(resolvedReportId);
       return;
     }
 
@@ -191,29 +276,87 @@ export default function ProcessingPage() {
 
   const phase = poll.phase === "idle" ? "running" : poll.phase;
 
-  // Quarterly reports get the financial-extraction screen (progress ring +
-  // figures/drivers/comparatives + step checklist). Same poll, different skin.
+  // Quarterly reports. The running/completing state uses the onboarding workspace
+  // loader (AiLoadingScreen). Hard failure / timeout keep the detailed
+  // QuarterlyGeneratingScreen card (retry / keep-waiting / cancel + the
+  // period_not_found redirect, which its own effect drives).
   if (state.reportType === "quarterly") {
     const summary = poll.run?.output_summary ?? null;
     const periodError = isPeriodNotFound(summary);
-    // Narrowed pipeline metrics (never the period_not_found payload).
-    const metrics = periodError ? null : summary;
+    const hardFailure = phase === "failed" && !periodError;
 
+    if (hardFailure || phase === "timeout") {
+      return (
+        <QuarterlyGeneratingScreen
+          phase={phase}
+          errorMessage={phase === "failed" ? poll.run.error_message : null}
+          onCancel={() => navigate("/reports/quarterly", { replace: true })}
+          onRetry={() => navigate("/reports/quarterly", { replace: true })}
+          onKeepWaiting={restart}
+          period={state.period ?? null}
+          companyName={user?.company_name ?? null}
+          nodes={poll.nodes}
+          outputSummary={periodError ? null : summary}
+        />
+      );
+    }
+
+    // Running / completed (and period_not_found while its effect redirects).
+    // The onboarding loader visual, but bound to the REAL pipeline: progress from
+    // node states, backend stat tiles, and a "Run in background" button.
+    // Full-viewport overlay so it reads full-screen (its own minHeight:100vh).
+    const progress = computeProgress(phase === "completed" ? "completed" : "running", poll.nodes);
+    // Two quarterly loaders share this screen: extraction (→ Outline) and
+    // section-production (→ Preview). Copy + milestones differ by target.
+    const isProduce = state.quarterlyNext === "preview";
+    const copy = isProduce
+      ? {
+          title: "Composing your report",
+          subtitle: "Writing each section from your figures and inputs.",
+          doneSubtitle: "Taking you to the preview…",
+          milestones: PRODUCE_MILESTONES,
+          tips: PRODUCE_TIPS,
+        }
+      : {
+          title: "Processing your report",
+          subtitle: "Reading your documents and extracting the figures.",
+          doneSubtitle: "Taking you to the outline…",
+          milestones: QUARTERLY_MILESTONES,
+          tips: QUARTERLY_TIPS,
+        };
     return (
-      <QuarterlyGeneratingScreen
-        // On period_not_found the redirect effect is navigating away this same
-        // tick — keep the running skin so the generic failure card never flashes.
-        phase={periodError ? "running" : phase}
-        errorMessage={phase === "failed" ? poll.run.error_message : null}
-        // "Run in background" returns to the Quarterly reports page.
-        onCancel={() => navigate("/reports/quarterly", { replace: true })}
-        onRetry={() => navigate("/reports/quarterly", { replace: true })}
-        onKeepWaiting={restart}
-        period={state.period ?? null}
-        companyName={user?.company_name ?? null}
-        nodes={poll.nodes}
-        outputSummary={metrics}
-      />
+      <div style={{ position: "fixed", inset: 0, zIndex: 1400, overflowY: "auto" }}>
+        <AiLoadingScreen
+          title={copy.title}
+          subtitle={copy.subtitle}
+          doneTitle="Report ready"
+          doneSubtitle={copy.doneSubtitle}
+          milestones={copy.milestones}
+          tips={copy.tips}
+          controlledProgress={progress}
+          done={readyReportId != null}
+          onDone={handleQuarterlyLoaderDone}
+          headerExtra={<QuarterlyStatTiles summary={periodError ? null : summary} />}
+          footer={
+            <button
+              type="button"
+              onClick={() => navigate("/reports/quarterly", { replace: true })}
+              style={{
+                padding: "8px 18px",
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#5A6080",
+                background: "transparent",
+                border: "1px solid #E2E4F0",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
+            >
+              Run in background
+            </button>
+          }
+        />
+      </div>
     );
   }
 

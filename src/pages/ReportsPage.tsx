@@ -571,11 +571,12 @@ export default function ReportsPage() {
       });
   };
 
-  // Click on a Recent Report card → open the dedicated detail page, which
-  // handles its own coverage fetch and back-navigation.
+  // Click on a Recent Report card → open the report. Quarterly reports open at
+  // the Outline (Coverage/Gaps are no longer separate screens); others go to the
+  // dedicated detail page, which handles its own coverage fetch.
   const handleReportCardClick = (report: ReportSummary) => {
     if (isQuarterlyReport(report)) {
-      navigate(`/quarterly-report/${report.id}/coverage`);
+      navigate(`/quarterly-report/${report.id}/outline`);
     } else {
       navigate(`/reports/${report.id}`);
     }
