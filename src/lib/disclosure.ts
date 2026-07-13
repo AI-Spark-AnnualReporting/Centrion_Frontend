@@ -84,17 +84,42 @@ export function deriveEvents(input: DeriveInput, now: Date = new Date()): Timeli
 
     let dueDate = new Date(year + 1, fye, 0); // last day of the FYE month, next year
     let official = false;
+    let cta = spec.cta;
+    let approvedCycleYear: number | null = null;
 
-    // A real annual cycle for next year supersedes the derived date.
+    // A real annual cycle for next year: route the CTA into that cycle's data,
+    // supersede the derived date with its deadline, and mark it done once the
+    // cycle's assembled report is approved.
     if (spec.type === 'annual' && cycles.length) {
-      const cycle = cycles.find((c) => c.fiscal_year === year + 1 && c.submission_deadline);
-      if (cycle?.submission_deadline) {
-        const parsed = toLocalDate(cycle.submission_deadline.slice(0, 10));
-        if (!Number.isNaN(parsed.getTime())) {
-          dueDate = parsed;
-          official = true;
+      const cycle = cycles.find((c) => c.fiscal_year === year + 1);
+      if (cycle) {
+        cta = { label: 'Open cycle', path: `/annual-report/cycles/${cycle.id}` };
+        if (cycle.submission_deadline) {
+          const parsed = toLocalDate(cycle.submission_deadline.slice(0, 10));
+          if (!Number.isNaN(parsed.getTime())) {
+            dueDate = parsed;
+            official = true;
+          }
+        }
+        if ((cycle.report_status ?? '').toLowerCase() === 'approved') {
+          approvedCycleYear = cycle.fiscal_year;
         }
       }
+    }
+
+    // Approved annual cycle → a completed (green) item, keeping the "Open cycle" CTA.
+    if (approvedCycleYear != null) {
+      events.push({
+        id: `due-${spec.type}`,
+        date: new Date(approvedCycleYear, fye, 0),
+        title: `Annual Report ${approvedCycleYear}`,
+        subtitle: `${MONTHS[fye - 1]} ${approvedCycleYear} · Completed`,
+        kind: 'filed',
+        dotColor: '#0F9D6B',
+        tone: 'done',
+        cta,
+      });
+      continue;
     }
 
     const days = diffDays(dueDate, now);
@@ -110,7 +135,7 @@ export function deriveEvents(input: DeriveInput, now: Date = new Date()): Timeli
       kind: 'due',
       dotColor,
       tone: days <= 30 ? 'urgent' : 'normal',
-      cta: spec.cta,
+      cta,
     });
   }
 
