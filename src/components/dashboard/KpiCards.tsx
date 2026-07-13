@@ -5,17 +5,16 @@ import type { Company } from '@/types/company';
 import { yearFromPeriod } from '@/lib/disclosure';
 
 /**
- * KPI cards row — Revenue, Net Profit, ESG Score, Disclosure Index. Read-only and
- * HONEST: shows real numbers when the backend has them, otherwise "Not enough data
- * yet" (common right after onboarding). Nothing is fabricated.
- *   • Revenue / Net Profit — real value + YoY from the `financial` digital-twin state
- *     (the parser pre-computes the prior-year delta from a single statement).
- *   • Disclosure Index — real coverage % from the latest report; no prior-year, so
- *     the sub-line shows the period rather than a fake "vs 2024".
- *   • ESG Score — no backing data yet (scoring agent is a stub) → insufficient state.
+ * KPI cards row — Revenue, Net Profit, ESG Score, Disclosure Index. Real numbers when
+ * the backend has them; while onboarding is still computing a card's value, the value
+ * slot shows the "AI" ring loader (the card heading stays). Nothing is fabricated.
+ *   • Revenue / Net Profit — value + YoY from the `financial` digital-twin (RAG-extracted).
+ *   • ESG Score — found/total*100 from the ESG harvester (esg.getScores), shown as N.N/100.
+ *   • Disclosure Index — coverage % from the latest report.
+ * Cards poll until the data lands (or onboarding finishes), so numbers appear without a reload.
  */
 
-// ---- Financial digital-twin state shapes (see financial_parser.py output) ----
+// ---- Financial digital-twin state shapes ----
 interface FinancialPeriod {
   period_label?: string;
   line_items?: Record<string, number | null>;
@@ -116,6 +115,26 @@ function deltaPct(fin: FinancialData | null, keys: string[]): number | null {
   return null;
 }
 
+// The onboarding "AI" loader — two counter-rotating rings with the AI mark, shown in a
+// card's value slot while that KPI is still being computed.
+function AiRingLoader() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 11, margin: '5px 0 3px' }}>
+      <div style={{ position: 'relative', width: 34, height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="34" height="34" viewBox="0 0 36 36" fill="none" style={{ position: 'absolute', inset: 0, animation: 'spin 1.2s linear infinite' }}>
+          <circle cx="18" cy="18" r="15" stroke="#ECEEFF" strokeWidth="3" />
+          <path d="M18 3a15 15 0 0 1 15 15" stroke="#4040C8" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ position: 'absolute', animation: 'spin 0.9s linear infinite reverse' }}>
+          <path d="M12 2.5a9.5 9.5 0 0 1 9.5 9.5" stroke="#7C3AED" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+        <span style={{ position: 'relative', fontSize: 8, fontWeight: 800, color: '#4040C8', letterSpacing: '.3px' }}>AI</span>
+      </div>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: '#9BA3C4' }}>Computing…</span>
+    </div>
+  );
+}
+
 function KpiCard({
   label, accent, value, delta, deltaLabel, sub, loading,
 }: {
@@ -134,7 +153,7 @@ function KpiCard({
       <div style={{ padding: '16px 18px 18px', flex: 1 }}>
         <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase' }}>{label}</div>
         {loading ? (
-          <div style={{ fontSize: 23, fontWeight: 800, color: '#C7CBDA', margin: '8px 0 2px', letterSpacing: '-.5px' }}>…</div>
+          <AiRingLoader />
         ) : value === null ? (
           <>
             <div style={{ fontSize: 23, fontWeight: 800, color: '#C7CBDA', margin: '8px 0 4px', letterSpacing: '-.5px' }}>—</div>
@@ -167,47 +186,74 @@ export function KpiCards({ company }: { company: Company | null }) {
   const [fin, setFin] = useState<FinancialData | null>(null);
   const [disclosure, setDisclosure] = useState<{ pct: number; period: string | null } | null>(null);
   const [esgScore, setEsgScore] = useState<{ overall: number; period: string | null } | null>(null);
+  // onboarding_progress.percent stays <100 until the KPI step finishes — drives the
+  // per-card "computing" loader and the poll.
+  const [progressPercent, setProgressPercent] = useState<number | null>(
+    company?.onboarding_progress?.percent ?? null,
+  );
 
   useEffect(() => {
-    if (!companyId) {
-      setLoading(false);
-      return;
-    }
+    if (!companyId) { setLoading(false); return; }
     let cancelled = false;
-    (async () => {
-      const [twinRes, repRes, esgRes] = await Promise.allSettled([
+    let timer: ReturnType<typeof setTimeout>;
+    const startedAt = Date.now();
+    const MAX_WAIT = 6 * 60 * 1000;
+    const nextDelay = () => {
+      const e = Date.now() - startedAt;
+      return e < 30_000 ? 3000 : e < 120_000 ? 6000 : 12000;
+    };
+
+    const applyDisclosure = (repRes: PromiseSettledResult<{ reports?: ReportRow[] }>): boolean => {
+      if (repRes.status !== 'fulfilled') return false;
+      const list = repRes.value?.reports ?? [];
+      const withCov = list.filter((r) => r.coverage && (r.coverage.percentage != null || r.coverage.metrics_total));
+      const esg = withCov.filter((r) => (r.report_type ?? '').toLowerCase() === 'esg');
+      const pool = esg.length ? esg : withCov;
+      const latest = pool.sort((a, b) => yearFromPeriod(b.period) - yearFromPeriod(a.period))[0];
+      const cov = latest?.coverage;
+      if (!cov) return false;
+      let pct = cov.percentage;
+      if (pct == null && cov.metrics_total) pct = ((cov.metrics_disclosed ?? 0) / cov.metrics_total) * 100;
+      if (pct != null && pct <= 1) pct *= 100; // normalise 0–1 rate → percentage
+      if (pct == null) return false;
+      setDisclosure({ pct, period: latest?.period ?? null });
+      return true;
+    };
+
+    const tick = async () => {
+      const [coRes, twinRes, repRes, esgRes] = await Promise.allSettled([
+        companiesApi.getMyCompany(),
         companiesApi.getTwinState<TwinRow>(companyId, 'financial'),
         reportsApi.list<{ reports?: ReportRow[] }>(companyId),
         esgApi.getScores<{ scores: EsgScoreRow | null }>(companyId),
       ]);
       if (cancelled) return;
 
-      setFin(twinRes.status === 'fulfilled' ? parseTwinData(twinRes.value) : null);
+      const pct = coRes.status === 'fulfilled' ? coRes.value?.onboarding_progress?.percent ?? null : null;
+      setProgressPercent(pct);
 
+      const finData = twinRes.status === 'fulfilled' ? parseTwinData(twinRes.value) : null;
+      setFin(finData);
+
+      let esgPresent = false;
       if (esgRes.status === 'fulfilled') {
         const s = esgRes.value?.scores;
-        if (s && s.overall_score != null) setEsgScore({ overall: s.overall_score, period: s.period ?? null });
+        if (s && s.overall_score != null) { setEsgScore({ overall: s.overall_score, period: s.period ?? null }); esgPresent = true; }
       }
 
-      if (repRes.status === 'fulfilled') {
-        const list = repRes.value?.reports ?? [];
-        const withCov = list.filter((r) => r.coverage && (r.coverage.percentage != null || r.coverage.metrics_total));
-        const esg = withCov.filter((r) => (r.report_type ?? '').toLowerCase() === 'esg');
-        const pool = esg.length ? esg : withCov;
-        const latest = pool.sort((a, b) => yearFromPeriod(b.period) - yearFromPeriod(a.period))[0];
-        const cov = latest?.coverage;
-        if (cov) {
-          let pct = cov.percentage;
-          if (pct == null && cov.metrics_total) pct = ((cov.metrics_disclosed ?? 0) / cov.metrics_total) * 100;
-          if (pct != null && pct <= 1) pct *= 100; // normalise 0–1 rate → percentage
-          if (pct != null) setDisclosure({ pct, period: latest?.period ?? null });
-        }
-      }
+      const disclosurePresent = applyDisclosure(repRes);
       setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
+
+      const li = finData?.periods?.[0]?.line_items;
+      const finPresent = Boolean(li && (li.revenue != null || li.net_profit != null));
+      const running = pct != null && pct < 100;
+      const allPresent = finPresent && esgPresent && disclosurePresent;
+      if (running && !allPresent && Date.now() - startedAt < MAX_WAIT) {
+        timer = setTimeout(tick, nextDelay());
+      }
     };
+    tick();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [companyId]);
 
   const latest = latestPeriod(fin);
@@ -224,12 +270,17 @@ export function KpiCards({ company }: { company: Company | null }) {
   const netDelta = deltaPct(fin, ['net_profit', 'net_income']);
   const netAccent = typeof netDelta === 'number' && netDelta < 0 ? '#E5484D' : '#0F9D6B';
 
+  // A card shows the "AI" loader while the first fetch is in flight, or while onboarding
+  // is still computing KPIs and this card's value hasn't landed yet.
+  const running = progressPercent != null && progressPercent < 100;
+  const cardLoading = (present: boolean) => loading || (running && !present);
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
       <KpiCard
         label="Revenue"
         accent="#0F9D6B"
-        loading={loading}
+        loading={cardLoading(revenueVal != null)}
         value={revenueVal != null ? formatMoney(revenueVal, currency, denom) : null}
         delta={revenueDelta}
         deltaLabel={deltaLabel}
@@ -238,7 +289,7 @@ export function KpiCards({ company }: { company: Company | null }) {
       <KpiCard
         label="Net Profit"
         accent={netAccent}
-        loading={loading}
+        loading={cardLoading(netVal != null)}
         value={netVal != null ? formatMoney(netVal, currency, denom) : null}
         delta={netDelta}
         deltaLabel={deltaLabel}
@@ -247,14 +298,14 @@ export function KpiCards({ company }: { company: Company | null }) {
       <KpiCard
         label="ESG Score"
         accent="#3B52E0"
-        loading={loading}
-        value={esgScore ? `${Math.round(esgScore.overall)}/100` : null}
+        loading={cardLoading(esgScore != null)}
+        value={esgScore ? `${esgScore.overall.toFixed(1)}/100` : null}
         sub={esgScore?.period ?? null}
       />
       <KpiCard
         label="Disclosure Index"
         accent="#E8A33D"
-        loading={loading}
+        loading={cardLoading(disclosure != null)}
         value={disclosure ? `${Math.round(disclosure.pct)}%` : null}
         sub={disclosure?.period ?? null}
       />
