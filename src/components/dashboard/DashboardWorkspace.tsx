@@ -10,7 +10,7 @@ import { KpiCards } from '@/components/dashboard/KpiCards';
 import { ActiveReportsCard } from '@/components/dashboard/ActiveReportsCard';
 import { BoardMeetingsCard } from '@/components/dashboard/BoardMeetingsCard';
 import { ShareholderCommsCard } from '@/components/dashboard/ShareholderCommsCard';
-import { ComplianceSnapshotCard } from '@/components/dashboard/ComplianceSnapshotCard';
+import { ReportingFrameworksCard } from '@/components/dashboard/ReportingFrameworksCard';
 import { EsgComparisonsCard } from '@/components/dashboard/EsgComparisonsCard';
 import { AskCopilotCard } from '@/components/dashboard/AskCopilotCard';
 
@@ -320,7 +320,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
 
       {/* Row B — Compliance Snapshot (left) | ESG Comparisons + Ask Copilot (right) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 16, alignItems: 'stretch' }}>
-        <ComplianceSnapshotCard />
+        <ReportingFrameworksCard />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <EsgComparisonsCard />
           <AskCopilotCard />
