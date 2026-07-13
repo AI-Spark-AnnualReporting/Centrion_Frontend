@@ -1,16 +1,14 @@
 import { useEffect, useState } from 'react';
-import { companies as companiesApi, reports as reportsApi, esg as esgApi } from '@/lib/api';
+import { companies as companiesApi, esg as esgApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
-import { yearFromPeriod } from '@/lib/disclosure';
 
 /**
- * KPI cards row — Revenue, Net Profit, ESG Score, Disclosure Index. Real numbers when
- * the backend has them; while onboarding is still computing a card's value, the value
- * slot shows the "AI" ring loader (the card heading stays). Nothing is fabricated.
+ * KPI cards row — Revenue, Net Profit, ESG Score. Real numbers when the backend has
+ * them; while onboarding is still computing a card's value, the value slot shows the
+ * "AI" ring loader (the card heading stays). Nothing is fabricated.
  *   • Revenue / Net Profit — value + YoY from the `financial` digital-twin (RAG-extracted).
  *   • ESG Score — found/total*100 from the ESG harvester (esg.getScores), shown as N.N/100.
- *   • Disclosure Index — coverage % from the latest report.
  * Cards poll until the data lands (or onboarding finishes), so numbers appear without a reload.
  */
 
@@ -27,13 +25,6 @@ interface FinancialData {
 }
 interface TwinRow {
   data?: FinancialData | string | null;
-}
-
-interface ReportRow {
-  id: string;
-  period?: string | null;
-  report_type?: string | null;
-  coverage?: { percentage?: number | null; metrics_total?: number | null; metrics_disclosed?: number | null } | null;
 }
 
 // Latest ESG score row (GET /esg/{id}/scores → { scores: <row>|null }).
@@ -184,7 +175,6 @@ export function KpiCards({ company }: { company: Company | null }) {
 
   const [loading, setLoading] = useState(true);
   const [fin, setFin] = useState<FinancialData | null>(null);
-  const [disclosure, setDisclosure] = useState<{ pct: number; period: string | null } | null>(null);
   const [esgScore, setEsgScore] = useState<{ overall: number; period: string | null } | null>(null);
   // onboarding_progress.percent stays <100 until the KPI step finishes — drives the
   // per-card "computing" loader and the poll.
@@ -203,28 +193,10 @@ export function KpiCards({ company }: { company: Company | null }) {
       return e < 30_000 ? 3000 : e < 120_000 ? 6000 : 12000;
     };
 
-    const applyDisclosure = (repRes: PromiseSettledResult<{ reports?: ReportRow[] }>): boolean => {
-      if (repRes.status !== 'fulfilled') return false;
-      const list = repRes.value?.reports ?? [];
-      const withCov = list.filter((r) => r.coverage && (r.coverage.percentage != null || r.coverage.metrics_total));
-      const esg = withCov.filter((r) => (r.report_type ?? '').toLowerCase() === 'esg');
-      const pool = esg.length ? esg : withCov;
-      const latest = pool.sort((a, b) => yearFromPeriod(b.period) - yearFromPeriod(a.period))[0];
-      const cov = latest?.coverage;
-      if (!cov) return false;
-      let pct = cov.percentage;
-      if (pct == null && cov.metrics_total) pct = ((cov.metrics_disclosed ?? 0) / cov.metrics_total) * 100;
-      if (pct != null && pct <= 1) pct *= 100; // normalise 0–1 rate → percentage
-      if (pct == null) return false;
-      setDisclosure({ pct, period: latest?.period ?? null });
-      return true;
-    };
-
     const tick = async () => {
-      const [coRes, twinRes, repRes, esgRes] = await Promise.allSettled([
+      const [coRes, twinRes, esgRes] = await Promise.allSettled([
         companiesApi.getMyCompany(),
         companiesApi.getTwinState<TwinRow>(companyId, 'financial'),
-        reportsApi.list<{ reports?: ReportRow[] }>(companyId),
         esgApi.getScores<{ scores: EsgScoreRow | null }>(companyId),
       ]);
       if (cancelled) return;
@@ -241,13 +213,12 @@ export function KpiCards({ company }: { company: Company | null }) {
         if (s && s.overall_score != null) { setEsgScore({ overall: s.overall_score, period: s.period ?? null }); esgPresent = true; }
       }
 
-      const disclosurePresent = applyDisclosure(repRes);
       setLoading(false);
 
       const li = finData?.periods?.[0]?.line_items;
       const finPresent = Boolean(li && (li.revenue != null || li.net_profit != null));
       const running = pct != null && pct < 100;
-      const allPresent = finPresent && esgPresent && disclosurePresent;
+      const allPresent = finPresent && esgPresent;
       if (running && !allPresent && Date.now() - startedAt < MAX_WAIT) {
         timer = setTimeout(tick, nextDelay());
       }
@@ -301,13 +272,6 @@ export function KpiCards({ company }: { company: Company | null }) {
         loading={cardLoading(esgScore != null)}
         value={esgScore ? `${esgScore.overall.toFixed(1)}/100` : null}
         sub={esgScore?.period ?? null}
-      />
-      <KpiCard
-        label="Disclosure Index"
-        accent="#E8A33D"
-        loading={cardLoading(disclosure != null)}
-        value={disclosure ? `${Math.round(disclosure.pct)}%` : null}
-        sub={disclosure?.period ?? null}
       />
     </div>
   );

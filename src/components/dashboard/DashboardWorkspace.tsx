@@ -308,7 +308,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         <DisclosureTimeline company={company} />
       </div>
 
-      {/* KPI row — Revenue / Net Profit / ESG Score / Disclosure Index (honest: real data or "not enough data yet") */}
+      {/* KPI row — Revenue / Net Profit / ESG Score (honest: real data or "not enough data yet") */}
       <KpiCards company={company} />
 
       {/* Row A — Active Reports · Board Meetings · Shareholder Comms */}
@@ -327,13 +327,16 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         </div>
       </div>
 
-      {/* Stat cards — real */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <StatCard accent="#3B52E0" label="Fiscal Year End" value={fiscalMonth} sub="Reporting period" />
-        <StatCard accent="#7C3AED" label="Employees" value={employees} sub="Headcount" />
-        <StatCard accent="#0F9D6B" label="Listed Exchange" value={exchange} sub="Market listing" />
-        <StatCard accent="#E8A33D" label="Documents Indexed" value={String(docs.length)} sub="Source files" />
-      </div>
+      {/* Stat cards — real. Hidden per request; remove the `false && ` to re-show. */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
+      {false && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+          <StatCard accent="#3B52E0" label="Fiscal Year End" value={fiscalMonth} sub="Reporting period" />
+          <StatCard accent="#7C3AED" label="Employees" value={employees} sub="Headcount" />
+          <StatCard accent="#0F9D6B" label="Listed Exchange" value={exchange} sub="Market listing" />
+          <StatCard accent="#E8A33D" label="Documents Indexed" value={String(docs.length)} sub="Source files" />
+        </div>
+      )}
 
       {/* Content row — description (left) | documents + frameworks (right), aligned fixed height + internal scroll */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: 16, height: 440 }}>
