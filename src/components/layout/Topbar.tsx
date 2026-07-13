@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { NotificationBell } from './NotificationBell';
 
 interface TopbarProps {
   pageName: string;
@@ -34,7 +35,7 @@ export function Topbar({ pageName }: TopbarProps) {
         )}
       </div>
       <div className="tb-actions">
-        {/* Global search + notification bell hidden until they're wired up. */}
+        <NotificationBell />
         <div className="tb-av">{initials}</div>
         <div>
           <span className="tb-uname">{displayName}</span>

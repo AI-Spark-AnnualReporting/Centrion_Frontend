@@ -1453,6 +1453,143 @@ export interface SendMessageResponse {
   message: ThreadMessage;
 }
 
+// ── History tab: email sends + publications ────────────────────────────────
+export type EmailAudience = 'external' | 'internal';
+export type EmailSendStatus = 'tracked' | 'scheduled' | 'draft';
+
+export interface EmailSendsStats {
+  emails_sent_ytd: number;
+  external_count: number;
+  internal_count: number;
+  avg_open_rate: number;
+  industry_open_rate: number;
+  open_rate_vs_industry: number; // signed delta vs industry
+  report_download_rate: number;
+  avg_time_on_report_seconds: number;
+  time_on_report_qoq_seconds: number | null;
+}
+
+// metrics is a different shape per audience_type.
+export type EmailSendMetrics =
+  | { opened_pct: number; downloaded_pct: number } // external
+  | { read_count: number; approved_count: number; total: number }; // internal
+
+export interface EmailSend {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  sent_at: string | null;
+  scheduled_at: string | null;
+  recipient_count: number;
+  report: { id: string; title: string } | null;
+  metrics: EmailSendMetrics;
+}
+
+export interface EmailSendsResponse {
+  stats: EmailSendsStats;
+  sends: EmailSend[];
+}
+
+export interface SendRecipientHeader {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  sent_at: string | null;
+  recipient_count: number;
+}
+
+export interface SendRecipient {
+  name: string;
+  org: string | null;
+  contact: string | null;
+  opened_at: string | null;
+  downloaded: boolean;
+  time_on_report_seconds: number | null;
+  approved_at: string | null;
+}
+
+export interface SendRecipientsResponse {
+  send: SendRecipientHeader;
+  recipients: SendRecipient[];
+}
+
+export interface Publication {
+  id: string;
+  report: { id: string; title: string; report_type: string; period: string } | null;
+  channel: string;
+  jurisdiction: string | null;
+  visibility: string;
+  watermarked: boolean;
+  published_at?: string | null;
+  published_by: { full_name: string } | null;
+}
+
+export interface PublicationsResponse {
+  stats: { total: number } & Record<string, number>;
+  publications: Publication[];
+}
+
+// ── Compose modal: draft / send ────────────────────────────────────────────
+export interface ComposeRecipient {
+  name: string; // the only required field per recipient
+  org?: string | null;
+  contact?: string | null;
+  email?: string | null;
+}
+
+export interface EmailSendSavePayload {
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label?: string;
+  body?: string;
+  report_id?: string | null;
+  status: EmailSendStatus;
+  scheduled_at?: string | null; // required only when status === 'scheduled'
+  recipients?: ComposeRecipient[];
+}
+
+// GET /{id} — the editor prefill shape (distinct from /{id}/recipients).
+export interface EmailSendDetail {
+  id: string;
+  subject: string;
+  body: string | null;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  scheduled_at: string | null;
+  report: {
+    id: string;
+    title: string;
+    pdf_path: string | null;
+    page_count: number | null;
+    file_size_mb: number | null;
+  } | null;
+  recipients: ComposeRecipient[];
+}
+
+export interface CreateEmailSendResponse {
+  send: EmailSendDetail;
+  recipient_count: number;
+}
+
+export interface UpdateEmailSendResponse {
+  send: EmailSendDetail;
+}
+
+export interface DraftListItem {
+  id: string;
+  subject: string;
+  recipient_count: number;
+  report: { id: string; title: string; period?: string } | null;
+  updated_at: string;
+}
+
+export interface DraftListResponse {
+  drafts: DraftListItem[];
+}
+
 // company_id is never sent — the backend derives it from the JWT.
 export const communications = {
   // Communication tab list. limit (1–200, default 50) / offset (default 0) are
@@ -1501,6 +1638,61 @@ export const communications = {
       method: "POST",
       body,
     }),
+
+  // ── History tab ──────────────────────────────────────────────────────────
+  // Email sends + header stats. `audience` filters the list only; stats always
+  // cover everything so the header stays stable while toggling.
+  emailSends: (audience?: EmailAudience | 'all') =>
+    request<EmailSendsResponse>("/api/v1/communications/history/email-sends", {
+      query: audience && audience !== 'all' ? { audience } : undefined,
+    }),
+
+  // Per-recipient drill-down for one send.
+  sendRecipients: (sendId: string) =>
+    request<SendRecipientsResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients`,
+    ),
+
+  // CSV export — must carry the Bearer token, so fetch as a blob (no plain <a>).
+  sendRecipientsCsv: async (sendId: string): Promise<Blob> => {
+    const url = `${API_BASE_URL}/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients.csv`;
+    const headers: Record<string, string> = {};
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
+    return res.blob();
+  },
+
+  // Publications list + stats. Empty until reports are published.
+  publications: () =>
+    request<PublicationsResponse>("/api/v1/communications/history/publications"),
+
+  // ── Compose: draft / send ────────────────────────────────────────────────
+  // Create a send row (first Save draft OR first Send).
+  createEmailSend: (body: EmailSendSavePayload) =>
+    request<CreateEmailSendResponse>("/api/v1/communications/history/email-sends", {
+      method: "POST",
+      body,
+    }),
+
+  // Update an existing draft (subsequent Save / Send). All fields optional;
+  // `recipients` replaces the whole list. 409 if already tracked/scheduled.
+  updateEmailSend: (id: string, body: Partial<EmailSendSavePayload>) =>
+    request<UpdateEmailSendResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
+
+  // Reopen a draft — prefill the editor. `report.pdf_path` may be null.
+  getEmailSend: (id: string) =>
+    request<EmailSendDetail>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+    ),
+
+  // Saved drafts (only surface for drafts — they're not in the History list).
+  drafts: () => request<DraftListResponse>("/api/v1/communications/history/drafts"),
 };
 
 // ---------------------------------------------------------------------------

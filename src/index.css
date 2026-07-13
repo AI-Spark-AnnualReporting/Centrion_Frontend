@@ -485,6 +485,13 @@ body {
 }
 .inp:focus { border-color: #4040C8; box-shadow: 0 0 0 3px rgba(64,64,200,.1); }
 .inp::placeholder { color: #9BA3C4; }
+/* External-email WYSIWYG editor + its live preview share paragraph/link/list styling. */
+.ext-body p, .ext-preview-body p { margin: 0 0 12px; }
+.ext-body p:last-child, .ext-preview-body p:last-child { margin-bottom: 0; }
+.ext-body a, .ext-preview-body a { color: #4040C8; text-decoration: underline; cursor: pointer; }
+.ext-body ul, .ext-preview-body ul { margin: 0 0 12px; padding-left: 22px; list-style: disc outside; }
+.ext-body li, .ext-preview-body li { list-style: disc outside; display: list-item; }
+.ext-body ol, .ext-preview-body ol { margin: 0 0 12px; padding-left: 22px; list-style: decimal outside; }
 .sel {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%239C9C9C' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
