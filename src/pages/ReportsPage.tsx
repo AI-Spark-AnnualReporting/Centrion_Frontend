@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
+import { ApiError, getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
@@ -264,10 +264,6 @@ export default function ReportsPage() {
 
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
-  // Per-quarterly-report driver coverage % (the list endpoint doesn't carry it;
-  // it lives in the quarterly coverage endpoint). Keyed by report id.
-  const [quarterlyCoverage, setQuarterlyCoverage] = useState<Record<string, number>>({});
-  const [quarterlyCoverageLoading, setQuarterlyCoverageLoading] = useState(false);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
   // picking "+ Add new…" + a year puts the form into create-new mode.
@@ -319,40 +315,6 @@ export default function ReportsPage() {
       cancelled = true;
     };
   }, [companyId]);
-
-  // Load real driver coverage for each quarterly report so the cards aren't all
-  // stuck at 0% (the list endpoint omits it). One coverage call per report.
-  useEffect(() => {
-    if (!companyId) {
-      setQuarterlyCoverage({});
-      return;
-    }
-    const quarterlies = existingReports.filter(isQuarterlyReport);
-    if (quarterlies.length === 0) {
-      setQuarterlyCoverage({});
-      return;
-    }
-    let cancelled = false;
-    setQuarterlyCoverageLoading(true);
-    Promise.allSettled(
-      quarterlies.map((r) =>
-        quarterlyReports
-          .getCoverage(companyId, r.id)
-          .then((cov) => ({ id: r.id, pct: cov.summary.driver_coverage_pct })),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, number> = {};
-      for (const res of results) {
-        if (res.status === 'fulfilled') next[res.value.id] = res.value.pct;
-      }
-      setQuarterlyCoverage(next);
-      setQuarterlyCoverageLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, existingReports]);
 
   const applyReportToForm = (report: ReportSummary) => {
     const cfg = report.generation_config ?? {};
@@ -847,14 +809,13 @@ export default function ReportsPage() {
               <div style={{ marginTop: 24 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
-                    // Coverage % is fetched per report; show a shimmer until it
-                    // resolves rather than flashing a misleading 0%.
-                    const coveragePending =
-                      quarterlyCoverageLoading && quarterlyCoverage[r.id] === undefined;
-                    const score = Math.round(
-                      quarterlyCoverage[r.id] ?? r.coverage?.percentage ?? 0,
-                    );
                     const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
+                    // Surface report metadata (scope + frameworks) on the card
+                    // face instead of a coverage %, which is more useful at a glance.
+                    const frameworks = r.frameworks ?? [];
+                    const scopeLabel = r.scope_type
+                      ? r.scope_type.charAt(0).toUpperCase() + r.scope_type.slice(1)
+                      : null;
                     return (
                       <div
                         key={r.id}
@@ -869,29 +830,30 @@ export default function ReportsPage() {
                         onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 22px rgba(26,29,46,.08)'; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
                       >
-                        <div style={{ background: gradient, padding: '16px 18px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
-                          <div style={{ position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
-                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
+                        <div style={{ background: gradient, padding: '20px 20px 22px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', top: -34, right: -34, width: 124, height: 124, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
+                          <div style={{ position: 'absolute', bottom: -48, right: 26, width: 84, height: 84, borderRadius: '50%', background: 'rgba(255,255,255,.05)' }} />
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', opacity: .8, marginBottom: 10, position: 'relative' }}>
+                            {r.title || 'Quarterly Report'}
+                          </div>
+                          <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.05, letterSpacing: '-.5px', marginBottom: 14, position: 'relative' }}>
                             {formatPeriod(r.period)}
                           </div>
-                          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'Quarterly Report'}</div>
-                          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                              {coveragePending ? (
-                                <Spinner size={20} pad={0} dark />
-                              ) : (
-                                <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
-                              )}
-                              <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
-                            </div>
-                            {!coveragePending && (
-                              <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, position: 'relative' }}>
+                            {scopeLabel && (
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
+                                {scopeLabel}
+                              </span>
+                            )}
+                            {frameworks.slice(0, 3).map((fw) => (
+                              <span key={fw} style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
+                                {fw}
+                              </span>
+                            ))}
+                            {frameworks.length === 0 && !scopeLabel && (
+                              <span style={{ fontSize: 10, fontWeight: 600, opacity: .7 }}>ESG Reporting</span>
                             )}
                           </div>
-                          <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
-                            <div style={{ width: coveragePending ? '0%' : `${score}%`, height: '100%', background: '#22C55E', transition: 'width .3s ease' }} />
-                          </div>
-                          <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>DRIVER COVERAGE</div>
                         </div>
                         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '4px 10px', borderRadius: 999 }}>
