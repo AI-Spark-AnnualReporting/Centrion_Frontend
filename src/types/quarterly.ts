@@ -418,3 +418,14 @@ export interface SaveSectionContentPayload {
 export interface SaveSectionContentResponse {
   section: ProducedSection;
 }
+
+// POST .../sections/{code}/extract — extract-ONLY: the backend parses the uploaded
+// document to plain text and returns it WITHOUT producing/saving the section, so
+// the user can review/edit the text before saving it as the section content.
+// The backend returns the text under `text`; `extracted_text` is kept as a
+// defensive fallback for older/alternate shapes.
+export interface SectionExtractResponse {
+  section_code?: string;
+  text?: string;
+  extracted_text?: string;
+}

@@ -8,7 +8,7 @@ import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
-import { isCoverSection } from '@/components/quarterly/sectionState';
+import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
 import type {
   ProducedSection,
   AssembledSection,
@@ -119,7 +119,7 @@ export default function AssembledReportPage() {
         if (cancelled) return;
         const list = (res.sections ?? [])
           .slice()
-          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+          .sort(byDisplayOrder)
           .map(toProduced);
         setSections(list);
         const { key, brand: coverBrand } = readCoverSelection(res);

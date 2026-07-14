@@ -56,6 +56,7 @@ import type {
   AssembledReportResponse,
   SaveSectionContentPayload,
   SaveSectionContentResponse,
+  SectionExtractResponse,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -1205,6 +1206,24 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/upload`,
       { method: "POST", form: fd },
     ).then(unwrapProducedSection);
+  },
+
+  // needs_input / no-data document: EXTRACT-ONLY. The backend parses the file to
+  // plain text (pdfplumber/python-docx/decode) and returns it WITHOUT producing or
+  // saving the section, so the extracted text can be shown in the input field for
+  // the user to review/edit before saving it as the section content (via produce).
+  extractSectionDocument: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    file: File,
+  ): Promise<SectionExtractResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<SectionExtractResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/extract`,
+      { method: "POST", form: fd },
+    );
   },
 
   // ── Export (step 7) ──

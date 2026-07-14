@@ -9,10 +9,25 @@ export function isCoverSection(s: Pick<ProducedSection, 'section_code'>): boolea
   return /cover/i.test(s.section_code);
 }
 
+// Ascending sort by display_order — the single source of section order shared by
+// the Outline, Preview and Assembled-report screens (and honored by the backend
+// export). Null/undefined orders coalesce to 0.
+export function byDisplayOrder(
+  a: Pick<ProducedSection | OutlineSection, 'display_order'>,
+  b: Pick<ProducedSection | OutlineSection, 'display_order'>,
+): number {
+  return (a.display_order ?? 0) - (b.display_order ?? 0);
+}
+
 // Honest display state — derived from REAL content, never from a blind status
 // flag. 'produced' requires actual content; empty tables / blank strings are NOT
 // produced.
 export type SectionState = 'produced' | 'needs_input' | 'empty';
+
+// Both 'needs_input' and 'empty' (no-data) sections want the user to supply
+// content — they render the same text + document-upload controls.
+export const wantsInput = (state: SectionState): boolean =>
+  state === 'needs_input' || state === 'empty';
 
 // Count rows across whatever table JSON shape the backend returns.
 export function tableRowCount(parsed: unknown): number {

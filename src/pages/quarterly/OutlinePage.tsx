@@ -7,6 +7,7 @@ import { quarterlyReports, ApiError } from '@/lib/api';
 import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
+import { byDisplayOrder } from '@/components/quarterly/sectionState';
 
 // ─── colours (shared quarterly conventions) ──────────────────────────────────
 const ACCENT = '#4040C8';
@@ -168,14 +169,14 @@ function SectionRow({
       <span
         {...dragHandleProps}
         role="button"
-        tabIndex={locked ? -1 : 0}
+        tabIndex={0}
         aria-label={`Reorder ${section.title}`}
-        title={locked ? undefined : 'Drag to reorder (or use arrow keys)'}
+        title="Drag to reorder (or use arrow keys)"
         style={{
           display: 'inline-flex',
           flexShrink: 0,
-          cursor: locked ? 'default' : 'grab',
-          color: locked ? '#C9CDE4' : '#9BA3C4',
+          cursor: 'grab',
+          color: '#9BA3C4',
           outlineOffset: 2,
         }}
       >
@@ -294,15 +295,13 @@ export default function OutlinePage() {
 
   // Split a response into pinned required + ordered optionals.
   const applyResponse = (res: OutlineResponse) => {
-    const byOrder = (a: OutlineSection, b: OutlineSection) =>
-      (a.display_order ?? 0) - (b.display_order ?? 0);
     const req = res.sections
       .filter((s) => s.requirement === 'required')
-      .sort(byOrder)
+      .sort(byDisplayOrder)
       .map((s) => ({ ...s, included: true }));
     const opt = res.sections
       .filter((s) => s.requirement === 'optional')
-      .sort(byOrder);
+      .sort(byDisplayOrder);
     setRequired(req);
     setOptionals(opt);
     setTotalCatalogue(res.total_catalogue ?? res.sections.length);
@@ -326,11 +325,16 @@ export default function OutlinePage() {
     required.length + optionals.filter((o) => o.included).length;
 
   // ── Persist (debounced PUT) ───────────────────────────────────────────────
+  // includedOnly: post-lock the SET is frozen, so a reorder must carry ONLY the
+  // sections in the locked/included set. Sending excluded optionals with a fresh
+  // display_order reads as "positioning a section not in the set" and the backend
+  // rejects it (409). Pre-lock we send the full catalogue so tick/untick persists.
   const buildPayload = useCallback(
-    (req: OutlineSection[], opts: OutlineSection[]) => {
-      const ordered = [...req, ...opts];
+    (req: OutlineSection[], opts: OutlineSection[], includedOnly = false) => {
+      const all = [...req, ...opts];
+      const rows = includedOnly ? all.filter((s) => s.included) : all;
       return {
-        sections: ordered.map((s, i) => ({
+        sections: rows.map((s, i) => ({
           section_code: s.section_code,
           included: s.included,
           display_order: i,
@@ -357,28 +361,49 @@ export default function OutlinePage() {
 
   const scheduleSave = useCallback(
     (req: OutlineSection[], opts: OutlineSection[]) => {
-      if (isLocked || !companyId || !reportId) return;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      setSaveState('saving');
-      saveTimerRef.current = setTimeout(() => {
-        const seq = ++saveSeqRef.current;
+      // Persist reorders even when locked — the SET is frozen (include toggles are
+      // disabled), so any autosave here is a display_order change, which the
+      // backend must accept on a locked report (no 409, no regeneration).
+      if (!companyId || !reportId) return;
+
+      // One PUT attempt. On a 409 (the report is actually locked) we retry ONCE
+      // with the included-only payload — only the locked/included set, order-only —
+      // which is exactly what the backend's post-lock reorder path accepts. A drag
+      // never changes the section SET, so re-sending just the included set is always
+      // correct. If the retry ALSO 409s, the backend isn't honoring reorder-while-
+      // locked and we revert (a real backend bug, now surfaced).
+      const runSave = (includedOnly: boolean, seq: number, retried: boolean) => {
         quarterlyReports
-          .saveOutline(companyId, reportId, buildPayload(req, opts))
+          .saveOutline(companyId, reportId, buildPayload(req, opts, includedOnly))
           .then(() => {
             if (seq === saveSeqRef.current) setSaveState('saved');
           })
           .catch((err: unknown) => {
             if (seq !== saveSeqRef.current) return;
             if (err instanceof ApiError && err.status === 409) {
+              console.warn('[outline] PUT /outline rejected (409):', err.body);
+              if (!retried) {
+                // The set is locked after all → retry as an included-only reorder.
+                setIsLocked(true);
+                runSave(true, seq, true);
+                return;
+              }
               handleLocked409();
               return;
             }
             // Non-lock error: surface softly in the indicator, keep local state.
             setSaveState('idle');
           });
+      };
+
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      setSaveState('saving');
+      saveTimerRef.current = setTimeout(() => {
+        const seq = ++saveSeqRef.current;
+        runSave(isLocked, seq, false);
       }, 700);
     },
-    [isLocked, companyId, reportId, buildPayload, handleLocked409],
+    [companyId, reportId, buildPayload, handleLocked409, isLocked],
   );
 
   // ── Mutations ─────────────────────────────────────────────────────────────
@@ -409,7 +434,9 @@ export default function OutlinePage() {
   };
 
   const moveRequired = (from: number, to: number) => {
-    if (isLocked || to < 0 || to >= required.length || from === to) return;
+    // Reordering is allowed even when the set is locked — only the include/exclude
+    // SET is frozen, not the display order.
+    if (to < 0 || to >= required.length || from === to) return;
     setRequired((prev) => {
       const next = [...prev];
       const [item] = next.splice(from, 1);
@@ -420,7 +447,7 @@ export default function OutlinePage() {
   };
 
   const moveOptional = (from: number, to: number) => {
-    if (isLocked || to < 0 || to >= optionals.length || from === to) return;
+    if (to < 0 || to >= optionals.length || from === to) return;
     setOptionals((prev) => {
       const next = [...prev];
       const [item] = next.splice(from, 1);
@@ -477,7 +504,9 @@ export default function OutlinePage() {
   const onGenerate = async () => {
     if (!companyId || !reportId) return;
     if (isLocked) {
-      await goProduceOrPreview();
+      // Already locked → sections were produced on the first pass. Just view them;
+      // do NOT re-run produceAll (that would regenerate everything on every revisit).
+      navigate(`/quarterly-report/${reportId}/preview`);
       return;
     }
     setSubmitting(true);
@@ -492,8 +521,9 @@ export default function OutlinePage() {
       await goProduceOrPreview();
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
-        // Already locked — still kick production and proceed.
-        await goProduceOrPreview();
+        // Already locked elsewhere — sections are (being) produced; just view them.
+        // Don't re-kick production.
+        navigate(`/quarterly-report/${reportId}/preview`);
         return;
       }
       setSubmitting(false);
@@ -518,7 +548,6 @@ export default function OutlinePage() {
     setOverIndex(null);
   };
   const onDragStart = (group: DragGroup, index: number) => (e: React.DragEvent) => {
-    if (isLocked) return;
     dragIndexRef.current = index;
     dragGroupRef.current = group;
     setDragIndex(index);
@@ -526,19 +555,18 @@ export default function OutlinePage() {
     e.dataTransfer.effectAllowed = 'move';
   };
   const onDragOver = (group: DragGroup, index: number) => (e: React.DragEvent) => {
-    if (isLocked || dragIndexRef.current === null || dragGroupRef.current !== group) return;
+    if (dragIndexRef.current === null || dragGroupRef.current !== group) return;
     e.preventDefault();
     if (index !== overIndex) setOverIndex(index);
   };
   const onDrop = (group: DragGroup, index: number) => (e: React.DragEvent) => {
-    if (isLocked || dragIndexRef.current === null || dragGroupRef.current !== group) return;
+    if (dragIndexRef.current === null || dragGroupRef.current !== group) return;
     e.preventDefault();
     moveInGroup(group, dragIndexRef.current, index);
     resetDrag();
   };
   const onDragEnd = () => resetDrag();
   const onGripKeyDown = (group: DragGroup, index: number) => (e: React.KeyboardEvent) => {
-    if (isLocked) return;
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       moveInGroup(group, index, index - 1);
@@ -702,7 +730,7 @@ export default function OutlinePage() {
             }}
           >
             <Lock size={13} aria-hidden />
-            Outline locked
+            Section set locked · drag to reorder
           </span>
         ) : (
           <>
@@ -740,7 +768,7 @@ export default function OutlinePage() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="ch">
               <span className="ct">
-                REQUIRED — always included{isLocked ? '' : ' · drag to reorder'}
+                REQUIRED — always included · drag to reorder
               </span>
             </div>
             <div
@@ -761,7 +789,7 @@ export default function OutlinePage() {
                     dragging={dragGroup === 'required' && dragIndex === i}
                     dragOver={dragGroup === 'required' && overIndex === i && dragIndex !== i}
                     dragHandleProps={{
-                      draggable: !isLocked,
+                      draggable: true,
                       onDragStart: onDragStart('required', i),
                       onDragEnd,
                       onKeyDown: onGripKeyDown('required', i),
@@ -778,7 +806,7 @@ export default function OutlinePage() {
           <div className="card">
             <div className="ch">
               <span className="ct">
-                OPTIONAL{isLocked ? '' : ' — drag to reorder'}
+                OPTIONAL — drag to reorder
               </span>
             </div>
             <div
@@ -800,7 +828,7 @@ export default function OutlinePage() {
                     dragOver={dragGroup === 'optional' && overIndex === i && dragIndex !== i}
                     onToggle={() => toggleOptional(s.section_code)}
                     dragHandleProps={{
-                      draggable: !isLocked,
+                      draggable: true,
                       onDragStart: onDragStart('optional', i),
                       onDragEnd,
                       onKeyDown: onGripKeyDown('optional', i),
@@ -845,7 +873,7 @@ export default function OutlinePage() {
           }}
         >
           {includedCount} sections · in your order
-          {!isLocked && saveState !== 'idle' && (
+          {saveState !== 'idle' && (
             <span
               style={{
                 fontSize: 11,

@@ -18,12 +18,11 @@ import type {
 import {
   isCoverSection,
   sectionState,
-  hasRealContent,
-  needsInputSection,
+  wantsInput,
   neededInput,
-  emptyMessage,
   sourceTypeLabel,
   seedFromOutline,
+  byDisplayOrder,
 } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Outline conventions) ────────────────────
@@ -95,7 +94,7 @@ function RailItem({
   const state = sectionState(section);
   const drafting = section.status === 'drafting';
   const produced = state === 'produced';
-  const needs = state === 'needs_input';
+  const needs = wantsInput(state); // needs_input + no-data both want the user's input
 
   // dot: green produced · amber needs-input · accent(spin) drafting · grey empty
   const dotBg = produced ? GREEN_LIGHT : needs ? AMBER_LIGHT : drafting ? ACCENT : '#F1F2F6';
@@ -178,7 +177,7 @@ function StatusPill({ section }: { section: ProducedSection }) {
     ? { label: 'Composing…', color: ACCENT, bg: '#EEEEFF', tick: false }
     : state === 'produced'
       ? { label: 'Produced', color: GREEN, bg: GREEN_LIGHT, tick: true }
-      : state === 'needs_input'
+      : wantsInput(state)
         ? { label: 'Needs input', color: AMBER, bg: AMBER_LIGHT, tick: false }
         : { label: 'No data', color: '#9BA3C4', bg: '#F2F3FA', tick: false };
   return (
@@ -218,6 +217,8 @@ export default function PreviewPage() {
   const [sectionFile, setSectionFile] = useState<Record<string, File | null>>({});
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  // Document extraction in flight (per section) — extract-to-field before save.
+  const [extracting, setExtracting] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // ── Cover design + brand color (Part 6) ──
@@ -322,7 +323,7 @@ export default function PreviewPage() {
         if (cancelled) return;
         const included = (res.sections ?? [])
           .filter((s) => s.included)
-          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+          .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);
         setCurrentIndex(0);
@@ -348,27 +349,25 @@ export default function PreviewPage() {
     };
   }, [companyId, reportId, retryKey, patchSection]);
 
-  // ── produce a single section (manual, incl. needs_input with supplied text)
+  // ── produce a single section (manual). Covers three cases:
+  //   • needs_input / no-data (empty): the user PROVIDES the content as text (a
+  //     document is extracted into the field first, see handleExtract). Saved via
+  //     produce — Template sections keep it verbatim, AI-written use it as a steer.
+  //   • produced: an explicit Regenerate — re-produce with no user_input.
   const handleProduce = useCallback(
     async (section: ProducedSection) => {
       if (!companyId || !reportId) return;
       const code = section.section_code;
       const text = (inputText[code] ?? '').trim();
-      const file = sectionFile[code] ?? null;
-      const isNeedsInput = needsInputSection(section) && !hasRealContent(section);
+      const provideContent = wantsInput(sectionState(section));
 
-      // ── needs_input: the user PROVIDES the content — typed text and/or an
-      // uploaded document. Both go through produce: Template sections save the
-      // text verbatim, AI-written sections use it as a steer. A document is sent
-      // to the dedicated /upload endpoint (plain-text extraction, not financial).
-      if (isNeedsInput) {
-        if (!text && !file) return;
+      // ── needs_input / empty: save the supplied text as the section content.
+      if (provideContent) {
+        if (!text) return; // uploaded docs are extracted into the field first
         setBusy((b) => ({ ...b, [code]: true }));
         setErrors((e) => ({ ...e, [code]: '' }));
         try {
-          const res = file
-            ? await quarterlyReports.uploadSectionDocument(companyId, reportId, code, file)
-            : await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
+          const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
           patchSection(code, res);
           setInputText((m) => ({ ...m, [code]: '' }));
           setSectionFile((m) => ({ ...m, [code]: null }));
@@ -380,26 +379,46 @@ export default function PreviewPage() {
         return;
       }
 
-      // ── produce (ready / template / empty): the backend generates/extracts.
+      // ── produced → Regenerate: re-produce from the backend (no user_input).
       setBusy((b) => ({ ...b, [code]: true }));
       setErrors((e) => ({ ...e, [code]: '' }));
       patchSection(code, { status: 'drafting' });
       try {
-        const res = await quarterlyReports.produceSection(
-          companyId,
-          reportId,
-          code,
-          text ? { user_input: text } : undefined,
-        );
+        const res = await quarterlyReports.produceSection(companyId, reportId, code, undefined);
         patchSection(code, res);
       } catch (err: unknown) {
-        patchSection(code, { status: 'pending' });
-        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not produce this section.' }));
+        patchSection(code, { status: 'done' });
+        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not regenerate this section.' }));
       } finally {
         setBusy((b) => ({ ...b, [code]: false }));
       }
     },
-    [companyId, reportId, inputText, sectionFile, patchSection],
+    [companyId, reportId, inputText, patchSection],
+  );
+
+  // ── extract a document's text INTO the input field (extract-only; no produce).
+  // The user reviews/edits the extracted text, then Save persists it as content.
+  const handleExtract = useCallback(
+    async (section: ProducedSection, file: File | null) => {
+      if (!companyId || !reportId) return;
+      const code = section.section_code;
+      setSectionFile((m) => ({ ...m, [code]: file }));
+      if (!file) return;
+      setExtracting((x) => ({ ...x, [code]: true }));
+      setErrors((e) => ({ ...e, [code]: '' }));
+      try {
+        const res = await quarterlyReports.extractSectionDocument(companyId, reportId, code, file);
+        const extracted = res.text ?? res.extracted_text ?? '';
+        setInputText((m) => ({ ...m, [code]: extracted }));
+      } catch (err: unknown) {
+        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not extract text from this document.' }));
+      } finally {
+        // The file has been consumed into the field — clear the chip either way.
+        setSectionFile((m) => ({ ...m, [code]: null }));
+        setExtracting((x) => ({ ...x, [code]: false }));
+      }
+    },
+    [companyId, reportId],
   );
 
   const handleRefined = useCallback(
@@ -548,11 +567,12 @@ export default function PreviewPage() {
                 <SectionPanel
                   section={section}
                   busy={!!busy[section.section_code]}
+                  extracting={!!extracting[section.section_code]}
                   error={errors[section.section_code] || null}
                   inputValue={inputText[section.section_code] ?? ''}
                   onInputChange={(v) => setInputText((m) => ({ ...m, [section.section_code]: v }))}
                   file={sectionFile[section.section_code] ?? null}
-                  onFileChange={(f) => setSectionFile((m) => ({ ...m, [section.section_code]: f }))}
+                  onFileChange={(f) => handleExtract(section, f)}
                   onProduce={() => handleProduce(section)}
                   onSkip={() => setSkipped((s) => new Set(s).add(section.section_code))}
                   skipped={skipped.has(section.section_code)}
@@ -645,6 +665,7 @@ function FileField({ file, onFileChange, disabled }: { file: File | null; onFile
 function SectionPanel({
   section,
   busy,
+  extracting,
   error,
   inputValue,
   onInputChange,
@@ -659,6 +680,7 @@ function SectionPanel({
 }: {
   section: ProducedSection;
   busy: boolean;
+  extracting: boolean;
   error: string | null;
   inputValue: string;
   onInputChange: (v: string) => void;
@@ -672,9 +694,10 @@ function SectionPanel({
   onRefined: (s: ProducedSection) => void;
 }) {
   const state = sectionState(section);
-  // Needs_input stays in its own panel while saving (button shows "Saving…") —
-  // only produce/extraction shows the full "Composing…" spinner.
-  const drafting = (section.status === 'drafting' || busy) && state !== 'produced' && state !== 'needs_input';
+  // Input-seeking states (needs_input / empty) stay in their own panel while
+  // saving (button shows "Saving…") — only a fresh produce shows the full
+  // "Composing…" spinner.
+  const drafting = (section.status === 'drafting' || busy) && state !== 'produced' && !wantsInput(state);
   const canRefine = state === 'produced' && section.mode === 'generate';
 
   // 1) Composing (produce in-flight)
@@ -690,10 +713,38 @@ function SectionPanel({
     );
   }
 
-  // 2) Produced → real content (+ refine for AI-written sections)
+  // 2) Produced → real content (+ Regenerate, + refine for AI-written sections).
+  //    Regenerate is the ONLY path that re-hits the producer for a done section;
+  //    revisiting never auto-regenerates.
   if (state === 'produced') {
     return (
       <>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginBottom: 12 }}>
+          {busy && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: ACCENT }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
+                <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              Regenerating…
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn bs"
+            onClick={onProduce}
+            disabled={busy}
+            title="Regenerate this section"
+            style={{ fontSize: 12.5, padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 7, opacity: busy ? 0.6 : 1 }}
+          >
+            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+              <path d="M16 5a7 7 0 1 0 1.5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <path d="M16 2v3.5h-3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Regenerate
+          </button>
+        </div>
+        {error && <div style={{ marginBottom: 12, fontSize: 12, color: '#DC2626' }}>{error}</div>}
         <SectionContent section={section} />
         {canRefine && companyId && reportId && (
           <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
@@ -702,63 +753,71 @@ function SectionPanel({
     );
   }
 
-  // 3) Needs input → requirement + text field + file upload + Produce / Skip
-  if (state === 'needs_input') {
-    const need = neededInput(section);
-    const canProduce = !busy && (!!inputValue.trim() || !!file);
-    return (
-      <div>
-        <div style={{ background: AMBER_LIGHT, border: '1px solid #FDE68A', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: AMBER, marginBottom: 3 }}>This section needs your input</div>
-          <div style={{ fontSize: 13, color: '#92610A' }}>Needs: {need}</div>
+  // 3) Needs input OR no-data (empty) → both let the user supply content: a text
+  //    field + a document upload (whose text is extracted into the field). Upload
+  //    → extract → review/edit → Save.
+  const need = neededInput(section);
+  const isEmpty = state === 'empty';
+  const canProduce = !busy && !extracting && !!inputValue.trim();
+  return (
+    <div>
+      <div style={{ background: AMBER_LIGHT, border: '1px solid #FDE68A', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: AMBER, marginBottom: 3 }}>
+          {isEmpty ? 'No data found for this section' : 'This section needs your input'}
         </div>
-
-        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
-          {need}
-        </label>
-        <textarea
-          value={inputValue}
-          onChange={(e) => onInputChange(e.target.value)}
-          placeholder={`Type or paste ${need.toLowerCase()}…`}
-          rows={5}
-          style={{
-            width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
-            fontSize: 13, lineHeight: 1.6, color: DARK, background: '#fff', resize: 'vertical',
-            outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
-          }}
-          onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
-          onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
-        />
-
-        <FileField file={file} onFileChange={onFileChange} disabled={busy} />
-
-        {error && <div style={{ marginTop: 8, fontSize: 12, color: '#DC2626' }}>{error}</div>}
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, gap: 12, flexWrap: 'wrap' }}>
-          <button
-            onClick={onSkip}
-            style={{ background: 'none', border: 'none', fontSize: 13, color: MUTED, cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}
-          >
-            {skipped ? 'Skipped — will be flagged' : 'Skip for now'}
-          </button>
-          <button
-            className="btn bp"
-            onClick={onProduce}
-            disabled={!canProduce}
-            style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
-          >
-            {busy ? 'Saving…' : 'Save'}
-          </button>
+        <div style={{ fontSize: 13, color: '#92610A' }}>
+          {isEmpty ? 'Add content below — type it in, or upload a document to pull its text.' : `Needs: ${need}`}
         </div>
       </div>
-    );
-  }
 
-  // 4) Empty → honest "no data" (no fake success).
-  return (
-    <div style={{ padding: '10px 4px' }}>
-      <p style={{ margin: 0, fontSize: 13, color: MUTED }}>{emptyMessage(section)}</p>
-      {error && <div style={{ marginTop: 12, fontSize: 12, color: '#DC2626' }}>{error}</div>}
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
+        {isEmpty ? 'Section content' : need}
+      </label>
+      <textarea
+        value={inputValue}
+        onChange={(e) => onInputChange(e.target.value)}
+        placeholder={`Type or paste ${isEmpty ? 'the section content' : need.toLowerCase()}…`}
+        rows={5}
+        disabled={extracting}
+        style={{
+          width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
+          fontSize: 13, lineHeight: 1.6, color: DARK, background: extracting ? '#F8F9FC' : '#fff', resize: 'vertical',
+          outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
+        }}
+        onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
+        onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
+      />
+
+      <FileField file={file} onFileChange={onFileChange} disabled={busy || extracting} />
+
+      {extracting && (
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: ACCENT }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
+            <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
+            <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          Extracting text from document…
+        </div>
+      )}
+
+      {error && <div style={{ marginTop: 8, fontSize: 12, color: '#DC2626' }}>{error}</div>}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, gap: 12, flexWrap: 'wrap' }}>
+        <button
+          onClick={onSkip}
+          style={{ background: 'none', border: 'none', fontSize: 13, color: MUTED, cursor: 'pointer', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}
+        >
+          {skipped ? 'Skipped — will be flagged' : 'Skip for now'}
+        </button>
+        <button
+          className="btn bp"
+          onClick={onProduce}
+          disabled={!canProduce}
+          style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
     </div>
   );
 }
