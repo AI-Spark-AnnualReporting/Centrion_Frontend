@@ -6,8 +6,9 @@ import type { ScopesResponse } from '@/types/lookups';
 /**
  * Reporting Frameworks — the wide left tile of the Home dashboard's Row B. Shows 5
  * specific reporting frameworks (real indicator counts from lookups.scopes, the same
- * source as the ESG-tab Framework Catalogue) plus a 2-year revenue mini-chart (the
- * report's year + the prior year, derived from the financial digital-twin).
+ * source as the ESG-tab Framework Catalogue) plus a multi-year revenue mini-chart —
+ * one bar per year across ALL financial digital-twin periods (the earliest prior year
+ * is derived from that report's YoY %).
  */
 
 const ACCENT_UNIVERSAL = '#4040C8'; // GRI / IFRS
@@ -32,6 +33,13 @@ interface FinancialData {
   denomination?: string | null;
 }
 interface TwinRow { data?: FinancialData | string | null }
+// One digital_twin_states row from GET /companies/{id}/twin (all states, no limit).
+interface TwinStateRow extends TwinRow {
+  state_type?: string | null;
+  period?: string | null;
+  version?: number | null;
+}
+interface DigitalTwinResponse { states?: TwinStateRow[] }
 
 function parseTwinData(row: TwinRow | null | undefined): FinancialData | null {
   const raw = row?.data;
@@ -68,7 +76,7 @@ export function ReportingFrameworksCard() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const [scopes, setScopes] = useState<ScopesResponse | null>(null);
-  const [fin, setFin] = useState<FinancialData | null>(null);
+  const [finRows, setFinRows] = useState<{ period: string | null; version: number; data: FinancialData }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,8 +87,21 @@ export function ReportingFrameworksCard() {
   useEffect(() => {
     if (!companyId) return;
     let cancelled = false;
-    companiesApi.getTwinState<TwinRow>(companyId, 'financial')
-      .then((r) => { if (!cancelled) setFin(parseTwinData(r)); })
+    // Pull ALL twin states (the /twin endpoint has no limit, unlike /twin/{type})
+    // so we can build a multi-year revenue history from every financial period.
+    companiesApi.getDigitalTwin<DigitalTwinResponse>(companyId)
+      .then((r) => {
+        if (cancelled) return;
+        const financialRows = (r?.states ?? [])
+          .filter((s) => s.state_type === 'financial')
+          .map((s) => ({
+            period: s.period ?? null,
+            version: typeof s.version === 'number' ? s.version : 0,
+            data: parseTwinData(s),
+          }))
+          .filter((x): x is { period: string | null; version: number; data: FinancialData } => x.data != null);
+        setFinRows(financialRows);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [companyId]);
@@ -100,25 +121,45 @@ export function ReportingFrameworksCard() {
   }
   const maxCount = Math.max(1, ...rows.map((r) => r.count));
 
-  // Revenue — the report's year + a derived prior (current / (1 + yoy%)).
-  const periods = fin?.periods ?? [];
-  const latest = periods.length
-    ? [...periods].sort((a, b) => (b.period_label ?? '').localeCompare(a.period_label ?? ''))[0]
-    : null;
-  const revNow = typeof latest?.line_items?.revenue === 'number' ? latest.line_items.revenue : null;
-  const revPct = typeof fin?.yoy_deltas?.revenue_change_pct === 'number' ? fin.yoy_deltas.revenue_change_pct : null;
-  const currentYear = latest?.period_label?.match(/(\d{4})/)?.[1] ?? null;
-  const revPrior = revNow != null && revPct != null && 1 + revPct / 100 !== 0 ? revNow / (1 + revPct / 100) : null;
+  // Revenue — one bar per YEAR across all financial twin periods. Each period's
+  // revenue is scaled to an absolute number (via DENOM_SCALE) so years with
+  // different denominations stay comparable; the earliest year is filled with a
+  // value derived from that report's YoY % so the history stays continuous.
+  const scaleOf = (d?: string | null) => (d ? DENOM_SCALE[d.toLowerCase()] ?? 1 : 1);
 
-  const revBars: { year: number; value: number; highlight: boolean }[] = [];
-  if (revNow != null && currentYear) {
-    const cy = Number(currentYear);
-    if (revPrior != null) revBars.push({ year: cy - 1, value: revPrior, highlight: false });
-    revBars.push({ year: cy, value: revNow, highlight: true });
+  // Dedup periods, keeping the highest version per period (re-uploads bump version).
+  const byPeriod = new Map<string, { version: number; data: FinancialData; label: string }>();
+  for (const row of finRows) {
+    const label = row.data.periods?.[0]?.period_label ?? row.period ?? '';
+    const key = label || `v${row.version}`;
+    const prev = byPeriod.get(key);
+    if (!prev || row.version >= prev.version) byPeriod.set(key, { version: row.version, data: row.data, label });
   }
+
+  // Actual revenues by year (absolute) + a derived prior year from each report's YoY.
+  const actualByYear = new Map<number, number>();
+  const derivedByYear = new Map<number, number>();
+  let seriesCurrency: string | null = null;
+  for (const { data, label } of byPeriod.values()) {
+    const rev = data.periods?.[0]?.line_items?.revenue;
+    const year = Number(label.match(/(\d{4})/)?.[1] ?? NaN);
+    if (typeof rev !== 'number' || Number.isNaN(year)) continue;
+    const abs = rev * scaleOf(data.denomination);
+    actualByYear.set(year, abs);
+    seriesCurrency = seriesCurrency ?? data.currency ?? null;
+    const yoy = data.yoy_deltas?.revenue_change_pct;
+    if (typeof yoy === 'number' && 1 + yoy / 100 !== 0) derivedByYear.set(year - 1, abs / (1 + yoy / 100));
+  }
+
+  // Merge (actuals win over deriveds), sort ascending, keep the last 4 years,
+  // highlight the latest actual year green.
+  const latestYear = actualByYear.size ? Math.max(...actualByYear.keys()) : null;
+  const revBars = [...new Set<number>([...actualByYear.keys(), ...derivedByYear.keys()])]
+    .sort((a, b) => a - b)
+    .map((year) => ({ year, value: actualByYear.get(year) ?? derivedByYear.get(year) ?? 0, highlight: year === latestYear }))
+    .filter((b) => b.value > 0)
+    .slice(-4);
   const maxRev = Math.max(1, ...revBars.map((b) => b.value));
-  const currency = fin?.currency ?? null;
-  const denom = fin?.denomination ?? null;
 
   return (
     <div className="card" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column' }}>
@@ -151,16 +192,16 @@ export function ReportingFrameworksCard() {
             ))}
       </div>
 
-      {/* Revenue — report year + prior */}
+      {/* Revenue — one bar per year (all financial periods) */}
       <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid #ECEEF8' }}>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: '#9BA3C4', marginBottom: 14 }}>Revenue</div>
         {revBars.length === 0 ? (
           <div style={{ fontSize: 12, color: '#9BA3C4', paddingBottom: 6 }}>Revenue appears once your annual report is processed.</div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 28, height: 110 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 22, height: 110 }}>
             {revBars.map((b) => (
               <div key={b.year} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 7, width: 74, height: '100%' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: b.highlight ? '#16A34A' : '#5A6080' }}>{formatMoney(b.value, currency, denom)}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: b.highlight ? '#16A34A' : '#5A6080' }}>{formatMoney(b.value, seriesCurrency, null)}</span>
                 <div style={{ width: '100%', maxWidth: 60, height: `${Math.max(8, Math.round((b.value / maxRev) * 62))}px`, borderRadius: 6, background: b.highlight ? '#16A34A' : 'rgba(22,163,74,.18)' }} />
                 <span style={{ fontSize: 10, fontWeight: 600, color: b.highlight ? '#16A34A' : '#9BA3C4' }}>{b.year}</span>
               </div>
