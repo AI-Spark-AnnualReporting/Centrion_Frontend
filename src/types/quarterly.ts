@@ -142,6 +142,9 @@ export interface OutlineSection {
   part_label: string;
   requirement: 'required' | 'optional';
   included: boolean;
+  // System's data-driven suggestion: true when we have source data for the section
+  // (feeder ready) or it's a chosen voice. Drives the "Recommended" quick-select.
+  recommended: boolean;
   // Per-section lock: a required section can't be unticked. Distinct from the
   // whole-outline freeze on OutlineResponse.locked.
   locked: boolean;
