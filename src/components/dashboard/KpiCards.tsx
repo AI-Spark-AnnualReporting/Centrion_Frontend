@@ -127,13 +127,14 @@ function AiRingLoader() {
 }
 
 function KpiCard({
-  label, accent, value, delta, deltaLabel, sub, loading,
+  label, accent, value, delta, deltaLabel, deltaUnit = 'pct', sub, loading,
 }: {
   label: string;
   accent: string;
   value: string | null;
   delta?: number | null;
   deltaLabel?: string;
+  deltaUnit?: 'pct' | 'pts';
   sub?: string | null;
   loading?: boolean;
 }) {
@@ -156,7 +157,7 @@ function KpiCard({
             {typeof delta === 'number' ? (
               <div style={{ fontSize: 11.5, fontWeight: 700, color: delta >= 0 ? '#0F9D6B' : '#E5484D', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span>{delta >= 0 ? '▲' : '▼'}</span>
-                <span>{Math.abs(delta).toFixed(1)}%{deltaLabel ? ` ${deltaLabel}` : ''}</span>
+                <span>{deltaUnit === 'pts' ? `${Math.round(Math.abs(delta))} pts` : `${Math.abs(delta).toFixed(1)}%`}{deltaLabel ? ` ${deltaLabel}` : ''}</span>
               </div>
             ) : (
               <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{sub ?? ''}</div>
@@ -175,7 +176,7 @@ export function KpiCards({ company }: { company: Company | null }) {
 
   const [loading, setLoading] = useState(true);
   const [fin, setFin] = useState<FinancialData | null>(null);
-  const [esgScore, setEsgScore] = useState<{ overall: number; period: string | null } | null>(null);
+  const [esgScore, setEsgScore] = useState<{ overall: number; period: string | null; prevOverall: number | null; prevPeriod: string | null } | null>(null);
   // onboarding_progress.percent stays <100 until the KPI step finishes — drives the
   // per-card "computing" loader and the poll.
   const [progressPercent, setProgressPercent] = useState<number | null>(
@@ -197,7 +198,7 @@ export function KpiCards({ company }: { company: Company | null }) {
       const [coRes, twinRes, esgRes] = await Promise.allSettled([
         companiesApi.getMyCompany(),
         companiesApi.getTwinState<TwinRow>(companyId, 'financial'),
-        esgApi.getScores<{ scores: EsgScoreRow | null }>(companyId),
+        esgApi.getScores<{ scores: EsgScoreRow | null; previous?: EsgScoreRow | null }>(companyId),
       ]);
       if (cancelled) return;
 
@@ -210,7 +211,16 @@ export function KpiCards({ company }: { company: Company | null }) {
       let esgPresent = false;
       if (esgRes.status === 'fulfilled') {
         const s = esgRes.value?.scores;
-        if (s && s.overall_score != null) { setEsgScore({ overall: s.overall_score, period: s.period ?? null }); esgPresent = true; }
+        const prev = esgRes.value?.previous;
+        if (s && s.overall_score != null) {
+          setEsgScore({
+            overall: s.overall_score,
+            period: s.period ?? null,
+            prevOverall: prev?.overall_score ?? null,
+            prevPeriod: prev?.period ?? null,
+          });
+          esgPresent = true;
+        }
       }
 
       setLoading(false);
@@ -246,6 +256,10 @@ export function KpiCards({ company }: { company: Company | null }) {
   const running = progressPercent != null && progressPercent < 100;
   const cardLoading = (present: boolean) => loading || (running && !present);
 
+  // ESG year-over-year: points delta vs the previous scored period (mockup: "▲ +6 pts vs 2024").
+  const esgDelta = esgScore && esgScore.prevOverall != null ? esgScore.overall - esgScore.prevOverall : null;
+  const esgPrevYear = esgScore?.prevPeriod?.match(/(\d{4})/)?.[1] ?? null;
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
       <KpiCard
@@ -270,7 +284,10 @@ export function KpiCards({ company }: { company: Company | null }) {
         label="ESG Score"
         accent="#3B52E0"
         loading={cardLoading(esgScore != null)}
-        value={esgScore ? `${esgScore.overall.toFixed(1)}/100` : null}
+        value={esgScore ? `${Math.round(esgScore.overall)}/100` : null}
+        delta={esgDelta}
+        deltaUnit="pts"
+        deltaLabel={esgPrevYear ? `vs ${esgPrevYear}` : undefined}
         sub={esgScore?.period ?? null}
       />
     </div>
