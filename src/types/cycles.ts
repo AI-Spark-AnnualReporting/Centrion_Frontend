@@ -38,6 +38,9 @@ export interface Cycle {
   has_subsidiaries: boolean;
   has_sukuk: boolean;
   status: CycleStatus;
+  // Assembled final-report status (e.g. 'approved') surfaced on the cycle list so
+  // the dashboard can mark an approved annual report done. Null if not assembled.
+  report_status?: string | null;
   created_at: string;
   updated_at: string;
   // Progress summary the list endpoint surfaces per cycle (the design shows

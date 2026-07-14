@@ -35,6 +35,9 @@ const AdminDepartmentsPage = lazy(
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
 
+// IR Calendar — admin + IR. Code-split; renders inside AppLayout.
+const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
+
 const App = () => (
   <BrowserRouter>
     <Routes>
@@ -88,6 +91,7 @@ const App = () => (
               path="/annual-report/cycles/:cycleId"
               element={<CycleDetailPage />}
             />
+            <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>
       </Route>

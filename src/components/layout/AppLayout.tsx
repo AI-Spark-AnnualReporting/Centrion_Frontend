@@ -14,6 +14,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/meetings': 'Board & Meetings',
   '/comms': 'Comms Hub',
   '/stakeholders': 'Leadership',
+  '/ir-calendar': 'IR Calendar',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',
@@ -60,7 +61,8 @@ export function AppLayout() {
           </Suspense>
         </div>
       </div>
-      <FloatingChatbot />
+      {/* Home has its own Ask Copilot card, so hide the floating chat there. */}
+      {location.pathname !== '/dashboard' && <FloatingChatbot />}
     </div>
   );
 }
