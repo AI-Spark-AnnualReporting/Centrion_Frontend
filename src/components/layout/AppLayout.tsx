@@ -22,6 +22,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin-console/departments': 'Departments',
   '/annual-report': 'Annual Report',
   '/annual-report/cycles/new': 'New Cycle',
+  '/earnings/setup': 'Earnings Report',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -47,7 +48,7 @@ export function AppLayout() {
   const location = useLocation();
   const pageName =
     PAGE_NAMES[location.pathname] ??
-    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
+    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : location.pathname.startsWith('/earnings') ? 'Earnings Report' : 'Command Center');
 
   return (
     <div className="app-shell">

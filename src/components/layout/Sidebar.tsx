@@ -10,6 +10,7 @@ const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: b
   // on /reports/quarterly (which startsWith('/reports')).
   { key: 'esg', label: 'ESG Validator', path: '/reports', end: true },
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly' },
+  { key: 'earnings', label: 'Earnings', path: '/earnings/setup' },
   // Annual: admins manage cycles in-app at /annual-report; PMs/departments
   // still go to the external workspace app (routed by role in goAnnual()).
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
@@ -74,7 +75,8 @@ export function Sidebar() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const reportsActive = location.pathname.startsWith('/reports');
+  const reportsActive =
+    location.pathname.startsWith('/reports') || location.pathname.startsWith('/earnings');
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
 
   const adminActive = location.pathname.startsWith('/admin-console');

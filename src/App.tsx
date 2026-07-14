@@ -21,6 +21,8 @@ import NotFound from "./pages/NotFound";
 import OutlinePage from "./pages/quarterly/OutlinePage";
 import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
+import EarningsSetupPage from "./pages/earnings/EarningsSetupPage";
+import EarningsExtractPage from "./pages/earnings/EarningsExtractPage";
 
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
 // They render inside AppLayout so the main sidebar drives navigation.
@@ -59,6 +61,10 @@ const App = () => (
           <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
           <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />
           <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
+          {/* Earnings report (Part 1 = setup). Static /earnings/setup is declared
+              before the /earnings/:reportId param route so it outranks it. */}
+          <Route path="/earnings/setup" element={<EarningsSetupPage />} />
+          <Route path="/earnings/:reportId/extract" element={<EarningsExtractPage />} />
           <Route path="/kpi" element={<KPIPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/ai" element={<AIPage />} />

@@ -59,6 +59,13 @@ import type {
   SectionExtractResponse,
 } from "@/types/quarterly";
 import type {
+  CreateEarningsReportPayload,
+  CreateEarningsReportResponse,
+  SelectableSource,
+  SelectableSourcesResponse,
+  SourceCoverage,
+} from "@/types/earnings";
+import type {
   CreateMeetingBody,
   MeetingListResponse,
   MeetingResponse,
@@ -1341,6 +1348,81 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview/sentence`,
       { method: "PATCH", body },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Earnings report — Part 1 (Setup). Two live endpoints (Centriyon API):
+//   GET  /api/v1/earnings/sources?company_id&period   (untyped 200)
+//   POST /api/v1/earnings/reports   (application/json; 201)
+// Both responses are untyped in the OpenAPI schema, so we normalise defensively
+// and CONFIRM the exact field names against a live response during integration.
+// ---------------------------------------------------------------------------
+function earnStr(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+function earnRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+}
+function normalizeEarningsSource(raw: unknown): SelectableSource | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.id) ?? earnStr(o.document_id) ?? earnStr(o.source_id);
+  if (!id) return null;
+  const title =
+    earnStr(o.title) ?? earnStr(o.name) ?? earnStr(o.filename) ?? earnStr(o.label) ?? "Untitled source";
+  const period = earnStr(o.period) ?? earnStr(o.period_label);
+  const covRaw = (earnStr(o.coverage) ?? earnStr(o.coverage_status) ?? earnStr(o.status) ?? "").toLowerCase();
+  const coverage: SourceCoverage = covRaw.includes("full")
+    ? "full"
+    : covRaw.includes("partial")
+      ? "partial"
+      : covRaw || "partial";
+  return { id, title, period, coverage };
+}
+function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.sources)
+      ? (rec.sources as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const sources = arr
+    .map(normalizeEarningsSource)
+    .filter((s): s is SelectableSource => s !== null);
+  return { sources };
+}
+function readCreatedEarningsReportId(raw: unknown): CreateEarningsReportResponse {
+  const o = earnRecord(raw);
+  const nested = earnRecord(o.report);
+  const id = earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(nested.report_id) ?? earnStr(nested.id);
+  if (!id) throw new Error("Create earnings report: response did not include a report_id.");
+  return { report_id: id };
+}
+
+export const earnings = {
+  // The selectable "existing report" sources for a company + period. Period is a
+  // string the backend keys on (format TBD — confirm live; we pass e.g. "FY-2025").
+  getSelectableSources: (
+    companyId: string,
+    period: string,
+    signal?: AbortSignal,
+  ): Promise<SelectableSourcesResponse> =>
+    request<unknown>(`/api/v1/earnings/sources`, {
+      query: { company_id: companyId, period },
+      signal,
+    }).then(normalizeEarningsSources),
+
+  // Create the draft earnings report. JSON body (NOT multipart) carrying the
+  // chosen document ids. Returns { report_id }. A duplicate active period may
+  // surface as a 409 (not in the OpenAPI schema, but handled by callers).
+  createEarningsReport: (
+    payload: CreateEarningsReportPayload,
+  ): Promise<CreateEarningsReportResponse> =>
+    request<unknown>(`/api/v1/earnings/reports`, {
+      method: "POST",
+      body: payload,
+    }).then(readCreatedEarningsReportId),
 };
 
 // ---------------------------------------------------------------------------
