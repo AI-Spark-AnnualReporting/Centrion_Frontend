@@ -1,4 +1,4 @@
-import type { EarningsVariant, EarningsQuarter, ReportTone } from '@/types/earnings';
+import type { EarningsVariant, EarningsQuarter, ReportTone, EarningsFigure } from '@/types/earnings';
 
 // Human-readable period label. Annual → "FY 2025"; Quarterly → "Q3 2025".
 export function formatPeriodLabel(
@@ -54,23 +54,42 @@ export function isFlagged(confidence: number | null, edited: boolean): boolean {
   return !edited && typeof confidence === 'number' && confidence < 90;
 }
 
-// Confidence tier for colouring. Backend `flag` wins when present; otherwise
-// derive from confidence: ≥90 green · 85–<90 amber · <85 red · null → manual.
-export type ConfidenceTier = 'green' | 'amber' | 'red' | 'manual';
-export function confidenceTier(
-  confidence: number | null,
-  flag?: string | null,
-): ConfidenceTier {
-  if (flag) {
-    const f = flag.toLowerCase();
-    if (f.includes('ok') || f.includes('good') || f === 'green') return 'green';
-    if (f.includes('review') || f.includes('warn') || f === 'amber') return 'amber';
-    if (f.includes('low') || f.includes('bad') || f === 'red') return 'red';
-  }
+// Confidence tier for colouring. `flag` is authoritative: needs_input always
+// wins ('needs-input'); flagged → amber/red by confidence; ok → normal
+// thresholds, or 'manual' when confidence is null. Only an absent/unrecognized
+// flag falls back to plain confidence thresholds.
+export type ConfidenceTier = 'green' | 'amber' | 'red' | 'manual' | 'needs-input';
+
+function tierFromConfidence(confidence: number | null): ConfidenceTier {
   if (typeof confidence !== 'number') return 'manual';
   if (confidence >= 90) return 'green';
   if (confidence >= 85) return 'amber';
   return 'red';
+}
+
+export function confidenceTier(
+  confidence: number | null,
+  flag?: string | null,
+): ConfidenceTier {
+  switch (flag) {
+    case 'needs_input':
+      return 'needs-input';
+    case 'flagged':
+      return typeof confidence === 'number' && confidence >= 85 ? 'amber' : 'red';
+    case 'ok':
+      return tierFromConfidence(confidence);
+    default:
+      // flag absent or unrecognized — fall back to plain confidence thresholds
+      return tierFromConfidence(confidence);
+  }
+}
+
+// Counts figures that need human attention: explicitly flagged for review, or
+// needing manual input outright. Drives the footer copy and the
+// Continue-confirm gate (a needs_input row must trigger the confirm, not pass
+// silently).
+export function needsReviewCount(figures: EarningsFigure[]): number {
+  return figures.filter((f) => f.flag === 'flagged' || f.flag === 'needs_input').length;
 }
 
 // Format a figure value with thousands separators + optional unit.

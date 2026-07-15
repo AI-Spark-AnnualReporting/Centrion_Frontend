@@ -50,9 +50,12 @@ export interface CreateEarningsReportResponse {
 //   GET   /api/v1/earnings/reports/{reportId}/figures                 (no company_id)
 //   PATCH /api/v1/earnings/reports/{reportId}/figures/{figureId}      { value, unit? }
 
-// Backend-provided flag/status for a figure (colour hint). When absent, the UI
-// derives the tier from `confidence`.
-export type FigureFlag = 'ok' | 'review' | 'low' | (string & {});
+// Backend-provided flag for a figure — authoritative for review/badge state.
+// 'needs_input': no usable extracted value, requires manual entry (red "Needs input").
+// 'flagged': extracted but low-confidence, needs review (amber/red by confidence).
+// 'ok': accepted as-is (green/amber/red by confidence, or "Manual" if confidence is null).
+// When absent/unrecognized, the UI falls back to confidence thresholds.
+export type FigureFlag = 'ok' | 'flagged' | 'needs_input' | (string & {});
 
 // One reviewed figure. Field names are read defensively at the api layer since the
 // response is untyped — confirm against a live payload.
@@ -73,8 +76,9 @@ export interface EarningsFigure {
   edited: boolean; // client marker: value was manually PATCHed
 }
 
-// The selected source shown in the header (subset — may ride in the figures
-// response, or be derived from the rows).
+// The selected source shown in the header — always taken verbatim from the
+// backend's own `sources`/`source_documents` field, never derived from figure
+// rows (derived figure rows carry a null source_document_id).
 export interface EarningsFigureSource {
   id: string;
   title: string;
@@ -84,7 +88,7 @@ export interface EarningsFigureSource {
 
 export interface EarningsFiguresResponse {
   figures: EarningsFigure[];
-  sources: EarningsFigureSource[]; // [] when the backend doesn't include them
+  sources: EarningsFigureSource[]; // [] only when the report genuinely has none
 }
 
 // PATCH body — edit a single figure's value (+ optional unit).

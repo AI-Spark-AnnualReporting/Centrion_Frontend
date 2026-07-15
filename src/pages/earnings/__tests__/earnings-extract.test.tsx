@@ -35,7 +35,7 @@ vi.mock('@/lib/api', () => ({
   ApiError: h.MockApiError,
 }));
 
-import { isFlagged, formatFigureValue } from '../helpers';
+import { isFlagged, formatFigureValue, confidenceTier, needsReviewCount } from '../helpers';
 import EarningsExtractPage from '../EarningsExtractPage';
 
 const fig = (over: Record<string, unknown>) => ({
@@ -51,21 +51,22 @@ const fig = (over: Record<string, unknown>) => ({
   confidence: 95,
   is_derived: false,
   derivation: null,
-  flag: null,
+  flag: 'ok',
   edited: false,
   ...over,
 });
 
 const FIGS = {
   figures: [
-    fig({ id: 'f-rev', metric_key: 'revenue', label: 'Revenue', value: 4182.6, confidence: 84 }),
-    fig({ id: 'f-ni', metric_key: 'net_income', label: 'Net Income', value: 1200, confidence: 96 }),
+    fig({ id: 'f-rev', metric_key: 'revenue', label: 'Revenue', value: 4182.6, confidence: 84, flag: 'flagged' }),
+    fig({ id: 'f-ni', metric_key: 'net_income', label: 'Net Income', value: 1200, confidence: 96, flag: 'ok' }),
     fig({
       id: 'f-fcf',
       metric_key: 'free_cash_flow',
       label: 'Free Cash Flow',
       value: 800,
       confidence: 92,
+      flag: 'ok',
       is_derived: true,
       derivation: 'OCF - CapEx',
       source_document_id: null,
@@ -90,7 +91,7 @@ beforeEach(() => {
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
   h.getEarningsFigures.mockResolvedValue(FIGS);
   h.patchEarningsFigure.mockResolvedValue(
-    fig({ id: 'f-rev', label: 'Revenue', value: 5000, confidence: null, edited: true }),
+    fig({ id: 'f-rev', label: 'Revenue', value: 5000, confidence: null, flag: null, edited: true }),
   );
 });
 
@@ -104,6 +105,37 @@ describe('isFlagged', () => {
 describe('formatFigureValue', () => {
   it('adds separators + unit', () => expect(formatFigureValue(4182.6, 'SAR M')).toBe('4,182.6 SAR M'));
   it('null → dash', () => expect(formatFigureValue(null, 'SAR M')).toBe('—'));
+});
+
+describe('confidenceTier', () => {
+  it('needs_input flag wins even with null confidence', () => {
+    expect(confidenceTier(null, 'needs_input')).toBe('needs-input');
+  });
+  it('ok flag + null confidence → manual', () => {
+    expect(confidenceTier(null, 'ok')).toBe('manual');
+  });
+  it('flagged + 84 confidence → amber or red, never manual/green', () => {
+    const tier = confidenceTier(84, 'flagged');
+    expect(['amber', 'red']).toContain(tier);
+  });
+  it('ok + 99 confidence → green', () => {
+    expect(confidenceTier(99, 'ok')).toBe('green');
+  });
+});
+
+describe('needsReviewCount', () => {
+  it('counts flagged + needs_input, ignores ok', () => {
+    const figs = [
+      fig({ id: 'a', flag: 'flagged' }),
+      fig({ id: 'b', flag: 'needs_input' }),
+      fig({ id: 'c', flag: 'ok' }),
+    ];
+    expect(needsReviewCount(figs as never)).toBe(2);
+  });
+  it('all ok → 0', () => {
+    const figs = [fig({ id: 'a', flag: 'ok' }), fig({ id: 'b', flag: 'ok' })];
+    expect(needsReviewCount(figs as never)).toBe(0);
+  });
 });
 
 // ── Route/behaviour ─────────────────────────────────────────────────────────
@@ -137,7 +169,7 @@ describe('EarningsExtractPage', () => {
     renderPage();
     await screen.findByText('Revenue');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    expect(await screen.findByText(/Continue with flagged figures\?/)).toBeInTheDocument();
+    expect(await screen.findByText(/Continue with figures needing review\?/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Continue anyway/ }));
     expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
   });
@@ -159,5 +191,65 @@ describe('EarningsExtractPage', () => {
     renderPage();
     expect(await screen.findByText('Extract earnings data')).toBeInTheDocument();
     expect(await screen.findByText('Revenue')).toBeInTheDocument();
+  });
+
+  it('a needs_input row badges "Needs input", not "Manual", and drives the footer + confirm', async () => {
+    h.getEarningsFigures.mockResolvedValueOnce({
+      figures: [
+        fig({ id: 'f-manual', label: 'Manual Metric', confidence: null, flag: 'ok', edited: true }),
+        fig({ id: 'f-needs', label: 'Needs Input Metric', confidence: null, flag: 'needs_input' }),
+      ],
+      sources: [{ id: 'd1', title: 'Q3 Release.pdf', coverage: 'full', preview_url: null }],
+    });
+    renderPage();
+    expect(await screen.findByText('Needs input')).toBeInTheDocument();
+    expect(screen.getByText('Manual')).toBeInTheDocument();
+    expect(screen.getByText('1 figure needs review')).toBeInTheDocument();
+    expect(screen.queryByText('All figures reviewed')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    expect(await screen.findByText(/Continue with figures needing review\?/)).toBeInTheDocument();
+  });
+
+  it('header shows the real source count even when every figure row is derived', async () => {
+    h.getEarningsFigures.mockResolvedValueOnce({
+      figures: [
+        fig({
+          id: 'f-d1',
+          label: 'Derived A',
+          is_derived: true,
+          derivation: 'X + Y',
+          source_document_id: null,
+          source_label: null,
+          source_ref: null,
+        }),
+        fig({
+          id: 'f-d2',
+          label: 'Derived B',
+          is_derived: true,
+          derivation: 'X - Y',
+          source_document_id: null,
+          source_label: null,
+          source_ref: null,
+        }),
+      ],
+      sources: [
+        { id: 'd1', title: 'Q3 Release.pdf', coverage: 'full', preview_url: null },
+        { id: 'd2', title: 'Prior Guidance.pdf', coverage: 'partial', preview_url: null },
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText('Derived A')).toBeInTheDocument();
+    expect(screen.getByText('2 sources')).toBeInTheDocument();
+    expect(screen.queryByText('0 sources')).not.toBeInTheDocument();
+  });
+
+  it('renders the empty-state message and no table when figures is empty', async () => {
+    h.getEarningsFigures.mockResolvedValueOnce({ figures: [], sources: [] });
+    renderPage();
+    expect(
+      await screen.findByText('No figures found for this period from the selected sources.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 });

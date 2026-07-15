@@ -9,6 +9,7 @@ const TONES: Record<ConfidenceTier, { color: string; bg: string; fill: string }>
   amber: { color: '#B45309', bg: 'rgba(245,158,11,.12)', fill: '#F59E0B' },
   red: { color: '#DC2626', bg: 'rgba(239,68,68,.12)', fill: '#EF4444' },
   manual: { color: MUTED, bg: '#E8EAF5', fill: '#9BA3C4' },
+  'needs-input': { color: '#DC2626', bg: 'rgba(239,68,68,.12)', fill: '#EF4444' },
 };
 
 // Confidence as a mini bar + %, coloured by tier (≥90 green · 85–<90 amber ·
@@ -22,6 +23,26 @@ export function ConfidenceBadge({
   flag?: string | null;
 }) {
   const tier = confidenceTier(confidence, flag);
+
+  if (tier === 'needs-input') {
+    const tone = TONES['needs-input'];
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '3px 9px',
+          borderRadius: 20,
+          fontSize: 10,
+          fontWeight: 700,
+          color: tone.color,
+          background: tone.bg,
+        }}
+      >
+        Needs input
+      </span>
+    );
+  }
 
   if (tier === 'manual' || confidence == null) {
     const tone = TONES.manual;

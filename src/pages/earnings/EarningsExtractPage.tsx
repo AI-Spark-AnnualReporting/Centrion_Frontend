@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { earnings } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsFigure, EarningsFigureSource } from '@/types/earnings';
-import { isFlagged } from './helpers';
+import { needsReviewCount } from './helpers';
 import { SelectedSourcesHeader } from '@/components/earnings/SelectedSourcesHeader';
 import { FigureTable } from '@/components/earnings/FigureTable';
 import { INK, MUTED } from '@/components/earnings/tokens';
@@ -79,11 +79,11 @@ export default function EarningsExtractPage() {
     [reportId, figures],
   );
 
-  const flaggedCount = figures.filter((f) => isFlagged(f.confidence, f.edited)).length;
+  const reviewCount = needsReviewCount(figures);
 
   const goOutline = () => navigate(`/earnings/${reportId}/outline`);
   const handleContinue = () => {
-    if (flaggedCount > 0) setConfirmOpen(true);
+    if (reviewCount > 0) setConfirmOpen(true);
     else goOutline();
   };
 
@@ -124,7 +124,7 @@ export default function EarningsExtractPage() {
           <SelectedSourcesHeader sources={sources} />
           {figures.length === 0 ? (
             <div className="card" style={{ padding: '40px 20px', textAlign: 'center', color: MUTED, fontSize: 13 }}>
-              No figures were extracted for this report yet.
+              No figures found for this period from the selected sources.
             </div>
           ) : (
             <FigureTable figures={figures} onSaveValue={handleSaveValue} />
@@ -138,7 +138,9 @@ export default function EarningsExtractPage() {
           ← Back
         </button>
         <span style={{ fontSize: 12, color: MUTED }}>
-          {flaggedCount > 0 ? `${flaggedCount} figure${flaggedCount === 1 ? '' : 's'} below 90% confidence` : 'All figures reviewed'}
+          {reviewCount > 0
+            ? `${reviewCount} figure${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} review`
+            : 'All figures reviewed'}
         </span>
         <button className="btn bp" onClick={handleContinue} disabled={loading || !!error}>
           Continue →
@@ -168,11 +170,12 @@ export default function EarningsExtractPage() {
           >
             <div style={{ padding: '18px 20px 6px' }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: INK, marginBottom: 6 }}>
-                Continue with flagged figures?
+                Continue with figures needing review?
               </div>
               <p style={{ margin: 0, fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
-                {flaggedCount} figure{flaggedCount === 1 ? ' is' : 's are'} below 90% confidence. You can
-                continue anyway, or go back and correct them first.
+                {reviewCount} figure{reviewCount === 1 ? ' needs' : 's need'} review before this report
+                is finalized. You can continue anyway, or go back and correct{' '}
+                {reviewCount === 1 ? 'it' : 'them'} first.
               </p>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px 18px' }}>

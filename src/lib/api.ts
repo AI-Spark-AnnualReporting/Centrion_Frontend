@@ -1469,24 +1469,9 @@ function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
     : Array.isArray(rec.source_documents)
       ? (rec.source_documents as unknown[])
       : [];
-  let sources = srcArr
+  const sources = srcArr
     .map(normalizeEarningsFigureSource)
     .filter((s): s is EarningsFigureSource => s !== null);
-  // Derive the header sources from the rows when the response doesn't carry them.
-  if (sources.length === 0) {
-    const seen = new Map<string, EarningsFigureSource>();
-    figures.forEach((f) => {
-      if (f.source_document_id && !seen.has(f.source_document_id)) {
-        seen.set(f.source_document_id, {
-          id: f.source_document_id,
-          title: f.source_label ?? "Source document",
-          coverage: null,
-          preview_url: null,
-        });
-      }
-    });
-    sources = Array.from(seen.values());
-  }
   return { figures, sources };
 }
 
