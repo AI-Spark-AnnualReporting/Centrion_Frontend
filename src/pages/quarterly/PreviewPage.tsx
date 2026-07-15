@@ -396,8 +396,12 @@ export default function PreviewPage() {
     [companyId, reportId, inputText, patchSection],
   );
 
-  // ── extract a document's text INTO the input field (extract-only; no produce).
-  // The user reviews/edits the extracted text, then Save persists it as content.
+  // ── document upload for a section awaiting input.
+  //   • Financial (table/kpi) sections: one-step /upload — the backend structures
+  //     the document's tables into the standard section table (no textarea review,
+  //     the table IS the content), so it patches straight to the produced section.
+  //   • Other sections: extract-only — pull the document's text into the input
+  //     field for the user to review/edit, then Save persists it as content.
   const handleExtract = useCallback(
     async (section: ProducedSection, file: File | null) => {
       if (!companyId || !reportId) return;
@@ -407,18 +411,25 @@ export default function PreviewPage() {
       setExtracting((x) => ({ ...x, [code]: true }));
       setErrors((e) => ({ ...e, [code]: '' }));
       try {
-        const res = await quarterlyReports.extractSectionDocument(companyId, reportId, code, file);
-        const extracted = res.text ?? res.extracted_text ?? '';
-        setInputText((m) => ({ ...m, [code]: extracted }));
+        if (section.mode === 'table' || section.mode === 'kpi') {
+          const res = await quarterlyReports.uploadSectionDocument(companyId, reportId, code, file);
+          patchSection(code, res);
+          setInputText((m) => ({ ...m, [code]: '' }));
+        } else {
+          const res = await quarterlyReports.extractSectionDocument(companyId, reportId, code, file);
+          const extracted = res.text ?? res.extracted_text ?? '';
+          setInputText((m) => ({ ...m, [code]: extracted }));
+        }
       } catch (err: unknown) {
         setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not extract text from this document.' }));
       } finally {
-        // The file has been consumed into the field — clear the chip either way.
+        // The file has been consumed (into the field, or into the produced table) —
+        // clear the chip either way.
         setSectionFile((m) => ({ ...m, [code]: null }));
         setExtracting((x) => ({ ...x, [code]: false }));
       }
     },
-    [companyId, reportId],
+    [companyId, reportId, patchSection],
   );
 
   const handleRefined = useCallback(
