@@ -64,6 +64,10 @@ import type {
   SelectableSource,
   SelectableSourcesResponse,
   SourceCoverage,
+  EarningsFigure,
+  EarningsFigureSource,
+  EarningsFiguresResponse,
+  EditEarningsFigurePayload,
 } from "@/types/earnings";
 import type {
   CreateMeetingBody,
@@ -1399,6 +1403,92 @@ function readCreatedEarningsReportId(raw: unknown): CreateEarningsReportResponse
   if (!id) throw new Error("Create earnings report: response did not include a report_id.");
   return { report_id: id };
 }
+function earnBool(v: unknown): boolean {
+  return v === true || v === "true" || v === 1;
+}
+function earnNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return null;
+}
+function normalizeEarningsFigure(raw: unknown): EarningsFigure | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.id) ?? earnStr(o.figure_id) ?? earnStr(o.metric_key);
+  if (!id) return null;
+  const src = earnRecord(o.source);
+  return {
+    id,
+    metric_key: earnStr(o.metric_key) ?? earnStr(o.key) ?? id,
+    label: earnStr(o.label) ?? earnStr(o.metric_label) ?? earnStr(o.name) ?? id,
+    value: earnNum(o.value),
+    unit: earnStr(o.unit) ?? earnStr(o.units),
+    period: earnStr(o.period) ?? earnStr(o.period_label),
+    source_document_id:
+      earnStr(o.source_document_id) ?? earnStr(o.document_id) ?? earnStr(src.document_id),
+    source_label:
+      earnStr(o.source_label) ?? earnStr(o.source_name) ?? earnStr(src.label) ?? earnStr(src.title),
+    source_ref: earnStr(o.source_ref) ?? earnStr(o.reference) ?? earnStr(src.ref) ?? earnStr(src.page),
+    confidence: earnNum(o.confidence),
+    is_derived: earnBool(o.is_derived) || earnBool(o.derived),
+    derivation: earnStr(o.derivation) ?? earnStr(o.formula),
+    flag: earnStr(o.flag) ?? earnStr(o.status),
+    edited: earnBool(o.edited) || earnBool(o.is_edited) || earnBool(o.manual),
+  };
+}
+function normalizeEarningsFigureSource(raw: unknown): EarningsFigureSource | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.id) ?? earnStr(o.document_id) ?? earnStr(o.source_document_id);
+  if (!id) return null;
+  const cov = (earnStr(o.coverage) ?? earnStr(o.coverage_status) ?? earnStr(o.status) ?? "").toLowerCase();
+  const coverage: SourceCoverage | null = cov.includes("full")
+    ? "full"
+    : cov.includes("partial")
+      ? "partial"
+      : cov || null;
+  return {
+    id,
+    title: earnStr(o.title) ?? earnStr(o.name) ?? earnStr(o.filename) ?? earnStr(o.label) ?? "Source",
+    coverage,
+    preview_url: earnStr(o.preview_url) ?? earnStr(o.download_url) ?? earnStr(o.url),
+  };
+}
+function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.figures)
+      ? (rec.figures as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const figures = arr
+    .map(normalizeEarningsFigure)
+    .filter((f): f is EarningsFigure => f !== null);
+  const srcArr: unknown[] = Array.isArray(rec.sources)
+    ? (rec.sources as unknown[])
+    : Array.isArray(rec.source_documents)
+      ? (rec.source_documents as unknown[])
+      : [];
+  let sources = srcArr
+    .map(normalizeEarningsFigureSource)
+    .filter((s): s is EarningsFigureSource => s !== null);
+  // Derive the header sources from the rows when the response doesn't carry them.
+  if (sources.length === 0) {
+    const seen = new Map<string, EarningsFigureSource>();
+    figures.forEach((f) => {
+      if (f.source_document_id && !seen.has(f.source_document_id)) {
+        seen.set(f.source_document_id, {
+          id: f.source_document_id,
+          title: f.source_label ?? "Source document",
+          coverage: null,
+          preview_url: null,
+        });
+      }
+    });
+    sources = Array.from(seen.values());
+  }
+  return { figures, sources };
+}
 
 export const earnings = {
   // The selectable "existing report" sources for a company + period. Period is a
@@ -1423,6 +1513,31 @@ export const earnings = {
       method: "POST",
       body: payload,
     }).then(readCreatedEarningsReportId),
+
+  // ── Part 2 — figures ──
+  // The reviewed figure set for a report. Path takes report_id ONLY (no
+  // company_id). The FIRST load triggers the backend resolve, so it may be slow.
+  getEarningsFigures: (reportId: string, signal?: AbortSignal): Promise<EarningsFiguresResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures`,
+      { signal },
+    ).then(normalizeEarningsFigures),
+
+  // Edit a single figure's value (+ optional unit). Returns the updated figure
+  // (untyped → normalised defensively; also unwraps a `{ figure }` envelope).
+  patchEarningsFigure: (
+    reportId: string,
+    figureId: string,
+    body: EditEarningsFigurePayload,
+  ): Promise<EarningsFigure> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}`,
+      { method: "PATCH", body },
+    ).then((raw) => {
+      const fig = normalizeEarningsFigure(earnRecord(raw).figure ?? raw);
+      if (!fig) throw new Error("Edit earnings figure: response was not a figure.");
+      return fig;
+    }),
 };
 
 // ---------------------------------------------------------------------------

@@ -44,3 +44,51 @@ export interface CreateEarningsReportPayload {
 export interface CreateEarningsReportResponse {
   report_id: string;
 }
+
+// ─── Part 2 — Extract & Review Figures ────────────────────────────────────────
+// Contracts from OpenAPI (both responses UNTYPED → read defensively; confirm live):
+//   GET   /api/v1/earnings/reports/{reportId}/figures                 (no company_id)
+//   PATCH /api/v1/earnings/reports/{reportId}/figures/{figureId}      { value, unit? }
+
+// Backend-provided flag/status for a figure (colour hint). When absent, the UI
+// derives the tier from `confidence`.
+export type FigureFlag = 'ok' | 'review' | 'low' | (string & {});
+
+// One reviewed figure. Field names are read defensively at the api layer since the
+// response is untyped — confirm against a live payload.
+export interface EarningsFigure {
+  id: string;
+  metric_key: string;
+  label: string;
+  value: number | null;
+  unit: string | null;
+  period: string | null;
+  source_document_id: string | null;
+  source_label: string | null; // human label for the source column
+  source_ref: string | null; // e.g. "p. 12" / section reference
+  confidence: number | null; // 0–100; null once the value is a manual edit
+  is_derived: boolean; // derived (computed) rows show "Derived · <formula>"
+  derivation: string | null; // the formula, when derived
+  flag: FigureFlag | null; // backend flag when present
+  edited: boolean; // client marker: value was manually PATCHed
+}
+
+// The selected source shown in the header (subset — may ride in the figures
+// response, or be derived from the rows).
+export interface EarningsFigureSource {
+  id: string;
+  title: string;
+  coverage: SourceCoverage | null;
+  preview_url: string | null;
+}
+
+export interface EarningsFiguresResponse {
+  figures: EarningsFigure[];
+  sources: EarningsFigureSource[]; // [] when the backend doesn't include them
+}
+
+// PATCH body — edit a single figure's value (+ optional unit).
+export interface EditEarningsFigurePayload {
+  value: number;
+  unit?: string | null;
+}

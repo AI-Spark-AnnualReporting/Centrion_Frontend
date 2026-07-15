@@ -1,30 +1,191 @@
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
+import { earnings } from '@/lib/api';
+import { Spinner } from '@/components/shared/Spinner';
+import type { EarningsFigure, EarningsFigureSource } from '@/types/earnings';
+import { isFlagged } from './helpers';
+import { SelectedSourcesHeader } from '@/components/earnings/SelectedSourcesHeader';
+import { FigureTable } from '@/components/earnings/FigureTable';
 import { INK, MUTED } from '@/components/earnings/tokens';
 
-// Placeholder for the Part-2 "Extract" screen. Exists so the setup screen's
-// Continue navigates to a real route (no 404). Part 2 replaces this.
 export default function EarningsExtractPage() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // companyId isn't needed by the figures endpoints (report-scoped), but we read
+  // it defensively so a null user never crashes the page.
+  void (user?.company_id ?? null);
+
+  const [figures, setFigures] = useState<EarningsFigure[]>([]);
+  const [sources, setSources] = useState<EarningsFigureSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Load the reviewed figure set. The FIRST load triggers the backend resolve.
+  useEffect(() => {
+    if (!reportId) {
+      setError('Missing report id.');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    earnings
+      .getEarningsFigures(reportId)
+      .then((res) => {
+        if (cancelled) return;
+        setFigures(res.figures);
+        setSources(res.sources);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load figures.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId, retryKey]);
+
+  // Optimistic single-figure edit with rollback on failure. Rethrows so the
+  // editing cell surfaces the error.
+  const handleSaveValue = useCallback(
+    async (figureId: string, value: number) => {
+      if (!reportId) return;
+      const prev = figures.find((f) => f.id === figureId) ?? null;
+      // optimistic: apply the value, mark manual (clears the flag).
+      setFigures((list) =>
+        list.map((f) =>
+          f.id === figureId ? { ...f, value, edited: true, confidence: null, flag: null } : f,
+        ),
+      );
+      try {
+        const updated = await earnings.patchEarningsFigure(reportId, figureId, {
+          value,
+          unit: prev?.unit ?? undefined,
+        });
+        setFigures((list) => list.map((f) => (f.id === figureId ? { ...updated, edited: true } : f)));
+      } catch (err) {
+        // rollback
+        setFigures((list) => list.map((f) => (f.id === figureId && prev ? prev : f)));
+        throw err;
+      }
+    },
+    [reportId, figures],
+  );
+
+  const flaggedCount = figures.filter((f) => isFlagged(f.confidence, f.edited)).length;
+
+  const goOutline = () => navigate(`/earnings/${reportId}/outline`);
+  const handleContinue = () => {
+    if (flaggedCount > 0) setConfirmOpen(true);
+    else goOutline();
+  };
+
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
-          Earnings — Extract
+          Extract earnings data
         </h1>
-        <p style={{ margin: 0, fontSize: 12, color: MUTED }}>Report ID: {reportId}</p>
+        <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
+          Review the figures pulled from your sources. Correct anything flagged, then continue.
+        </p>
       </div>
-      <div
-        className="card"
-        style={{ padding: '40px 22px', textAlign: 'center', color: MUTED, fontSize: 13 }}
-      >
-        The extract step is coming in Part 2.
-        <div style={{ marginTop: 16 }}>
-          <button className="btn bs" type="button" onClick={() => navigate('/earnings/setup')}>
-            ← Back to setup
+
+      {loading ? (
+        <div className="card" style={{ padding: 0 }}>
+          <Spinner pad={80} />
+        </div>
+      ) : error ? (
+        <div
+          className="card"
+          role="alert"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+          }}
+        >
+          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+          <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
+            Retry
           </button>
         </div>
+      ) : (
+        <>
+          <SelectedSourcesHeader sources={sources} />
+          {figures.length === 0 ? (
+            <div className="card" style={{ padding: '40px 20px', textAlign: 'center', color: MUTED, fontSize: 13 }}>
+              No figures were extracted for this report yet.
+            </div>
+          ) : (
+            <FigureTable figures={figures} onSaveValue={handleSaveValue} />
+          )}
+        </>
+      )}
+
+      {/* Footer */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18 }}>
+        <button className="btn bs" onClick={() => navigate('/earnings/setup')}>
+          ← Back
+        </button>
+        <span style={{ fontSize: 12, color: MUTED }}>
+          {flaggedCount > 0 ? `${flaggedCount} figure${flaggedCount === 1 ? '' : 's'} below 90% confidence` : 'All figures reviewed'}
+        </span>
+        <button className="btn bp" onClick={handleContinue} disabled={loading || !!error}>
+          Continue →
+        </button>
       </div>
+
+      {confirmOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setConfirmOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(420px, 100%)', background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 24px 60px rgba(20,22,40,.24)' }}
+          >
+            <div style={{ padding: '18px 20px 6px' }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: INK, marginBottom: 6 }}>
+                Continue with flagged figures?
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
+                {flaggedCount} figure{flaggedCount === 1 ? ' is' : 's are'} below 90% confidence. You can
+                continue anyway, or go back and correct them first.
+              </p>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px 18px' }}>
+              <button className="btn bs" onClick={() => setConfirmOpen(false)}>
+                Keep reviewing
+              </button>
+              <button className="btn bp" onClick={goOutline}>
+                Continue anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
