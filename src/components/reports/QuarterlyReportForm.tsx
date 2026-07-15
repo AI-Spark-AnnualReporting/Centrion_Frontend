@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea, QuarterlyQuestion } from '@/lib/api';
+import type { QuarterlyReportArea } from '@/lib/api';
+import type { CompanyType, Voice, ReportTone } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
-import QuarterlyQuestionnaire from '@/components/reports/QuarterlyQuestionnaire';
 
 // Quarter options for the reporting-period selector.
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -103,6 +103,163 @@ function formatPeriod(period: string): string {
 // Sentinel value for the "+ Add new…" option in the reporting-year select.
 const ADD_NEW_SENTINEL = '__add_new__';
 
+// ─── Confirm-context Q/A (embedded on this form) ──────────────────────────────
+const CTX_COMPANY_TYPES: { label: string; value: CompanyType }[] = [
+  { label: 'Bank', value: 'bank' },
+  { label: 'Non-bank', value: 'non_bank' },
+];
+
+// Report tone — the prose style of the narrative. Default: formal_corporate.
+const CTX_TONES: { label: string; value: ReportTone; desc: string }[] = [
+  { label: 'Formal corporate', value: 'formal_corporate', desc: 'Measured, board-ready register' },
+  { label: 'Investor-focused', value: 'investor_focused', desc: 'Leads with returns and outlook' },
+  { label: 'Data-driven', value: 'data_driven', desc: 'Figures first, minimal narrative' },
+  { label: 'Executive summary', value: 'executive_summary', desc: 'Concise, decision-oriented' },
+  { label: 'Compliance-focused', value: 'compliance_focused', desc: 'Aligned to CMA / SAMA disclosure' },
+  { label: 'Strategic / visionary', value: 'strategic_visionary', desc: 'Forward-looking, thematic' },
+  { label: 'Simple and direct', value: 'simple_direct', desc: 'Plain language, no jargon' },
+];
+
+const CTX_VOICES: { label: string; value: Voice; locked?: boolean }[] = [
+  { label: 'CEO statement · always', value: 'ceo', locked: true },
+  { label: 'Chairman statement', value: 'chairman' },
+  { label: 'CFO statement', value: 'cfo' },
+];
+
+// Capsule pill — indigo border + light fill when selected; locked pills (CEO)
+// render dashed/muted and are non-interactive.
+function CtxPill({
+  label,
+  selected,
+  locked,
+  title,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  locked?: boolean;
+  title?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      title={title}
+      aria-pressed={selected}
+      onClick={locked ? undefined : onClick}
+      style={{
+        padding: '9px 16px',
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        transition: 'border-color .15s, background .15s, color .15s',
+        cursor: locked ? 'default' : 'pointer',
+        background: locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
+        color: locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
+        border: locked
+          ? '1.5px dashed #4040C8'
+          : `1.5px solid ${selected ? '#4040C8' : '#E4E6F1'}`,
+      }}
+      onMouseEnter={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#C4C7F0';
+          e.currentTarget.style.background = '#FAFAFF';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#E4E6F1';
+          e.currentTarget.style.background = '#fff';
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Green "DETECTED" capsule — shown on a card whose value was auto-detected.
+function DetectedBadge() {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        borderRadius: 999,
+        background: '#E7F7EF',
+        color: '#10B981',
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        padding: '3px 9px',
+      }}
+    >
+      Detected
+    </span>
+  );
+}
+
+// Numbered question card for the embedded confirm-context questions.
+function CtxCard({
+  n,
+  title,
+  helper,
+  detected,
+  children,
+}: {
+  n: number;
+  title: string;
+  helper?: string;
+  detected?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: '1px solid #ECEEF8',
+        borderRadius: 14,
+        padding: '14px 16px 16px',
+        background: '#fff',
+        marginBottom: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+        <span
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 8,
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12,
+            fontWeight: 800,
+            color: '#4040C8',
+            background: '#EEEEFF',
+          }}
+        >
+          {n}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E', lineHeight: 1.4 }}>
+            {title}
+          </div>
+          {helper && (
+            <div style={{ fontSize: 12, color: '#5A6080', marginTop: 3, lineHeight: 1.4 }}>
+              {helper}
+            </div>
+          )}
+        </div>
+        {detected && <DetectedBadge />}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginLeft: 34 }}>{children}</div>
+    </div>
+  );
+}
+
 // Minimal shape of an existing quarterly report needed by the year dropdown.
 interface QuarterlyReportOption {
   id: string;
@@ -171,20 +328,51 @@ export default function QuarterlyReportForm({
   const [existingPeriodLabel, setExistingPeriodLabel] = useState<string | null>(null);
   const [existingCoverageLoading, setExistingCoverageLoading] = useState(false);
 
-  // Report areas come from the API — the source of truth for which cards show.
+  // Report areas come from the API. The picker UI is hidden; areas are always
+  // all-selected and sent in the generate payload.
   const [areas, setAreas] = useState<AreaCard[]>([]);
-  const [areasLoading, setAreasLoading] = useState(true);
-  const [areasError, setAreasError] = useState<string | null>(null);
   // Area whose full metric list is shown in the popup (null = closed).
   const [metricsModal, setMetricsModal] = useState<AreaCard | null>(null);
 
-  // On-form questionnaire (single-select). Questions come from the API; answers
-  // are kept here as questionId → chosen option. UI-only for now — see the
-  // TODO in triggerGenerate for wiring these into the payload later.
-  const [questions, setQuestions] = useState<QuarterlyQuestion[]>([]);
-  const [questionsLoading, setQuestionsLoading] = useState(true);
-  const [questionsError, setQuestionsError] = useState<string | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  // Confirm-context answers (embedded cards), held locally until submit and sent
+  // in the single generate call. company_type is auto-selected from the detected
+  // company sector (overridable); report tone starts unselected; voices defaults
+  // to the always-on CEO.
+  const [companyType, setCompanyType] = useState<CompanyType | null>(null);
+  // Detected company type (from the detect-company-type endpoint). Drives the
+  // DETECTED badge, shown while the selection still matches the detected value.
+  const [detectedCompanyType, setDetectedCompanyType] = useState<CompanyType | null>(null);
+  // No default — the user picks a tone (or leaves it unset; backend defaults).
+  const [reportTone, setReportTone] = useState<ReportTone | null>(null);
+  const [voices, setVoices] = useState<Voice[]>(['ceo']);
+
+  const toggleVoice = (v: Voice) => {
+    if (v === 'ceo') return; // always on, locked
+    setVoices((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+  };
+
+  // On mount (company known): detect the company type from its sector and
+  // pre-select it. Detection only — no report exists yet. Fail-soft: if the
+  // endpoint isn't available, the user picks manually (no badge).
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    quarterlyReportsApi
+      .detectCompanyType(companyId)
+      .then((res) => {
+        if (cancelled) return;
+        const detected = res.detected_company_type ?? null;
+        setDetectedCompanyType(detected);
+        // Pre-select only if the user hasn't already chosen.
+        if (detected) setCompanyType((prev) => prev ?? detected);
+      })
+      .catch(() => {
+        // No detection available — leave the pill unselected for manual choice.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -201,9 +389,6 @@ export default function QuarterlyReportForm({
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
-  const allSelected =
-    areas.length > 0 && selectedAreas.length === areas.length;
-
   // How many more documents can be added to the selected existing report.
   const remainingSlots =
     existingDocCount != null ? MAX_DOCUMENTS - existingDocCount : MAX_DOCUMENTS;
@@ -212,67 +397,26 @@ export default function QuarterlyReportForm({
   const isOpenMode = false;
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
+  // The picker is hidden — every area is always selected and sent in the
+  // generate payload (report scope is not a user choice).
   useEffect(() => {
     let cancelled = false;
-    setAreasLoading(true);
-    setAreasError(null);
     reportsApi
       .getQuarterlyReportAreas()
       .then((res) => {
         if (cancelled) return;
-        setAreas((res.areas ?? []).map(toAreaCard));
+        const cards = (res.areas ?? []).map(toAreaCard);
+        setAreas(cards);
+        setSelectedAreas(cards.map((c) => c.key)); // always select all
       })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setAreasError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load report areas. Please retry.',
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setAreasLoading(false);
+      .catch(() => {
+        // Areas failed to load — send none and let the backend default to all.
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Fetch the questionnaire once the company is known. Fail-soft: on error we
-  // keep an empty list so the section simply doesn't render (never blocks the
-  // form). `companyId` scopes the questions to the company.
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    setQuestionsLoading(true);
-    setQuestionsError(null);
-    reportsApi
-      .getQuarterlyQuestions(companyId)
-      .then((res) => {
-        if (cancelled) return;
-        setQuestions(res.questions ?? []);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setQuestions([]);
-        setQuestionsError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load questions. Please retry.',
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setQuestionsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
-
-  // Record a single-select answer (replaces any prior choice for that question).
-  const selectAnswer = (questionId: string, option: string) => {
-    setAnswers((prev) => ({ ...prev, [questionId]: option }));
-  };
 
   // Fetch coverage for the selected existing report to get doc count + period label.
   useEffect(() => {
@@ -437,15 +581,6 @@ export default function QuarterlyReportForm({
     setGenError(null);
   };
 
-  const toggleArea = (key: string) => {
-    setSelectedAreas((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
-  };
-
-  const toggleSelectAll = () => {
-    setSelectedAreas(allSelected ? [] : areas.map((a) => a.key));
-  };
 
   // --- File handling (multiple) -------------------------------------------
   const openFilePicker = () => fileInputRef.current?.click();
@@ -527,14 +662,22 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  const hasAreas = selectedAreas.length > 0;
+
+  // New-report submit requires a company type (pre-selected from detection, but
+  // must be set). Report tone is default-selected and voices always has CEO, so
+  // neither gates. Report areas are always all-selected behind the scenes.
+  const contextComplete = companyType != null;
 
   const canGenerate =
     !!companyId &&
     !isSubmittingGenerate &&
     (isOpenMode ||
       (isUploadMode && hasFiles) ||
-      (!selectedReportId && customYear != null && hasFiles && hasAreas && !langBlocked));
+      (!selectedReportId &&
+        customYear != null &&
+        hasFiles &&
+        !langBlocked &&
+        contextComplete));
 
   const disabledReason = isOpenMode
     ? undefined
@@ -544,15 +687,15 @@ export default function QuarterlyReportForm({
         : undefined
       : customYear == null
         ? 'Select a reporting year to continue'
-        : !hasAreas
-          ? 'Select at least one report area to continue'
-          : !hasFiles
+        : !hasFiles
             ? 'Upload at least one source document to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : undefined;
+                : companyType == null
+                  ? 'Select the company type to continue'
+                  : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -573,9 +716,9 @@ export default function QuarterlyReportForm({
   const triggerGenerate = () => {
     if (!canGenerate || !companyId) return;
 
-    // Branch A — open existing report: navigate straight to coverage.
+    // Branch A — open existing report: navigate straight to the outline.
     if (isOpenMode && selectedReportId) {
-      navigate(`/quarterly-report/${selectedReportId}/coverage`);
+      navigate(`/quarterly-report/${selectedReportId}/outline`);
       return;
     }
 
@@ -611,15 +754,16 @@ export default function QuarterlyReportForm({
       return;
     }
 
-    // Branch C — new report.
-    if (customYear == null) return;
+    // Branch C — new report. company_type is required (guaranteed by
+    // `canGenerate`, re-checked here to narrow the nullable state type).
+    if (customYear == null || companyType == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
 
-    // TODO(questionnaire): the single-select answers are captured in `answers`
-    // (questionId → option). Once the backend accepts them, add e.g.
-    // `questionnaire: answers` to this payload and to GenerateQuarterlyBody.
+    // Single creation call — the report is created already configured with the
+    // confirm-context answers. No separate PATCH /context (the report_id only
+    // exists after this returns, which is what previously caused the 404).
     reportsApi
       .generateQuarterly(companyId, {
         files,
@@ -627,6 +771,9 @@ export default function QuarterlyReportForm({
         quarter,
         areas: selectedAreas,
         content_language: language,
+        company_type: companyType,
+        voices,
+        report_tone: reportTone ?? undefined,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -726,6 +873,7 @@ export default function QuarterlyReportForm({
             report content + export only; the app UI stays English/LTR. */}
         <div style={{ marginBottom: 18 }}>
           <label className="fl-label">Report Language</label>
+          {/* Arabic is hidden for now — English only. `language` stays 'english'. */}
           <div className="tabs" style={{ marginBottom: 0 }}>
             <button
               type="button"
@@ -733,13 +881,6 @@ export default function QuarterlyReportForm({
               onClick={() => setLanguage('english')}
             >
               English
-            </button>
-            <button
-              type="button"
-              className={`tab ${language === 'arabic' ? 'act' : ''}`}
-              onClick={() => setLanguage('arabic')}
-            >
-              العربية
             </button>
           </div>
         </div>
@@ -936,201 +1077,6 @@ export default function QuarterlyReportForm({
               <option value="upload">Upload new documents</option>
             </select>
           </div>
-        )}
-
-        {/* Report areas — hidden when an existing report is selected */}
-        {!selectedReportId && (
-          <div style={{ marginBottom: 18 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 8,
-              }}
-            >
-              <label className="fl-label" style={{ marginBottom: 0 }}>
-                Report Areas{' '}
-                <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
-              </label>
-              {areas.length > 0 && (
-                <button
-                  type="button"
-                  onClick={toggleSelectAll}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#4040C8',
-                    background: 'transparent',
-                    border: 0,
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  {allSelected ? 'Clear all' : 'Select all'}
-                </button>
-              )}
-            </div>
-
-            {areasLoading ? (
-              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-                Loading report areas…
-              </div>
-            ) : areasError ? (
-              <div
-                role="alert"
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  background: 'rgba(229,72,77,.08)',
-                  border: '1px solid rgba(229,72,77,.25)',
-                  color: '#B33A3E',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                {areasError}
-              </div>
-            ) : areas.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-                No report areas available.
-              </div>
-            ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3,1fr)',
-                gap: 10,
-              }}
-            >
-              {areas.map((area) => {
-                const active = selectedAreas.includes(area.key);
-                return (
-                  <div
-                    key={area.key}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setMetricsModal(area)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setMetricsModal(area);
-                      }
-                    }}
-                    title="View metrics"
-                    className={`fw-chip ${active ? 'sel' : ''}`}
-                    style={{
-                      flexDirection: 'column',
-                      alignItems: 'stretch',
-                      gap: 6,
-                      padding: '12px 14px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      background: active ? '#EEEEFF' : '#fff',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: '#1A1D2E',
-                        }}
-                      >
-                        {area.title}
-                      </span>
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={active}
-                        aria-label={
-                          active
-                            ? `Deselect ${area.title}`
-                            : `Select ${area.title}`
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleArea(area.key);
-                        }}
-                        style={{
-                          width: 18,
-                          height: 18,
-                          padding: 0,
-                          borderRadius: 5,
-                          flexShrink: 0,
-                          cursor: 'pointer',
-                          border: active ? 'none' : '1.5px solid #C9CDE4',
-                          background: active ? '#4040C8' : '#fff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {active && (
-                          <svg
-                            width="11"
-                            height="11"
-                            viewBox="0 0 12 12"
-                            fill="none"
-                          >
-                            <path
-                              d="M2.5 6.2l2.2 2.2L9.5 3.6"
-                              stroke="#fff"
-                              strokeWidth="1.6"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                    {area.desc && (
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: '#5A6080',
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {area.desc}
-                      </span>
-                    )}
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '.5px',
-                        color: active ? '#4040C8' : '#9BA3C4',
-                        marginTop: 2,
-                      }}
-                    >
-                      {area.meta}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            )}
-          </div>
-        )}
-
-        {/* Questionnaire — new-report mode only (mirrors Report Areas). Renders
-            nothing when there are no questions. */}
-        {!selectedReportId && (questionsLoading || questions.length > 0) && (
-          <QuarterlyQuestionnaire
-            questions={questions}
-            answers={answers}
-            onSelect={selectAnswer}
-            loading={questionsLoading}
-            error={questionsError}
-          />
         )}
 
         {/* Upload — shown for new reports and upload-to-existing mode */}
@@ -1357,6 +1303,85 @@ export default function QuarterlyReportForm({
             }}
           >
             {languageWarning}
+          </div>
+        )}
+
+        {/* Confirm context — new-report mode only. Held locally and sent inside
+            the single generate call (no GET/PATCH context at creation). */}
+        {!selectedReportId && (
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              <span style={{ width: 18, height: 2, background: '#4040C8', borderRadius: 2 }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: 1.2,
+                  textTransform: 'uppercase',
+                  color: '#4040C8',
+                }}
+              >
+                Confirm Context
+              </span>
+            </div>
+
+            {/* Card 1 — company type (auto-selected from detected sector) */}
+            <CtxCard
+              n={1}
+              title="What kind of company is this report for?"
+              helper="Sets which sections are required — banks vs non-banks differ."
+              detected={detectedCompanyType != null && companyType === detectedCompanyType}
+            >
+              {CTX_COMPANY_TYPES.map((c) => (
+                <CtxPill
+                  key={c.value}
+                  label={c.label}
+                  selected={companyType === c.value}
+                  onClick={() => setCompanyType(c.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 2 — report tone (single-select; default formal_corporate) */}
+            <CtxCard
+              n={2}
+              title="What tone should the report take?"
+              helper="Sets the writing style of the narrative."
+            >
+              {CTX_TONES.map((t) => (
+                <CtxPill
+                  key={t.value}
+                  label={t.label}
+                  title={t.desc}
+                  selected={reportTone === t.value}
+                  onClick={() => setReportTone(t.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 3 — executive voices (multi-select; CEO locked-on) */}
+            <CtxCard
+              n={3}
+              title="Which executive voices will the report carry?"
+              helper="CEO statement is always included; add the others if your report uses them."
+            >
+              {CTX_VOICES.map((v) => (
+                <CtxPill
+                  key={v.value}
+                  label={v.label}
+                  locked={v.locked}
+                  selected={v.locked ? true : voices.includes(v.value)}
+                  onClick={() => toggleVoice(v.value)}
+                />
+              ))}
+            </CtxCard>
           </div>
         )}
 
