@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
 import {
   Bar,
@@ -183,19 +184,7 @@ export default function AdminOverviewPage() {
   }, []);
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'flex', gap: 14 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skel" style={{ flex: 1, height: 118, borderRadius: 16 }} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 14 }}>
-          <div className="skel" style={{ flex: 3, height: 240, borderRadius: 16 }} />
-          <div className="skel" style={{ flex: 2, height: 240, borderRadius: 16 }} />
-        </div>
-      </div>
-    );
+    return <Spinner pad={80} />;
   }
 
   if (error || !data) {

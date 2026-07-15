@@ -111,11 +111,55 @@ export interface DocumentBankDocument {
   download_expires_at: string | null;
 }
 
+// GET /api/v1/documents/{company_id}/company-document-bank — Company Document
+// Bank as a 3-level hierarchy: Category (report type) → Report (a specific
+// report or reporting cycle) → Documents. Cycle-uploaded docs surface as named
+// report nodes under the "annual" category; anything tied to neither a report
+// nor a cycle falls into a trailing "Unassigned" category. Each document carries
+// a time-limited signed `download_url` (null when the storage object is missing).
+export interface BankDocument {
+  id: string;
+  filename: string;
+  file_type: string;            // ".pdf" / "pdf" — strip leading dot for the badge
+  file_size_bytes: number | null;
+  extraction_status: string;
+  created_at: string;
+  download_url: string | null;
+  download_expires_at: string | null;
+}
+
+export interface ReportGroup {
+  report_id: string | null;     // null for cycle nodes and the Unassigned node
+  cycle_id: string | null;      // set when this node is a reporting cycle
+  report_name: string;
+  report_type: string | null;
+  period: string | number | null; // report period string, or cycle fiscal_year
+  status: string | null;
+  document_count: number;
+  documents: BankDocument[];
+}
+
+export interface ReportCategory {
+  category: string | null;      // report type key; null => "Unassigned" (last)
+  category_name: string;
+  report_count: number;
+  document_count: number;
+  reports: ReportGroup[];
+}
+
+export interface CompanyDocumentBankResponse {
+  company_id: string;
+  company_name: string;
+  categories: ReportCategory[];
+  total: number;
+}
+
 export interface DocumentBankReport {
   report_id: string;
   title: string;
   period: string;
   status: string;
+  report_type?: string | null;
   created_at: string;
   documents: DocumentBankDocument[];
 }
@@ -276,6 +320,33 @@ export interface PipelineInputSummary {
   trigger: string;
 }
 
+// Terminal payload the quarterly pipeline emits on `status: "failed"` when the
+// requested reporting period isn't present in the uploaded document(s). This is
+// a RECOVERABLE user-input error, not a crash: the backend has already wiped the
+// half-built report and its uploads server-side (`cleaned_up: true`), so the
+// frontend must NOT call any cleanup/delete endpoint — it only routes the user
+// back to the first screen to correct the quarter/year and re-upload. Detect by
+// `error_code`, never by matching the message text.
+export interface PeriodNotFoundSummary {
+  error_code: "period_not_found";
+  requested_period: string;
+  available_periods: string[];
+  user_action: "correct_input" | (string & {});
+  cleaned_up: boolean;
+  message: string;
+}
+
+// Narrow an AgentRun's output_summary to the period_not_found payload. Keys off
+// `error_code` so it's independent of the human-readable message.
+export function isPeriodNotFound(
+  summary: PipelineOutputSummary | PeriodNotFoundSummary | null | undefined,
+): summary is PeriodNotFoundSummary {
+  return (
+    !!summary &&
+    (summary as PeriodNotFoundSummary).error_code === "period_not_found"
+  );
+}
+
 export interface AgentRun {
   run_id: string;
   agent_name: string;
@@ -285,7 +356,7 @@ export interface AgentRun {
   elapsed_seconds: number;
   completed_at: string | null;
   input_summary: PipelineInputSummary | null;
-  output_summary: PipelineOutputSummary | null;
+  output_summary: PipelineOutputSummary | PeriodNotFoundSummary | null;
   error_message: string | null;
 }
 

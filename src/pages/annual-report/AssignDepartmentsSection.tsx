@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Department, AdminUserRow } from '@/types/admin';
+import type { Department } from '@/types/admin';
 
 const PRIMARY = '#4040C8';
 
@@ -7,25 +7,30 @@ export interface DepartmentAssignment {
   department_id: string;
   department_name: string;
   department_code: string;
-  assigned_user_id: string | null;
 }
 
-// Draft-only section: admin picks departments and a responsible department_user
-// per department. Nothing persists until the page's Submit (assign + activate).
+const initials = (name?: string | null) =>
+  (name || '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+
+// Draft-only section: admin picks the departments that participate. Each department's
+// questions route to that department's HOD (Head of Department), set in the admin console.
+// A department with no HOD is blocked. Nothing persists until the page's Submit (assign only;
+// the cycle stays draft and only goes active when the PM kicks off).
 export default function AssignDepartmentsSection({
   allDepartments,
-  departmentUsers,
   assigned,
   onAdd,
   onRemove,
-  onChangeUser,
 }: {
   allDepartments: Department[];
-  departmentUsers: AdminUserRow[];
   assigned: DepartmentAssignment[];
   onAdd: (dept: Department) => void;
   onRemove: (departmentId: string) => void;
-  onChangeUser: (departmentId: string, userId: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
@@ -42,8 +47,10 @@ export default function AssignDepartmentsSection({
     );
   }, [allDepartments, assigned, query]);
 
-  const usersFor = (deptId: string) =>
-    departmentUsers.filter((u) => u.department_id === deptId);
+  const deptById = useMemo(
+    () => new Map(allDepartments.map((d) => [d.id, d])),
+    [allDepartments],
+  );
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -70,7 +77,7 @@ export default function AssignDepartmentsSection({
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Assign Departments</div>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
-              Select which departments participate in this cycle and assign one responsible user per department.
+              Select which departments participate in this cycle. Each one's questions go to its Head of Department.
             </div>
           </div>
         </div>
@@ -94,8 +101,8 @@ export default function AssignDepartmentsSection({
         >
           <span aria-hidden>ℹ️</span>
           <span>
-            Each department will get an AI-generated questionnaire after assignments are saved. The
-            responsible user will fill in their department’s answers.
+            After kickoff, each department's AI-generated questions go to its Head of Department, who reviews
+            them and assigns a team member to answer.
           </span>
         </div>
 
@@ -168,7 +175,9 @@ export default function AssignDepartmentsSection({
         {assigned.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {assigned.map((row) => {
-              const users = usersFor(row.department_id);
+              const dept = deptById.get(row.department_id);
+              const hasHod = dept?.has_hod ?? !!dept?.hod_user_id;
+              const hodName = dept?.hod_name;
               return (
                 <div
                   key={row.department_id}
@@ -177,9 +186,9 @@ export default function AssignDepartmentsSection({
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 12px',
-                    border: '1px solid #ECEEF8',
+                    border: `1px solid ${hasHod ? '#ECEEF8' : '#F4C7C7'}`,
                     borderRadius: 10,
-                    background: '#FAFBFE',
+                    background: hasHod ? '#FAFBFE' : '#FFF7F7',
                   }}
                 >
                   <span
@@ -204,28 +213,67 @@ export default function AssignDepartmentsSection({
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E' }}>
                       {row.department_name}
                     </div>
-                    {users.length === 0 ? (
-                      <div style={{ fontSize: 10.5, color: '#B45309', marginTop: 2, fontWeight: 600 }}>
-                        No department users available. Invite one from the admin portal.
-                      </div>
+                    {hasHod ? (
+                      <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 2 }}>Head of Department</div>
                     ) : (
-                      <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 1 }}>Responsible user</div>
+                      <div style={{ fontSize: 10.5, color: '#B45309', marginTop: 2, fontWeight: 600 }}>
+                        No HOD assigned — set one in the admin console before adding this department.
+                      </div>
                     )}
                   </div>
-                  <select
-                    className="inp sel"
-                    style={{ width: 210, padding: '7px 28px 7px 10px' }}
-                    value={row.assigned_user_id ?? ''}
-                    disabled={users.length === 0}
-                    onChange={(e) => onChangeUser(row.department_id, e.target.value)}
-                  >
-                    <option value="">Select responsible user</option>
-                    {users.map((u) => (
-                      <option key={u.user_id} value={u.user_id}>
-                        {u.full_name}
-                      </option>
-                    ))}
-                  </select>
+                  {hasHod ? (
+                    <div
+                      style={{
+                        width: 210,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 10px',
+                        border: '1px solid #E2E4F0',
+                        borderRadius: 8,
+                        background: '#fff',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          background: 'rgba(37,99,235,.12)',
+                          color: '#2563EB',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {initials(hodName)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#1A1D2E',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={hodName ?? undefined}
+                      >
+                        {hodName || 'HOD'}
+                      </span>
+                    </div>
+                  ) : (
+                    <span
+                      className="badge b-am"
+                      style={{ width: 210, justifyContent: 'center', flexShrink: 0 }}
+                    >
+                      ⚠ No HOD assigned
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => onRemove(row.department_id)}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -50,11 +51,6 @@ function EditCycleModal({
   const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
   const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
-  const [companyProfile, setCompanyProfile] = useState(cycle.company_profile ?? '');
-  const [sectorId, setSectorId] = useState(cycle.sector ?? cycle.sector_id ?? '');
-  const [shariah, setShariah] = useState(cycle.is_shariah ?? cycle.is_shariah_compliant ?? false);
-  const [subsidiaries, setSubsidiaries] = useState(cycle.has_subsidiaries);
-  const [sukuk, setSukuk] = useState(cycle.has_sukuk);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -63,9 +59,7 @@ function EditCycleModal({
     fiscalYear.trim() !== '' &&
     startDate !== '' &&
     endDate !== '' &&
-    submissionDeadline !== '' &&
-    companyProfile !== '' &&
-    sectorId !== '';
+    submissionDeadline !== '';
 
   const submit = async () => {
     if (busy || !canSubmit) return;
@@ -79,11 +73,6 @@ function EditCycleModal({
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
-        company_profile: companyProfile,
-        sector: sectorId,
-        is_shariah: shariah,
-        has_subsidiaries: subsidiaries,
-        has_sukuk: sukuk,
       };
       await sarCycles.update(cycle.id, payload);
       onSaved();
@@ -92,48 +81,6 @@ function EditCycleModal({
       setBusy(false);
     }
   };
-
-  const flag = (label: string, value: boolean, set: (v: boolean) => void) => (
-    <button
-      type="button"
-      onClick={() => set(!value)}
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 7,
-        padding: '9px 11px',
-        borderRadius: 10,
-        border: `1.5px solid ${value ? PRIMARY : '#E2E4F0'}`,
-        background: value ? '#EEEEFF' : '#fff',
-        cursor: 'pointer',
-        fontSize: 11.5,
-        fontWeight: 600,
-        color: value ? PRIMARY : '#5A6080',
-      }}
-    >
-      <span
-        style={{
-          width: 15,
-          height: 15,
-          borderRadius: 4,
-          flexShrink: 0,
-          border: value ? 'none' : '1.5px solid #C9CDE4',
-          background: value ? PRIMARY : '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {value && (
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
-      {label}
-    </button>
-  );
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -169,38 +116,9 @@ function EditCycleModal({
             <input className="inp" type="date" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} />
           </div>
 
-          <div style={{ borderTop: '1px solid #ECEEF8', paddingTop: 12, fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>
-            🏢 Company Profile
-          </div>
-          <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Company Profile *</label>
-            <select className="inp sel" value={companyProfile} onChange={(e) => setCompanyProfile(e.target.value)}>
-              <option value="">Select a company profile</option>
-              {/* Surface the saved value even if it's not in our known option list */}
-              {companyProfile && !COMPANY_PROFILE_OPTIONS.some((o) => o.value === companyProfile) && (
-                <option value={companyProfile}>{companyProfile}</option>
-              )}
-              {COMPANY_PROFILE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Sector *</label>
-            <select className="inp sel" value={sectorId} onChange={(e) => setSectorId(e.target.value)}>
-              <option value="">Select a sector</option>
-              {sectorId && !CYCLE_SECTOR_OPTIONS.some((s) => s.value === sectorId) && (
-                <option value={sectorId}>{cycle.sector_name ?? sectorId}</option>
-              )}
-              {CYCLE_SECTOR_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {flag('Shariah-compliant', shariah, setShariah)}
-            {flag('Has subsidiaries', subsidiaries, setSubsidiaries)}
-            {flag('Has sukuk', sukuk, setSukuk)}
+          <div style={{ fontSize: 11, color: '#9BA3C4', paddingTop: 4 }}>
+            Reporting sector, company profile, Shariah, subsidiaries &amp; sukuk are set on the
+            company (Profile page / onboarding) and inherited by each cycle.
           </div>
 
           {err && <div role="alert" style={{ fontSize: 11, color: '#DC2626' }}>{err}</div>}
@@ -266,7 +184,6 @@ export default function CycleDetailPage() {
 
   // Draft-state department assignment.
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-  const [departmentUsers, setDepartmentUsers] = useState<AdminUserRow[]>([]);
   const [assigned, setAssigned] = useState<DepartmentAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
@@ -358,26 +275,13 @@ export default function CycleDetailPage() {
       })
       .catch(() => setAllDepartments([]));
 
-    adminConsole
-      .listUsers({ role: 'department_user' })
-      .then((res: unknown) => {
-        const list = Array.isArray(res)
-          ? res
-          : Array.isArray((res as { users?: AdminUserRow[] })?.users)
-            ? (res as { users: AdminUserRow[] }).users
-            : [];
-        setDepartmentUsers(list);
-      })
-      .catch(() => setDepartmentUsers([]));
-
     // Hydrate from any existing assignments on the cycle (usually empty for a
-    // fresh draft).
+    // fresh draft). The dept's HOD comes from allDepartments, not the assignment.
     setAssigned(
       (overview?.departments ?? []).map((d) => ({
         department_id: d.department_id,
         department_name: d.department_name,
         department_code: d.department_code,
-        assigned_user_id: d.assigned_user_id ?? null,
       })),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,7 +297,6 @@ export default function CycleDetailPage() {
               department_id: dept.id,
               department_name: dept.department_name,
               department_code: dept.department_code,
-              assigned_user_id: null,
             },
           ],
     );
@@ -401,17 +304,16 @@ export default function CycleDetailPage() {
   const removeDepartment = (departmentId: string) =>
     setAssigned((prev) => prev.filter((a) => a.department_id !== departmentId));
 
-  const changeAssignedUser = (departmentId: string, userId: string) =>
-    setAssigned((prev) =>
-      prev.map((a) =>
-        a.department_id === departmentId ? { ...a, assigned_user_id: userId || null } : a,
-      ),
-    );
+  const deptHasHod = (departmentId: string) => {
+    const d = allDepartments.find((x) => x.id === departmentId);
+    return d?.has_hod ?? !!d?.hod_user_id;
+  };
 
-  const canSubmit =
-    assigned.length > 0 && assigned.every((a) => !!a.assigned_user_id);
+  // Every added department must have a Head of Department before the cycle can be submitted.
+  const canSubmit = assigned.length > 0 && assigned.every((a) => deptHasHod(a.department_id));
 
-  // Submit = assign departments (bulk) THEN activate, in sequence.
+  // Submit = assign departments (bulk). The cycle stays in draft; it only goes
+  // active when the PM submits the kickoff brief and generates questions.
   const handleSubmitCycle = async () => {
     if (submitting || !canSubmit) return;
     setSubmitErr('');
@@ -419,13 +321,9 @@ export default function CycleDetailPage() {
     setSubmitting(true);
     try {
       await sarCycles.assignDepartments(cycleId, {
-        assignments: assigned.map((a) => ({
-          department_id: a.department_id,
-          user_id: a.assigned_user_id as string,
-        })),
+        assignments: assigned.map((a) => ({ department_id: a.department_id })),
       });
-      await sarCycles.activate(cycleId);
-      setSubmitMsg('Cycle activated. AI-generated questions are being prepared.');
+      setSubmitMsg('Departments assigned. The project manager can now kick off the cycle.');
       await fetchOverview();
     } catch (e) {
       const status = e instanceof ApiError ? e.status : undefined;
@@ -434,7 +332,7 @@ export default function CycleDetailPage() {
           ? (e.body as { detail: string }).detail
           : e instanceof Error
             ? e.message
-            : 'Failed to activate cycle.';
+            : 'Failed to save departments.';
       if (status === 400 && /draft/i.test(msg)) {
         setSubmitErr('This cycle is no longer in draft. Refreshing…');
         await fetchOverview();
@@ -452,17 +350,7 @@ export default function CycleDetailPage() {
   );
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="skel" style={{ height: 70, borderRadius: 12 }} />
-        <div style={{ display: 'flex', gap: 14 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skel" style={{ flex: 1, height: 90, borderRadius: 12 }} />
-          ))}
-        </div>
-        <div className="skel" style={{ height: 240, borderRadius: 12 }} />
-      </div>
-    );
+    return <Spinner pad={80} />;
   }
 
   if (error || !overview) {
@@ -525,7 +413,7 @@ export default function CycleDetailPage() {
                 type="button"
                 onClick={handleSubmitCycle}
                 disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Assign at least one department, each with a responsible user' : undefined}
+                title={!canSubmit ? 'Add at least one department, and each must have a Head of Department assigned' : undefined}
               >
                 {submitting ? 'Submitting…' : '✓ Submit'}
               </button>
@@ -558,11 +446,9 @@ export default function CycleDetailPage() {
         <div style={{ marginBottom: 16 }}>
           <AssignDepartmentsSection
             allDepartments={allDepartments}
-            departmentUsers={departmentUsers}
             assigned={assigned}
             onAdd={addDepartment}
             onRemove={removeDepartment}
-            onChangeUser={changeAssignedUser}
           />
         </div>
       )}

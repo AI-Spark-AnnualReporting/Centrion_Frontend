@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, getSectors, lookups, quarterlyReports, reports as reportsApi } from '@/lib/api';
+import { ApiError, getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
@@ -263,10 +264,6 @@ export default function ReportsPage() {
 
 
   const [existingReports, setExistingReports] = useState<ReportSummary[]>([]);
-  // Per-quarterly-report driver coverage % (the list endpoint doesn't carry it;
-  // it lives in the quarterly coverage endpoint). Keyed by report id.
-  const [quarterlyCoverage, setQuarterlyCoverage] = useState<Record<string, number>>({});
-  const [quarterlyCoverageLoading, setQuarterlyCoverageLoading] = useState(false);
   const [periodsLoading, setPeriodsLoading] = useState<boolean>(!!companyId);
   // Selecting an existing report puts the form into read-from-report mode;
   // picking "+ Add new…" + a year puts the form into create-new mode.
@@ -318,40 +315,6 @@ export default function ReportsPage() {
       cancelled = true;
     };
   }, [companyId]);
-
-  // Load real driver coverage for each quarterly report so the cards aren't all
-  // stuck at 0% (the list endpoint omits it). One coverage call per report.
-  useEffect(() => {
-    if (!companyId) {
-      setQuarterlyCoverage({});
-      return;
-    }
-    const quarterlies = existingReports.filter(isQuarterlyReport);
-    if (quarterlies.length === 0) {
-      setQuarterlyCoverage({});
-      return;
-    }
-    let cancelled = false;
-    setQuarterlyCoverageLoading(true);
-    Promise.allSettled(
-      quarterlies.map((r) =>
-        quarterlyReports
-          .getCoverage(companyId, r.id)
-          .then((cov) => ({ id: r.id, pct: cov.summary.driver_coverage_pct })),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, number> = {};
-      for (const res of results) {
-        if (res.status === 'fulfilled') next[res.value.id] = res.value.pct;
-      }
-      setQuarterlyCoverage(next);
-      setQuarterlyCoverageLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, existingReports]);
 
   const applyReportToForm = (report: ReportSummary) => {
     const cfg = report.generation_config ?? {};
@@ -570,11 +533,12 @@ export default function ReportsPage() {
       });
   };
 
-  // Click on a Recent Report card → open the dedicated detail page, which
-  // handles its own coverage fetch and back-navigation.
+  // Click on a Recent Report card → open the report. Quarterly reports open at
+  // the Outline (Coverage/Gaps are no longer separate screens); others go to the
+  // dedicated detail page, which handles its own coverage fetch.
   const handleReportCardClick = (report: ReportSummary) => {
     if (isQuarterlyReport(report)) {
-      navigate(`/quarterly-report/${report.id}/coverage`);
+      navigate(`/quarterly-report/${report.id}/outline`);
     } else {
       navigate(`/reports/${report.id}`);
     }
@@ -845,14 +809,13 @@ export default function ReportsPage() {
               <div style={{ marginTop: 24 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
-                    // Coverage % is fetched per report; show a shimmer until it
-                    // resolves rather than flashing a misleading 0%.
-                    const coveragePending =
-                      quarterlyCoverageLoading && quarterlyCoverage[r.id] === undefined;
-                    const score = Math.round(
-                      quarterlyCoverage[r.id] ?? r.coverage?.percentage ?? 0,
-                    );
                     const gradient = REPORT_CARD_GRADIENTS[idx % REPORT_CARD_GRADIENTS.length];
+                    // Surface report metadata (scope + frameworks) on the card
+                    // face instead of a coverage %, which is more useful at a glance.
+                    const frameworks = r.frameworks ?? [];
+                    const scopeLabel = r.scope_type
+                      ? r.scope_type.charAt(0).toUpperCase() + r.scope_type.slice(1)
+                      : null;
                     return (
                       <div
                         key={r.id}
@@ -867,29 +830,30 @@ export default function ReportsPage() {
                         onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 22px rgba(26,29,46,.08)'; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
                       >
-                        <div style={{ background: gradient, padding: '16px 18px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
-                          <div style={{ position: 'absolute', top: -30, right: -30, width: 110, height: 110, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
-                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', opacity: .75, marginBottom: 6 }}>
+                        <div style={{ background: gradient, padding: '20px 20px 22px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', top: -34, right: -34, width: 124, height: 124, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
+                          <div style={{ position: 'absolute', bottom: -48, right: 26, width: 84, height: 84, borderRadius: '50%', background: 'rgba(255,255,255,.05)' }} />
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', opacity: .8, marginBottom: 10, position: 'relative' }}>
+                            {r.title || 'Quarterly Report'}
+                          </div>
+                          <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.05, letterSpacing: '-.5px', marginBottom: 14, position: 'relative' }}>
                             {formatPeriod(r.period)}
                           </div>
-                          <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>{r.title || 'Quarterly Report'}</div>
-                          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                              {coveragePending ? (
-                                <span className="skel-dark" style={{ display: 'inline-block', width: 52, height: 26, borderRadius: 6 }} />
-                              ) : (
-                                <span style={{ fontSize: 30, fontWeight: 800, fontFamily: "'DM Mono',monospace", lineHeight: 1 }}>{score}%</span>
-                              )}
-                              <span style={{ fontSize: 10, fontWeight: 700, opacity: .7 }}>Coverage</span>
-                            </div>
-                            {!coveragePending && (
-                              <div style={{ fontSize: 10, opacity: .7, fontFamily: "'DM Mono',monospace" }}>{score}%</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, position: 'relative' }}>
+                            {scopeLabel && (
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
+                                {scopeLabel}
+                              </span>
+                            )}
+                            {frameworks.slice(0, 3).map((fw) => (
+                              <span key={fw} style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
+                                {fw}
+                              </span>
+                            ))}
+                            {frameworks.length === 0 && !scopeLabel && (
+                              <span style={{ fontSize: 10, fontWeight: 600, opacity: .7 }}>ESG Reporting</span>
                             )}
                           </div>
-                          <div style={{ height: 4, background: 'rgba(255,255,255,.18)', borderRadius: 4, overflow: 'hidden' }}>
-                            <div style={{ width: coveragePending ? '0%' : `${score}%`, height: '100%', background: '#22C55E', transition: 'width .3s ease' }} />
-                          </div>
-                          <div style={{ fontSize: 9, fontWeight: 700, opacity: .55, marginTop: 4 }}>DRIVER COVERAGE</div>
                         </div>
                         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: '#4040C8', background: 'rgba(64,64,200,.08)', padding: '4px 10px', borderRadius: 999 }}>
@@ -1482,55 +1446,8 @@ export default function ReportsPage() {
       </div>
 
       {/* Recent Reports — driven by GET /api/v1/reports/{company_id}.
-          While the list is loading we render skeleton placeholder cards
-          matching the real card shape rather than a spinner — keeps the
-          layout stable and avoids the jarring loading-circle pattern. */}
-      {periodsLoading && existingReports.length === 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              aria-hidden="true"
-              style={{
-                background: '#fff',
-                borderRadius: 14,
-                overflow: 'hidden',
-                border: '1px solid #E2E4F0',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <div style={{ background: '#3535B5', padding: '16px 18px', position: 'relative', overflow: 'hidden' }}>
-                <div className="skel-dark" style={{ height: 9, width: '55%', marginBottom: 10 }} />
-                <div className="skel-dark" style={{ height: 13, width: '70%', marginBottom: 16 }} />
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div className="skel-dark" style={{ height: 28, width: 80 }} />
-                  <div className="skel-dark" style={{ height: 10, width: 28 }} />
-                </div>
-                <div className="skel-dark" style={{ height: 4, width: '100%', borderRadius: 4 }} />
-                <div className="skel-dark" style={{ height: 8, width: '40%', marginTop: 8 }} />
-              </div>
-              <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-                  {[0, 1, 2].map((j) => (
-                    <div key={j} style={{ background: '#F5F6FB', borderRadius: 8, padding: '10px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                      <div className="skel" style={{ height: 16, width: 28 }} />
-                      <div className="skel" style={{ height: 8, width: 22 }} />
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 'auto' }}>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <div className="skel" style={{ height: 16, width: 70, borderRadius: 999 }} />
-                    <div className="skel" style={{ height: 16, width: 50, borderRadius: 999 }} />
-                  </div>
-                  <div className="skel" style={{ height: 10, width: 90 }} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+          While the list is loading we show a centered spinner. */}
+      {periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
 
       {existingReports.filter((r) => !isQuarterlyReport(r)).length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>

@@ -38,6 +38,9 @@ export interface Cycle {
   has_subsidiaries: boolean;
   has_sukuk: boolean;
   status: CycleStatus;
+  // Assembled final-report status (e.g. 'approved') surfaced on the cycle list so
+  // the dashboard can mark an approved annual report done. Null if not assembled.
+  report_status?: string | null;
   created_at: string;
   updated_at: string;
   // Progress summary the list endpoint surfaces per cycle (the design shows
@@ -49,9 +52,9 @@ export interface Cycle {
 }
 
 // Exact request body for POST/PUT /api/v1/admin/cycles. Do NOT add company_id
-// (derived from JWT), content_language (no such field on SAR), or sector_id
-// (use `sector` code). company_profile is "listed" | "private"; sector is one
-// of bank|insurance|general|reit|finance_co.
+// (derived from JWT) or content_language. The reporting sector AND the
+// company-profile attributes (listed/private, Shariah, subsidiaries, sukuk) are
+// set at onboarding and the cycle inherits them from the company — NOT sent here.
 export interface CreateCyclePayload {
   cycle_name: string;
   fiscal_year: number;
@@ -60,11 +63,6 @@ export interface CreateCyclePayload {
   end_date: string;
   submission_deadline: string;
   kickoff_brief?: string;
-  company_profile?: string;
-  sector?: string;
-  is_shariah?: boolean;
-  has_subsidiaries?: boolean;
-  has_sukuk?: boolean;
 }
 
 export type SessionStatus =
@@ -136,7 +134,8 @@ export interface ResolveSectionsResponse {
 
 // POST /api/v1/admin/cycles/{id}/assign-departments
 export interface AssignDepartmentsPayload {
-  assignments: { department_id: string; user_id: string }[];
+  // HOD flow: department-only. The dept's HOD is resolved server-side; user_id is ignored.
+  assignments: { department_id: string; user_id?: string }[];
 }
 
 export interface AssignDepartmentsResponse {

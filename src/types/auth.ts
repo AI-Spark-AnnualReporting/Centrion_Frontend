@@ -5,7 +5,8 @@ export interface AuthUser {
   email: string;
   full_name: string;
   // `ir` users come from the Admin Console invite flow — read-only.
-  role: "admin" | "project_manager" | "department_user" | "ir";
+  // `hod` (Head of Department) works in the SAR app like PM/department_user.
+  role: "admin" | "project_manager" | "hod" | "department_user" | "ir";
   company_id?: string | null;
   company_name?: string | null;
   // Set TRUE for users created via /companies/{id}/team — backend flags
@@ -54,6 +55,15 @@ export interface OnboardingPayload {
   fiscal_year_end_month: number;
   reporting_currency: "SAR" | "AED" | "BHD" | "KWD" | "OMR" | "QAR" | "USD";
   primary_language: "en" | "ar";
+  // ESG sector (UUID from the sectors lookup) + the company-profile attributes
+  // the annual-report cycle inherits. All mandatory.
+  sector_id: string;
+  company_profile: "listed" | "private";
+  is_shariah: boolean;
+  has_subsidiaries: boolean;
+  has_sukuk: boolean;
+  // SAR reporting sector (bank/insurance/general/reit/finance_co) — inherited by the cycle.
+  reporting_sector: string;
   // Default departments the admin chose to create (their AI agents get
   // generated server-side). Sent with the onboarding completion.
   selected_department_codes: string[];

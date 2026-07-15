@@ -2,7 +2,7 @@
 // Admin Console (and anywhere else that shows a role). Never hardcode display
 // names inline — import from here.
 
-export type BackendRole = "admin" | "project_manager" | "department_user" | "ir";
+export type BackendRole = "admin" | "project_manager" | "hod" | "department_user" | "ir";
 
 export interface RoleMeta {
   label: string; // Display name shown to users
@@ -24,6 +24,12 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     badgeClass: "b-tl",
     dot: "#0D9488",
   },
+  hod: {
+    label: "Head of Department",
+    description: "Curates questions & reviews answers for a department",
+    badgeClass: "b-bl",
+    dot: "#2563EB",
+  },
   department_user: {
     label: "Department User",
     description: "Reviews, edits, approves content",
@@ -42,6 +48,7 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
 export const ROLE_ORDER: BackendRole[] = [
   "admin",
   "project_manager",
+  "hod",
   "department_user",
   "ir",
 ];
@@ -50,6 +57,7 @@ export const ROLE_ORDER: BackendRole[] = [
 // the admin role can never be granted from the UI.
 export const ASSIGNABLE_ROLES: BackendRole[] = [
   "project_manager",
+  "hod",
   "department_user",
   "ir",
 ];

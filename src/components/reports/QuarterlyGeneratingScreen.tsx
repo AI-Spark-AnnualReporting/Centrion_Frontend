@@ -44,7 +44,7 @@ interface QuarterlyGeneratingScreenProps {
 
 // Progress 0–100 derived from real backend node states. Mirrors the formula
 // used by the ESG GeneratingScreen so the bar advances during long steps.
-function computeProgress(
+export function computeProgress(
   phase: QuarterlyPhase,
   nodes: AgentNode[] | undefined,
 ): number {

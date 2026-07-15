@@ -11,7 +11,9 @@ export interface SectorsResponse {
 
 export interface CreateCompanyRequest {
   name: string;
-  sector_id: string;
+  // Sector is captured on a separate onboarding step, not at signup, so it is
+  // optional here and omitted from the request when not provided.
+  sector_id?: string;
   jurisdiction?: string;
 }
 
@@ -49,6 +51,32 @@ export interface Company {
   reporting_currency: string | null;
   primary_language: string | null;
   fiscal_year_end_month: number | null;
+  // Company-profile attributes (also editable on the Profile page). The
+  // annual-report cycle inherits these from the company.
+  company_profile: string | null;
+  is_shariah: boolean | null;
+  has_subsidiaries: boolean | null;
+  has_sukuk: boolean | null;
+  // SAR reporting sector (bank/insurance/general/reit/finance_co) — inherited by the cycle.
+  reporting_sector: string | null;
+  // Status of the signup-time background profile extraction (processing | done).
+  profile_extraction_status?: string | null;
+  // Report style extracted (background) from the docs uploaded at onboarding.
+  // report_tone = the prose style "directive"; report_tone_profile = the
+  // structured dimensions + verbatim exemplar sentences; theme = prose;
+  // outline = merged table-of-contents.
+  report_tone?: string | null;
+  report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
+  // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
+  report_theme?: { name: string; explanation?: string }[] | null;
+  report_outline?: string[] | null;
+  // AI-extracted key highlights from the uploaded reports ({category, text}); shown on the workspace dashboard.
+  report_highlights?: { category: string; text: string }[] | null;
+  // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
+  esg_frameworks?: string[] | null;
+  // Onboarding deep-ingest state — drives the dashboard card (fetch) + the setup screen.
+  report_extraction_status?: string | null; // 'processing' | 'done' | 'failed'
+  onboarding_progress?: { stage?: string; detail?: string; percent?: number } | null;
   plan_name: string | null;
   plan_renewal_date: string | null;
   max_seats: number | null;
@@ -70,4 +98,9 @@ export type CompanyEditableFields = Pick<
   | "reporting_currency"
   | "primary_language"
   | "fiscal_year_end_month"
+  | "company_profile"
+  | "is_shariah"
+  | "has_subsidiaries"
+  | "has_sukuk"
+  | "reporting_sector"
 >;

@@ -1,90 +1,11 @@
-import { useNavigate } from 'react-router-dom';
+import { ReportStartCards } from '@/components/dashboard/ReportStartCards';
 
 // First-run welcome screen — shown on the dashboard when the company has no
-// reports yet, instead of a bare "No reports yet" panel. Guides the user to
-// start their first report (ESG / Quarterly / Annual).
-
-interface ReportCard {
-  key: string;
-  category: string;
-  title: string;
-  description: string;
-  features: string[];
-  cta: string;
-  accent: string; // solid accent (text, checks, button)
-  headerGradient: string;
-  onOpen: (navigate: ReturnType<typeof useNavigate>) => void;
-  icon: React.ReactNode;
-}
-
-const CARDS: ReportCard[] = [
-  {
-    key: 'esg',
-    category: 'ESG & Corporate Intelligence',
-    title: 'ESG Disclosure Report',
-    description:
-      'Compile CMA / Tadawul-aligned environmental, social, and governance disclosures with traceable GRI-coded metrics and AI-assisted narrative.',
-    features: ['GRI-coded metrics', 'Materiality mapping', 'Assurance-ready'],
-    cta: 'Open ESG Studio',
-    accent: '#16A34A',
-    headerGradient: 'linear-gradient(135deg,#14532D,#16A34A)',
-    onOpen: (navigate) => navigate('/reports'),
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-        <path d="M10 2C7 6 6 8 6 11a4 4 0 0 0 8 0c0-3-1-5-4-9z" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    key: 'quarterly',
-    category: 'Periodic Reporting',
-    title: 'Quarterly Report',
-    description:
-      'Document-first quarterly results. Upload financials, let the AI extract figures and drivers, fill the gaps, and generate a YoY + YTD narrative.',
-    features: ['Figure & driver extraction', 'Coverage map', 'YoY + YTD tables'],
-    cta: 'Open Quarterly',
-    accent: '#4040C8',
-    headerGradient: 'linear-gradient(135deg,#2E2E9E,#4747CC)',
-    onOpen: (navigate) => navigate('/reports/quarterly'),
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-        <rect x="3" y="3" width="14" height="14" rx="2" stroke="#fff" strokeWidth="1.4" />
-        <path d="M3 8h14M8 8v9" stroke="#fff" strokeWidth="1.4" />
-      </svg>
-    ),
-  },
-  {
-    key: 'annual',
-    category: 'Periodic Reporting',
-    title: 'Annual Report',
-    description:
-      'Orchestrate the full-year report end-to-end — set up a cycle, assign departments, collect submissions, and assemble the final integrated document.',
-    features: ['Reporting cycles', 'Department workflow', 'Section assembly'],
-    cta: 'Open Annual',
-    accent: '#7C3AED',
-    headerGradient: 'linear-gradient(135deg,#4C1D95,#7C3AED)',
-    onOpen: (navigate) => navigate('/annual-report'),
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-        <path d="M5 2.5h7l3 3V17a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 5 17V3a.5.5 0 0 1 .5-.5z" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
-        <path d="M12 2.5v3h3M7.5 10h5M7.5 13h3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-];
-
-function Check({ color }: { color: string }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
-      <circle cx="7" cy="7" r="6.2" fill={color} opacity="0.12" />
-      <path d="M4.3 7.2l1.9 1.9L9.8 5.2" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+// reports AND no uploaded documents. Guides the user to start their first report
+// (ESG / Quarterly / Annual). Once documents are uploaded the personal
+// DashboardWorkspace takes over.
 
 export function DashboardWelcome({ company }: { company: string }) {
-  const navigate = useNavigate();
-
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '8px 0 24px' }}>
       {/* Intro */}
@@ -145,110 +66,8 @@ export function DashboardWelcome({ company }: { company: string }) {
       </div>
 
       {/* Report cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 16 }}>
-        {CARDS.map((c) => (
-          <div
-            key={c.key}
-            className="card"
-            style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          >
-            {/* Coloured header — icon + title sit on the same row */}
-            <div
-              style={{
-                background: c.headerGradient,
-                padding: '16px 18px',
-                position: 'relative',
-                overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 13,
-              }}
-            >
-              {/* subtle decorative glow */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: -28,
-                  right: -28,
-                  width: 96,
-                  height: 96,
-                  borderRadius: '50%',
-                  background: 'rgba(255,255,255,.09)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 11,
-                  background: 'rgba(255,255,255,.18)',
-                  border: '1px solid rgba(255,255,255,.22)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                {c.icon}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    letterSpacing: '.6px',
-                    textTransform: 'uppercase',
-                    color: 'rgba(255,255,255,.72)',
-                    marginBottom: 3,
-                  }}
-                >
-                  {c.category}
-                </div>
-                <div style={{ fontSize: 15.5, fontWeight: 800, color: '#fff', lineHeight: 1.15, letterSpacing: '-.2px' }}>
-                  {c.title}
-                </div>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-              <p style={{ fontSize: 11.5, color: '#5A6080', lineHeight: 1.6, marginBottom: 14 }}>{c.description}</p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {c.features.map((f) => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#3A3F5C' }}>
-                    <Check color={c.accent} />
-                    {f}
-                  </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => c.onOpen(navigate)}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: 10,
-                  border: 'none',
-                  background: c.accent,
-                  color: '#fff',
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  marginTop: 'auto',
-                }}
-              >
-                {c.cta} →
-              </button>
-            </div>
-          </div>
-        ))}
+      <div style={{ marginBottom: 16 }}>
+        <ReportStartCards />
       </div>
 
       {/* How it works */}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Spinner } from '@/components/shared/Spinner';
 import { admin, adminConsole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -124,13 +125,13 @@ function InviteModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  // A department only applies to `department_user`. Clear the selection when the
-  // role moves away so we never send a stale id.
+  // A department applies to `department_user` and `hod`. Clear the selection when
+  // the role moves away so we never send a stale id.
   useEffect(() => {
-    if (role !== 'department_user') setDepartmentId(null);
+    if (role !== 'department_user' && role !== 'hod') setDepartmentId(null);
   }, [role]);
 
-  const needsDepartment = role === 'department_user';
+  const needsDepartment = role === 'department_user' || role === 'hod';
   const canSubmit =
     fullName.trim() !== '' &&
     email.trim() !== '' &&
@@ -142,6 +143,17 @@ function InviteModal({
     if (!fullName.trim()) return setErr('Full name is required');
     if (!/.+@.+\..+/.test(email)) return setErr('A valid email is required');
     if (needsDepartment && !departmentId) return setErr('Please select a department');
+    if (role === 'hod' && departmentId) {
+      const dept = departments.find((d) => d.id === departmentId);
+      if (dept?.has_hod) {
+        const ok = window.confirm(
+          `${dept.department_name} already has a Head of Department` +
+            (dept.hod_name ? ` (${dept.hod_name})` : '') +
+            `. Creating this user will replace them as the HOD. Continue?`,
+        );
+        if (!ok) return;
+      }
+    }
     setBusy(true);
     try {
       const payload: InviteUserPayload = {
@@ -222,8 +234,7 @@ function InviteModal({
             </select>
           </div>
 
-          {/* Department — only for department_user. Required: a reviewer must
-              belong to a department. */}
+          {/* Department — required for department_user and hod. */}
           {needsDepartment && (
             <div className="fl">
               <label className="fl-label">Department</label>
@@ -254,6 +265,17 @@ function InviteModal({
                   ))}
                 </select>
               )}
+              {role === 'hod' &&
+                departmentId &&
+                departments.find((d) => d.id === departmentId)?.has_hod && (
+                  <div style={{ marginTop: 6, fontSize: 10.5, color: '#B45309', fontWeight: 600 }}>
+                    ⚠ This department already has an HOD
+                    {departments.find((d) => d.id === departmentId)?.hod_name
+                      ? ` (${departments.find((d) => d.id === departmentId)?.hod_name})`
+                      : ''}
+                    . Creating this user replaces them.
+                  </div>
+                )}
             </div>
           )}
 
@@ -648,11 +670,7 @@ function UsersView(props: {
           <span style={{ fontSize: 11, color: '#9BA3C4' }}>Click a row to manage</span>
         </div>
         {loading ? (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="skel" style={{ height: 52, borderRadius: 10 }} />
-            ))}
-          </div>
+          <Spinner />
         ) : error ? (
           <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>
             {error}
@@ -799,10 +817,10 @@ function UsersView(props: {
                               )}
                             </div>
 
-                            {/* Change department — only for department_user. They
+                            {/* Change department — for department_user and hod. They
                                 must always belong to a department, so there's no
                                 "none" option. */}
-                            {u.role === 'department_user' && (
+                            {(u.role === 'department_user' || u.role === 'hod') && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
                                   Change department
@@ -945,10 +963,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
 
   if (loading) {
     return (
-      <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {Array.from({ length: 9 }).map((_, i) => (
-          <div key={i} className="skel" style={{ height: 34, borderRadius: 8 }} />
-        ))}
+      <div className="card">
+        <Spinner />
       </div>
     );
   }

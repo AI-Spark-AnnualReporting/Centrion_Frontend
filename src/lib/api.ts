@@ -37,6 +37,26 @@ import type {
   PreviewSentenceUpdateResponse,
   ChatHistoryResponse,
   ChatStreamEvent,
+  QuarterlyContextPatch,
+  QuarterlyContextSaveResponse,
+  OutlineResponse,
+  OutlineSavePayload,
+  OutlineLockResponse,
+  ProducedSection,
+  ProducedSectionResponse,
+  ProduceAllHandle,
+  CompanyType,
+  Voice,
+  ReportTone,
+  DetectCompanyTypeResponse,
+  CoverTemplatesResponse,
+  ColorPalettesResponse,
+  CoverSelectionPayload,
+  CoverSelectionResponse,
+  AssembledReportResponse,
+  SaveSectionContentPayload,
+  SaveSectionContentResponse,
+  SectionExtractResponse,
 } from "@/types/quarterly";
 import type {
   CreateMeetingBody,
@@ -65,6 +85,7 @@ import type {
   CycleSection,
   ResolveSectionsResponse,
   SARUser,
+  SessionStatus,
 } from "@/types/cycles";
 
 const API_BASE_URL = (
@@ -325,6 +346,11 @@ export interface GenerateQuarterlyBody {
   quarter: string; // "Q1".."Q4"
   areas?: string[]; // snake_case slugs; omit/empty when none selected
   content_language?: "english" | "arabic"; // report language; defaults to english
+  // Confirm-context answers — sent in the same creation call so the report is
+  // created already configured (no separate PATCH /context at creation).
+  company_type?: CompanyType;
+  voices?: Voice[];
+  report_tone?: ReportTone;
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -339,6 +365,19 @@ export interface QuarterlyReportArea {
 
 export interface QuarterlyReportAreasResponse {
   areas: QuarterlyReportArea[];
+}
+
+// One single-select questionnaire item on the Generate Quarterly Report screen.
+// The API is the source of truth: `id` is the answer key, `options` are the
+// (up to 4) mutually-exclusive choices. Render dynamically — never hardcode.
+export interface QuarterlyQuestion {
+  id: string;
+  text: string;
+  options: string[];
+}
+
+export interface QuarterlyQuestionsResponse {
+  questions: QuarterlyQuestion[];
 }
 
 // Loose aliases for values sourced from API lookups.
@@ -375,7 +414,6 @@ export interface LoginParams {
 }
 
 export interface ChangePasswordParams {
-  old_password: string;
   new_password: string;
 }
 
@@ -434,6 +472,22 @@ export interface CreateCompanyParams {
   jurisdiction?: Jurisdiction; // default "KSA"
 }
 
+// Verdict from the inline Annual/ESG upload check (POST /companies/{id}/validate-report).
+export interface ReportValidation {
+  valid: boolean;
+  detected_type: string;
+  fiscal_year: string | null;
+  period: string | null;      // "FY-2025" | null
+  document_id: string | null; // banked doc the submit step will process
+  message: string;
+}
+
+export interface OnboardingIngestItem {
+  document_id: string;
+  doc_type: string;
+  period: string | null;
+}
+
 export const companies = {
   create: <T = unknown>(params: CreateCompanyParams) =>
     request<T>("/api/v1/companies/", { method: "POST", query: params }),
@@ -474,6 +528,50 @@ export const companies = {
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/questions`, {
       query: filters,
     }),
+
+  // Onboarding-time: kick off BACKGROUND tone/theme/outline extraction from the
+  // uploaded report documents. `docTypes` is parallel to `files` (annual / esg /
+  // financial / other) and drives the source rules. Returns { status }. Non-fatal.
+  extractReportStyle: (
+    companyId: string,
+    files: File[],
+    docTypes: string[] = [],
+  ): Promise<{ status: string }> => {
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    docTypes.forEach((t) => form.append("doc_types", t));
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/extract-report-style`,
+      form,
+    );
+  },
+
+  // Inline onboarding validation: LLM-check one Annual/ESG file, bank it, and return the
+  // verdict + detected fiscal year + a document_id the submit step will process.
+  validateReport: (
+    companyId: string,
+    file: File,
+    docType: string,
+  ): Promise<ReportValidation> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("doc_type", docType);
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/validate-report`,
+      form,
+    );
+  },
+
+  // Onboarding submit: kick off the heavy ingest (reports + chunks + embeddings + all
+  // dashboard data) for the already-validated docs. Non-blocking — returns { status }.
+  ingestOnboarding: (
+    companyId: string,
+    items: OnboardingIngestItem[],
+  ): Promise<{ status: string }> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/ingest-onboarding`, {
+      method: "POST",
+      body: { items },
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -489,8 +587,15 @@ export const documents = {
     return postPipeline("/api/v1/documents/upload", fd, { company_id: companyId });
   },
 
-  list: <T = unknown>(companyId: string) =>
-    request<T>(`/api/v1/documents/${encodeURIComponent(companyId)}`),
+  // All documents for the company — a flat, newest-first list that INCLUDES
+  // ad-hoc uploads not tied to any report (unlike `byReport`). Each carries a
+  // time-limited signed `download_url` (null when the file is missing from
+  // storage). `expiresInSeconds` controls link lifetime (60–86400, default 1h).
+  // Backs the dashboard's has-docs gate + the post-onboarding self-heal poll.
+  list: <T = unknown>(companyId: string, expiresInSeconds = 3600) =>
+    request<T>(`/api/v1/documents/${encodeURIComponent(companyId)}`, {
+      query: { expires_in: expiresInSeconds },
+    }),
 
   get: <T = unknown>(companyId: string, documentId: string) =>
     request<T>(
@@ -502,6 +607,15 @@ export const documents = {
   byReport: <T = unknown>(companyId: string, expiresInSeconds = 3600) =>
     request<T>(
       `/api/v1/documents/${encodeURIComponent(companyId)}/by-report`,
+      { query: { expires_in: expiresInSeconds } },
+    ),
+
+  // Company Document Bank — documents grouped by the report they belong to,
+  // newest report first; report_id=null is the trailing "Unassigned" group.
+  // Each document has a time-limited signed download URL (null when missing).
+  companyDocumentBank: <T = unknown>(companyId: string, expiresInSeconds = 3600) =>
+    request<T>(
+      `/api/v1/documents/${encodeURIComponent(companyId)}/company-document-bank`,
       { query: { expires_in: expiresInSeconds } },
     ),
 };
@@ -720,6 +834,18 @@ export interface EsgEvidenceResponse {
   total?: number;
 }
 
+// `GET /reports/{company_id}/quarterly/{report_id}/figures` mirrors the evidence
+// envelope. Rows reuse the EsgEvidenceItem shape; they may arrive bare or inside
+// a `raw_evidence` wrapper, so callers unwrap defensively.
+export interface QuarterlyFigureRow extends Partial<EsgEvidenceItem> {
+  raw_evidence?: EsgEvidenceItem | null;
+}
+
+export interface QuarterlyFiguresResponse {
+  figures: QuarterlyFigureRow[];
+  total?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Compliance
 // ---------------------------------------------------------------------------
@@ -817,6 +943,13 @@ export const reports = {
       `/api/v1/reports/quarterly/report-areas`,
     ),
 
+  // Source of truth for the on-form questionnaire (single-select). Company-
+  // scoped so the backend can tailor questions to the company's context.
+  getQuarterlyQuestions: (companyId: string) =>
+    request<QuarterlyQuestionsResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/questions`,
+    ),
+
   // Async: see generate(). Stamps report_type='quarterly' server-side so the
   // worker routes to the financial parser instead of the ESG harvester.
   generateQuarterly: (
@@ -831,6 +964,12 @@ export const reports = {
       body.areas.forEach((v) => fd.append("areas", v));
     }
     if (body.content_language) fd.append("content_language", body.content_language);
+    // Confirm-context answers — configure the report at creation time.
+    if (body.company_type) fd.append("company_type", body.company_type);
+    if (body.voices && body.voices.length > 0) {
+      body.voices.forEach((v) => fd.append("voices", v));
+    }
+    if (body.report_tone) fd.append("report_tone", body.report_tone);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
@@ -882,6 +1021,14 @@ export const reports = {
 // Quarterly reports — coverage map and figure driver endpoints.
 // ---------------------------------------------------------------------------
 
+// The producer endpoints return the section either at the top level or wrapped
+// as { section }. Normalise to the bare ProducedSection. The response omits
+// feeder_status/title/display_order — callers merge onto the outline seed, whose
+// spread preserves those fields.
+function unwrapProducedSection(r: ProducedSectionResponse): ProducedSection {
+  return (r as { section?: ProducedSection }).section ?? (r as ProducedSection);
+}
+
 export const quarterlyReports = {
   getCoverage: (companyId: string, reportId: string) =>
     request<QuarterlyCoverageResponse>(
@@ -892,6 +1039,152 @@ export const quarterlyReports = {
     request<GapsResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/gaps`,
     ),
+
+  // ── Outline (step 6) ──
+  // The report's section catalogue. saveOutline persists include+order (PUT);
+  // lockOutline freezes it (POST). Backend returns 409 on edits after lock.
+  getOutline: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
+      { signal },
+    ),
+
+  saveOutline: (
+    companyId: string,
+    reportId: string,
+    body: OutlineSavePayload,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
+      { method: "PUT", body },
+    ),
+
+  lockOutline: (companyId: string, reportId: string) =>
+    request<OutlineLockResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline/lock`,
+      { method: "POST" },
+    ),
+
+  // ── Produced sections (step 7 — Part 5 Preview) ──
+  // The section-by-section producer. getSection reads one section's status +
+  // content; produceSection composes it (optionally with supplied user_input for
+  // needs_input sections); refineSection rewrites AI prose from an instruction;
+  // produceAll kicks the batch async job (202 → poll via usePipelinePoll).
+  getSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    signal?: AbortSignal,
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}`,
+      { signal },
+    ).then(unwrapProducedSection),
+
+  produceSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body?: { user_input?: string },
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/produce`,
+      { method: "POST", body: body ?? {} },
+    ).then(unwrapProducedSection),
+
+  refineSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    instruction: string,
+  ): Promise<ProducedSection> =>
+    request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then(unwrapProducedSection),
+
+  // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
+  // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive
+  // the returned handle with usePipelinePoll and refresh getSection per tick.
+  produceAll: (companyId: string, reportId: string) =>
+    request<ProduceAllHandle>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: {} },
+    ),
+
+  // ── Confirm Context ──
+  // Company-scoped detection (form time — no reportId). Derives the company type
+  // from the company's sector so the setup form can pre-select the pill + show a
+  // DETECTED badge. A UI hint only; the chosen value is sent in the generate call.
+  detectCompanyType: (companyId: string) =>
+    request<DetectCompanyTypeResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/detect-company-type`,
+    ),
+
+  // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit
+  // screen. NOT used during creation: at creation the confirm-context answers
+  // ride in the single generate call (see GenerateQuarterlyBody).
+  saveContext: (
+    companyId: string,
+    reportId: string,
+    body: QuarterlyContextPatch,
+  ) =>
+    request<QuarterlyContextSaveResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/context`,
+      { method: "PATCH", body },
+    ),
+
+  // ── Cover template picker (Part 6) ──
+  // Cover-page designs + the current selection (so the preview can render the
+  // saved cover/colors on load). reportId is an optional query scope.
+  getCoverTemplates: (companyId: string, reportId?: string) =>
+    request<CoverTemplatesResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/cover-templates`,
+      { query: reportId ? { report_id: reportId } : undefined },
+    ),
+
+  // Preset brand palettes (primary + secondary swatch pairs).
+  getColorPalettes: (companyId: string) =>
+    request<ColorPalettesResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/color-palettes`,
+    ),
+
+  // Persist the chosen cover design + brand colors; re-renders the cover +
+  // report accents. Colors apply to accents/headings only (body stays dark).
+  selectCoverTemplate: (
+    companyId: string,
+    reportId: string,
+    body: CoverSelectionPayload,
+  ) =>
+    request<CoverSelectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/cover-template`,
+      { method: "PATCH", body },
+    ),
+
+  // Raw financial_figures rows for a quarterly report. Same envelope/row shape
+  // as the ESG evidence endpoint, so the KPI Normalizer can render both with
+  // one table. statement_type is the pillar analog (income_statement /
+  // balance_sheet); document_id / fields mirror evidence. Omit any to get all.
+  getFigures: <T = QuarterlyFiguresResponse>(
+    companyId: string,
+    reportId: string,
+    opts?: {
+      statement_type?: string;
+      document_id?: string;
+      fields?: string | string[];
+      signal?: AbortSignal;
+    },
+  ) => {
+    const { statement_type, document_id, fields, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (statement_type != null) query.statement_type = statement_type;
+    if (document_id != null) query.document_id = document_id;
+    if (fields != null) query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    return request<T>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figures`,
+      { query, signal },
+    );
+  },
 
   addDriver: (
     companyId: string,
@@ -921,6 +1214,59 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/preview`,
       { signal },
     ),
+
+  // ── Assembled report (Part 7) ──
+  // The full report as one document: cover + produced sections in display_order
+  // (needs_input/empty excluded server-side).
+  getAssembled: (companyId: string, reportId: string, signal?: AbortSignal) =>
+    request<AssembledReportResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/assemble`,
+      { signal },
+    ),
+
+  // Inline-edit a section's content (prose text, or JSON-stringified table content).
+  saveSectionContent: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body: SaveSectionContentPayload,
+  ) =>
+    request<SaveSectionContentResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/content`,
+      { method: "PATCH", body },
+    ),
+
+  // needs_input document: upload a file for a Template/AI-written section. The
+  // backend extracts PLAIN TEXT (pdfplumber/python-docx/decode — NOT financial
+  // extraction) and runs it through produce as the user_input (verbatim for
+  // Template, an LLM steer for AI-written). Returns the produced section. 422 for
+  // Extraction/Hybrid sections (they don't take a text steer).
+  uploadSectionDocument: (companyId: string, reportId: string, code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    ).then(unwrapProducedSection);
+  },
+
+  // needs_input / no-data document: EXTRACT-ONLY. The backend parses the file to
+  // plain text (pdfplumber/python-docx/decode) and returns it WITHOUT producing or
+  // saving the section, so the extracted text can be shown in the input field for
+  // the user to review/edit before saving it as the section content (via produce).
+  extractSectionDocument: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    file: File,
+  ): Promise<SectionExtractResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<SectionExtractResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/extract`,
+      { method: "POST", form: fd },
+    );
+  },
 
   // ── Export (step 7) ──
   // Download the rendered report as a pdf or docx file. Auth-required and returns
@@ -1325,11 +1671,50 @@ function unwrap<T>(raw: unknown, key: string): T {
   return raw as T;
 }
 
+// Raw department row as the SAR backend actually returns it. The `*_percentage`
+// / `status` / `user_*` keys are the backend's names; the optional frontend-name
+// fields let `overview()` normalise either shape (see below).
+interface RawCycleDepartment {
+  department_id: string;
+  department_name: string;
+  department_code: string;
+  user_id?: string | null;
+  user_name?: string;
+  user_email?: string;
+  status?: SessionStatus;
+  progress_percentage?: number;
+  submitted_at?: string | null;
+  // Frontend-shaped names, in case the backend is ever updated to emit them:
+  assigned_user_id?: string | null;
+  assigned_user_name?: string;
+  assigned_user_email?: string;
+  session_status?: SessionStatus;
+  progress?: number;
+}
+
+interface RawCycleOverview extends Omit<CycleOverview, "departments"> {
+  departments?: RawCycleDepartment[];
+}
+
+// Raw cycle as the list endpoint returns it — same as `Cycle` plus the backend's
+// `pm_name` (the page reads `project_manager_name`).
+interface RawCycle extends Cycle {
+  pm_name?: string;
+}
+
 export const sarCycles = {
   list: async (): Promise<Cycle[]> => {
     const raw = await sarRequest<unknown>("/api/v1/admin/cycles");
-    const list = unwrap<Cycle[]>(raw, "cycles");
-    return Array.isArray(list) ? list : [];
+    const list = unwrap<RawCycle[]>(raw, "cycles");
+    if (!Array.isArray(list)) return [];
+    // The SAR backend names the manager `pm_name`, but the list page reads
+    // `project_manager_name`. Map it so the Project Manager column renders the
+    // name instead of —. (The list endpoint returns no per-cycle progress, so
+    // progress stays 0% until the backend surfaces it.)
+    return list.map((c) => ({
+      ...c,
+      project_manager_name: c.project_manager_name ?? c.pm_name,
+    }));
   },
 
   get: async (id: string): Promise<Cycle> => {
@@ -1358,10 +1743,31 @@ export const sarCycles = {
     return unwrap<Cycle>(raw, "cycle");
   },
 
-  overview: (id: string): Promise<CycleOverview> =>
-    sarRequest<CycleOverview>(
+  // The SAR backend returns department rows keyed as `progress_percentage`,
+  // `status`, `user_name`/`user_email`/`user_id`, but the page + CycleOverview
+  // type use `progress`, `session_status`, `assigned_user_*`. Map them here so
+  // the Department Sessions table shows real progress/status/assignee instead of
+  // 0% / Not Started / —. Fallbacks keep it working if the backend ever switches
+  // to the frontend names.
+  overview: async (id: string): Promise<CycleOverview> => {
+    const raw = await sarRequest<RawCycleOverview>(
       `/api/v1/admin/cycles/${encodeURIComponent(id)}/overview`,
-    ),
+    );
+    return {
+      ...raw,
+      departments: (raw.departments ?? []).map((d) => ({
+        department_id: d.department_id,
+        department_name: d.department_name,
+        department_code: d.department_code,
+        assigned_user_id: d.assigned_user_id ?? d.user_id ?? null,
+        assigned_user_name: d.assigned_user_name ?? d.user_name,
+        assigned_user_email: d.assigned_user_email ?? d.user_email,
+        session_status: (d.session_status ?? d.status) as SessionStatus,
+        progress: d.progress ?? d.progress_percentage ?? 0,
+        submitted_at: d.submitted_at ?? null,
+      })),
+    };
+  },
 
   sections: async (id: string): Promise<CycleSection[]> => {
     const raw = await sarRequest<unknown>(
@@ -1454,6 +1860,37 @@ export const lookups = {
     });
     return extractIndicatorList(raw);
   },
+
+  // Financial metrics catalogue — mirrors framework-indicators. Auth-only (not
+  // company-scoped), ordered by sort_order. Used by the KPI Normalizer's
+  // Quarterly tab.
+  financialMetrics: async (opts?: {
+    statement?: string | string[];
+    statement_type?: string | string[];
+    fields?: string | string[];
+    is_active?: boolean;
+    signal?: AbortSignal;
+  }): Promise<FinancialMetric[]> => {
+    const { statement, statement_type, fields, is_active, signal } = opts ?? {};
+    const query: Record<string, unknown> = {};
+    if (statement != null) {
+      query.statement = Array.isArray(statement) ? statement.join(",") : statement;
+    }
+    if (statement_type != null) {
+      query.statement_type = Array.isArray(statement_type)
+        ? statement_type.join(",")
+        : statement_type;
+    }
+    if (fields != null) {
+      query.fields = Array.isArray(fields) ? fields.join(",") : fields;
+    }
+    if (is_active != null) query.is_active = is_active;
+    const raw = await request<unknown>("/api/v1/lookups/financial-metrics", {
+      query,
+      signal,
+    });
+    return extractFinancialMetricList(raw);
+  },
 };
 
 // The endpoint may return the array under a wrapper key (`framework_indicators`,
@@ -1483,6 +1920,51 @@ function extractIndicatorList(raw: unknown): FrameworkIndicator[] {
     }
   }
   return [];
+}
+
+// The financial-metrics endpoint may wrap the array under `financial_metrics`
+// (or `data` / `items` / `results`) or return a bare array. Normalise to
+// FinancialMetric[] so callers don't have to second-guess the shape.
+function extractFinancialMetricList(raw: unknown): FinancialMetric[] {
+  if (Array.isArray(raw)) return raw as FinancialMetric[];
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    for (const key of [
+      "financial_metrics",
+      "financialMetrics",
+      "metrics",
+      "data",
+      "items",
+      "results",
+    ]) {
+      const v = obj[key];
+      if (Array.isArray(v)) return v as FinancialMetric[];
+      if (v && typeof v === "object") {
+        const inner = v as Record<string, unknown>;
+        for (const k2 of ["financial_metrics", "metrics", "items", "results"]) {
+          if (Array.isArray(inner[k2])) return inner[k2] as FinancialMetric[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+export interface FinancialMetric {
+  id?: string;
+  metric_key?: string | null;
+  code?: string | null;
+  label?: string | null;
+  statement?: string | null;
+  statement_type?: string | null;
+  unit_type?: string | null;
+  sort_order?: number | null;
+  is_active?: boolean;
+}
+
+export interface FinancialMetricsResponse {
+  financial_metrics: FinancialMetric[];
+  total: number;
 }
 
 export interface FrameworkIndicator {
@@ -1686,15 +2168,60 @@ export async function getSectors(): Promise<Sector[]> {
   return data.sectors;
 }
 
+// Onboarding "Company Intel": the backend LLM-extracts the Review-Details fields
+// from a profile doc and/or a website URL. `sector_id` is the AI's constrained
+// pick from the sectors lookup (null if unsure). Nulls for anything not found.
+export interface ExtractedCompanyProfile {
+  description: string | null;
+  sector_id: string | null;
+  sector_name: string | null;
+  employee_count: number | null;
+  founded_year: number | null;
+  headquarter_city: string | null;
+  fiscal_year_end_month: number | null;
+  reporting_currency: string | null;
+  primary_language: string | null;
+  listed_exchange: string | null;
+  website_url: string | null;
+}
+
+// Single combined extraction — pass a document, a URL, or both; when both are
+// given the backend merges their text and makes ONE LLM call.
+export async function extractCompanyProfile(
+  file: File | null,
+  url?: string,
+): Promise<ExtractedCompanyProfile> {
+  const form = new FormData();
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
+  const { fields } = await postForm<{ fields: ExtractedCompanyProfile }>(
+    "/api/v1/auth/onboarding/extract-profile",
+    form,
+  );
+  return fields;
+}
+
+// Signup-time: kick off BACKGROUND profile extraction from a doc and/or URL.
+// Unauthenticated (the company is created before login). No-ops if neither given.
+export async function extractProfileAtSignup(
+  companyId: string,
+  file: File | null,
+  url?: string,
+): Promise<void> {
+  if (!file && !(url && url.trim())) return;
+  const form = new FormData();
+  if (file) form.append("file", file);
+  if (url && url.trim()) form.append("url", url.trim());
+  await postForm(`/api/v1/companies/${encodeURIComponent(companyId)}/extract-profile`, form);
+}
+
 // Spec-named createCompany() — raw fetch per .claude/specs/2step_register.md.
 // Typed companies.create() namespace remains for future callers.
 export async function createCompany(
   params: CreateCompanyRequest,
 ): Promise<CreateCompanyResponse> {
-  const query = new URLSearchParams({
-    name: params.name,
-    sector_id: params.sector_id,
-  });
+  const query = new URLSearchParams({ name: params.name });
+  if (params.sector_id) query.append("sector_id", params.sector_id);
   if (params.jurisdiction) query.append("jurisdiction", params.jurisdiction);
 
   let res: Response;
