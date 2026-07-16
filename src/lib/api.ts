@@ -1367,20 +1367,34 @@ function earnStr(v: unknown): string | null {
 function earnRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
 }
-function normalizeEarningsSource(raw: unknown): SelectableSource | null {
+// One shape, one normalizer — GET /earnings/sources and the figures response's
+// `sources` header both return this same report-backed object (report_id,
+// label, report_type, period, updated_at, coverage). Field names are read
+// defensively for naming robustness only; this never falls back to
+// reconstructing a source from figure rows.
+export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | null {
   const o = earnRecord(raw);
-  const id = earnStr(o.id) ?? earnStr(o.document_id) ?? earnStr(o.source_id);
-  if (!id) return null;
-  const title =
-    earnStr(o.title) ?? earnStr(o.name) ?? earnStr(o.filename) ?? earnStr(o.label) ?? "Untitled source";
+  const reportId = earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(o.source_id);
+  if (!reportId) return null;
+  const reportType = earnStr(o.report_type) ?? earnStr(o.type);
   const period = earnStr(o.period) ?? earnStr(o.period_label);
+  // Never a filename. If the backend omits a label, show report type + period
+  // instead of falling back to a raw id.
+  const composedLabel = [reportType, period].filter(Boolean).join(" ") || null;
+  const label =
+    earnStr(o.label) ??
+    earnStr(o.title) ??
+    earnStr(o.name) ??
+    composedLabel ??
+    "Untitled report";
   const covRaw = (earnStr(o.coverage) ?? earnStr(o.coverage_status) ?? earnStr(o.status) ?? "").toLowerCase();
   const coverage: SourceCoverage = covRaw.includes("full")
     ? "full"
     : covRaw.includes("partial")
       ? "partial"
       : covRaw || "partial";
-  return { id, title, period, coverage };
+  const updatedAt = earnStr(o.updated_at) ?? earnStr(o.updatedAt);
+  return { report_id: reportId, label, report_type: reportType, period, updated_at: updatedAt, coverage };
 }
 function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
   const rec = earnRecord(raw);
@@ -1392,7 +1406,7 @@ function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
         ? (rec.items as unknown[])
         : [];
   const sources = arr
-    .map(normalizeEarningsSource)
+    .map(normalizeEarningsSourceItem)
     .filter((s): s is SelectableSource => s !== null);
   return { sources };
 }
@@ -1425,6 +1439,8 @@ function normalizeEarningsFigure(raw: unknown): EarningsFigure | null {
     period: earnStr(o.period) ?? earnStr(o.period_label),
     source_document_id:
       earnStr(o.source_document_id) ?? earnStr(o.document_id) ?? earnStr(src.document_id),
+    source_report_id:
+      earnStr(o.source_report_id) ?? earnStr(o.report_id) ?? earnStr(src.report_id),
     source_label:
       earnStr(o.source_label) ?? earnStr(o.source_name) ?? earnStr(src.label) ?? earnStr(src.title),
     source_ref: earnStr(o.source_ref) ?? earnStr(o.reference) ?? earnStr(src.ref) ?? earnStr(src.page),
@@ -1433,23 +1449,6 @@ function normalizeEarningsFigure(raw: unknown): EarningsFigure | null {
     derivation: earnStr(o.derivation) ?? earnStr(o.formula),
     flag: earnStr(o.flag) ?? earnStr(o.status),
     edited: earnBool(o.edited) || earnBool(o.is_edited) || earnBool(o.manual),
-  };
-}
-function normalizeEarningsFigureSource(raw: unknown): EarningsFigureSource | null {
-  const o = earnRecord(raw);
-  const id = earnStr(o.id) ?? earnStr(o.document_id) ?? earnStr(o.source_document_id);
-  if (!id) return null;
-  const cov = (earnStr(o.coverage) ?? earnStr(o.coverage_status) ?? earnStr(o.status) ?? "").toLowerCase();
-  const coverage: SourceCoverage | null = cov.includes("full")
-    ? "full"
-    : cov.includes("partial")
-      ? "partial"
-      : cov || null;
-  return {
-    id,
-    title: earnStr(o.title) ?? earnStr(o.name) ?? earnStr(o.filename) ?? earnStr(o.label) ?? "Source",
-    coverage,
-    preview_url: earnStr(o.preview_url) ?? earnStr(o.download_url) ?? earnStr(o.url),
   };
 }
 function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
@@ -1470,7 +1469,7 @@ function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
       ? (rec.source_documents as unknown[])
       : [];
   const sources = srcArr
-    .map(normalizeEarningsFigureSource)
+    .map(normalizeEarningsSourceItem)
     .filter((s): s is EarningsFigureSource => s !== null);
   return { figures, sources };
 }

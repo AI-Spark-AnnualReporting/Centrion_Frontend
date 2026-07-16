@@ -14,16 +14,27 @@ export type EarningsVariant = 'annual' | 'quarterly';
 export const EARNINGS_QUARTERS = [1, 2, 3, 4] as const;
 export type EarningsQuarter = (typeof EARNINGS_QUARTERS)[number];
 
-// One row in the "Use existing reports" list. The /sources response is untyped in
-// OpenAPI, so these fields are read defensively at the api layer — confirm the exact
-// names against a live response. `coverage` drives the Full/Partial badge.
+// One row in the "Use existing reports" list — sourced from REPORTS, not
+// documents. The identical shape is also what the figures response's `sources`
+// header returns (GET .../figures), so this one type covers both; see
+// `EarningsFigureSource` alias below and normalizeEarningsSourceItem in
+// lib/api.ts (one normalizer for both endpoints — do not declare a second
+// type/normalizer for this concept, that's what let the two skew apart).
+// `coverage` drives the Full/Partial badge. Field names read defensively at
+// the api layer for naming robustness only — never to fabricate a source.
 export type SourceCoverage = 'full' | 'partial' | (string & {});
 export interface SelectableSource {
-  id: string; // a document id — feeds source_document_ids on create
-  title: string; // display label (filename / report title)
-  period: string | null; // e.g. "FY 2025" / "Q3 2025"
+  report_id: string; // feeds source_report_ids on create
+  label: string; // display label, e.g. "Shell — Quarterly Report Q4-2023". Never a filename.
+  report_type: string | null; // e.g. 'quarterly' | 'annual'
+  period: string | null; // e.g. "Q4-2023"
+  updated_at: string | null;
   coverage: SourceCoverage; // 'full' | 'partial'
 }
+
+// The selected source shown on the Extract screen's header — the identical
+// shape as SelectableSource (one concept, one type).
+export type EarningsFigureSource = SelectableSource;
 
 export interface SelectableSourcesResponse {
   sources: SelectableSource[];
@@ -37,7 +48,7 @@ export interface CreateEarningsReportPayload {
   fiscal_year: number;
   quarter?: number | null; // 1..4 for quarterly; null/omitted for annual
   tone: ReportTone; // backend default is formal_corporate; UI pre-selects investor_focused
-  source_document_ids: string[]; // required, ≥1
+  source_report_ids: string[]; // required, ≥1
 }
 
 // Create response is untyped (201) — read `report_id` defensively at the api layer.
@@ -67,6 +78,7 @@ export interface EarningsFigure {
   unit: string | null;
   period: string | null;
   source_document_id: string | null;
+  source_report_id: string | null; // the report this figure was extracted from
   source_label: string | null; // human label for the source column
   source_ref: string | null; // e.g. "p. 12" / section reference
   confidence: number | null; // 0–100; null once the value is a manual edit
@@ -74,16 +86,6 @@ export interface EarningsFigure {
   derivation: string | null; // the formula, when derived
   flag: FigureFlag | null; // backend flag when present
   edited: boolean; // client marker: value was manually PATCHed
-}
-
-// The selected source shown in the header — always taken verbatim from the
-// backend's own `sources`/`source_documents` field, never derived from figure
-// rows (derived figure rows carry a null source_document_id).
-export interface EarningsFigureSource {
-  id: string;
-  title: string;
-  coverage: SourceCoverage | null;
-  preview_url: string | null;
 }
 
 export interface EarningsFiguresResponse {

@@ -17,7 +17,7 @@ function coverageBadge(coverage: string): { cls: string; label: string } {
 // Block 4 — source selection. Default mode "Use existing reports" (multiselect
 // from GET /earnings/sources with Full/Partial badges). "Upload new" reuses the
 // shared uploader; uploaded docs are processed async and then appear here for
-// selection (the create endpoint consumes source_document_ids, not files).
+// selection (the create endpoint consumes source_report_ids, not files).
 export function SourcePicker({
   companyId,
   variant,
@@ -76,7 +76,7 @@ export function SourcePicker({
 
   // Drop any selected ids that are no longer in the list (period changed, etc.).
   useEffect(() => {
-    const present = new Set(sources.map((s) => s.id));
+    const present = new Set(sources.map((s) => s.report_id));
     const kept = selectedIds.filter((id) => present.has(id));
     if (kept.length !== selectedIds.length) onSelectedIdsChange(kept);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -152,15 +152,15 @@ export function SourcePicker({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {sources.map((s) => {
-              const checked = selectedIds.includes(s.id);
+              const checked = selectedIds.includes(s.report_id);
               const badge = coverageBadge(s.coverage);
               return (
                 <button
-                  key={s.id}
+                  key={s.report_id}
                   type="button"
                   role="checkbox"
                   aria-checked={checked}
-                  onClick={() => toggle(s.id)}
+                  onClick={() => toggle(s.report_id)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -205,7 +205,7 @@ export function SourcePicker({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {s.title}
+                      {s.label}
                     </div>
                     {s.period && <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{s.period}</div>}
                   </div>

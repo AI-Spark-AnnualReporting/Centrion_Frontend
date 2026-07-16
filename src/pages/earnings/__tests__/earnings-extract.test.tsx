@@ -46,6 +46,7 @@ const fig = (over: Record<string, unknown>) => ({
   unit: 'SAR M',
   period: 'Q3 2025',
   source_document_id: 'd1',
+  source_report_id: 'rep-d1',
   source_label: 'Q3 Release',
   source_ref: 'p. 3',
   confidence: 95,
@@ -53,6 +54,19 @@ const fig = (over: Record<string, unknown>) => ({
   derivation: null,
   flag: 'ok',
   edited: false,
+  ...over,
+});
+
+// The report-shaped source object — GET /earnings/sources and the figures
+// response's `sources` header return this same shape (report_id/label, not
+// document_id/filename).
+const source = (over: Record<string, unknown>) => ({
+  report_id: 'rep-d1',
+  label: 'Shell — Quarterly Report Q3-2025',
+  report_type: 'quarterly',
+  period: 'Q3-2025',
+  updated_at: '2026-01-01T00:00:00Z',
+  coverage: 'full',
   ...over,
 });
 
@@ -70,11 +84,12 @@ const FIGS = {
       is_derived: true,
       derivation: 'OCF - CapEx',
       source_document_id: null,
+      source_report_id: null,
       source_label: null,
       source_ref: null,
     }),
   ],
-  sources: [{ id: 'd1', title: 'Q3 Release.pdf', coverage: 'full', preview_url: null }],
+  sources: [source({})],
 };
 
 const renderPage = () =>
@@ -199,7 +214,7 @@ describe('EarningsExtractPage', () => {
         fig({ id: 'f-manual', label: 'Manual Metric', confidence: null, flag: 'ok', edited: true }),
         fig({ id: 'f-needs', label: 'Needs Input Metric', confidence: null, flag: 'needs_input' }),
       ],
-      sources: [{ id: 'd1', title: 'Q3 Release.pdf', coverage: 'full', preview_url: null }],
+      sources: [source({})],
     });
     renderPage();
     expect(await screen.findByText('Needs input')).toBeInTheDocument();
@@ -220,6 +235,7 @@ describe('EarningsExtractPage', () => {
           is_derived: true,
           derivation: 'X + Y',
           source_document_id: null,
+          source_report_id: null,
           source_label: null,
           source_ref: null,
         }),
@@ -229,19 +245,23 @@ describe('EarningsExtractPage', () => {
           is_derived: true,
           derivation: 'X - Y',
           source_document_id: null,
+          source_report_id: null,
           source_label: null,
           source_ref: null,
         }),
       ],
       sources: [
-        { id: 'd1', title: 'Q3 Release.pdf', coverage: 'full', preview_url: null },
-        { id: 'd2', title: 'Prior Guidance.pdf', coverage: 'partial', preview_url: null },
+        source({ report_id: 'rep-d1', label: 'Shell — Quarterly Report Q3-2025' }),
+        source({ report_id: 'rep-d2', label: 'Shell — Prior Guidance', report_type: 'quarterly', coverage: 'partial' }),
       ],
     });
     renderPage();
     expect(await screen.findByText('Derived A')).toBeInTheDocument();
     expect(screen.getByText('2 sources')).toBeInTheDocument();
     expect(screen.queryByText('0 sources')).not.toBeInTheDocument();
+    // SelectedSourcesHeader renders report labels, never a filename.
+    expect(screen.getByText('Shell — Quarterly Report Q3-2025')).toBeInTheDocument();
+    expect(screen.getByText('Shell — Prior Guidance')).toBeInTheDocument();
   });
 
   it('renders the empty-state message and no table when figures is empty', async () => {

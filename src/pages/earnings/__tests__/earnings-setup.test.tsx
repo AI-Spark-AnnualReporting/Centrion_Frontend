@@ -37,18 +37,25 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { company_id: 'co-1', company_name: 'Acme' } }),
 }));
 
-vi.mock('@/lib/api', () => ({
-  earnings: {
-    getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
-    createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
-  },
-  documents: { upload: (...a: unknown[]) => h.uploadDocs(...a) },
-  ApiError: h.MockApiError,
-}));
+vi.mock('@/lib/api', async () => {
+  // Spread the real module so normalizeEarningsSourceItem stays the actual
+  // implementation under test — only earnings/documents are mocked out.
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
+  return {
+    ...actual,
+    earnings: {
+      getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
+      createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
+    },
+    documents: { upload: (...a: unknown[]) => h.uploadDocs(...a) },
+    ApiError: h.MockApiError,
+  };
+});
 
 const { navigateMock, getSelectableSources, createEarningsReport, MockApiError } = h;
 
 import { formatPeriodLabel, canContinue } from '../helpers';
+import { normalizeEarningsSourceItem } from '@/lib/api';
 import EarningsSetupPage from '../EarningsSetupPage';
 import { ToneSelector } from '@/components/earnings/ToneSelector';
 import { DEFAULT_EARNINGS_TONE } from '@/components/earnings/tones';
@@ -64,8 +71,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   getSelectableSources.mockResolvedValue({
     sources: [
-      { id: 'doc-1', title: 'FY24 Annual Report.pdf', period: 'FY 2024', coverage: 'full' },
-      { id: 'doc-2', title: 'Q3 Release.pdf', period: 'Q3 2024', coverage: 'partial' },
+      {
+        report_id: 'rep-1',
+        label: 'Acme — FY24 Annual Report',
+        report_type: 'annual',
+        period: 'FY 2024',
+        updated_at: '2026-01-01T00:00:00Z',
+        coverage: 'full',
+      },
+      {
+        report_id: 'rep-2',
+        label: 'Acme — Q3 2024 Quarterly Report',
+        report_type: 'quarterly',
+        period: 'Q3 2024',
+        updated_at: '2026-01-01T00:00:00Z',
+        coverage: 'partial',
+      },
     ],
   });
   createEarningsReport.mockResolvedValue({ report_id: 'rep-99' });
@@ -103,6 +124,27 @@ describe('canContinue', () => {
   });
 });
 
+// ── Unit: sources normalizer — regression for the report/document skew ──────
+describe('normalizeEarningsSourceItem', () => {
+  it('parses the confirmed live payload (report_id/label, not document_id/filename)', () => {
+    const parsed = normalizeEarningsSourceItem({
+      report_id: 'c0c38900-348f-4752-b68f-af9246aa1b97',
+      label: 'Shell — Quarterly Report Q4-2023',
+      report_type: 'quarterly',
+      period: 'Q4-2023',
+      updated_at: '2026-07-16T09:32:07.098811+00:00',
+      coverage: 'full',
+    });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.report_id).toBe('c0c38900-348f-4752-b68f-af9246aa1b97');
+    expect(parsed?.label).toBe('Shell — Quarterly Report Q4-2023');
+  });
+
+  it('drops an item with no report_id (defensive, not fabricated)', () => {
+    expect(normalizeEarningsSourceItem({ label: 'Orphan', coverage: 'full' })).toBeNull();
+  });
+});
+
 // ── Component: ToneSelector default ─────────────────────────────────────────
 describe('ToneSelector', () => {
   it('renders Investor-focused as the pre-selected default', () => {
@@ -134,9 +176,54 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     await waitFor(() => expect(getSelectableSources).toHaveBeenCalledWith('co-1', 'FY-2025'));
-    expect(await screen.findByText('FY24 Annual Report.pdf')).toBeInTheDocument();
+    expect(await screen.findByText('Acme — FY24 Annual Report')).toBeInTheDocument();
     expect(screen.getByText('Full')).toBeInTheDocument();
     expect(screen.getByText('Partial')).toBeInTheDocument();
+  });
+
+  // Regression for the bug this spec fixes: the backend's confirmed live
+  // payload uses report_id/label, not document_id/filename. Before the fix
+  // this rendered the empty state against a response with a valid source.
+  it('renders the confirmed live report-shaped payload as one selectable row — not the empty state', async () => {
+    getSelectableSources.mockResolvedValueOnce({
+      sources: [
+        {
+          report_id: 'c0c38900-348f-4752-b68f-af9246aa1b97',
+          label: 'Shell — Quarterly Report Q4-2023',
+          report_type: 'quarterly',
+          period: 'Q4-2023',
+          updated_at: '2026-07-16T09:32:07.098811+00:00',
+          coverage: 'full',
+        },
+      ],
+      total: 1,
+    });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Quarterly Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2023' } });
+    fireEvent.change(screen.getByDisplayValue('Select quarter…'), { target: { value: '4' } });
+
+    expect(await screen.findByText('Shell — Quarterly Report Q4-2023')).toBeInTheDocument();
+    expect(screen.getByText('Full')).toBeInTheDocument();
+    expect(screen.queryByText(/No sources found/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Shell — Quarterly Report Q4-2023'));
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await waitFor(() =>
+      expect(createEarningsReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_report_ids: ['c0c38900-348f-4752-b68f-af9246aa1b97'],
+        }),
+      ),
+    );
+  });
+
+  it('a genuinely empty sources list shows the empty-state message', async () => {
+    getSelectableSources.mockResolvedValueOnce({ sources: [] });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    expect(await screen.findByText(/No sources found for this period/)).toBeInTheDocument();
   });
 
   it('Continue is disabled until type + period + tone + ≥1 source, then creates + navigates', async () => {
@@ -146,7 +233,7 @@ describe('EarningsSetupPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    const sourceRow = await screen.findByText('FY24 Annual Report.pdf');
+    const sourceRow = await screen.findByText('Acme — FY24 Annual Report');
     expect(continueBtn()).toBeDisabled();
 
     fireEvent.click(sourceRow);
@@ -161,7 +248,7 @@ describe('EarningsSetupPage', () => {
           fiscal_year: 2025,
           quarter: null,
           tone: 'investor_focused',
-          source_document_ids: ['doc-1'],
+          source_report_ids: ['rep-1'],
         }),
       ),
     );
@@ -175,7 +262,7 @@ describe('EarningsSetupPage', () => {
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    fireEvent.click(await screen.findByText('FY24 Annual Report.pdf'));
+    fireEvent.click(await screen.findByText('Acme — FY24 Annual Report'));
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 

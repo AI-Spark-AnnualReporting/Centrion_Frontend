@@ -38,7 +38,7 @@ export function SelectedSourcesHeader({ sources }: { sources: EarningsFigureSour
             const badge = coverageBadge(s.coverage);
             return (
               <div
-                key={s.id}
+                key={s.report_id}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -65,20 +65,9 @@ export function SelectedSourcesHeader({ sources }: { sources: EarningsFigureSour
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {s.title}
+                  {s.label}
                 </span>
                 {badge && <span className={badge.cls}>{badge.label}</span>}
-                {s.preview_url && (
-                  <a
-                    href={s.preview_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn bs bsm"
-                    style={{ textDecoration: 'none' }}
-                  >
-                    Preview
-                  </a>
-                )}
               </div>
             );
           })}

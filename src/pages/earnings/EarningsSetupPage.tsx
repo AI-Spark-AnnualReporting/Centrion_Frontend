@@ -95,7 +95,7 @@ export default function EarningsSetupPage() {
         fiscal_year: fiscalYear,
         quarter: variant === 'quarterly' ? quarter : null,
         tone,
-        source_document_ids: sourceIds,
+        source_report_ids: sourceIds,
       });
       navigate(`/earnings/${res.report_id}/extract`);
     } catch (err: unknown) {
