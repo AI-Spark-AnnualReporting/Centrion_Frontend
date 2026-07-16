@@ -201,6 +201,9 @@ export interface ProducedSection {
   feeder_status: FeederStatus;
   // Carried through so needs_input sections can show what they require.
   message?: string;
+  // False when re-producing yields nothing fresh (Template/External, or content
+  // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
+  regeneratable?: boolean;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.
@@ -412,6 +415,32 @@ export interface AssembledReportResponse {
   cover?: CoverSelectionPayload | null;
   brand?: BrandColors | null; // some backends put brand at top level
   sections: AssembledSection[];
+  // Approval/lock status — exact backend field name unconfirmed (no OpenAPI
+  // entry yet), so every likely shape is read defensively (see
+  // readApprovalStatus in AssembledReportPage.tsx). Once approved, the report
+  // is read-only and Export becomes available.
+  status?: string;
+  approved?: boolean;
+  is_approved?: boolean;
+  is_locked?: boolean;
+  locked?: boolean;
+  approved_at?: string | null;
+  approvedAt?: string | null;
+  locked_at?: string | null;
+}
+
+// POST .../quarterly/{reportId}/approve response — approve & lock the
+// assembled report. Shape unconfirmed; mirrors the same defensive fields as
+// AssembledReportResponse above.
+export interface ApproveReportResponse {
+  status?: string;
+  approved?: boolean;
+  is_approved?: boolean;
+  is_locked?: boolean;
+  locked?: boolean;
+  approved_at?: string | null;
+  approvedAt?: string | null;
+  locked_at?: string | null;
 }
 
 // PATCH .../sections/{code}/content — inline edits.

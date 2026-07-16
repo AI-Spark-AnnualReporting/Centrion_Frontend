@@ -54,6 +54,7 @@ import type {
   CoverSelectionPayload,
   CoverSelectionResponse,
   AssembledReportResponse,
+  ApproveReportResponse,
   SaveSectionContentPayload,
   SaveSectionContentResponse,
   SectionExtractResponse,
@@ -1222,6 +1223,18 @@ export const quarterlyReports = {
     request<AssembledReportResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/assemble`,
       { signal },
+    ),
+
+  // Approve & lock the assembled report — after this the report is read-only
+  // (no edits, regeneration, outline changes, or cover changes) and Export
+  // becomes available. No OpenAPI entry exists yet for this path; it mirrors
+  // every other quarterly action's `.../quarterly/{reportId}/...` convention
+  // rather than the generic (non-quarterly-scoped) reports.approve — confirm
+  // with backend and adjust if it turns out to be the latter.
+  approveReport: (companyId: string, reportId: string) =>
+    request<ApproveReportResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST" },
     ),
 
   // Inline-edit a section's content (prose text, or JSON-stringified table content).
