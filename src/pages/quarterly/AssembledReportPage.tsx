@@ -6,6 +6,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
+import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
@@ -52,6 +53,31 @@ function readCoverSelection(res: unknown): { key: string | null; brand: BrandCol
     asStr(pick(cover, 'template_key'));
   const brand = asBrand(pick(res, 'brand')) ?? asBrand(pick(cover, 'brand'));
   return { key, brand };
+}
+
+// The exact approval/lock field name isn't fixed either — read defensively
+// across the likely shapes until confirmed live.
+function readApprovalStatus(res: unknown): { approved: boolean; approvedAt: string | null } {
+  const status = asStr(pick(res, 'status'));
+  const approved =
+    status === 'approved' ||
+    pick(res, 'approved') === true ||
+    pick(res, 'is_approved') === true ||
+    pick(res, 'is_locked') === true ||
+    pick(res, 'locked') === true;
+  const approvedAt =
+    asStr(pick(res, 'approved_at')) ??
+    asStr(pick(res, 'approvedAt')) ??
+    asStr(pick(res, 'locked_at'));
+  return { approved: !!approved, approvedAt };
+}
+
+// "2026-04-26T07:47:38..." → "Apr 26, 2026" for the Approved & Locked badge.
+function formatApprovedDate(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 // The assemble endpoint returns produced sections only. Map to a ProducedSection
@@ -104,6 +130,13 @@ export default function AssembledReportPage() {
   const [savedCode, setSavedCode] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // approve & lock
+  const [approved, setApproved] = useState(false);
+  const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
   const companyName = coverMeta.company ?? user?.company_name ?? null;
 
   // ── load: assembled report + picker catalogue ──
@@ -125,6 +158,9 @@ export default function AssembledReportPage() {
         const { key, brand: coverBrand } = readCoverSelection(res);
         if (coverBrand) setBrand(coverBrand);
         if (key) setCoverTemplateKey(key);
+        const { approved: isApproved, approvedAt: at } = readApprovalStatus(res);
+        setApproved(isApproved);
+        setApprovedAt(at);
         setCoverMeta({
           company: res.header?.company_name ?? null,
           period: res.header?.period_label ?? null,
@@ -209,6 +245,26 @@ export default function AssembledReportPage() {
     [companyId, reportId],
   );
 
+  const handleApprove = useCallback(async () => {
+    if (!companyId || !reportId) return;
+    setApproving(true);
+    setApproveError(null);
+    try {
+      const res = await quarterlyReports.approveReport(companyId, reportId);
+      const { approvedAt: at } = readApprovalStatus(res);
+      setApproved(true);
+      setApprovedAt(at ?? new Date().toISOString());
+      setApproveDialogOpen(false);
+      // Editing is entirely gated behind the pencil button below — clearing
+      // any in-progress edit here ensures the read-only view takes over cleanly.
+      setEditingCode(null);
+    } catch (err: unknown) {
+      setApproveError(err instanceof Error ? err.message : 'Could not approve the report.');
+    } finally {
+      setApproving(false);
+    }
+  }, [companyId, reportId]);
+
   const bodySections = sections.filter((s) => !isCoverSection(s));
 
   return (
@@ -219,17 +275,40 @@ export default function AssembledReportPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 28px 14px', flexShrink: 0, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: 0, lineHeight: 1.2 }}>Assembled report</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: MUTED }}>Cover first, then every section. Click the pencil to edit any section; changes save automatically.</p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: MUTED }}>
+            {approved
+              ? 'This report is approved and locked — read-only.'
+              : 'Cover first, then every section. Click the pencil to edit any section; changes save automatically.'}
+          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 16px', borderRadius: 8, color: DARK, background: '#fff', border: '1px solid #D1D5DB', cursor: 'pointer' }}
-          >
-            Choose cover design & colors
-          </button>
-          <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
+          {approved ? (
+            <>
+              <span className="badge b-gn" style={{ fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Approved &amp; Locked{approvedAt ? ` · ${formatApprovedDate(approvedAt)}` : ''}
+              </span>
+              <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 16px', borderRadius: 8, color: DARK, background: '#fff', border: '1px solid #D1D5DB', cursor: 'pointer' }}
+              >
+                Choose cover design & colors
+              </button>
+              <button
+                type="button"
+                className="btn bp"
+                onClick={() => setApproveDialogOpen(true)}
+                style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 18px' }}
+              >
+                Approve & Lock
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -280,7 +359,7 @@ export default function AssembledReportPage() {
                           Saved
                         </span>
                       )}
-                      {!isEditing && (
+                      {!approved && !isEditing && (
                         <button
                           type="button"
                           onClick={() => { setEditError(null); setEditingCode(s.section_code); }}
@@ -313,14 +392,18 @@ export default function AssembledReportPage() {
 
       {/* Footer */}
       <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #E5E7EF', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
-          ← Back
-        </button>
+        {!approved && (
+          <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
+            ← Back
+          </button>
+        )}
         <span style={{ fontSize: 12, color: MUTED }}>Cover + {bodySections.length} sections</span>
-        <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
+        {approved && (
+          <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
+        )}
       </div>
 
-      {pickerOpen && (
+      {!approved && pickerOpen && (
         <CoverTemplatePicker
           templates={coverTemplates}
           palettes={palettes}
@@ -330,6 +413,15 @@ export default function AssembledReportPage() {
           error={coverError}
           onApply={handleCoverApply}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+
+      {approveDialogOpen && (
+        <ApproveConfirmDialog
+          approving={approving}
+          error={approveError}
+          onConfirm={handleApprove}
+          onClose={() => setApproveDialogOpen(false)}
         />
       )}
     </div>
