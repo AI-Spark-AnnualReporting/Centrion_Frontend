@@ -149,6 +149,7 @@ const TH: React.CSSProperties = {
 function FinancialTable({ rows }: { rows: LooseRow[] }) {
   const showPrior = rows.some((r) => cell(r, 'prior_display', 'prior') != null);
   const showChange = rows.some((r) => cell(r, 'change_pct', 'change') != null);
+  const colCount = 2 + (showPrior ? 1 : 0) + (showChange ? 1 : 0);
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
@@ -160,24 +161,62 @@ function FinancialTable({ rows }: { rows: LooseRow[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
-            <td style={{ padding: '9px 10px', color: DARK }}>{stringifyCell(cell(r, 'label', 'metric', 'name'))}</td>
-            <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: BRAND, fontWeight: 700 }}>
-              {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
-            </td>
-            {showPrior && (
-              <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: MUTED }}>
-                {stringifyCell(cell(r, 'prior_display', 'prior')) || '—'}
+        {rows.map((r, i) => {
+          // role: header | line | subtotal | total; indent: 0/1/2 (see statement_layout.py).
+          // Rows without these keys (old content) render as plain lines — unchanged.
+          const role = String(cell(r, 'role') ?? 'line');
+          const indent = Number(cell(r, 'indent') ?? 0) || 0;
+
+          // Group header — a bold brand label spanning the row, no value.
+          if (role === 'header') {
+            return (
+              <tr key={i}>
+                <td
+                  colSpan={colCount}
+                  style={{
+                    padding: '16px 10px 6px', color: BRAND, fontWeight: 800, fontSize: 11,
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    borderBottom: '1px solid #EDEEF3',
+                  }}
+                >
+                  {stringifyCell(cell(r, 'label', 'metric', 'name'))}
+                </td>
+              </tr>
+            );
+          }
+
+          const isTotal = role === 'total' || role === 'subtotal';
+          const topBorder = isTotal ? '1px solid #D6D8E0' : undefined;
+          return (
+            <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
+              <td style={{
+                padding: '9px 10px', paddingLeft: 10 + indent * 18, color: DARK,
+                fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
+              }}>
+                {stringifyCell(cell(r, 'label', 'metric', 'name'))}
               </td>
-            )}
-            {showChange && (
-              <td style={{ padding: '9px 10px', textAlign: 'right' }}>
-                <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} />
+              <td style={{
+                padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: BRAND,
+                fontWeight: 700, borderTop: topBorder,
+              }}>
+                {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
               </td>
-            )}
-          </tr>
-        ))}
+              {showPrior && (
+                <td style={{
+                  padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: MUTED,
+                  borderTop: topBorder,
+                }}>
+                  {stringifyCell(cell(r, 'prior_display', 'prior')) || '—'}
+                </td>
+              )}
+              {showChange && (
+                <td style={{ padding: '9px 10px', textAlign: 'right', borderTop: topBorder }}>
+                  <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} />
+                </td>
+              )}
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
