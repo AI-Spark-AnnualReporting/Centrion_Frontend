@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea } from '@/lib/api';
+import type { QuarterlyReportArea, ComparisonAvailability } from '@/lib/api';
 import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
@@ -354,6 +354,12 @@ export default function QuarterlyReportForm({
   const [voices, setVoices] = useState<Voice[]>(['ceo']);
   // Comparison basis — single choice ("Confirm context" Q4). Default: YoY.
   const [comparison, setComparison] = useState<Comparison>('yoy');
+  // Comparison-data gate. When a comparison + period are set we check the backend
+  // for prior-period figures: Generate is disabled while 'checking'; 'missing'
+  // pops the no-data dialog and keeps Generate disabled. New-report branch only.
+  const [comparisonCheck, setComparisonCheck] =
+    useState<'idle' | 'checking' | 'ok' | 'missing'>('idle');
+  const [comparisonMissing, setComparisonMissing] = useState<ComparisonAvailability | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -404,6 +410,42 @@ export default function QuarterlyReportForm({
 
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
+
+  // Comparison-data availability check. Re-runs whenever the comparison basis or
+  // the target period changes (new-report branch only). Disables Generate while
+  // in flight; on a missing prior period, flags 'missing' + opens the dialog.
+  useEffect(() => {
+    // Only gate a brand-new report (upload-to-existing / open modes don't set a
+    // comparison here). Needs a company + a chosen year.
+    if (isUploadMode || isOpenMode || !companyId || customYear == null) {
+      setComparisonCheck('idle');
+      setComparisonMissing(null);
+      return;
+    }
+    let cancelled = false;
+    setComparisonCheck('checking');
+    quarterlyReportsApi
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.available) {
+          setComparisonCheck('ok');
+          setComparisonMissing(null);
+        } else {
+          setComparisonCheck('missing');
+          setComparisonMissing(res);
+        }
+      })
+      .catch(() => {
+        // Fail open: if the check itself errors, don't block generation on it.
+        if (cancelled) return;
+        setComparisonCheck('ok');
+        setComparisonMissing(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [comparison, customYear, quarter, companyId, isUploadMode, isOpenMode]);
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
   // The picker is hidden — every area is always selected and sent in the
@@ -677,6 +719,10 @@ export default function QuarterlyReportForm({
   // neither gates. Report areas are always all-selected behind the scenes.
   const contextComplete = companyType != null;
 
+  // Comparison gate blocks only the new-report branch, and only while checking or
+  // when the required prior period(s) are missing.
+  const comparisonBlocked = comparisonCheck === 'checking' || comparisonCheck === 'missing';
+
   const canGenerate =
     !!companyId &&
     !isSubmittingGenerate &&
@@ -686,6 +732,7 @@ export default function QuarterlyReportForm({
         customYear != null &&
         hasFiles &&
         !langBlocked &&
+        !comparisonBlocked &&
         contextComplete));
 
   const disabledReason = isOpenMode
@@ -704,7 +751,11 @@ export default function QuarterlyReportForm({
                 ? 'Remove the wrong-language document to continue'
                 : companyType == null
                   ? 'Select the company type to continue'
-                  : undefined;
+                  : comparisonCheck === 'checking'
+                    ? 'Checking comparison data…'
+                    : comparisonCheck === 'missing'
+                      ? 'No data for the comparison period'
+                      : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -783,6 +834,7 @@ export default function QuarterlyReportForm({
         company_type: companyType,
         voices,
         report_tone: reportTone ?? undefined,
+        comparison,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1793,6 +1845,105 @@ export default function QuarterlyReportForm({
                   }}
                 >
                   Correct &amp; re-upload
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison "no data" dialog — the chosen comparison period(s) have no
+          figures in the DB. Placeholder handling for now (dismiss + Generate
+          stays disabled until the user picks a comparison/period that has data). */}
+      {comparisonMissing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="No data to compare against"
+          onClick={() => setComparisonMissing(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                No data to compare against
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                We don't have data for{' '}
+                <strong>
+                  {comparisonMissing.specs
+                    .filter((s) => !s.present)
+                    .map((s) => s.label)
+                    .join(' and ')}
+                </strong>{' '}
+                to compare this quarter against. Pick a different comparison or reporting period to
+                continue.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
+                <button
+                  type="button"
+                  onClick={() => setComparisonMissing(null)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Got it
                 </button>
               </div>
             </div>
