@@ -322,7 +322,7 @@ export default function PreviewPage() {
       .then(async (res) => {
         if (cancelled) return;
         const included = (res.sections ?? [])
-          .filter((s) => s.included)
+          .filter((s) => s.included && !s.hidden_duplicate)
           .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);
