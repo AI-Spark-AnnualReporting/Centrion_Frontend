@@ -411,9 +411,28 @@ export default function QuarterlyReportForm({
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
 
+  // Picking a comparison option is the ONLY thing that surfaces the "no data"
+  // dialog. It runs its own check so the popup is a direct response to the click
+  // (selecting a year/quarter just silently gates Generate via the effect below).
+  const selectComparison = (v: Comparison) => {
+    setComparison(v);
+    if (isUploadMode || isOpenMode || !companyId || customYear == null) return;
+    quarterlyReportsApi
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: v })
+      .then((res) => {
+        if (!res.available) setComparisonMissing(res);
+      })
+      .catch(() => {
+        /* fail open — the effect already gates Generate */
+      });
+  };
+
   // Comparison-data availability check. Re-runs whenever the comparison basis or
-  // the target period changes (new-report branch only). Disables Generate while
-  // in flight; on a missing prior period, flags 'missing' + opens the dialog.
+  // the target period changes (new-report branch only) — but only to GATE the
+  // Generate button (disabled while checking / when a required prior period is
+  // missing). It never opens the "no data" dialog: that surfaces only when the
+  // user actively picks a comparison option (see selectComparison), so simply
+  // choosing a year/quarter can't throw a popup at them.
   useEffect(() => {
     // Only gate a brand-new report (upload-to-existing / open modes don't set a
     // comparison here). Needs a company + a chosen year.
@@ -422,25 +441,21 @@ export default function QuarterlyReportForm({
       setComparisonMissing(null);
       return;
     }
+    // Close any stale dialog when the inputs change — the dialog only (re)opens
+    // via selectComparison, which runs after this synchronous reset.
+    setComparisonMissing(null);
     let cancelled = false;
     setComparisonCheck('checking');
     quarterlyReportsApi
       .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison })
       .then((res) => {
         if (cancelled) return;
-        if (res.available) {
-          setComparisonCheck('ok');
-          setComparisonMissing(null);
-        } else {
-          setComparisonCheck('missing');
-          setComparisonMissing(res);
-        }
+        setComparisonCheck(res.available ? 'ok' : 'missing');
       })
       .catch(() => {
         // Fail open: if the check itself errors, don't block generation on it.
         if (cancelled) return;
         setComparisonCheck('ok');
-        setComparisonMissing(null);
       });
     return () => {
       cancelled = true;
@@ -719,9 +734,10 @@ export default function QuarterlyReportForm({
   // neither gates. Report areas are always all-selected behind the scenes.
   const contextComplete = companyType != null;
 
-  // Comparison gate blocks only the new-report branch, and only while checking or
-  // when the required prior period(s) are missing.
-  const comparisonBlocked = comparisonCheck === 'checking' || comparisonCheck === 'missing';
+  // Comparison gate blocks the new-report branch only WHILE the availability
+  // check is in flight. Missing prior data does NOT block generation — it just
+  // pops a heads-up and the report skips the comparison where data is absent.
+  const comparisonBlocked = comparisonCheck === 'checking';
 
   const canGenerate =
     !!companyId &&
@@ -753,9 +769,7 @@ export default function QuarterlyReportForm({
                   ? 'Select the company type to continue'
                   : comparisonCheck === 'checking'
                     ? 'Checking comparison data…'
-                    : comparisonCheck === 'missing'
-                      ? 'No data for the comparison period'
-                      : undefined;
+                    : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -1456,7 +1470,7 @@ export default function QuarterlyReportForm({
                   label={c.label}
                   title={c.desc}
                   selected={comparison === c.value}
-                  onClick={() => setComparison(c.value)}
+                  onClick={() => selectComparison(c.value)}
                 />
               ))}
             </CtxCard>
