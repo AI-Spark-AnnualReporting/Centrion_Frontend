@@ -142,6 +142,9 @@ export interface OutlineSection {
   part_label: string;
   requirement: 'required' | 'optional';
   included: boolean;
+  // System's data-driven suggestion: true when we have source data for the section
+  // (feeder ready) or it's a chosen voice. Drives the "Recommended" quick-select.
+  recommended: boolean;
   // Per-section lock: a required section can't be unticked. Distinct from the
   // whole-outline freeze on OutlineResponse.locked.
   locked: boolean;
@@ -198,6 +201,9 @@ export interface ProducedSection {
   feeder_status: FeederStatus;
   // Carried through so needs_input sections can show what they require.
   message?: string;
+  // False when re-producing yields nothing fresh (Template/External, or content
+  // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
+  regeneratable?: boolean;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.

@@ -254,7 +254,7 @@ export default function OutlinePage() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [submitting, setSubmitting] = useState(false);
 
-  // Snapshot of the backend's default `included` flags (for the Recommended preset).
+  // Snapshot of the backend's per-section `recommended` flags (for the Recommended preset).
   const defaultIncludedRef = useRef<Record<string, boolean>>({});
   // Debounce + latest-wins guards for autosave.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -311,7 +311,7 @@ export default function OutlinePage() {
         (res.sections.length > 0 && res.sections.every((s) => s.locked)),
     );
     defaultIncludedRef.current = Object.fromEntries(
-      opt.map((s) => [s.section_code, s.included]),
+      opt.map((s) => [s.section_code, s.recommended]),
     );
   };
 

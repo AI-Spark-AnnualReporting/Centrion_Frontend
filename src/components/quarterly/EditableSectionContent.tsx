@@ -285,6 +285,10 @@ function editableTables(parsed: unknown): { title?: string; rows: Row[] }[] {
 
 // Editable columns = the primitive-valued keys across the rows (objects/arrays
 // are skipped so we don't try to text-edit nested structures).
+// Layout metadata (statement_layout.py) — kept on the row and preserved through
+// edits (the draft is deep-cloned), but not shown as editable columns.
+const HIDDEN_COLS = new Set(['role', 'indent']);
+
 function columnsOf(rows: Row[]): string[] {
   const cols = new Set<string>();
   rows.forEach((r) => {
@@ -292,5 +296,6 @@ function columnsOf(rows: Row[]): string[] {
       if (v == null || typeof v !== 'object') cols.add(k);
     });
   });
+  HIDDEN_COLS.forEach((h) => cols.delete(h));
   return Array.from(cols);
 }
