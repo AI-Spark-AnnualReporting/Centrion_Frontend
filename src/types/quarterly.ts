@@ -5,6 +5,9 @@
 // be overridden; reporting_basis + voices are chosen manually.
 export type CompanyType = "bank" | "non_bank";
 export type Voice = "ceo" | "chairman" | "cfo";
+// The "What should this quarter be compared against?" question — single choice.
+// yoy = same quarter last year; qoq = the immediately prior quarter; both = both.
+export type Comparison = "yoy" | "qoq" | "both";
 // Prose style of the narrative — the "Report tone" question. Default:
 // formal_corporate.
 export type ReportTone =
@@ -152,6 +155,9 @@ export interface OutlineSection {
   mode: string;
   display_order?: number;
   feeder: OutlineFeeder;
+  // True when this section's produced data duplicates an earlier section's — the
+  // Preview hides these (keep the first, hide the rest). Computed server-side.
+  hidden_duplicate?: boolean;
 }
 
 export interface OutlineResponse {

@@ -48,6 +48,7 @@ import type {
   CompanyType,
   Voice,
   ReportTone,
+  Comparison,
   DetectCompanyTypeResponse,
   CoverTemplatesResponse,
   ColorPalettesResponse,
@@ -352,6 +353,16 @@ export interface GenerateQuarterlyBody {
   company_type?: CompanyType;
   voices?: Voice[];
   report_tone?: ReportTone;
+  comparison?: Comparison; // yoy | qoq | both — which prior period to compare against
+}
+
+// Whether the company has extracted figures for the period(s) a report would
+// compare against — drives the form's Generate-button gating + "no data" popup.
+export interface ComparisonAvailability {
+  available: boolean; // all required prior periods have figures ('both' needs both)
+  comparison: Comparison;
+  target_period: string; // e.g. "Q3-2025"
+  specs: { key: string; period: string; label: string; present: boolean }[];
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -971,6 +982,7 @@ export const reports = {
       body.voices.forEach((v) => fd.append("voices", v));
     }
     if (body.report_tone) fd.append("report_tone", body.report_tone);
+    if (body.comparison) fd.append("comparison", body.comparison);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
@@ -1120,6 +1132,19 @@ export const quarterlyReports = {
   detectCompanyType: (companyId: string) =>
     request<DetectCompanyTypeResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/detect-company-type`,
+    ),
+
+  // Form-time comparison-data check (no reportId yet). Given the chosen period +
+  // comparison basis, reports whether the prior period(s) have figures to compare
+  // against — the form disables Generate while this is in flight and pops the
+  // "no data" dialog when a required period is missing.
+  checkComparisonAvailability: (
+    companyId: string,
+    params: { year: number; quarter: string; comparison: Comparison },
+  ) =>
+    request<ComparisonAvailability>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
+        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}`,
     ),
 
   // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit
