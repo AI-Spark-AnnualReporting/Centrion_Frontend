@@ -71,7 +71,16 @@ function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
 }
 
+// Earnings Reports are a separate feature (its own /earnings/* pages) that
+// happens to write into the same reports table this page lists — a quarterly
+// Earnings Report's period ("Q4-2023") otherwise matches isQuarterlyReport's
+// period regex and leaks into this page's Quarterly/ESG galleries.
+function isEarningsReport(r: ReportSummary): boolean {
+  return /earnings/i.test(r.title ?? '');
+}
+
 function isQuarterlyReport(r: ReportSummary): boolean {
+  if (isEarningsReport(r)) return false;
   if (r.title?.toLowerCase().includes('quarterly')) return true;
   return /^Q[1-4][\s-]/i.test(r.period);
 }
@@ -300,7 +309,7 @@ export default function ReportsPage() {
         setExistingReports(list);
         // If the company has no ESG reports yet, jump straight to the year
         // picker (quarterly reports live in their own tab/dropdown).
-        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r)));
+        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r) && !isEarningsReport(r)));
       })
       .catch(() => {
         if (!cancelled) {
@@ -376,7 +385,7 @@ export default function ReportsPage() {
 
   // ESG reports only — the ESG year dropdown and gallery must not surface
   // quarterly reports (those have their own tab and dropdown).
-  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r));
+  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r) && !isEarningsReport(r));
 
   // Years already taken by an existing ESG report — blocked in the year picker
   // so one ESG report per year is enforced.
@@ -1449,9 +1458,9 @@ export default function ReportsPage() {
           While the list is loading we show a centered spinner. */}
       {periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
 
-      {existingReports.filter((r) => !isQuarterlyReport(r)).length > 0 && (
+      {esgReports.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
-          {existingReports.filter((r) => !isQuarterlyReport(r)).map((r, idx) => {
+          {esgReports.map((r, idx) => {
             const score = Math.round(r.coverage?.percentage ?? 0);
             const env = r.coverage?.by_pillar?.E?.found ?? 0;
             const soc = r.coverage?.by_pillar?.S?.found ?? 0;
