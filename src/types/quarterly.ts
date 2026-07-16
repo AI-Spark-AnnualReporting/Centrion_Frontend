@@ -5,6 +5,9 @@
 // be overridden; reporting_basis + voices are chosen manually.
 export type CompanyType = "bank" | "non_bank";
 export type Voice = "ceo" | "chairman" | "cfo";
+// The "What should this quarter be compared against?" question — single choice.
+// yoy = same quarter last year; qoq = the immediately prior quarter; both = both.
+export type Comparison = "yoy" | "qoq" | "both";
 // Prose style of the narrative — the "Report tone" question. Default:
 // formal_corporate.
 export type ReportTone =

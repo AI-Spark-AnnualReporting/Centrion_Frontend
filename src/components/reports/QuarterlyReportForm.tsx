@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
 import type { QuarterlyReportArea } from '@/lib/api';
-import type { CompanyType, Voice, ReportTone } from '@/types/quarterly';
+import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
 // Quarter options for the reporting-period selector.
@@ -124,6 +124,13 @@ const CTX_VOICES: { label: string; value: Voice; locked?: boolean }[] = [
   { label: 'CEO statement · always', value: 'ceo', locked: true },
   { label: 'Chairman statement', value: 'chairman' },
   { label: 'CFO statement', value: 'cfo' },
+];
+
+// The comparison basis — single choice. Default: year-on-year.
+const CTX_COMPARISONS: { label: string; value: Comparison; desc: string }[] = [
+  { label: 'Year on year', value: 'yoy', desc: 'vs the same quarter last year' },
+  { label: 'Previous quarter', value: 'qoq', desc: 'vs the immediately prior quarter' },
+  { label: 'Both', value: 'both', desc: 'vs prior year and prior quarter' },
 ];
 
 // Capsule pill — indigo border + light fill when selected; locked pills (CEO)
@@ -345,6 +352,8 @@ export default function QuarterlyReportForm({
   // No default — the user picks a tone (or leaves it unset; backend defaults).
   const [reportTone, setReportTone] = useState<ReportTone | null>(null);
   const [voices, setVoices] = useState<Voice[]>(['ceo']);
+  // Comparison basis — single choice ("Confirm context" Q4). Default: YoY.
+  const [comparison, setComparison] = useState<Comparison>('yoy');
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -1379,6 +1388,23 @@ export default function QuarterlyReportForm({
                   locked={v.locked}
                   selected={v.locked ? true : voices.includes(v.value)}
                   onClick={() => toggleVoice(v.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 4 — comparison basis (single-select; default YoY) */}
+            <CtxCard
+              n={4}
+              title="What should this quarter be compared against?"
+              helper="Sets which prior period the figures are compared to."
+            >
+              {CTX_COMPARISONS.map((c) => (
+                <CtxPill
+                  key={c.value}
+                  label={c.label}
+                  title={c.desc}
+                  selected={comparison === c.value}
+                  onClick={() => setComparison(c.value)}
                 />
               ))}
             </CtxCard>
