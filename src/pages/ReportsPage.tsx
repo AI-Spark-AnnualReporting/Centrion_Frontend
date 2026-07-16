@@ -60,6 +60,14 @@ interface ReportSummary {
   regulators?: ReportRegulatorSummary[];
   generated_at?: string;
   coverage?: ReportCoverage;
+  // Approval/lock status — exact backend field name unconfirmed (mirrors the
+  // same uncertainty as AssembledReportResponse in types/quarterly.ts), so
+  // every likely shape is read defensively via isApprovedReport below.
+  status?: string;
+  approved?: boolean;
+  is_approved?: boolean;
+  is_locked?: boolean;
+  locked?: boolean;
 }
 
 interface ReportsListResponse {
@@ -83,6 +91,18 @@ function isQuarterlyReport(r: ReportSummary): boolean {
   if (isEarningsReport(r)) return false;
   if (r.title?.toLowerCase().includes('quarterly')) return true;
   return /^Q[1-4][\s-]/i.test(r.period);
+}
+
+// Approved/locked quarterly reports open straight on the read-only Assembled
+// Report screen instead of the Outline — there's nothing left to configure.
+function isApprovedReport(r: ReportSummary): boolean {
+  return (
+    r.status === 'approved' ||
+    r.approved === true ||
+    r.is_approved === true ||
+    r.is_locked === true ||
+    r.locked === true
+  );
 }
 
 // "2026-04-26T07:47:38..." → "Apr 26, 2026" for the gallery card footer.
@@ -547,7 +567,11 @@ export default function ReportsPage() {
   // dedicated detail page, which handles its own coverage fetch.
   const handleReportCardClick = (report: ReportSummary) => {
     if (isQuarterlyReport(report)) {
-      navigate(`/quarterly-report/${report.id}/outline`);
+      navigate(
+        isApprovedReport(report)
+          ? `/quarterly-report/${report.id}/report`
+          : `/quarterly-report/${report.id}/outline`,
+      );
     } else {
       navigate(`/reports/${report.id}`);
     }
