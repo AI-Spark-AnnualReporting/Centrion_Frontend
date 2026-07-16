@@ -201,6 +201,9 @@ export interface ProducedSection {
   feeder_status: FeederStatus;
   // Carried through so needs_input sections can show what they require.
   message?: string;
+  // False when re-producing yields nothing fresh (Template/External, or content
+  // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
+  regeneratable?: boolean;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.

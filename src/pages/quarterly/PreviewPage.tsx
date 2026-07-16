@@ -730,6 +730,9 @@ function SectionPanel({
   if (state === 'produced') {
     return (
       <>
+        {/* Regenerate only for sections that actually re-generate — hidden for
+            Template/External and user-supplied (typed/uploaded) content. */}
+        {section.regeneratable !== false && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginBottom: 12 }}>
           {busy && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: ACCENT }}>
@@ -755,6 +758,7 @@ function SectionPanel({
             Regenerate
           </button>
         </div>
+        )}
         {error && <div style={{ marginBottom: 12, fontSize: 12, color: '#DC2626' }}>{error}</div>}
         <SectionContent section={section} />
         {canRefine && companyId && reportId && (
