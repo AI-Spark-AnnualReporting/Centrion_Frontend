@@ -79,6 +79,13 @@ const SAR_BASE_URL = (
   import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
 
+// Public, unauthenticated PDF download — the backend sets
+// `Content-Disposition: attachment`, so a plain <a> works and no token is
+// needed. That matters: the same URL goes into the investor email, where there
+// is no JS to attach a Bearer header.
+export const publicReportDownloadUrl = (reportId: string) =>
+  `${API_BASE_URL}/api/public/reports/${reportId}/download`;
+
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
 
