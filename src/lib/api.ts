@@ -68,6 +68,14 @@ import type {
   EarningsFigureSource,
   EarningsFiguresResponse,
   EditEarningsFigurePayload,
+  EarningsOutlineSection,
+  EarningsOutlineResponse,
+  SaveEarningsOutlinePayload,
+  EarningsProducedSection,
+  EarningsSectionsResponse,
+  EarningsProduceHandle,
+  SaveEarningsSectionContentPayload,
+  EarningsExportFormat,
 } from "@/types/earnings";
 import type {
   CreateMeetingBody,
@@ -1474,6 +1482,130 @@ function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
   return { figures, sources };
 }
 
+// ── Part 3 — outline ──
+// Response is untyped (200 → {}); field names follow the spec and are read
+// defensively. TODO(Step 0): confirm against a live GET during integration.
+function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id) ?? earnStr(o.key);
+  if (!code) return null;
+  const requirementRaw = (earnStr(o.requirement) ?? earnStr(o.requirement_level) ?? "").toLowerCase();
+  const requirement: EarningsOutlineSection["requirement"] = requirementRaw.includes("required")
+    ? "required"
+    : requirementRaw.includes("optional")
+      ? "optional"
+      : requirementRaw || "optional";
+  const displayOrder =
+    earnNum(o.display_order) ?? earnNum(o.order) ?? earnNum(o.section_number) ?? 0;
+  // A required section is always available/included; an optional's availability
+  // defaults to true unless the backend explicitly says false.
+  const available =
+    requirement === "required"
+      ? true
+      : "available" in o
+        ? earnBool(o.available)
+        : !(earnBool(o.unavailable) || earnBool(o.no_data));
+  return {
+    section_code: code,
+    title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
+    section_number: earnNum(o.section_number) ?? earnNum(o.number),
+    display_order: displayOrder,
+    included:
+      requirement === "required"
+        ? true
+        : earnBool(o.included) || earnBool(o.selected) || earnBool(o.is_included),
+    requirement,
+    available,
+    source_type: earnStr(o.source_type) ?? earnStr(o.mode_hint) ?? earnStr(o.data_source),
+    mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
+    page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
+  };
+}
+function normalizeEarningsOutline(raw: unknown): EarningsOutlineResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.sections)
+      ? (rec.sections as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const sections = arr
+    .map(normalizeEarningsOutlineSection)
+    .filter((s): s is EarningsOutlineSection => s !== null);
+  return { sections };
+}
+
+// ── Part 4/5 — produced sections ──
+// Response untyped ({}); field names follow the spec and are read defensively.
+// TODO(Step 0): confirm against a live GET /sections during integration.
+function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  // content can arrive as a string (prose) or an object/array (table/kpi/cover);
+  // stringify objects so the shared renderers can JSON.parse them.
+  const rawContent = o.content ?? o.body ?? o.text;
+  const content =
+    rawContent == null
+      ? null
+      : typeof rawContent === "string"
+        ? rawContent
+        : JSON.stringify(rawContent);
+  const feeder = earnRecord(o.feeder);
+  return {
+    section_code: code,
+    title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    display_order: earnNum(o.display_order) ?? earnNum(o.order) ?? 0,
+    source_type: earnStr(o.source_type) ?? earnStr(o.type),
+    mode: earnStr(o.mode) ?? earnStr(o.render_mode) ?? "generate",
+    status: (earnStr(o.status) ?? "pending") as EarningsProducedSection["status"],
+    content,
+    // Default to included=true unless the payload explicitly excludes it — the
+    // sections endpoint typically returns only the included set.
+    included: "included" in o ? earnBool(o.included) : true,
+    feeder_status: earnStr(o.feeder_status) ?? earnStr(feeder.status),
+    feeder_message: earnStr(o.message) ?? earnStr(feeder.message),
+    source_label: earnStr(o.source_label) ?? earnStr(feeder.document_name) ?? earnStr(feeder.label),
+    source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
+    confidence: earnNum(o.confidence),
+    flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
+    grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
+    grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
+    edited: earnBool(o.edited) || earnBool(o.is_edited),
+  };
+}
+function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.sections)
+      ? (rec.sections as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const sections = arr
+    .map(normalizeEarningsSection)
+    .filter((s): s is EarningsProducedSection => s !== null);
+  const cover = earnRecord(rec.cover);
+  return {
+    sections,
+    cover_template_key:
+      earnStr(rec.cover_template_key) ?? earnStr(cover.template_key) ?? earnStr(cover.cover_template_key),
+    locked: earnBool(rec.locked) || earnBool(rec.approved) || earnStr(rec.status) === "approved",
+  };
+}
+function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
+  const o = earnRecord(raw);
+  const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
+  const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  if (!runId || !pollUrl) {
+    throw new Error("Produce earnings report: response did not include run_id/poll_url.");
+  }
+  return { run_id: runId, poll_url: pollUrl };
+}
+
 export const earnings = {
   // The selectable "existing report" sources for a company + period. Period is a
   // string the backend keys on (format TBD — confirm live; we pass e.g. "FY-2025").
@@ -1522,6 +1654,120 @@ export const earnings = {
       if (!fig) throw new Error("Edit earnings figure: response was not a figure.");
       return fig;
     }),
+
+  // ── Part 3 — outline ──
+  // The report outline (included + available sections). Path takes report_id ONLY
+  // (no company_id), mirroring the figures endpoints. Response untyped → normalised.
+  getEarningsOutline: (reportId: string, signal?: AbortSignal): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
+      { signal },
+    ).then(normalizeEarningsOutline),
+
+  // Save the arrangement (inclusion + order). Returns the re-normalised outline
+  // when the backend echoes it; callers may ignore the body. A 422 (e.g. a stale
+  // include of an unavailable optional) throws ApiError for the caller to surface.
+  saveEarningsOutline: (
+    reportId: string,
+    payload: SaveEarningsOutlinePayload,
+  ): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
+      { method: "PUT", body: payload },
+    ).then(normalizeEarningsOutline),
+
+  // ── Part 4/5 — preview & publish ──
+  // The produced sections (cover + body) for a report. Report-scoped, untyped → normalised.
+  getEarningsSections: (reportId: string, signal?: AbortSignal): Promise<EarningsSectionsResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections`,
+      { signal },
+    ).then(normalizeEarningsSections),
+
+  // Kick batch production of all included sections. Async 202-style → {run_id, poll_url};
+  // poll with agentRuns.getByPollUrl, then re-fetch getEarningsSections on completion.
+  produceEarningsReport: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: {} },
+    ).then(readEarningsProduceHandle),
+
+  // Produce (or regenerate) a single section. Optional user_input for needs_input sections.
+  produceEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    body?: { user_input?: string },
+  ): Promise<EarningsProducedSection> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
+      { method: "POST", body: body ?? {} },
+    ).then((raw) => {
+      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      if (!sec) throw new Error("Produce earnings section: response was not a section.");
+      return sec;
+    }),
+
+  // Inline-edit a produced section's content. Unwraps a { section } envelope.
+  patchEarningsSectionContent: (
+    reportId: string,
+    sectionCode: string,
+    body: SaveEarningsSectionContentPayload,
+  ): Promise<EarningsProducedSection> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/content`,
+      { method: "PATCH", body },
+    ).then((raw) => {
+      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      if (!sec) throw new Error("Edit earnings section: response was not a section.");
+      return sec;
+    }),
+
+  // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body
+  // carries the blocker list (read defensively in the UI).
+  approveEarningsReport: (reportId: string): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST", body: {} },
+    ),
+
+  // Export DOCX/PDF. Binary response → bypass request<T>() (which parses JSON) and
+  // use fetchWithAuth + blob, mirroring quarterlyReports.downloadExport. Prefers the
+  // server Content-Disposition filename when present.
+  downloadEarningsExport: async (
+    reportId: string,
+    format: EarningsExportFormat,
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/export`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format }) },
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    // Prefer the server-provided filename (Content-Disposition), else synthesize one.
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    const serverName = match ? decodeURIComponent(match[1].trim()) : null;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = serverName || `${(filename || "earnings-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 // ---------------------------------------------------------------------------

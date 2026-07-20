@@ -98,3 +98,107 @@ export interface EditEarningsFigurePayload {
   value: number;
   unit?: string | null;
 }
+
+// ─── Part 3 — Arrange Outline ─────────────────────────────────────────────────
+// Contracts from OpenAPI are UNTYPED (200 → {}), and the PUT body is undocumented,
+// so field names below follow the spec and are read defensively at the api layer.
+//   GET  /api/v1/earnings/reports/{reportId}/outline                (no company_id)
+//   PUT  /api/v1/earnings/reports/{reportId}/outline   { sections: [...] }
+// TODO(Step 0): confirm every field name against a live GET during integration.
+
+// Whether an optional section can actually be added — the backend tells us when a
+// section has no backing data. `available=false` → greyed, toggle disabled, never
+// silently addable (D-12). Required sections are always included regardless.
+export interface EarningsOutlineSection {
+  section_code: string;
+  title: string;
+  description: string | null;
+  section_number: number | null; // display number on the card, when provided
+  display_order: number; // authoritative sort key; array order on save
+  included: boolean; // currently in the report
+  requirement: 'required' | 'optional' | (string & {});
+  available: boolean; // optional-only meaning: has backing data → addable
+  source_type: string | null; // hint chip; render only when the backend provides it
+  mode: string | null; // hint chip; render only when the backend provides it
+  page_hint: string | null; // e.g. "~2 pages"; never fabricated
+}
+
+export interface EarningsOutlineResponse {
+  sections: EarningsOutlineSection[];
+}
+
+// PUT body — the full arrangement. `display_order` is the array position of the
+// included set; excluded sections carry included=false.
+export interface SaveEarningsOutlinePayload {
+  sections: { section_code: string; included: boolean; display_order: number }[];
+}
+
+// ─── Part 4/5 — Preview & Publish ─────────────────────────────────────────────
+// All endpoints report-scoped (path takes report_id only); OpenAPI responses are
+// UNTYPED ({}), so field names follow the spec and are read defensively.
+// TODO(Step 0): confirm content/feeder/status/blocker shapes on a live GET /sections.
+//   GET   /api/v1/earnings/reports/{id}/sections
+//   POST  /api/v1/earnings/reports/{id}/produce                     (async → {run_id, poll_url})
+//   POST  /api/v1/earnings/reports/{id}/sections/{code}/produce
+//   PATCH /api/v1/earnings/reports/{id}/sections/{code}/content     { content }
+//   POST  /api/v1/earnings/reports/{id}/export                      { format }  → bytes
+//   POST  /api/v1/earnings/reports/{id}/approve                     (409 → blocker list)
+
+// Per-section production status. 'produced' means real content; 'needs_input'/'empty'
+// are surfaced, never claimed done.
+export type EarningsSectionStatus =
+  | 'pending'
+  | 'drafting'
+  | 'produced'
+  | 'needs_input'
+  | 'empty'
+  | (string & {});
+
+// One produced section. Shape mirrors the quarterly `ProducedSection` so the shared
+// renderers (SectionContent/CoverRenderer/sectionState) work on it. `content` is a
+// JSON string for table/kpi/cover modes and prose for generate/template.
+export interface EarningsProducedSection {
+  section_code: string;
+  title: string;
+  display_order: number;
+  source_type: string | null;
+  mode: string; // 'table' | 'kpi' | 'generate' | 'template' | 'cover'
+  status: EarningsSectionStatus;
+  content: string | null;
+  included: boolean; // whether the outline included this section
+  feeder_status: string | null; // 'ready' | 'template' | 'external' | 'needs_input' | null
+  feeder_message: string | null; // what a needs_input section requires
+  source_label: string | null; // citation label, when the payload carries feeder/citations
+  source_ref: string | null; // e.g. "p. 12"
+  confidence: number | null; // 0–100, when present
+  flag: string | null; // grounding/confidence flag, when present
+  grounding_flag: string | null; // grounding-violation message from a PATCH, when present
+  grounding_acknowledged: boolean; // client marker: the user acknowledged the flag
+  edited: boolean; // client marker: content was manually PATCHed
+}
+
+export interface EarningsSectionsResponse {
+  sections: EarningsProducedSection[];
+  cover_template_key: string | null; // for the cover renderer, when the backend provides it
+  locked: boolean; // approved/locked → read-only
+}
+
+// POST /produce async handle (mirrors the quarterly ProduceAllHandle).
+export interface EarningsProduceHandle {
+  run_id: string;
+  poll_url: string;
+}
+
+// PATCH .../content body.
+export interface SaveEarningsSectionContentPayload {
+  content: string;
+}
+
+export type EarningsExportFormat = 'pdf' | 'docx';
+
+// One reason approve is blocked (from a 409). `section_code` may be null for a
+// document-level blocker.
+export interface EarningsApproveBlocker {
+  section_code: string | null;
+  message: string;
+}
