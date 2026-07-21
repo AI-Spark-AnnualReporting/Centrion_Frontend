@@ -1,7 +1,16 @@
 import type { EarningsProducedSection } from '@/types/earnings';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
-import { isCoverMode, isTableMode, readCoverValues, tryParseJson } from '@/pages/earnings/preview-helpers';
+import {
+  isCoverMode,
+  isTableMode,
+  isQuoteMode,
+  isReconciliationMode,
+  readCoverValues,
+  tryParseJson,
+} from '@/pages/earnings/preview-helpers';
 import { SectionTable } from './SectionTable';
+import { ReconciliationTable } from './ReconciliationTable';
+import { QuoteBlock } from './QuoteBlock';
 import { MUTED } from './tokens';
 
 // Prose block — split on blank lines into justified paragraphs, never a JSON blob.
@@ -54,8 +63,31 @@ export function SectionRenderer({
     );
   }
 
+  // Management commentary (S05) — QuoteBlock itself returns null when the
+  // backend omitted it (no placeholder, ever), so no empty-content branch here.
+  if (isQuoteMode(section)) {
+    return <QuoteBlock content={content} />;
+  }
+
+  if (isReconciliationMode(section)) {
+    if (content == null || content.trim() === '') {
+      const pending = section.status === 'pending';
+      return (
+        <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: pending ? 'italic' : 'normal' }}>
+          {pending ? 'This section is awaiting generation.' : 'No data available for this section.'}
+        </p>
+      );
+    }
+    return <ReconciliationTable content={content} />;
+  }
+
   if (content == null || content.trim() === '') {
-    return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>;
+    const pending = section.status === 'pending';
+    return (
+      <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: pending ? 'italic' : 'normal' }}>
+        {pending ? 'This section is awaiting generation.' : 'No data available for this section.'}
+      </p>
+    );
   }
 
   if (isTableMode(section)) {

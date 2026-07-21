@@ -1,5 +1,5 @@
 import type { EarningsFigure } from '@/types/earnings';
-import { isFlagged, confidenceTier } from '@/pages/earnings/helpers';
+import { isFlagged, confidenceTier, formatFigureValue, formatDelta, deltaTone } from '@/pages/earnings/helpers';
 import { ConfidenceBadge } from './ConfidenceBadge';
 import { EditableValueCell } from './EditableValueCell';
 import { INK, MUTED, FAINT, ACCENT } from './tokens';
@@ -14,6 +14,10 @@ const TH: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 const TD: React.CSSProperties = { padding: '11px 10px', color: INK, fontSize: 13, verticalAlign: 'top' };
+
+// Mirrors ConfidenceBadge's own green/red hexes — within-feature consistency,
+// not quarterly's slightly different palette.
+const DELTA_COLOR: Record<'up' | 'down' | 'flat', string> = { up: '#16A34A', down: '#DC2626', flat: MUTED };
 
 // Source column text: derived rows show "Derived · <formula>"; others show
 // "<doc label> · <ref>".
@@ -33,15 +37,17 @@ export function FigureTable({
 }) {
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ overflowX: 'auto' }}>
+      <div style={{ overflow: 'auto', maxHeight: 480 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: `2px solid ${ACCENT}`, background: '#FAFBFF' }}>
-              <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
-              <th style={{ ...TH, textAlign: 'left' }}>Value</th>
-              <th style={{ ...TH, textAlign: 'left' }}>Period</th>
-              <th style={{ ...TH, textAlign: 'left' }}>Source</th>
-              <th style={{ ...TH, textAlign: 'right' }}>Confidence</th>
+              <th style={{ ...TH, textAlign: 'left', position: 'sticky', top: 0, background: '#FAFBFF' }}>Metric</th>
+              <th style={{ ...TH, textAlign: 'left', position: 'sticky', top: 0, background: '#FAFBFF' }}>Value</th>
+              <th style={{ ...TH, textAlign: 'right', position: 'sticky', top: 0, background: '#FAFBFF' }}>Prior</th>
+              <th style={{ ...TH, textAlign: 'right', position: 'sticky', top: 0, background: '#FAFBFF' }}>Δ / YoY</th>
+              <th style={{ ...TH, textAlign: 'left', position: 'sticky', top: 0, background: '#FAFBFF' }}>Period</th>
+              <th style={{ ...TH, textAlign: 'left', position: 'sticky', top: 0, background: '#FAFBFF' }}>Source</th>
+              <th style={{ ...TH, textAlign: 'right', position: 'sticky', top: 0, background: '#FAFBFF' }}>Confidence</th>
             </tr>
           </thead>
           <tbody>
@@ -61,6 +67,19 @@ export function FigureTable({
                   </td>
                   <td style={{ ...TD }}>
                     <EditableValueCell figure={f} onSave={(v) => onSaveValue(f.id, v)} />
+                  </td>
+                  <td style={{ ...TD, textAlign: 'right', color: MUTED }}>
+                    {formatFigureValue(f.prior_value, f.unit)}
+                  </td>
+                  <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
+                    {(() => {
+                      const tone = deltaTone(f.change_pct, f.comparative_status);
+                      return (
+                        <span style={{ color: tone ? DELTA_COLOR[tone] : MUTED }}>
+                          {formatDelta(f.change_pct, f.comparative_status)}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td style={{ ...TD, color: MUTED }}>{f.period ?? '—'}</td>
                   <td style={{ ...TD, color: MUTED, fontStyle: f.is_derived ? 'italic' : 'normal' }}>

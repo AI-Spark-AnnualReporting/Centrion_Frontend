@@ -22,12 +22,14 @@ export function GenerateProgress({ sections }: { sections: EarningsProducedSecti
             drafting ? 'Drafting…'
               : state === 'produced' ? 'Produced'
                 : state === 'needs_input' ? 'Needs input'
-                  : 'Pending';
+                  : state === 'pending' ? 'Pending'
+                    : 'No data';
           const color =
             drafting ? ACCENT
               : state === 'produced' ? '#10B981'
                 : state === 'needs_input' ? '#B45309'
-                  : MUTED;
+                  : state === 'pending' ? ACCENT
+                    : MUTED;
           return (
             <div
               key={s.section_code}

@@ -1,11 +1,21 @@
 import type { EarningsFigureSource } from '@/types/earnings';
+import { sourceKey, formatSourceType } from '@/pages/earnings/helpers';
 import { INK, MUTED, FAINT, BORDER } from './tokens';
 
-// Coverage → shared badge class + label.
+// Coverage → shared badge class + label. Official sources only — a narrative
+// upload never gets a coverage badge (that would imply it's an official,
+// coverage-scored filing, which it isn't).
 function coverageBadge(coverage: string | null): { cls: string; label: string } | null {
   if (coverage === 'full') return { cls: 'badge b-gn', label: 'Full' };
   if (coverage === 'partial') return { cls: 'badge b-am', label: 'Partial' };
   return coverage ? { cls: 'badge b-gy', label: coverage } : null;
+}
+
+// Extraction state → shared badge class + label (narrative/upload sources only).
+function extractionBadge(status: string | null): { cls: string; label: string } {
+  if (status === 'ready') return { cls: 'badge b-gn', label: 'Ready' };
+  if (status === 'failed') return { cls: 'badge b-rd', label: 'Failed' };
+  return { cls: 'badge b-am', label: 'Extracting…' };
 }
 
 // Block 1 — the chosen source reports: count + per-source coverage badge and a
@@ -35,10 +45,11 @@ export function SelectedSourcesHeader({ sources }: { sources: EarningsFigureSour
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {sources.map((s) => {
-            const badge = coverageBadge(s.coverage);
+            const isNarrative = s.track === 'narrative_adjusted';
+            const badge = isNarrative ? extractionBadge(s.extraction_status) : coverageBadge(s.coverage);
             return (
               <div
-                key={s.report_id}
+                key={sourceKey(s)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -65,7 +76,7 @@ export function SelectedSourcesHeader({ sources }: { sources: EarningsFigureSour
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {s.label}
+                  {isNarrative ? `${s.label} · ${formatSourceType(s.type)}` : s.label}
                 </span>
                 {badge && <span className={badge.cls}>{badge.label}</span>}
               </div>

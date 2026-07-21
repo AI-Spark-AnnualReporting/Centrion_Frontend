@@ -164,4 +164,44 @@ describe('EarningsOutlinePage', () => {
     expect(await screen.findByText('Arrange your report outline')).toBeInTheDocument();
     expect(screen.getByText('Report sections')).toBeInTheDocument();
   });
+
+  it('sorts "Available to add" by requirement tier (recommended before optional) and shows badges', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, display_order: 0 }),
+        sec({ section_code: 'outlook', title: 'Outlook', requirement: 'optional', included: false, available: true, display_order: 1 }),
+        sec({ section_code: 'market_context', title: 'Market Context', requirement: 'recommended', included: false, available: true, display_order: 2 }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Available to add');
+    const order = screen
+      .getAllByRole('checkbox', { name: /^Include/ })
+      .map((c) => c.getAttribute('aria-label'));
+    // Market Context (recommended) sorts before Outlook (optional) despite a
+    // higher display_order — tier rank wins, display_order only tiebreaks.
+    expect(order).toEqual(['Include Market Context', 'Include Outlook']);
+    expect(screen.getByText('RECOMMENDED')).toBeInTheDocument();
+  });
+
+  it('toggling an included recommended section off inserts it in tier order, not appended last', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, display_order: 0 }),
+        sec({ section_code: 'market_context', title: 'Market Context', requirement: 'recommended', included: true, display_order: 1 }),
+        sec({ section_code: 'outlook', title: 'Outlook', requirement: 'optional', included: false, available: true, display_order: 2 }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Report sections');
+    // Toggle Market Context (included, recommended) out — it must land BEFORE
+    // Outlook (optional) in "Available to add", not appended after it.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Exclude Market Context' }));
+    await waitFor(() => {
+      const order = screen
+        .getAllByRole('checkbox', { name: /^Include/ })
+        .map((c) => c.getAttribute('aria-label'));
+      expect(order).toEqual(['Include Market Context', 'Include Outlook']);
+    });
+  });
 });

@@ -23,13 +23,36 @@ export type EarningsQuarter = (typeof EARNINGS_QUARTERS)[number];
 // `coverage` drives the Full/Partial badge. Field names read defensively at
 // the api layer for naming robustness only — never to fabricate a source.
 export type SourceCoverage = 'full' | 'partial' | (string & {});
+
+// Which pool a source belongs to (Part 6B — Tagged Uploads). 'official' = a DB
+// report (filed data); 'narrative_adjusted' = a user upload (narrative/adjusted
+// content only — never implies an official-figure source, D-19).
+export type SourceTrack = 'official' | 'narrative_adjusted' | (string & {});
+// The tag a user picks when uploading a document. 'aggregator' is a
+// backend/system-only tag — never offered as a user-selectable upload option.
+export type SourceUploadType =
+  | 'annual'
+  | 'interim'
+  | 'release'
+  | 'presentation'
+  | 'transcript'
+  | 'aggregator'
+  | (string & {});
+// Upload-only processing state. Never treat 'extracting'/'failed' as a usable
+// figure source (D-12) — only 'ready' sources have real figures behind them.
+export type SourceExtractionStatus = 'extracting' | 'ready' | 'failed' | (string & {});
+
 export interface SelectableSource {
-  report_id: string; // feeds source_report_ids on create
+  report_id: string | null; // populated for the 'official' track (DB reports)
+  document_id: string | null; // populated for the 'narrative_adjusted' track (uploads)
   label: string; // display label, e.g. "Shell — Quarterly Report Q4-2023". Never a filename.
   report_type: string | null; // e.g. 'quarterly' | 'annual'
   period: string | null; // e.g. "Q4-2023"
   updated_at: string | null;
-  coverage: SourceCoverage; // 'full' | 'partial'
+  coverage: SourceCoverage; // 'full' | 'partial' — official sources only
+  track: SourceTrack;
+  type: SourceUploadType | null; // upload doc type; null for official sources
+  extraction_status: SourceExtractionStatus | null; // upload-only; null for official sources
 }
 
 // The selected source shown on the Extract screen's header — the identical
@@ -48,7 +71,8 @@ export interface CreateEarningsReportPayload {
   fiscal_year: number;
   quarter?: number | null; // 1..4 for quarterly; null/omitted for annual
   tone: ReportTone; // backend default is formal_corporate; UI pre-selects investor_focused
-  source_report_ids: string[]; // required, ≥1
+  source_report_ids: string[]; // official-track selections; combined with source_document_ids, ≥1
+  source_document_ids: string[]; // narrative-track (upload) selections
 }
 
 // Create response is untyped (201) — read `report_id` defensively at the api layer.
@@ -86,6 +110,13 @@ export interface EarningsFigure {
   derivation: string | null; // the formula, when derived
   flag: FigureFlag | null; // backend flag when present
   edited: boolean; // client marker: value was manually PATCHed
+  // Comparative fields (Part 6A backend). Field names UNCONFIRMED — confirm
+  // against a live GET .../figures during Step 0. comparative_status='none'
+  // means no comparison exists for this figure; never compute a delta then (D-12).
+  prior_value: number | null;
+  prior_period: string | null;
+  change_pct: number | null; // fractional, e.g. 0.114 = +11.4%
+  comparative_status: string | null; // e.g. 'none' | 'yoy' — treat any non-none, non-null value as "has a delta"
 }
 
 export interface EarningsFiguresResponse {
@@ -116,7 +147,7 @@ export interface EarningsOutlineSection {
   section_number: number | null; // display number on the card, when provided
   display_order: number; // authoritative sort key; array order on save
   included: boolean; // currently in the report
-  requirement: 'required' | 'optional' | (string & {});
+  requirement: 'required' | 'recommended' | 'optional' | (string & {});
   available: boolean; // optional-only meaning: has backing data → addable
   source_type: string | null; // hint chip; render only when the backend provides it
   mode: string | null; // hint chip; render only when the backend provides it

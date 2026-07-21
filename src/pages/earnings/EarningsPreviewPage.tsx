@@ -5,7 +5,7 @@ import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState } from './preview-helpers';
+import { earningsSectionState, isHiddenWhenOmitted } from './preview-helpers';
 import { SectionRail } from '@/components/earnings/SectionRail';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -272,7 +272,14 @@ export default function EarningsPreviewPage() {
     );
   }
 
-  const included = sections.filter((s) => s.included);
+  // Sections that vanish entirely when omitted by design (quote/trend) — no
+  // card, no rail entry, no gating on a section that will never produce
+  // content. Returning null from the leaf renderer alone isn't enough; the
+  // outer numbered card would still render around an empty body.
+  const visibleSections = sections.filter(
+    (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
+  );
+  const included = visibleSections.filter((s) => s.included);
   const needsGenerate = included.length > 0 && included.some((s) => earningsSectionState(s) !== 'produced');
   const generating = runInfo !== null;
 
@@ -294,7 +301,7 @@ export default function EarningsPreviewPage() {
         </div>
       )}
 
-      {sections.length === 0 ? (
+      {visibleSections.length === 0 ? (
         <div
           className="card"
           style={{ padding: '40px 20px', textAlign: 'center', color: MUTED, fontSize: 13 }}
@@ -309,7 +316,7 @@ export default function EarningsPreviewPage() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '200px minmax(0, 1fr) 290px', gap: 18, alignItems: 'start' }}>
           {/* Left — section rail */}
-          <SectionRail sections={sections} activeCode={activeCode} onSelect={selectSection} />
+          <SectionRail sections={visibleSections} activeCode={activeCode} onSelect={selectSection} />
 
           {/* Center — generate state or the assembled document */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
@@ -330,7 +337,7 @@ export default function EarningsPreviewPage() {
                     </button>
                   </div>
                 )}
-                {sections.map((s, i) => (
+                {visibleSections.map((s, i) => (
                   <div key={s.section_code} id={`earnings-sec-${s.section_code}`} className="card" style={{ padding: '18px 22px' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 800, color: FAINT, fontVariantNumeric: 'tabular-nums' }}>
@@ -354,7 +361,7 @@ export default function EarningsPreviewPage() {
 
           {/* Right — publish bar */}
           <PublishBar
-            sections={sections}
+            sections={visibleSections}
             locked={locked}
             blockers={blockers}
             approving={approving}

@@ -12,26 +12,19 @@ import { INK, MUTED, ACCENT } from './tokens';
 // ConfidenceBadge's established amber — within-feature consistency.
 const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
 
-// Renders an earnings table/kpi envelope as Metric | Value — `label` +
-// `current_display` ONLY. No Prior/Change columns are ever rendered: earnings data
-// has no comparatives, and we never show a fabricated or blank delta column (D-12).
-// Operational KPIs (S06): an out-of-catalog row shows its gap reason instead of a
-// value, and a still-producing row shows "Pending" — never the same grey dash.
-export function SectionTable({ content }: { content: string | null }) {
+// Non-IFRS reconciliation (S15) — reported → adjustments → adjusted, per line,
+// cited. A gap row shows its reason instead of guessed/blank values; citation
+// renders unconditionally per row (the spec requires "per line, cited" here,
+// unlike the plain KPI table where a Source column is optional).
+export function ReconciliationTable({ content }: { content: string | null }) {
   const parsed = content ? tryParseJson(content) : undefined;
-  if (parsed === undefined) {
-    // Not valid JSON — treat as prose upstream; here just show nothing structured.
-    return null;
-  }
+  if (parsed === undefined) return null;
   const tables = normalizeTables(parsed)
     .map((t) => ({ ...t, rows: t.rows.filter((r) => rowBlankState(r) !== 'omitted') }))
     .filter((t) => t.rows.length > 0);
   if (tables.length === 0) {
     return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>;
   }
-  // A Source column only appears when at least one row actually carries a
-  // citation — existing sections with no citation fields render unchanged.
-  const showSource = tables.some((t) => t.rows.some((r) => rowCitation(r) != null));
 
   const TH: React.CSSProperties = {
     padding: '8px 10px',
@@ -40,6 +33,13 @@ export function SectionTable({ content }: { content: string | null }) {
     fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
+  };
+  const valueStyle: React.CSSProperties = {
+    padding: '9px 10px',
+    textAlign: 'right',
+    fontFamily: "'DM Mono', 'Courier New', monospace",
+    color: ACCENT,
+    fontWeight: 700,
   };
 
   return (
@@ -52,21 +52,24 @@ export function SectionTable({ content }: { content: string | null }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${ACCENT}` }}>
-                <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
-                <th style={{ ...TH, textAlign: 'right' }}>Value</th>
-                {showSource && <th style={{ ...TH, textAlign: 'left' }}>Source</th>}
+                <th style={{ ...TH, textAlign: 'left' }}>Line item</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Reported</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Adjustments</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Adjusted</th>
+                <th style={{ ...TH, textAlign: 'left' }}>Source</th>
               </tr>
             </thead>
             <tbody>
               {t.rows.map((r, i) => {
                 const state = rowBlankState(r);
+                const citation = rowCitation(r);
                 return (
                   <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
                     <td style={{ padding: '9px 10px', color: INK }}>
                       {stringifyCell(cell(r, 'label', 'metric', 'name'))}
                     </td>
                     {state === 'gap' ? (
-                      <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+                      <td colSpan={3} style={{ padding: '9px 10px', textAlign: 'right' }}>
                         <span
                           style={{
                             display: 'inline-flex',
@@ -83,25 +86,26 @@ export function SectionTable({ content }: { content: string | null }) {
                         </span>
                       </td>
                     ) : state === 'pending' ? (
-                      <td style={{ padding: '9px 10px', textAlign: 'right', fontStyle: 'italic', color: MUTED }}>
+                      <td
+                        colSpan={3}
+                        style={{ padding: '9px 10px', textAlign: 'right', fontStyle: 'italic', color: MUTED }}
+                      >
                         Pending
                       </td>
                     ) : (
-                      <td
-                        style={{
-                          padding: '9px 10px',
-                          textAlign: 'right',
-                          fontFamily: "'DM Mono', 'Courier New', monospace",
-                          color: ACCENT,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {stringifyCell(cell(r, 'current_display', 'current', 'value')) || '—'}
-                      </td>
+                      <>
+                        <td style={valueStyle}>
+                          {stringifyCell(cell(r, 'reported_display', 'reported')) || '—'}
+                        </td>
+                        <td style={valueStyle}>
+                          {stringifyCell(cell(r, 'adjustments_display', 'adjustment_display', 'adjustments')) || '—'}
+                        </td>
+                        <td style={valueStyle}>
+                          {stringifyCell(cell(r, 'adjusted_display', 'adjusted')) || '—'}
+                        </td>
+                      </>
                     )}
-                    {showSource && (
-                      <td style={{ padding: '9px 10px', color: MUTED, fontSize: 11.5 }}>{rowCitation(r) ?? ''}</td>
-                    )}
+                    <td style={{ padding: '9px 10px', color: MUTED, fontSize: 11.5 }}>{citation ?? ''}</td>
                   </tr>
                 );
               })}

@@ -106,6 +106,74 @@ const PERFORMANCE = sec({
   }),
 });
 
+// ── 6C fixtures — new section content shapes ────────────────────────────────
+const COMMENTARY_QUOTE = sec({
+  section_code: 'management_commentary',
+  title: 'Management Commentary',
+  mode: 'quote',
+  display_order: 3,
+  content: JSON.stringify({
+    quote: 'We delivered strong results despite a challenging macro backdrop.',
+    attribution: { name: 'Jane Doe', title: 'CEO' },
+  }),
+});
+const COMMENTARY_OMITTED = sec({
+  section_code: 'management_commentary',
+  title: 'Management Commentary',
+  mode: 'quote',
+  display_order: 3,
+  content: null,
+});
+const RECONCILIATION = sec({
+  section_code: 'non_ifrs_reconciliation',
+  title: 'Non-IFRS Reconciliation',
+  mode: 'reconciliation',
+  display_order: 4,
+  content: JSON.stringify({
+    rows: [
+      {
+        label: 'Adjusted EBITDA',
+        reported_display: 'SAR 900M',
+        adjustments_display: 'SAR 50M',
+        adjusted_display: 'SAR 950M',
+        source_ref: 'p. 12',
+      },
+      {
+        label: 'One-off restructuring charge',
+        gap_reason: 'Not broken out in the filing',
+      },
+    ],
+  }),
+});
+const MDNA_NOT_DISCLOSED = sec({
+  section_code: 'mdna',
+  title: "MD&A",
+  mode: 'generate',
+  display_order: 5,
+  content: 'Not disclosed for this period.',
+});
+const TREND_DEFERRED = sec({
+  section_code: 'trend_series',
+  title: 'Trend',
+  mode: 'trend',
+  display_order: 6,
+  content: null,
+});
+const KPI_TABLE = sec({
+  section_code: 'operational_kpis',
+  title: 'Operational KPIs',
+  mode: 'kpi',
+  display_order: 7,
+  content: JSON.stringify({
+    rows: [
+      { label: 'Same-store sales growth', current_display: '4.2%' },
+      { label: 'Store count', row_status: 'pending' },
+      { label: 'Utilization rate', gap_reason: 'Not tracked for this sector' },
+      { label: 'Discontinued metric', row_status: 'omitted' },
+    ],
+  }),
+});
+
 const PRODUCED = { sections: [COVER, OVERVIEW, PERFORMANCE], cover_template_key: 'classic', locked: false };
 
 const renderPage = () =>
@@ -164,6 +232,65 @@ describe('SectionRenderer dispatch', () => {
     expect(screen.queryByText('▲')).not.toBeInTheDocument();
     expect(screen.queryByText('▼')).not.toBeInTheDocument();
   });
+
+  it('a pending section shows "awaiting generation" copy, not the generic empty-state text', () => {
+    const pending = sec({ content: null, status: 'pending' });
+    render(<SectionRenderer section={pending} />);
+    expect(screen.getByText('This section is awaiting generation.')).toBeInTheDocument();
+    expect(screen.queryByText('No data available for this section.')).not.toBeInTheDocument();
+  });
+
+  it('a genuinely empty section still shows the generic empty-state text', () => {
+    const empty = sec({ content: null, status: 'produced' });
+    render(<SectionRenderer section={empty} />);
+    expect(screen.getByText('No data available for this section.')).toBeInTheDocument();
+  });
+
+  it('a commentary quote renders the quote + attribution', () => {
+    render(<SectionRenderer section={COMMENTARY_QUOTE} />);
+    expect(screen.getByText(/We delivered strong results/)).toBeInTheDocument();
+    expect(screen.getByText(/Jane Doe, CEO/)).toBeInTheDocument();
+  });
+
+  it('an omitted commentary quote renders nothing — no placeholder', () => {
+    const { container } = render(<SectionRenderer section={COMMENTARY_OMITTED} />);
+    expect(screen.queryByText(/No data available/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/quote/i)).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('a reconciliation section renders reported → adjusted with citations, and a gap row shows its reason', () => {
+    render(<SectionRenderer section={RECONCILIATION} />);
+    expect(screen.getByText('Adjusted EBITDA')).toBeInTheDocument();
+    expect(screen.getByText('SAR 900M')).toBeInTheDocument();
+    expect(screen.getByText('SAR 50M')).toBeInTheDocument();
+    expect(screen.getByText('SAR 950M')).toBeInTheDocument();
+    expect(screen.getByText('p. 12')).toBeInTheDocument();
+    expect(screen.getByText('One-off restructuring charge')).toBeInTheDocument();
+    expect(screen.getByText('Not broken out in the filing')).toBeInTheDocument();
+  });
+
+  it('MD&A renders the "not disclosed" line verbatim, unembellished', () => {
+    render(<SectionRenderer section={MDNA_NOT_DISCLOSED} />);
+    expect(screen.getByText('Not disclosed for this period.')).toBeInTheDocument();
+  });
+
+  it('a deferred trend section renders no table at the leaf level (page-level filtering hides the whole section, tested at the route level)', () => {
+    render(<SectionRenderer section={TREND_DEFERRED} />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('pending / gap / omitted KPI rows render as three distinct states, not one dash', () => {
+    render(<SectionRenderer section={KPI_TABLE} />);
+    expect(screen.getByText('Same-store sales growth')).toBeInTheDocument();
+    expect(screen.getByText('4.2%')).toBeInTheDocument();
+    expect(screen.getByText('Store count')).toBeInTheDocument();
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText('Utilization rate')).toBeInTheDocument();
+    expect(screen.getByText('Not tracked for this sector')).toBeInTheDocument();
+    // The omitted row never renders at all.
+    expect(screen.queryByText('Discontinued metric')).not.toBeInTheDocument();
+  });
 });
 
 describe('earningsSectionState', () => {
@@ -171,8 +298,11 @@ describe('earningsSectionState', () => {
     const s = sec({ status: 'needs_input', content: null });
     expect(earningsSectionState(s)).toBe('needs_input');
   });
-  it('an empty produced section reports empty', () => {
-    expect(earningsSectionState(sec({ content: null, status: 'produced' }))).toBe('empty');
+  it('an empty produced section reports omitted', () => {
+    expect(earningsSectionState(sec({ content: null, status: 'produced' }))).toBe('omitted');
+  });
+  it('a pending section (awaiting a producer) reports pending, distinct from empty', () => {
+    expect(earningsSectionState(sec({ content: null, status: 'pending' }))).toBe('pending');
   });
   it('real prose reports produced', () => {
     expect(earningsSectionState(OVERVIEW)).toBe('produced');
@@ -271,5 +401,32 @@ describe('EarningsPreviewPage', () => {
     renderPage();
     expect(await screen.findByText('Preview your earnings report')).toBeInTheDocument();
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
+  });
+
+  it('an omitted-by-design quote section is absent from the rail, the card list, and Included sections, and never gates Generate', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, { ...COMMENTARY_OMITTED, included: true }],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    // No card heading, no rail entry for the omitted commentary section.
+    expect(screen.queryByText('Management Commentary')).not.toBeInTheDocument();
+    // Not stuck showing "Generate report" because of a section that can never produce.
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+  });
+
+  it('a deferred trend section is absent from the rail and card list — no empty table, no chart placeholder', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, { ...TREND_DEFERRED, included: true }],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Trend')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
   });
 });

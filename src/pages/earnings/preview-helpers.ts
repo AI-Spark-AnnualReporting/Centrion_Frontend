@@ -18,7 +18,7 @@ export function tryParseJson(s: string): unknown | undefined {
   }
 }
 
-function isRecord(v: unknown): v is LooseRow {
+export function isRecord(v: unknown): v is LooseRow {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 function asString(v: unknown): string | undefined {
@@ -73,8 +73,32 @@ export function isCoverMode(section: Pick<EarningsProducedSection, 'section_code
   return section.mode === 'cover' || /cover/i.test(section.section_code);
 }
 
+// Trend (S16) reuses this table path entirely — no dedicated component.
 export function isTableMode(section: Pick<EarningsProducedSection, 'mode'>): boolean {
-  return section.mode === 'table' || section.mode === 'kpi';
+  return section.mode === 'table' || section.mode === 'kpi' || section.mode === 'trend';
+}
+
+// Management commentary (S05) — a quote block: verbatim text + attribution.
+export function isQuoteMode(section: Pick<EarningsProducedSection, 'mode' | 'section_code'>): boolean {
+  return section.mode === 'quote' || /commentary/i.test(section.section_code);
+}
+
+// Non-IFRS reconciliation (S15) — reported → adjustments → adjusted, per line.
+export function isReconciliationMode(
+  section: Pick<EarningsProducedSection, 'mode' | 'section_code'>,
+): boolean {
+  return section.mode === 'reconciliation' || /reconciliation/i.test(section.section_code);
+}
+
+// Sections that vanish ENTIRELY (no card, no rail entry) when they produced
+// nothing by design. Only quote (S05) and trend (S16) get this treatment — the
+// spec's "doesn't appear" language is specific to these two. Reconciliation/KPI
+// still render their (possibly all-gap) table, and MD&A always renders its
+// prose (including a literal "not disclosed" line) rather than disappearing.
+export function isHiddenWhenOmitted(
+  section: Pick<EarningsProducedSection, 'mode' | 'section_code'>,
+): boolean {
+  return isQuoteMode(section) || section.mode === 'trend' || /trend/i.test(section.section_code);
 }
 
 export interface CoverValues {
@@ -104,16 +128,57 @@ export function readCoverValues(
 }
 
 // Honest render-state for an earnings produced section — derived from real content,
-// not a blind status flag. Table/kpi with zero rows counts as empty, not produced.
-export type EarningsRenderState = 'produced' | 'needs_input' | 'empty';
+// not a blind status flag. Table/kpi with zero real (non-omitted) rows counts as
+// omitted, not produced.
+export type EarningsRenderState = 'produced' | 'needs_input' | 'pending' | 'omitted';
 
-function hasRealContent(section: Pick<EarningsProducedSection, 'content' | 'mode'>): boolean {
+// ─── row-level three-state reading (D-12) ──────────────────────────────────────
+// The same "a blank must read as what it is" rule, at line-item granularity —
+// distinguishes a row still awaiting production, a specific gap (with a reason),
+// and a row the backend omitted entirely. Field names unconfirmed (Step 0); read
+// every plausible alias, never fabricate a status the payload doesn't carry.
+export type RowBlankState = 'value' | 'pending' | 'gap' | 'omitted';
+
+export function gapReason(row: LooseRow): string | null {
+  const v = cell(row, 'gap_reason', 'gap_message');
+  return typeof v === 'string' && v ? v : null;
+}
+
+export function rowBlankState(row: LooseRow): RowBlankState {
+  const status = cell(row, 'row_status', 'status');
+  if (status === 'omitted') return 'omitted';
+  if (status === 'pending') return 'pending';
+  if (status === 'gap' || gapReason(row) != null) return 'gap';
+  const hasValue =
+    stringifyCell(cell(row, 'current_display', 'current', 'value', 'reported_display', 'adjusted_display')) !== '';
+  return hasValue ? 'value' : 'pending';
+}
+
+// Shared per-row citation text ("<label> · <ref>") — used by SectionTable and
+// ReconciliationTable so the join logic lives in exactly one place.
+export function rowCitation(row: LooseRow): string | null {
+  const parts = [cell(row, 'source_label'), cell(row, 'source_ref', 'page')].filter(
+    (v): v is string => typeof v === 'string' && v !== '',
+  );
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function hasRealContent(
+  section: Pick<EarningsProducedSection, 'content' | 'mode' | 'section_code'>,
+): boolean {
   const c = section.content;
   if (c == null || c.trim() === '') return false;
   if (isTableMode(section)) {
     const parsed = tryParseJson(c);
     if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose
-    return normalizeTables(parsed).some((t) => t.rows.length > 0);
+    return normalizeTables(parsed).some((t) => t.rows.some((r) => rowBlankState(r) !== 'omitted'));
+  }
+  if (isQuoteMode(section)) {
+    const parsed = tryParseJson(c);
+    if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose
+    const q = isRecord(parsed) ? parsed : {};
+    const quote = cell(q, 'quote', 'text');
+    return typeof quote === 'string' && quote.trim() !== '';
   }
   return true;
 }
@@ -127,5 +192,6 @@ export function earningsSectionState(section: EarningsProducedSection): Earnings
   ) {
     return 'needs_input';
   }
-  return 'empty';
+  if (section.status === 'pending') return 'pending';
+  return 'omitted';
 }

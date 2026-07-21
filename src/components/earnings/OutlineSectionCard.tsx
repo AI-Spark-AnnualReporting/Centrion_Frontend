@@ -167,6 +167,7 @@ export function OutlineSectionCard({
           </span>
         ))}
         {isRequired && <span className="badge b-gy">REQUIRED</span>}
+        {section.requirement === 'recommended' && <span className="badge b-gn">RECOMMENDED</span>}
       </div>
     </div>
   );

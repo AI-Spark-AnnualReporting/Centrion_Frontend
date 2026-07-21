@@ -14,7 +14,14 @@ function StatusDot({ section }: { section: EarningsProducedSection }) {
     );
   }
   const state = earningsSectionState(section);
-  const color = state === 'produced' ? '#10B981' : state === 'needs_input' ? '#F59E0B' : '#C9CDE4';
+  const color =
+    state === 'produced'
+      ? '#10B981'
+      : state === 'needs_input'
+        ? '#F59E0B'
+        : state === 'pending'
+          ? ACCENT
+          : '#C9CDE4';
   return <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} aria-hidden />;
 }
 

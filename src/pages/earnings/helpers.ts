@@ -1,4 +1,4 @@
-import type { EarningsVariant, EarningsQuarter, ReportTone, EarningsFigure } from '@/types/earnings';
+import type { EarningsVariant, EarningsQuarter, ReportTone, EarningsFigure, SelectableSource } from '@/types/earnings';
 
 // Human-readable period label. Annual → "FY 2025"; Quarterly → "Q3 2025".
 export function formatPeriodLabel(
@@ -98,4 +98,57 @@ export function formatFigureValue(value: number | null, unit?: string | null): s
   if (value == null || !Number.isFinite(value)) return '—';
   const num = value.toLocaleString('en-US', { maximumFractionDigits: 3 });
   return unit ? `${num} ${unit}` : num;
+}
+
+// ─── Part 6A — comparatives ────────────────────────────────────────────────────
+export type DeltaTone = 'up' | 'down' | 'flat' | null;
+
+// A delta only exists when comparative_status is an explicit non-'none' value
+// AND change_pct is a real number. Absent/null status is treated the same as
+// 'none' (D-12: never render a delta the data doesn't carry).
+function hasDelta(change_pct: number | null, comparative_status: string | null): change_pct is number {
+  return comparative_status != null && comparative_status !== 'none' && typeof change_pct === 'number';
+}
+
+export function deltaTone(change_pct: number | null, comparative_status: string | null): DeltaTone {
+  if (!hasDelta(change_pct, comparative_status)) return null;
+  if (change_pct > 0) return 'up';
+  if (change_pct < 0) return 'down';
+  return 'flat';
+}
+
+// e.g. (0.114, 'yoy') → '+11.4%'; (null, 'none') → '—'; (-0.05, 'yoy') → '-5.0%'.
+export function formatDelta(change_pct: number | null, comparative_status: string | null): string {
+  if (!hasDelta(change_pct, comparative_status)) return '—';
+  const pct = change_pct * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+// ─── Part 6B — tagged uploads ───────────────────────────────────────────────────
+// A source's selection identity — whichever id is populated (official vs
+// narrative-track), falling back to its label if somehow neither is present.
+export function sourceKey(s: Pick<SelectableSource, 'report_id' | 'document_id' | 'label'>): string {
+  return s.report_id ?? s.document_id ?? s.label;
+}
+
+// Upload doc type → display label. 'aggregator' is never user-selected but can
+// still appear on an existing source, so it's mapped too.
+export function formatSourceType(type: string | null): string {
+  switch (type) {
+    case 'annual':
+      return 'Annual';
+    case 'interim':
+      return 'Interim';
+    case 'release':
+      return 'Press release';
+    case 'presentation':
+      return 'Presentation';
+    case 'transcript':
+      return 'Transcript';
+    case 'aggregator':
+      return 'Aggregator';
+    default:
+      return type ?? 'Document';
+  }
 }

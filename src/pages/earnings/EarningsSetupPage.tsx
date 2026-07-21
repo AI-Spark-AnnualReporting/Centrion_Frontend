@@ -69,6 +69,10 @@ export default function EarningsSetupPage() {
   const [quarter, setQuarter] = useState<EarningsQuarter | null>(null);
   const [tone, setTone] = useState<ReportTone>(DEFAULT_EARNINGS_TONE);
   const [sourceIds, setSourceIds] = useState<string[]>([]);
+  const [sourceSplit, setSourceSplit] = useState<{ source_report_ids: string[]; source_document_ids: string[] }>({
+    source_report_ids: [],
+    source_document_ids: [],
+  });
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +99,7 @@ export default function EarningsSetupPage() {
         fiscal_year: fiscalYear,
         quarter: variant === 'quarterly' ? quarter : null,
         tone,
-        source_report_ids: sourceIds,
+        ...sourceSplit,
       });
       navigate(`/earnings/${res.report_id}/extract`);
     } catch (err: unknown) {
@@ -149,7 +153,10 @@ export default function EarningsSetupPage() {
               fiscalYear={fiscalYear}
               quarter={quarter}
               selectedIds={sourceIds}
-              onSelectedIdsChange={setSourceIds}
+              onSelectedIdsChange={(ids, split) => {
+                setSourceIds(ids);
+                setSourceSplit(split);
+              }}
             />
           ) : (
             <div style={{ fontSize: 12, color: '#9BA3C4' }}>

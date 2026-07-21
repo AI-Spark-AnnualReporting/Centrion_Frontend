@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ const h = vi.hoisted(() => {
     navigateMock: vi.fn(),
     getSelectableSources: vi.fn(),
     createEarningsReport: vi.fn(),
-    uploadDocs: vi.fn(),
+    uploadEarningsSource: vi.fn(),
     MockApiError,
   };
 });
@@ -46,13 +46,13 @@ vi.mock('@/lib/api', async () => {
     earnings: {
       getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
       createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
+      uploadEarningsSource: (...a: unknown[]) => h.uploadEarningsSource(...a),
     },
-    documents: { upload: (...a: unknown[]) => h.uploadDocs(...a) },
     ApiError: h.MockApiError,
   };
 });
 
-const { navigateMock, getSelectableSources, createEarningsReport, MockApiError } = h;
+const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSource, MockApiError } = h;
 
 import { formatPeriodLabel, canContinue } from '../helpers';
 import { normalizeEarningsSourceItem } from '@/lib/api';
@@ -218,12 +218,17 @@ describe('EarningsSetupPage', () => {
     );
   });
 
-  it('a genuinely empty sources list shows the empty-state message', async () => {
+  it('a genuinely empty sources list shows both groups with their own empty hints', async () => {
     getSelectableSources.mockResolvedValueOnce({ sources: [] });
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    expect(await screen.findByText(/No sources found for this period/)).toBeInTheDocument();
+    expect(await screen.findByText('Official sources')).toBeInTheDocument();
+    expect(screen.getByText('Narrative & adjusted')).toBeInTheDocument();
+    expect(screen.getByText('No official filings found for this period.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No uploads yet — switch to "Upload new documents" to add one.'),
+    ).toBeInTheDocument();
   });
 
   it('Continue is disabled until type + period + tone + ≥1 source, then creates + navigates', async () => {
@@ -270,5 +275,111 @@ describe('EarningsSetupPage', () => {
     const link = screen.getByRole('button', { name: /Open existing draft/i });
     fireEvent.click(link);
     expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
+  });
+
+  it('uploading a tagged file calls uploadEarningsSource with the chosen type and shows it tagged, extracting', async () => {
+    uploadEarningsSource.mockResolvedValueOnce({
+      report_id: null,
+      document_id: 'doc-1',
+      label: 'Q4 2025 Earnings Call Transcript',
+      report_type: null,
+      period: 'FY 2025',
+      updated_at: '2026-01-01T00:00:00Z',
+      coverage: 'partial',
+      track: 'narrative_adjusted',
+      type: 'transcript',
+      extraction_status: 'extracting',
+    });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    await screen.findByText('Acme — FY24 Annual Report');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload new documents' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
+    const file = new File(['transcript text'], 'q4-call.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: /Upload & extract/ }));
+
+    await waitFor(() =>
+      expect(uploadEarningsSource).toHaveBeenCalledWith('co-1', 'FY-2025', file, 'transcript'),
+    );
+    const uploadedLabel = await screen.findByText(/Q4 2025 Earnings Call Transcript/);
+    const uploadedRow = uploadedLabel.closest('button[role="checkbox"]') as HTMLButtonElement;
+    expect(within(uploadedRow).getByText('Extracting…')).toBeInTheDocument();
+    // Never shown as a usable official source before it's ready (D-12) — no
+    // coverage badge on the narrative row, even though the coverage field
+    // carries a stray value from the mock.
+    expect(within(uploadedRow).queryByText('Full')).not.toBeInTheDocument();
+    expect(within(uploadedRow).queryByText('Partial')).not.toBeInTheDocument();
+  });
+
+  it('an extracting/failed narrative source cannot be selected', async () => {
+    getSelectableSources.mockResolvedValueOnce({
+      sources: [
+        {
+          report_id: null,
+          document_id: 'doc-1',
+          label: 'Investor Presentation Q4',
+          report_type: null,
+          period: 'FY 2025',
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'partial',
+          track: 'narrative_adjusted',
+          type: 'presentation',
+          extraction_status: 'extracting',
+        },
+      ],
+    });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    const chip = await screen.findByText('Investor Presentation Q4');
+    const checkbox = chip.closest('button[role="checkbox"]') as HTMLButtonElement;
+    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('Continue sends both source_report_ids and source_document_ids', async () => {
+    getSelectableSources.mockResolvedValueOnce({
+      sources: [
+        {
+          report_id: 'rep-1',
+          label: 'Acme — FY24 Annual Report',
+          report_type: 'annual',
+          period: 'FY 2024',
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'full',
+        },
+        {
+          report_id: null,
+          document_id: 'doc-1',
+          label: 'Investor Presentation Q4',
+          report_type: null,
+          period: 'FY 2025',
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'partial',
+          track: 'narrative_adjusted',
+          type: 'presentation',
+          extraction_status: 'ready',
+        },
+      ],
+    });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    fireEvent.click(await screen.findByText('Acme — FY24 Annual Report'));
+    fireEvent.click(await screen.findByText('Investor Presentation Q4'));
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await waitFor(() =>
+      expect(createEarningsReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_report_ids: ['rep-1'],
+          source_document_ids: ['doc-1'],
+        }),
+      ),
+    );
   });
 });

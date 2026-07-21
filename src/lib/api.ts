@@ -64,6 +64,9 @@ import type {
   SelectableSource,
   SelectableSourcesResponse,
   SourceCoverage,
+  SourceTrack,
+  SourceUploadType,
+  SourceExtractionStatus,
   EarningsFigure,
   EarningsFigureSource,
   EarningsFiguresResponse,
@@ -1382,9 +1385,41 @@ function earnRecord(v: unknown): Record<string, unknown> {
 // reconstructing a source from figure rows.
 export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | null {
   const o = earnRecord(raw);
-  const reportId = earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(o.source_id);
-  if (!reportId) return null;
-  const reportType = earnStr(o.report_type) ?? earnStr(o.type);
+
+  // The document-id pool is only populated from an EXPLICIT document field —
+  // never from the generic id fallbacks below, or a single generic id on the
+  // raw payload would populate both report_id and document_id at once and
+  // collapse the track distinction (Part 6B).
+  const explicitDocumentId = earnStr(o.document_id) ?? earnStr(o.doc_id);
+  const reportId = explicitDocumentId
+    ? null
+    : earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(o.source_id);
+  const documentId = explicitDocumentId;
+  if (!reportId && !documentId) return null;
+
+  const trackRaw = (earnStr(o.track) ?? "").toLowerCase();
+  const track: SourceTrack = trackRaw.includes("narrative")
+    ? "narrative_adjusted"
+    : trackRaw.includes("official")
+      ? "official"
+      : documentId
+        ? "narrative_adjusted"
+        : "official";
+
+  // report_type no longer falls back to a generic `o.type` — that field now
+  // has a distinct meaning (the upload doc type) since Part 6B.
+  const reportType = earnStr(o.report_type);
+  const type: SourceUploadType | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.type) ?? earnStr(o.document_type) ?? earnStr(o.upload_type)
+      : null;
+  // Not read from o.status for narrative sources — that field is already
+  // claimed as a coverage fallback below for official sources.
+  const extractionStatus: SourceExtractionStatus | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.extraction_status) ?? earnStr(o.processing_status)
+      : null;
+
   const period = earnStr(o.period) ?? earnStr(o.period_label);
   // Never a filename. If the backend omits a label, show report type + period
   // instead of falling back to a raw id.
@@ -1395,14 +1430,33 @@ export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | nu
     earnStr(o.name) ??
     composedLabel ??
     "Untitled report";
-  const covRaw = (earnStr(o.coverage) ?? earnStr(o.coverage_status) ?? earnStr(o.status) ?? "").toLowerCase();
+  // The o.status fallback only applies once extractionStatus hasn't already
+  // claimed it — otherwise an upload's extraction state could leak into
+  // coverage (e.g. coverage: "extracting").
+  const covRaw = (
+    earnStr(o.coverage) ??
+    earnStr(o.coverage_status) ??
+    (extractionStatus ? null : earnStr(o.status)) ??
+    ""
+  ).toLowerCase();
   const coverage: SourceCoverage = covRaw.includes("full")
     ? "full"
     : covRaw.includes("partial")
       ? "partial"
       : covRaw || "partial";
   const updatedAt = earnStr(o.updated_at) ?? earnStr(o.updatedAt);
-  return { report_id: reportId, label, report_type: reportType, period, updated_at: updatedAt, coverage };
+  return {
+    report_id: reportId,
+    document_id: documentId,
+    label,
+    report_type: reportType,
+    period,
+    updated_at: updatedAt,
+    coverage,
+    track,
+    type,
+    extraction_status: extractionStatus,
+  };
 }
 function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
   const rec = earnRecord(raw);
@@ -1457,6 +1511,10 @@ function normalizeEarningsFigure(raw: unknown): EarningsFigure | null {
     derivation: earnStr(o.derivation) ?? earnStr(o.formula),
     flag: earnStr(o.flag) ?? earnStr(o.status),
     edited: earnBool(o.edited) || earnBool(o.is_edited) || earnBool(o.manual),
+    prior_value: earnNum(o.prior_value),
+    prior_period: earnStr(o.prior_period),
+    change_pct: earnNum(o.change_pct),
+    comparative_status: earnStr(o.comparative_status),
   };
 }
 function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
@@ -1489,12 +1547,20 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
   const o = earnRecord(raw);
   const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id) ?? earnStr(o.key);
   if (!code) return null;
+  // Sector-excluded sections never reach the type — dropped exactly like a
+  // malformed row. Field name unconfirmed (Step 0); hedges both possibilities
+  // (backend omits them entirely, or returns them flagged).
+  const sectorExcluded =
+    earnBool(o.sector_excluded) || earnBool(o.excluded_by_sector) || earnBool(o.not_applicable_sector);
+  if (sectorExcluded) return null;
   const requirementRaw = (earnStr(o.requirement) ?? earnStr(o.requirement_level) ?? "").toLowerCase();
   const requirement: EarningsOutlineSection["requirement"] = requirementRaw.includes("required")
     ? "required"
-    : requirementRaw.includes("optional")
-      ? "optional"
-      : requirementRaw || "optional";
+    : requirementRaw.includes("recommend")
+      ? "recommended"
+      : requirementRaw.includes("optional")
+        ? "optional"
+        : requirementRaw || "optional";
   const displayOrder =
     earnNum(o.display_order) ?? earnNum(o.order) ?? earnNum(o.section_number) ?? 0;
   // A required section is always available/included; an optional's availability
@@ -1618,6 +1684,32 @@ export const earnings = {
       query: { company_id: companyId, period },
       signal,
     }).then(normalizeEarningsSources),
+
+  // Upload a narrative-track source document, tagged with its type. Scoped by
+  // company + period (mirrors getSelectableSources) since no report exists yet
+  // at Setup time — the whole flow is client-side state until the single
+  // createEarningsReport call below. Endpoint path/scoping unconfirmed (Step 0)
+  // — the highest-risk guess in this file; adjust if the live backend expects
+  // something else (e.g. a pending-draft id).
+  uploadEarningsSource: (
+    companyId: string,
+    period: string,
+    file: File,
+    type: string,
+  ): Promise<SelectableSource> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("type", type);
+    return request<unknown>(`/api/v1/earnings/sources/upload`, {
+      method: "POST",
+      query: { company_id: companyId, period },
+      form: fd,
+    }).then((raw) => {
+      const s = normalizeEarningsSourceItem(earnRecord(raw).source ?? raw);
+      if (!s) throw new Error("Upload earnings source: response was not a source.");
+      return s;
+    });
+  },
 
   // Create the draft earnings report. JSON body (NOT multipart) carrying the
   // chosen document ids. Returns { report_id }. A duplicate active period may

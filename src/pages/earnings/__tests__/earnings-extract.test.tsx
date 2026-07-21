@@ -35,7 +35,7 @@ vi.mock('@/lib/api', () => ({
   ApiError: h.MockApiError,
 }));
 
-import { isFlagged, formatFigureValue, confidenceTier, needsReviewCount } from '../helpers';
+import { isFlagged, formatFigureValue, confidenceTier, needsReviewCount, formatDelta, deltaTone } from '../helpers';
 import EarningsExtractPage from '../EarningsExtractPage';
 
 const fig = (over: Record<string, unknown>) => ({
@@ -54,6 +54,10 @@ const fig = (over: Record<string, unknown>) => ({
   derivation: null,
   flag: 'ok',
   edited: false,
+  prior_value: null,
+  prior_period: null,
+  change_pct: null,
+  comparative_status: 'none',
   ...over,
 });
 
@@ -150,6 +154,24 @@ describe('needsReviewCount', () => {
   it('all ok → 0', () => {
     const figs = [fig({ id: 'a', flag: 'ok' }), fig({ id: 'b', flag: 'ok' })];
     expect(needsReviewCount(figs as never)).toBe(0);
+  });
+});
+
+describe('formatDelta', () => {
+  it('(0.114, "yoy") → "+11.4%"', () => expect(formatDelta(0.114, 'yoy')).toBe('+11.4%'));
+  it('(null, "none") → "—"', () => expect(formatDelta(null, 'none')).toBe('—'));
+  it('(-0.05, "yoy") → "-5.0%" (single sign)', () => expect(formatDelta(-0.05, 'yoy')).toBe('-5.0%'));
+  it('null comparative_status (absent) → "—", never fabricated', () => {
+    expect(formatDelta(0.05, null)).toBe('—');
+  });
+});
+
+describe('deltaTone', () => {
+  it('up/down/flat/null cases', () => {
+    expect(deltaTone(0.114, 'yoy')).toBe('up');
+    expect(deltaTone(-0.05, 'yoy')).toBe('down');
+    expect(deltaTone(0, 'yoy')).toBe('flat');
+    expect(deltaTone(null, 'none')).toBe(null);
   });
 });
 
@@ -271,5 +293,34 @@ describe('EarningsExtractPage', () => {
       await screen.findByText('No figures found for this period from the selected sources.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('shows — for both Prior and Δ when comparative_status is none (Shell = no deltas)', async () => {
+    renderPage();
+    await screen.findByText('Revenue');
+    // All three fixture rows have comparative_status: 'none' — every Prior/Δ
+    // cell must show '—', never a computed number.
+    const dashCells = screen.getAllByText('—');
+    expect(dashCells.length).toBeGreaterThanOrEqual(6); // 3 rows × (Prior + Δ)
+  });
+
+  it('renders a real delta when comparative_status carries one', async () => {
+    h.getEarningsFigures.mockResolvedValueOnce({
+      figures: [
+        fig({
+          id: 'f-rev',
+          label: 'Revenue',
+          value: 4182.6,
+          prior_value: 3754.0,
+          change_pct: 0.114,
+          comparative_status: 'yoy',
+        }),
+      ],
+      sources: [source({})],
+    });
+    renderPage();
+    expect(await screen.findByText('Revenue')).toBeInTheDocument();
+    expect(screen.getByText('+11.4%')).toBeInTheDocument();
+    expect(screen.getByText(/3,754/)).toBeInTheDocument();
   });
 });

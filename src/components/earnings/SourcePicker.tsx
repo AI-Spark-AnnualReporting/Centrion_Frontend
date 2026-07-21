@@ -1,23 +1,41 @@
 import { useEffect, useState } from 'react';
-import { earnings, documents, ApiError } from '@/lib/api';
-import type { EarningsVariant, EarningsQuarter, SelectableSource } from '@/types/earnings';
-import { sourcesPeriodKey } from '@/pages/earnings/helpers';
+import { earnings, ApiError } from '@/lib/api';
+import type { EarningsVariant, EarningsQuarter, SelectableSource, SourceUploadType } from '@/types/earnings';
+import { sourcesPeriodKey, sourceKey, formatSourceType } from '@/pages/earnings/helpers';
 import { DocumentUploader } from './DocumentUploader';
 import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER } from './tokens';
 
 type Mode = 'existing' | 'upload';
 
-// Coverage → shared badge class + label.
+// 'aggregator' is a backend/system-only tag — never offered as a user-selectable upload option.
+const UPLOAD_TYPES: { value: SourceUploadType; label: string }[] = [
+  { value: 'annual', label: 'Annual' },
+  { value: 'interim', label: 'Interim' },
+  { value: 'release', label: 'Press release' },
+  { value: 'presentation', label: 'Presentation' },
+  { value: 'transcript', label: 'Transcript' },
+];
+
+// Coverage → shared badge class + label (official-track rows only).
 function coverageBadge(coverage: string): { cls: string; label: string } {
   if (coverage === 'full') return { cls: 'badge b-gn', label: 'Full' };
   if (coverage === 'partial') return { cls: 'badge b-am', label: 'Partial' };
   return { cls: 'badge b-gy', label: coverage || 'Unknown' };
 }
 
-// Block 4 — source selection. Default mode "Use existing reports" (multiselect
-// from GET /earnings/sources with Full/Partial badges). "Upload new" reuses the
-// shared uploader; uploaded docs are processed async and then appear here for
-// selection (the create endpoint consumes source_report_ids, not files).
+// Extraction state → shared badge class + label (narrative/upload rows only).
+// Never implies "ready" before the backend actually says so (D-12).
+function extractionBadge(status: string | null): { cls: string; label: string } {
+  if (status === 'ready') return { cls: 'badge b-gn', label: 'Ready' };
+  if (status === 'failed') return { cls: 'badge b-rd', label: 'Failed' };
+  return { cls: 'badge b-am', label: 'Extracting…' };
+}
+
+// Block 4 — source selection. Two tracks, always shown as distinct groups:
+// Official sources (DB reports, via GET /earnings/sources) and Narrative &
+// adjusted (uploads — tagged with a type, shown honestly by extraction state
+// until they're ready). "Upload new documents" reuses the shared uploader; the
+// create endpoint consumes both source_report_ids and source_document_ids.
 export function SourcePicker({
   companyId,
   variant,
@@ -31,7 +49,10 @@ export function SourcePicker({
   fiscalYear: number | null;
   quarter: EarningsQuarter | null;
   selectedIds: string[];
-  onSelectedIdsChange: (ids: string[]) => void;
+  onSelectedIdsChange: (
+    ids: string[],
+    split: { source_report_ids: string[]; source_document_ids: string[] },
+  ) => void;
 }) {
   const [mode, setMode] = useState<Mode>('existing');
   const [sources, setSources] = useState<SelectableSource[]>([]);
@@ -40,11 +61,22 @@ export function SourcePicker({
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadType, setUploadType] = useState<SourceUploadType>('annual');
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
 
   const periodReady = fiscalYear != null && (variant !== 'quarterly' || quarter != null);
   const periodKey = periodReady ? sourcesPeriodKey(variant, fiscalYear as number, quarter) : null;
+
+  // Emits the flat selection plus its official/narrative split, computed here
+  // since this is the one place that has both the ids and the loaded sources.
+  const emit = (ids: string[]) => {
+    const selected = sources.filter((s) => ids.includes(sourceKey(s)));
+    onSelectedIdsChange(ids, {
+      source_report_ids: selected.map((s) => s.report_id).filter((x): x is string => !!x),
+      source_document_ids: selected.map((s) => s.document_id).filter((x): x is string => !!x),
+    });
+  };
 
   // Load the selectable sources whenever the (complete) period changes.
   useEffect(() => {
@@ -76,31 +108,28 @@ export function SourcePicker({
 
   // Drop any selected ids that are no longer in the list (period changed, etc.).
   useEffect(() => {
-    const present = new Set(sources.map((s) => s.report_id));
+    const present = new Set(sources.map(sourceKey));
     const kept = selectedIds.filter((id) => present.has(id));
-    if (kept.length !== selectedIds.length) onSelectedIdsChange(kept);
+    if (kept.length !== selectedIds.length) emit(kept);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources]);
 
   const toggle = (id: string) => {
-    onSelectedIdsChange(
-      selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id],
-    );
+    emit(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
   };
 
   const handleUpload = () => {
-    if (!companyId || uploadFiles.length === 0 || uploading) return;
+    if (!companyId || !periodKey || uploadFiles.length === 0 || uploading) return;
     setUploading(true);
     setUploadNote(null);
-    documents
-      .upload(companyId, { files: uploadFiles })
-      .then(() => {
-        setUploadNote(
-          'Uploading & extracting… once processed, these documents appear under “Use existing reports” for selection.',
-        );
+    Promise.all(uploadFiles.map((f) => earnings.uploadEarningsSource(companyId, periodKey, f, uploadType)))
+      .then((newSources) => {
+        // Optimistic — the new sources appear immediately (in their reported
+        // extraction state) instead of waiting on a refetch.
+        setSources((prev) => [...prev, ...newSources]);
         setUploadFiles([]);
+        setUploadNote('Uploaded — shown under "Narrative & adjusted" while it extracts.');
         setMode('existing');
-        setRefreshKey((k) => k + 1); // re-fetch so freshly-ready docs show up
       })
       .catch((err: unknown) => {
         const msg =
@@ -113,6 +142,9 @@ export function SourcePicker({
       })
       .finally(() => setUploading(false));
   };
+
+  const officialSources = sources.filter((s) => s.track !== 'narrative_adjusted');
+  const narrativeSources = sources.filter((s) => s.track === 'narrative_adjusted');
 
   return (
     <div>
@@ -145,78 +177,62 @@ export function SourcePicker({
               Retry
             </button>
           </div>
-        ) : sources.length === 0 ? (
-          <EmptyHint>
-            No sources found for this period. Switch to “Upload new documents” to add some.
-          </EmptyHint>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {sources.map((s) => {
-              const checked = selectedIds.includes(s.report_id);
-              const badge = coverageBadge(s.coverage);
-              return (
-                <button
-                  key={s.report_id}
-                  type="button"
-                  role="checkbox"
-                  aria-checked={checked}
-                  onClick={() => toggle(s.report_id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    textAlign: 'left',
-                    padding: '11px 14px',
-                    borderRadius: 12,
-                    cursor: 'pointer',
-                    background: checked ? ACCENT_TINT : '#fff',
-                    border: `1.5px solid ${checked ? ACCENT : BORDER}`,
-                    transition: 'border-color .12s, background .12s',
-                  }}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 18,
-                      height: 18,
-                      flexShrink: 0,
-                      borderRadius: 5,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: checked ? ACCENT : '#fff',
-                      border: checked ? 'none' : '1.5px solid #C9CDE4',
-                    }}
-                  >
-                    {checked && (
-                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                        <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: INK,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {s.label}
-                    </div>
-                    {s.period && <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{s.period}</div>}
-                  </div>
-                  <span className={badge.cls}>{badge.label}</span>
-                </button>
-              );
-            })}
+          // Always both groups — never hidden, even when one side is empty —
+          // so the official/narrative distinction is always visible (D-19).
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <SourceGroup
+              title="Official sources"
+              subtitle="From filed reports"
+              sources={officialSources}
+              selectedIds={selectedIds}
+              onToggle={toggle}
+              emptyText="No official filings found for this period."
+            />
+            <SourceGroup
+              title="Narrative & adjusted"
+              subtitle="From your uploads"
+              sources={narrativeSources}
+              selectedIds={selectedIds}
+              onToggle={toggle}
+              emptyText='No uploads yet — switch to "Upload new documents" to add one.'
+            />
           </div>
         )
       ) : (
         <div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>
+              Document type
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              {UPLOAD_TYPES.map((t) => {
+                const selected = uploadType === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setUploadType(t.value)}
+                    style={{
+                      padding: '9px 16px',
+                      borderRadius: 999,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      cursor: 'pointer',
+                      transition: 'border-color .15s, background .15s, color .15s',
+                      background: selected ? ACCENT_TINT : '#fff',
+                      color: selected ? '#2B2B8F' : '#3A3F5C',
+                      border: `1.5px solid ${selected ? ACCENT : BORDER}`,
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <DocumentUploader files={uploadFiles} onFilesChange={setUploadFiles} disabled={uploading} />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
             <button
@@ -248,6 +264,130 @@ export function SourcePicker({
         </div>
       )}
     </div>
+  );
+}
+
+// One track's group: heading + rows, or an empty hint. Always rendered (even
+// when its own `sources` is empty) so the two-group split stays visible.
+function SourceGroup({
+  title,
+  subtitle,
+  sources,
+  selectedIds,
+  onToggle,
+  emptyText,
+}: {
+  title: string;
+  subtitle: string;
+  sources: SelectableSource[];
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  emptyText: string;
+}) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: INK }}>{title}</span>
+        <span style={{ fontSize: 11, color: FAINT }}>{subtitle}</span>
+      </div>
+      {sources.length === 0 ? (
+        <EmptyHint>{emptyText}</EmptyHint>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sources.map((s) => {
+            const key = sourceKey(s);
+            return (
+              <SourceRow
+                key={key}
+                source={s}
+                checked={selectedIds.includes(key)}
+                onToggle={() => onToggle(key)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One selectable row. Shared chrome (checkbox, label); trailing badge differs
+// by track. A narrative source still extracting/failed can't be selected yet
+// — never a usable source before it's actually ready (D-12).
+function SourceRow({
+  source: s,
+  checked,
+  onToggle,
+}: {
+  source: SelectableSource;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  const isNarrative = s.track === 'narrative_adjusted';
+  const disabled = isNarrative && (s.extraction_status === 'extracting' || s.extraction_status === 'failed');
+  const badge = isNarrative ? extractionBadge(s.extraction_status) : coverageBadge(s.coverage);
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onToggle}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        textAlign: 'left',
+        padding: '11px 14px',
+        borderRadius: 12,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        background: checked ? ACCENT_TINT : '#fff',
+        border: `1.5px solid ${checked ? ACCENT : BORDER}`,
+        transition: 'border-color .12s, background .12s',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 18,
+          height: 18,
+          flexShrink: 0,
+          borderRadius: 5,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: checked ? ACCENT : '#fff',
+          border: checked ? 'none' : '1.5px solid #C9CDE4',
+        }}
+      >
+        {checked && (
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: INK,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {s.label}
+        </div>
+        {isNarrative ? (
+          <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{formatSourceType(s.type)}</div>
+        ) : (
+          s.period && <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{s.period}</div>
+        )}
+      </div>
+      <span className={badge.cls}>{badge.label}</span>
+    </button>
   );
 }
 

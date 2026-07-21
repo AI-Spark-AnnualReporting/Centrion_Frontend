@@ -26,6 +26,17 @@ function apiErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+// "Available to add" is sorted by requirement tier (Required sections are
+// always force-included so never appear here, in practice this only orders
+// Recommended before Optional), then by the backend's display order. The
+// included/"Report sections" group keeps the user's own drag order — that's
+// the final assembled order and must never be re-sorted.
+const REQUIREMENT_RANK: Record<string, number> = { required: 0, recommended: 1, optional: 2 };
+function byTierThenOrder(a: EarningsOutlineSection, b: EarningsOutlineSection): number {
+  const rankOf = (s: EarningsOutlineSection) => REQUIREMENT_RANK[s.requirement] ?? 3;
+  return rankOf(a) - rankOf(b) || byDisplayOrder(a, b);
+}
+
 export default function EarningsOutlinePage() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
@@ -49,7 +60,7 @@ export default function EarningsOutlinePage() {
   // Split a response into the ordered included set + the available-to-add set.
   const applyResponse = useCallback((res: EarningsOutlineResponse) => {
     const inc = res.sections.filter((s) => s.included).sort(byDisplayOrder);
-    const av = res.sections.filter((s) => !s.included).sort(byDisplayOrder);
+    const av = res.sections.filter((s) => !s.included).sort(byTierThenOrder);
     setIncluded(inc);
     setAvailable(av);
   }, []);
@@ -82,29 +93,29 @@ export default function EarningsOutlinePage() {
 
   // ── Toggle inclusion ──────────────────────────────────────────────────────
   // Required sections and unavailable optionals can't move (their toggles are
-  // disabled), so this only ever moves an available optional in or out.
-  const toggleSection = useCallback((code: string) => {
-    setIncluded((inc) => {
-      const idx = inc.findIndex((s) => s.section_code === code);
-      if (idx !== -1) {
-        const section = inc[idx];
-        if (section.requirement === 'required') return inc; // required can't be excluded
-        setAvailable((av) => [...av, { ...section, included: false }]);
-        return inc.filter((s) => s.section_code !== code);
+  // disabled), so this only ever moves an available optional in or out. Reads
+  // the current included/available snapshots directly (no nested setState-
+  // inside-setState) so the move is unambiguous.
+  const toggleSection = useCallback(
+    (code: string) => {
+      const incIdx = included.findIndex((s) => s.section_code === code);
+      if (incIdx !== -1) {
+        const section = included[incIdx];
+        if (section.requirement === 'required') return; // required can't be excluded
+        setIncluded((inc) => inc.filter((s) => s.section_code !== code));
+        setAvailable((av) => [...av, { ...section, included: false }].sort(byTierThenOrder));
+        return;
       }
-      return inc;
-    });
-    setAvailable((av) => {
-      const idx = av.findIndex((s) => s.section_code === code);
-      if (idx !== -1) {
-        const section = av[idx];
-        if (!section.available) return av; // unavailable optional — not addable
+      const avIdx = available.findIndex((s) => s.section_code === code);
+      if (avIdx !== -1) {
+        const section = available[avIdx];
+        if (!section.available) return; // unavailable optional — not addable
+        setAvailable((av) => av.filter((s) => s.section_code !== code));
         setIncluded((inc) => [...inc, { ...section, included: true }]);
-        return av.filter((s) => s.section_code !== code);
       }
-      return av;
-    });
-  }, []);
+    },
+    [included, available],
+  );
 
   // ── Reorder within the included set ───────────────────────────────────────
   const moveIncluded = useCallback((from: number, to: number) => {

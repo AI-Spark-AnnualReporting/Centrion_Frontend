@@ -132,8 +132,8 @@ export default function EarningsExtractPage() {
         </>
       )}
 
-      {/* Footer */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18 }}>
+      {/* Footer — right padding keeps Continue clear of the fixed "Ask Centriyon" FAB (bottom:22px, right:22px, z-index:9998). */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18, paddingRight: 190 }}>
         <button className="btn bs" onClick={() => navigate('/earnings/setup')}>
           ← Back
         </button>
