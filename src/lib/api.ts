@@ -79,6 +79,18 @@ import type {
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
+  CandidatesResponse,
+  CertifyResponse,
+  CompliancePreview,
+  ComplianceRun,
+  CreateRunPayload,
+  CreateRunResponse,
+  EntityType,
+  Market,
+  ReportType,
+  ResolveGapResponse,
+} from "@/types/compliance";
+import type {
   AssignDepartmentsPayload,
   AssignDepartmentsResponse,
   Cycle,
@@ -873,6 +885,85 @@ export const compliance = {
 
   getRules: <T = unknown>(regulator?: string) =>
     request<T>("/api/v1/compliance/rules", { query: { regulator } }),
+};
+
+// ---------------------------------------------------------------------------
+// Compliance Validation (3-step wizard)
+// ---------------------------------------------------------------------------
+//
+// The company is derived from the report/cycle server-side and checked against
+// the JWT, so no company id is sent — a cross-company subject id returns 403.
+//
+// Note the subject pair: annual reports aren't rows in `reports`, they live
+// under a reporting cycle, so runs are keyed by (subject_type, subject_id).
+
+const COMPLIANCE_BASE = "/api/v1/compliance";
+
+// Guarantee the three list fields exist so a sparse response renders an empty
+// section instead of crashing the review screen.
+function normalizeRun(run: ComplianceRun): ComplianceRun {
+  return {
+    ...run,
+    frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
+    gaps: Array.isArray(run?.gaps) ? run.gaps : [],
+    rule_detail: Array.isArray(run?.rule_detail) ? run.rule_detail : [],
+  };
+}
+
+export const complianceValidation = {
+  // Reports/cycles eligible for validation. The endpoint hides the fan-out
+  // across two tables: annual comes back as subject_type "cycle", everything
+  // else as "report". Only approved subjects are returned, so an empty list is
+  // an expected state, not an error.
+  listCandidates: (companyId: string, reportType: ReportType) =>
+    request<CandidatesResponse>(`${COMPLIANCE_BASE}/candidates`, {
+      query: { company_id: companyId, report_type: reportType },
+    }).then((r) => (Array.isArray(r?.candidates) ? r.candidates : [])),
+
+  // Runs the same rule selection the real run uses, so the preview can never
+  // disagree with what executes.
+  preview: (query: {
+    report_type: ReportType;
+    entity_type: EntityType;
+    market?: Market;
+    period_end?: string;
+  }) =>
+    request<CompliancePreview>(`${COMPLIANCE_BASE}/preview`, { query }).then(
+      (p) => ({
+        ...p,
+        frameworks: Array.isArray(p?.frameworks) ? p.frameworks : [],
+      }),
+    ),
+
+  // Synchronous — evaluates every check and returns when finished (no LLM
+  // calls, ~30 checks). Returns a summary only; fetch the run for the detail.
+  createRun: (body: CreateRunPayload) =>
+    request<CreateRunResponse>(`${COMPLIANCE_BASE}/runs`, {
+      method: "POST",
+      body,
+    }),
+
+  // Scores are recomputed from stored results on each read, so this is always
+  // current after a resolve.
+  getRun: (runId: string) =>
+    request<ComplianceRun>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}`,
+    ).then(normalizeRun),
+
+  // `reason` is required and cannot be blank — the API 400s otherwise.
+  resolveGap: (resultId: string, reason: string) =>
+    request<ResolveGapResponse>(
+      `${COMPLIANCE_BASE}/results/${encodeURIComponent(resultId)}/resolve`,
+      { method: "POST", body: { reason } },
+    ),
+
+  // Throws ApiError with a 409 and a CertifyBlockedBody `detail` when HARD
+  // checks are still failing; the gate is re-checked server-side at this point.
+  certify: (runId: string) =>
+    request<CertifyResponse>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certify`,
+      { method: "POST" },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -2297,6 +2388,7 @@ export const api = {
   agents,
   esg,
   compliance,
+  complianceValidation,
   reports,
   chat,
   meetings,
