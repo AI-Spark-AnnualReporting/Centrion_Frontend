@@ -286,7 +286,7 @@ export default function EarningsPreviewPage() {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
+        <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Preview your earnings report
         </h1>
         <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 620 }}>

@@ -24,6 +24,7 @@ const h = vi.hoisted(() => {
     getSelectableSources: vi.fn(),
     createEarningsReport: vi.fn(),
     uploadEarningsSource: vi.fn(),
+    listEarningsReports: vi.fn(),
     MockApiError,
   };
 });
@@ -47,12 +48,13 @@ vi.mock('@/lib/api', async () => {
       getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
       createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
       uploadEarningsSource: (...a: unknown[]) => h.uploadEarningsSource(...a),
+      listEarningsReports: (...a: unknown[]) => h.listEarningsReports(...a),
     },
     ApiError: h.MockApiError,
   };
 });
 
-const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSource, MockApiError } = h;
+const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSource, listEarningsReports, MockApiError } = h;
 
 import { formatPeriodLabel, canContinue } from '../helpers';
 import { normalizeEarningsSourceItem } from '@/lib/api';
@@ -90,6 +92,7 @@ beforeEach(() => {
     ],
   });
   createEarningsReport.mockResolvedValue({ report_id: 'rep-99' });
+  listEarningsReports.mockResolvedValue({ reports: [] });
 });
 
 // ── Unit: pure helpers ──────────────────────────────────────────────────────
@@ -277,7 +280,7 @@ describe('EarningsSetupPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
   });
 
-  it('uploading a tagged file calls uploadEarningsSource with the chosen type and shows it tagged, extracting', async () => {
+  it('uploading a file calls uploadEarningsSource with the default type and shows it tagged, extracting', async () => {
     uploadEarningsSource.mockResolvedValueOnce({
       report_id: null,
       document_id: 'doc-1',
@@ -296,14 +299,14 @@ describe('EarningsSetupPage', () => {
     await screen.findByText('Acme — FY24 Annual Report');
 
     fireEvent.click(screen.getByRole('button', { name: 'Upload new documents' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Transcript' }));
     const file = new File(['transcript text'], 'q4-call.pdf', { type: 'application/pdf' });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: /Upload & extract/ }));
 
+    // No per-doc type picker anymore — a single default tag is sent for all files.
     await waitFor(() =>
-      expect(uploadEarningsSource).toHaveBeenCalledWith('co-1', 'FY-2025', file, 'transcript'),
+      expect(uploadEarningsSource).toHaveBeenCalledWith('co-1', 'FY-2025', file, 'annual'),
     );
     const uploadedLabel = await screen.findByText(/Q4 2025 Earnings Call Transcript/);
     const uploadedRow = uploadedLabel.closest('button[role="checkbox"]') as HTMLButtonElement;
@@ -381,5 +384,53 @@ describe('EarningsSetupPage', () => {
         }),
       ),
     );
+  });
+});
+
+// ── Dashboard: existing earnings report tiles ────────────────────────────────
+describe('EarningsSetupPage — earnings reports dashboard', () => {
+  const summary = (over: Record<string, unknown>) => ({
+    report_id: 'e-1',
+    title: 'Earnings Report',
+    variant: 'quarterly',
+    tone: 'formal_corporate',
+    period: 'Q4-2023',
+    period_display: 'Q4 2023',
+    status: 'draft',
+    action: 'Continue',
+    version: 'v1.0',
+    generated_at: '2026-07-16T10:00:00Z',
+    updated_at: '2026-07-16T10:00:00Z',
+    approved_at: null,
+    locked_at: null,
+    ...over,
+  });
+
+  it('loads and renders the report tiles from listEarningsReports', async () => {
+    listEarningsReports.mockResolvedValue({
+      reports: [
+        summary({ report_id: 'e-1', period_display: 'Q4 2023' }),
+        summary({ report_id: 'e-2', period_display: 'FY 2025', variant: 'annual', status: 'approved', action: 'View' }),
+      ],
+    });
+    renderSetup();
+    await waitFor(() => expect(listEarningsReports).toHaveBeenCalledWith('co-1'));
+    expect(await screen.findByText('Q4 2023')).toBeInTheDocument();
+    expect(screen.getByText('FY 2025')).toBeInTheDocument();
+    expect(screen.getByText('View →')).toBeInTheDocument();
+    expect(screen.getAllByText('Generated Jul 16, 2026').length).toBe(2);
+  });
+
+  it('clicking a tile navigates to that report\'s preview', async () => {
+    listEarningsReports.mockResolvedValue({ reports: [summary({ report_id: 'e-42' })] });
+    renderSetup();
+    fireEvent.click(await screen.findByText('Q4 2023'));
+    expect(navigateMock).toHaveBeenCalledWith('/earnings/e-42/preview');
+  });
+
+  it('shows an empty state when there are no reports', async () => {
+    listEarningsReports.mockResolvedValue({ reports: [] });
+    renderSetup();
+    expect(await screen.findByText(/No earnings reports yet/)).toBeInTheDocument();
   });
 });

@@ -90,7 +90,7 @@ export default function EarningsExtractPage() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
+        <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Extract earnings data
         </h1>
         <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
@@ -132,12 +132,12 @@ export default function EarningsExtractPage() {
         </>
       )}
 
-      {/* Footer — right padding keeps Continue clear of the fixed "Ask Centriyon" FAB (bottom:22px, right:22px, z-index:9998). */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18, paddingRight: 190 }}>
+      {/* Footer — Back (left) · review status (center) · Continue (right). */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18 }}>
         <button className="btn bs" onClick={() => navigate('/earnings/setup')}>
           ← Back
         </button>
-        <span style={{ fontSize: 12, color: MUTED }}>
+        <span style={{ fontSize: 12, color: reviewCount > 0 ? '#B4730B' : MUTED, fontWeight: reviewCount > 0 ? 700 : 400 }}>
           {reviewCount > 0
             ? `${reviewCount} figure${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} review`
             : 'All figures reviewed'}

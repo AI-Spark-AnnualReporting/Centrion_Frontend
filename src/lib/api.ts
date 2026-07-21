@@ -79,6 +79,8 @@ import type {
   EarningsProduceHandle,
   SaveEarningsSectionContentPayload,
   EarningsExportFormat,
+  EarningsReportSummary,
+  EarningsReportsListResponse,
 } from "@/types/earnings";
 import type {
   CreateMeetingBody,
@@ -1672,6 +1674,49 @@ function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
   return { run_id: runId, poll_url: pollUrl };
 }
 
+// ── Earnings dashboard — report list ──
+// Response untyped ({ reports: [...] }); field names come from the backend
+// dashboard contract and are read defensively.
+function normalizeEarningsReportSummary(raw: unknown): EarningsReportSummary | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.report_id) ?? earnStr(o.id);
+  if (!id) return null;
+  const period = earnStr(o.period) ?? earnStr(o.period_key) ?? "";
+  const status = (earnStr(o.status) ?? "draft").toLowerCase();
+  // Fallbacks keep the card sensible if the backend omits a field.
+  const periodDisplay = earnStr(o.period_display) ?? (period ? period.replace(/-/g, " ") : "—");
+  const finished = ["approved", "locked", "published", "complete", "completed"].includes(status);
+  return {
+    report_id: id,
+    title: earnStr(o.title) ?? "Earnings Report",
+    variant: earnStr(o.variant) ?? earnStr(o.report_variant) ?? "quarterly",
+    tone: earnStr(o.tone),
+    period,
+    period_display: periodDisplay,
+    status,
+    action: earnStr(o.action) ?? (finished ? "View" : "Continue"),
+    version: earnStr(o.version),
+    generated_at: earnStr(o.generated_at) ?? earnStr(o.created_at),
+    updated_at: earnStr(o.updated_at),
+    approved_at: earnStr(o.approved_at),
+    locked_at: earnStr(o.locked_at),
+  };
+}
+function normalizeEarningsReportsList(raw: unknown): EarningsReportsListResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.reports)
+      ? (rec.reports as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const reports = arr
+    .map(normalizeEarningsReportSummary)
+    .filter((r): r is EarningsReportSummary => r !== null);
+  return { reports };
+}
+
 export const earnings = {
   // The selectable "existing report" sources for a company + period. Period is a
   // string the backend keys on (format TBD — confirm live; we pass e.g. "FY-2025").
@@ -1721,6 +1766,23 @@ export const earnings = {
       method: "POST",
       body: payload,
     }).then(readCreatedEarningsReportId),
+
+  // ── Dashboard — list a company's earnings reports (newest first) ──
+  // company_id defaults to the caller's JWT company; pass it explicitly to match
+  // the create contract. Optional status filter + limit (1–200, default 50).
+  listEarningsReports: (
+    companyId?: string,
+    opts?: { status?: string; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<EarningsReportsListResponse> =>
+    request<unknown>(`/api/v1/earnings/reports`, {
+      query: {
+        ...(companyId ? { company_id: companyId } : {}),
+        ...(opts?.status ? { status: opts.status } : {}),
+        ...(opts?.limit != null ? { limit: opts.limit } : {}),
+      },
+      signal,
+    }).then(normalizeEarningsReportsList),
 
   // ── Part 2 — figures ──
   // The reviewed figure set for a report. Path takes report_id ONLY (no

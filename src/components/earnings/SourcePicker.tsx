@@ -7,14 +7,19 @@ import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER } from './tokens';
 
 type Mode = 'existing' | 'upload';
 
-// 'aggregator' is a backend/system-only tag — never offered as a user-selectable upload option.
-const UPLOAD_TYPES: { value: SourceUploadType; label: string }[] = [
-  { value: 'annual', label: 'Annual' },
-  { value: 'interim', label: 'Interim' },
-  { value: 'release', label: 'Press release' },
-  { value: 'presentation', label: 'Presentation' },
-  { value: 'transcript', label: 'Transcript' },
+// Guidance only — the kinds of documents that help build the report. Uploads are
+// no longer tagged per-type in the UI; a single default tag is sent for all files.
+const UPLOAD_TYPE_NOTES: { label: string; desc: string }[] = [
+  { label: 'Annual report', desc: 'Full-year financial statements & MD&A' },
+  { label: 'Interim', desc: 'Quarterly or half-year statements' },
+  { label: 'Press release', desc: 'Earnings press release' },
+  { label: 'Presentation', desc: 'Investor / earnings deck' },
+  { label: 'Transcript', desc: 'Earnings-call transcript' },
 ];
+
+// All uploads carry one tag now that the per-doc type picker is gone. 'annual' is
+// the backend-recognised default for financial source documents.
+const DEFAULT_UPLOAD_TYPE: SourceUploadType = 'annual';
 
 // Coverage → shared badge class + label (official-track rows only).
 function coverageBadge(coverage: string): { cls: string; label: string } {
@@ -61,7 +66,6 @@ export function SourcePicker({
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadType, setUploadType] = useState<SourceUploadType>('annual');
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
 
@@ -122,7 +126,7 @@ export function SourcePicker({
     if (!companyId || !periodKey || uploadFiles.length === 0 || uploading) return;
     setUploading(true);
     setUploadNote(null);
-    Promise.all(uploadFiles.map((f) => earnings.uploadEarningsSource(companyId, periodKey, f, uploadType)))
+    Promise.all(uploadFiles.map((f) => earnings.uploadEarningsSource(companyId, periodKey, f, DEFAULT_UPLOAD_TYPE)))
       .then((newSources) => {
         // Optimistic — the new sources appear immediately (in their reported
         // extraction state) instead of waiting on a refetch.
@@ -201,36 +205,27 @@ export function SourcePicker({
         )
       ) : (
         <div>
-          <div style={{ marginBottom: 12 }}>
+          {/* Guidance note — the document types that help build the report.
+              Uploads aren't tagged per-type anymore; add any of these together. */}
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: '#F7F8FC',
+              border: `1px solid ${BORDER}`,
+            }}
+          >
             <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>
-              Document type
+              Documents you can add — upload any of these together:
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {UPLOAD_TYPES.map((t) => {
-                const selected = uploadType === t.value;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setUploadType(t.value)}
-                    style={{
-                      padding: '9px 16px',
-                      borderRadius: 999,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: 'nowrap',
-                      cursor: 'pointer',
-                      transition: 'border-color .15s, background .15s, color .15s',
-                      background: selected ? ACCENT_TINT : '#fff',
-                      color: selected ? '#2B2B8F' : '#3A3F5C',
-                      border: `1.5px solid ${selected ? ACCENT : BORDER}`,
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {UPLOAD_TYPE_NOTES.map((t) => (
+                <div key={t.label} style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.4 }}>
+                  <span style={{ fontWeight: 700, color: INK, minWidth: 108, flexShrink: 0 }}>{t.label}</span>
+                  <span style={{ color: FAINT }}>{t.desc}</span>
+                </div>
+              ))}
             </div>
           </div>
           <DocumentUploader files={uploadFiles} onFilesChange={setUploadFiles} disabled={uploading} />

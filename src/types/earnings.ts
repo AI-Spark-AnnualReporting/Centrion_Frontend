@@ -233,3 +233,27 @@ export interface EarningsApproveBlocker {
   section_code: string | null;
   message: string;
 }
+
+// ─── Earnings dashboard — report list ─────────────────────────────────────────
+//   GET /api/v1/earnings/reports?company_id&status&limit  → { reports: [...] }
+// One flat object per dashboard card (newest first). Read defensively at the api
+// layer; the response body is untyped in OpenAPI.
+export interface EarningsReportSummary {
+  report_id: string;
+  title: string; // e.g. "Earnings Report"
+  variant: string; // 'quarterly' | 'annual'
+  tone: string | null;
+  period: string; // stored form, e.g. "Q4-2023"
+  period_display: string; // display form, e.g. "Q4 2023"
+  status: string; // 'draft' | 'pending_approval' | 'approved' | 'locked' | ...
+  action: string; // 'Continue' (draft/pending) | 'View' (finished)
+  version: string | null;
+  generated_at: string | null;
+  updated_at: string | null;
+  approved_at: string | null;
+  locked_at: string | null;
+}
+
+export interface EarningsReportsListResponse {
+  reports: EarningsReportSummary[];
+}

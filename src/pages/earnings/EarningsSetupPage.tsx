@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, ApiError } from '@/lib/api';
-import type { EarningsVariant, EarningsQuarter, ReportTone } from '@/types/earnings';
+import type { EarningsVariant, EarningsQuarter, ReportTone, EarningsReportSummary } from '@/types/earnings';
 import { canContinue } from './helpers';
 import { ReportTypeToggle } from '@/components/earnings/ReportTypeToggle';
 import { PeriodSelector } from '@/components/earnings/PeriodSelector';
 import { ToneSelector } from '@/components/earnings/ToneSelector';
 import { DEFAULT_EARNINGS_TONE } from '@/components/earnings/tones';
 import { SourcePicker } from '@/components/earnings/SourcePicker';
-import { INK, MUTED, ACCENT } from '@/components/earnings/tokens';
+import { EarningsReportCard } from '@/components/earnings/EarningsReportCard';
+import { Spinner } from '@/components/shared/Spinner';
+import { INK, MUTED, ACCENT, FAINT } from '@/components/earnings/tokens';
 
 // One numbered block in the setup form.
 function Block({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
@@ -74,9 +76,40 @@ export default function EarningsSetupPage() {
     source_document_ids: [],
   });
 
+  const [formOpen, setFormOpen] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ message: string; reportId: string | null } | null>(null);
+
+  // Dashboard: this company's existing earnings reports (newest first).
+  const [reports, setReports] = useState<EarningsReportSummary[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(true);
+  const [reportsError, setReportsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!companyId) {
+      setReports([]);
+      setReportsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReportsLoading(true);
+    setReportsError(null);
+    earnings
+      .listEarningsReports(companyId)
+      .then((res) => {
+        if (!cancelled) setReports(res.reports);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setReportsError(err instanceof Error ? err.message : 'Failed to load your reports.');
+      })
+      .finally(() => {
+        if (!cancelled) setReportsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   const ready =
     !!companyId &&
@@ -116,7 +149,7 @@ export default function EarningsSetupPage() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
+        <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Set up your earnings report
         </h1>
         <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
@@ -124,7 +157,57 @@ export default function EarningsSetupPage() {
         </p>
       </div>
 
-      <div className="card" style={{ padding: '20px 22px' }}>
+      <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
+        {/* Collapsible header — matches the Quarterly "Generate Report" card. */}
+        <div
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            cursor: 'pointer',
+            borderBottom: formOpen ? '1px solid #ECEEF8' : 'none',
+          }}
+          onClick={() => setFormOpen(!formOpen)}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                background: ACCENT,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" />
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>Generate Earnings Report</div>
+              <div style={{ fontSize: 11, color: MUTED }}>Configure parameters &amp; select source documents</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: ACCENT }}>AI Powered</span>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              style={{ transform: formOpen ? 'rotate(180deg)' : 'rotate(0)', transition: '.2s' }}
+            >
+              <path d="M3 5l4 4 4-4" stroke="#5A6080" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        </div>
+
+        {formOpen && (
+        <div style={{ padding: '18px 20px' }}>
         <Block n={1} title="Report type">
           <ReportTypeToggle value={variant} onChange={handleVariant} />
         </Block>
@@ -230,6 +313,43 @@ export default function EarningsSetupPage() {
             {submitting ? 'Creating…' : 'Continue'}
           </button>
         </div>
+        </div>
+        )}
+      </div>
+
+      {/* Your earnings reports — dashboard tiles. Each opens the preview screen. */}
+      <div style={{ marginTop: 28 }}>
+        <div style={{ marginBottom: 12 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your earnings reports</h2>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: MUTED }}>
+            Open an existing report to preview, edit, export, or approve it.
+          </p>
+        </div>
+
+        {reportsLoading ? (
+          <Spinner pad={40} />
+        ) : reportsError ? (
+          <div className="card" role="alert" style={{ padding: '14px 18px', fontSize: 12.5, color: '#DC2626' }}>
+            {reportsError}
+          </div>
+        ) : reports.length === 0 ? (
+          <div
+            className="card"
+            style={{ padding: '28px 20px', textAlign: 'center', fontSize: 12.5, color: FAINT }}
+          >
+            No earnings reports yet. Create one above to get started.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+            {reports.map((r) => (
+              <EarningsReportCard
+                key={r.report_id}
+                report={r}
+                onOpen={(rep) => navigate(`/earnings/${rep.report_id}/preview`)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -227,7 +227,7 @@ export default function EarningsOutlinePage() {
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
+        <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Arrange your report outline
         </h1>
         <p style={{ margin: 0, fontSize: 12, color: MUTED }}>
