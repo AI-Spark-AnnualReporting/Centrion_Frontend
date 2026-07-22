@@ -84,6 +84,17 @@ export interface AiLoadingScreenProps {
   // number, the internal simulation is disabled and this value (0–99 while
   // running) drives the bar + milestones. `done` then eases it to 100 → onDone.
   controlledProgress?: number;
+  // Indeterminate mode — for waits where the backend reports no measurable
+  // progress. Shows a travelling shimmer and the caller's own caption instead
+  // of a percentage, because a percentage nobody measured is a lie the user can
+  // see through on a long wait. Once `done`, the bar fills for real.
+  indeterminate?: boolean;
+  // Replaces the "N% complete" line. Use it to say something true about the
+  // wait (elapsed time, queued work) when there is no percentage to show.
+  progressCaption?: ReactNode;
+  // Overrides which milestone is active. Pass this when the caller knows the
+  // real stage; without it the stage is inferred from the progress bar.
+  activeMilestone?: number;
   // Extra content under the subtitle (e.g. backend stat tiles).
   headerExtra?: ReactNode;
   // Footer content (e.g. a "Run in background" button).
@@ -92,7 +103,8 @@ export interface AiLoadingScreenProps {
 
 export default function AiLoadingScreen({
   title, subtitle, milestones, done = false, doneTitle, doneSubtitle, onDone, tips = DEFAULT_TIPS,
-  controlledProgress, headerExtra, footer,
+  controlledProgress, indeterminate = false, progressCaption, activeMilestone,
+  headerExtra, footer,
 }: AiLoadingScreenProps) {
   const [progress, setProgress] = useState(0);
   const [currentTip, setCurrentTip] = useState(0);
@@ -163,7 +175,13 @@ export default function AiLoadingScreen({
 
   const allDone = progress >= 100;
   const stepWidth = 90 / Math.max(1, milestones.length);
-  const activeIdx = allDone ? milestones.length : Math.min(milestones.length - 1, Math.floor(progress / stepWidth));
+  const activeIdx = allDone
+    ? milestones.length
+    : activeMilestone != null
+      ? Math.min(milestones.length - 1, Math.max(0, activeMilestone))
+      : Math.min(milestones.length - 1, Math.floor(progress / stepWidth));
+  // Indeterminate ends the moment the work does — the finishing fill is real.
+  const shimmer = indeterminate && !allDone && !done;
 
   return (
     <div
@@ -225,17 +243,19 @@ export default function AiLoadingScreen({
           <div
             style={{
               height: '100%',
-              width: `${Math.round(progress)}%`,
+              width: shimmer ? '32%' : `${Math.round(progress)}%`,
               borderRadius: 9,
               background: 'linear-gradient(90deg,#4040C8,#5BC9E2,#4040C8)',
               backgroundSize: '200% auto',
-              animation: 'onb-sheen 1.6s linear infinite',
-              transition: 'width .25s ease',
+              animation: shimmer
+                ? 'compliance-indeterminate 1.5s ease-in-out infinite, onb-sheen 1.6s linear infinite'
+                : 'onb-sheen 1.6s linear infinite',
+              transition: shimmer ? undefined : 'width .25s ease',
             }}
           />
         </div>
         <div style={{ fontSize: 12, color: '#5A6080', fontFamily: "'DM Mono', monospace", fontWeight: 700, marginBottom: 24 }}>
-          {Math.round(progress)}% complete
+          {progressCaption != null && !allDone ? progressCaption : `${Math.round(progress)}% complete`}
         </div>
 
         <div

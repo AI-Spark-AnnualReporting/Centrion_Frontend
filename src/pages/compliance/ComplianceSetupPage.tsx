@@ -9,12 +9,15 @@ import { useAuth } from '@/context/AuthContext';
 import type {
   Candidate,
   CompliancePreview,
+  CreateRunPayload,
   EntityType,
   Market,
   ReportType,
   RunRejectedBody,
 } from '@/types/compliance';
 import { ComplianceStepper } from './ComplianceStepper';
+import { CertifiedGallery } from './CertifiedGallery';
+import type { ComplianceRunningState } from './ComplianceRunningPage';
 import { ComplianceHeader, DARK, MONO, MUTED, PRIMARY } from './compliance-ui';
 
 const REPORT_TYPES: { key: ReportType; label: string }[] = [
@@ -317,14 +320,10 @@ export default function ComplianceSetupPage() {
   // re-seeded (all applicable ON) whenever the preview or entity type changes.
   const [enabled, setEnabled] = useState<string[]>([]);
 
-  const [running, setRunning] = useState(false);
+  // Only covers the POST itself, which answers in under a second. The run's own
+  // 30–60s happens on the progress screen this hands off to.
+  const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState('');
-  const [summary, setSummary] = useState<{
-    runId: string;
-    checksRun: number;
-    readiness: number | null;
-    gate: string;
-  } | null>(null);
 
   // One endpoint per tab. It fans out across reports and reporting_cycles
   // server-side and hands back the (subject_type, subject_id) pair to pass
@@ -438,28 +437,34 @@ export default function ComplianceSetupPage() {
 
   // An empty `enabled_frameworks` means "no filter" to the API — every rule
   // runs, the opposite of switching them all off. So block the submit instead.
-  const canRun = selected != null && enabled.length > 0 && !running;
+  const canRun = selected != null && enabled.length > 0 && !starting;
 
+  // POST /runs is 202: it comes back before a single check has been made, with
+  // no scores in the body. All we get is the run id, so the only thing to do
+  // with it is hand it to the progress screen, which polls until it's done.
   const runValidation = () => {
     if (!canRun || !selected) return;
-    setRunning(true);
+    const payload: CreateRunPayload = {
+      subject_type: selected.subject_type,
+      subject_id: selected.subject_id,
+      report_type: reportType,
+      entity_type: entityType,
+      market,
+      enabled_frameworks: enabled,
+    };
+    setStarting(true);
     setRunError('');
-    setSummary(null);
     complianceValidation
-      .createRun({
-        subject_type: selected.subject_type,
-        subject_id: selected.subject_id,
-        report_type: reportType,
-        entity_type: entityType,
-        market,
-        enabled_frameworks: enabled,
-      })
+      .createRun(payload)
       .then((res) =>
-        setSummary({
-          runId: res.run_id,
-          checksRun: res.checks_run,
-          readiness: res.overall_readiness,
-          gate: res.publication_gate,
+        navigate(`/compliance/runs/${res.run_id}/running`, {
+          // The payload rides along so a failed run can be retried from the
+          // progress screen without re-picking everything here.
+          state: {
+            payload,
+            checksQueued: res.checks_queued,
+            subjectTitle: selected.title,
+          } satisfies ComplianceRunningState,
         }),
       )
       .catch((e) => {
@@ -470,8 +475,10 @@ export default function ComplianceSetupPage() {
           rejection ??
             (e instanceof Error ? e.message : 'Validation failed. Please try again.'),
         );
-      })
-      .finally(() => setRunning(false));
+        setStarting(false);
+      });
+    // No `finally` — on success this screen is unmounting into the progress
+    // screen, and clearing the flag first would flash the button back to idle.
   };
 
   const subjectNoun = reportType === 'annual' ? 'reporting cycle' : 'report';
@@ -589,7 +596,12 @@ export default function ComplianceSetupPage() {
                   fontFamily: MONO,
                 }}
               >
-                {enabled.length} frameworks · {selectedChecks} checks will run
+                {/* A small count is a correct answer, not a warning: the rules
+                    that apply depend on the entity and the report type — a
+                    quarterly corporate on Main really is a single check. Stated
+                    plainly, with no "only" and no amber. */}
+                {enabled.length} {enabled.length === 1 ? 'framework' : 'frameworks'} ·{' '}
+                {selectedChecks} {selectedChecks === 1 ? 'check' : 'checks'} will run
                 {enabled.length !== applicable.size && (
                   <span style={{ opacity: 0.7 }}> (of {applicable.size} applicable)</span>
                 )}
@@ -600,7 +612,11 @@ export default function ComplianceSetupPage() {
       </Card>
 
       {/* ── Card 3 · Validate ───────────────────────────────────────────── */}
-      <Card step={3} title="Validate" caption="Run every enabled check against the report's evidence.">
+      <Card
+        step={3}
+        title="Validate"
+        caption="Every enabled check is read against what the report actually says. This takes 30–60 seconds — we'll show you the progress."
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button
             type="button"
@@ -614,7 +630,7 @@ export default function ComplianceSetupPage() {
               cursor: canRun ? 'pointer' : 'not-allowed',
             }}
           >
-            {running ? 'Running…' : '▶ Run validation'}
+            {starting ? 'Starting…' : '▶ Run validation'}
           </button>
           {!selected && (
             <span style={{ fontSize: 11.5, color: MUTED }}>
@@ -627,30 +643,6 @@ export default function ComplianceSetupPage() {
             </span>
           )}
         </div>
-
-        {/* Indeterminate — POST /runs is synchronous and reports no percentage;
-            the bar just signals work in flight. */}
-        {running && (
-          <div
-            style={{
-              marginTop: 14,
-              height: 6,
-              borderRadius: 3,
-              background: '#ECEEF8',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: '38%',
-                height: '100%',
-                borderRadius: 3,
-                background: PRIMARY,
-                animation: 'compliance-indeterminate 1.1s ease-in-out infinite',
-              }}
-            />
-          </div>
-        )}
 
         {/* The 400 reason is a full sentence written for a human, so it gets a
             banner rather than the one-line treatment an unexpected error gets. */}
@@ -670,32 +662,11 @@ export default function ComplianceSetupPage() {
             {runError}
           </div>
         )}
-
-        {summary && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: DARK }}>
-              Done · {summary.checksRun} {summary.checksRun === 1 ? 'check' : 'checks'} run
-              {summary.readiness != null && ` · readiness ${summary.readiness}/100`}
-            </div>
-            {summary.readiness == null && (
-              <div style={{ fontSize: 11.5, color: MUTED, marginTop: 5, lineHeight: 1.6 }}>
-                Nothing was scoreable — every rule is awaiting a data source. See the breakdown for
-                which checks are pending.
-              </div>
-            )}
-            <div style={{ marginTop: 14 }}>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={() => navigate(`/compliance/runs/${summary.runId}`)}
-                style={{ fontSize: 13, padding: '10px 20px' }}
-              >
-                See results &amp; gaps →
-              </button>
-            </div>
-          </div>
-        )}
       </Card>
+
+      {/* Past sign-offs for whichever report type is selected above. Renders
+          nothing until there is at least one. */}
+      <CertifiedGallery companyId={companyId} reportType={reportType} />
     </div>
   );
 }

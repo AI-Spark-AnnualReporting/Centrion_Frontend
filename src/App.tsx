@@ -43,6 +43,9 @@ const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
 const ComplianceSetupPage = lazy(
   () => import("./pages/compliance/ComplianceSetupPage"),
 );
+const ComplianceRunningPage = lazy(
+  () => import("./pages/compliance/ComplianceRunningPage"),
+);
 const ComplianceReviewPage = lazy(
   () => import("./pages/compliance/ComplianceReviewPage"),
 );
@@ -76,6 +79,12 @@ const App = () => (
           <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
           <Route path="/kpi" element={<KPIPage />} />
           <Route path="/compliance" element={<ComplianceSetupPage />} />
+          {/* The 30–60s wait after POST /runs gets its own screen so the run is
+              deep-linkable and a refresh resumes polling instead of losing it. */}
+          <Route
+            path="/compliance/runs/:runId/running"
+            element={<ComplianceRunningPage />}
+          />
           <Route
             path="/compliance/runs/:runId"
             element={<ComplianceReviewPage />}

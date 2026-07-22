@@ -22,12 +22,37 @@ export type Gate = "HARD" | "SOFT" | "WATCH";
 // The API returns these lower-case.
 export type Severity = "high" | "medium" | "low";
 
-// `no_data` is the one to design for — today it's the majority. It means no
-// evidence source is wired for that rule yet, NOT that the company failed.
-// Both `na` and `no_data` are excluded from scoring and never block publication.
+// All four occur. The renderer must branch on each explicitly — there is no
+// safe default, because the two grey states mean different things:
+//   pass    — the report evidences the rule.
+//   fail    — it doesn't, or only partially (see `Gap.finding`, which then
+//             starts "Partially evidenced." and still carries evidence.quote).
+//   na      — the rule doesn't govern this company.
+//   no_data — answered by a filing or register outside this report. A small
+//             minority. Grey, never red, and excluded from scoring.
 export type CheckStatus = "pass" | "fail" | "na" | "no_data";
 
 export type PublicationGate = "open" | "blocked";
+
+// Lifecycle of a run. The checker reads the whole report through an LLM, so a
+// run is asynchronous: POST /runs answers `running` in under a second and the
+// work lands 30–60s later.
+//   done  — terminal, results are populated.
+//   error — terminal, the report couldn't be read. It will NEVER become done.
+// Anything else (incl. an unrecognised value) is treated as still in flight.
+export type RunStatus = "running" | "done" | "error";
+
+export function isTerminalStatus(status: string | undefined): boolean {
+  return status === "done" || status === "error";
+}
+
+export function isRunFailed(status: string | undefined): boolean {
+  return status === "error";
+}
+
+export function isRunDone(status: string | undefined): boolean {
+  return status === "done";
+}
 
 // ---------------------------------------------------------------------------
 // GET /preview
@@ -61,22 +86,22 @@ export interface CreateRunPayload {
   enabled_frameworks?: string[];
 }
 
-// POST /runs returns a summary only, not the full results. Fetch the run to
-// render the review screen.
+// POST /runs is 202 Accepted. It returns before a single check has been made —
+// there are no scores in this body and there is no point looking for them. Keep
+// the run_id, send the user to the progress screen and poll GET /runs/{run_id}.
 export interface CreateRunResponse {
   run_id: string;
-  checks_run: number;
-  overall_readiness: number | null;
-  publication_gate: PublicationGate;
+  status: RunStatus;
+  checks_queued: number;
 }
 
 // ---------------------------------------------------------------------------
 // GET /runs/{run_id}
 // ---------------------------------------------------------------------------
 
-// `score` is null when every rule in the framework was no_data — there was
-// nothing to score. Render "Awaiting data", not 0%. `total` counts only the
-// scoreable rules (pass + fail); `no_data` is the awaiting-data count.
+// `score` is null when nothing in the framework was scoreable. Render text, not
+// 0%. `total` counts only the scoreable rules (pass + fail); `no_data` counts
+// the rules answered outside this report.
 export interface FrameworkScore {
   regulator: string;
   score: number | null;
@@ -85,15 +110,35 @@ export interface FrameworkScore {
   no_data: number;
 }
 
-export interface GapEvidence {
-  expected?: string;
+// What the checker read, and what it concluded from it. Every key is OPTIONAL
+// and absent — not null — when it doesn't apply: a `no_data` result carries only
+// `evidence_source`. Always reach through with `evidence?.quote`; never
+// destructure assuming a key is there.
+export interface CheckEvidence {
+  // The sentence from the report the verdict rests on. The single most useful
+  // thing here — show it verbatim as a pull-quote.
+  quote?: string;
+  // Which section of the report the quote came from, e.g. "governance_report".
+  section_code?: string;
+  // The checker's reasoning over the quote.
+  proof?: string;
+  // The checker's own word for the outcome, e.g. "satisfied". `status` is the
+  // authority on pass/fail — this is descriptive colour only.
+  verdict?: string;
+  // 0–1. Display only, as a tooltip. NEVER gate on it: `status` already encodes
+  // the threshold, so re-applying one here would double-count it.
+  confidence?: number;
+  // Plain-English phrases now ("dividend policy"), not indicator codes. Render
+  // them straight to screen — there is nothing left to map through a lookup.
   found?: string[];
-  // The most useful field for the UI — it names exactly what was absent.
   missing?: string[];
   evidence_source?: string;
 }
 
 // Only `status === "fail"` rows appear here. This is the action list.
+// A partially-evidenced rule is a fail: `finding` opens with "Partially
+// evidenced.", `evidence.quote` is still populated (the author wrote something,
+// it just isn't enough), and it blocks a HARD gate like any other failure.
 export interface Gap {
   result_id: string;
   rule_id: string;
@@ -101,17 +146,18 @@ export interface Gap {
   severity: Severity;
   gate: Gate;
   finding: string;
-  evidence: GapEvidence | null;
+  evidence: CheckEvidence | null;
   resolved: boolean;
 }
 
 // Per-rule row in the expandable table. Note there is no description, logic or
-// parameter — only the evidence source is exposed.
+// parameter. `evidence` is optional throughout — treat its absence as normal.
 export interface RuleTrace {
   rule_id: string;
   status: CheckStatus;
   gate: Gate;
   evidence_source?: string;
+  evidence?: CheckEvidence | null;
 }
 
 // Full per-regulator breakdown, including no_data rows.
@@ -120,20 +166,35 @@ export interface RuleDetailGroup {
   rules: RuleTrace[];
 }
 
+// The same shape comes back at every stage of the run. While `status` is
+// "running" the result fields are empty placeholders: `overall_readiness` and
+// `publication_gate` are null and the three lists are []. That null gate is why
+// every gate banner must test for null explicitly — falling through to an
+// `=== "blocked" ? … : …` would render a green "Ready to publish" over a run
+// that hasn't been checked yet.
 export interface ComplianceRun {
   run_id: string;
   subject_type: SubjectType;
   subject_id: string;
   report_type: ReportType;
-  status: string;
+  status: RunStatus;
   certified: boolean;
-  // Plain average of the non-null framework scores, or null if nothing was
-  // scoreable at all.
+  // Plain average of the non-null framework scores. Null while running, and
+  // still null afterwards if nothing was scoreable at all.
   overall_readiness: number | null;
-  publication_gate: PublicationGate;
+  publication_gate: PublicationGate | null;
   frameworks: FrameworkScore[];
   gaps: Gap[];
   rule_detail: RuleDetailGroup[];
+  // Progress hints. `checks_queued` mirrors the POST response. `checks_completed`
+  // is optional — if the backend starts reporting it the progress screen shows a
+  // true percentage; without it the screen stays honestly indeterminate rather
+  // than animating a number nobody measured.
+  checks_queued?: number;
+  checks_completed?: number;
+  // Present on `status === "error"` runs when the backend explains itself.
+  error?: string;
+  error_message?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,16 +214,18 @@ export interface CertifyResponse {
   certified_by: string;
 }
 
-// 409 body from certify. Two distinct cases, told apart by whether
-// `blocking_rule_ids` is populated:
-//   A — HARD checks are failing: there are gap rows to point the user at.
-//   B — nothing was verified at all (every rule returned no_data), so there is
-//       nothing to fix and no rows to highlight; `reason` explains it.
-// The gate is re-checked server-side, so A can fire even when cached state
-// said `open`.
+// 409 body from certify. Three distinct cases:
+//   A — `status === "running"`: the run hasn't finished. Not a failure and not
+//       the user's doing — keep polling, then let them certify.
+//   B — HARD checks are failing: `blocking_rule_ids` names gap rows to point
+//       the user at. The gate is re-checked server-side, so this can fire even
+//       when the state we loaded said `open`.
+//   C — nothing was verified at all, so there is nothing to fix and no rows to
+//       highlight; `reason` explains it.
 export interface CertifyBlockedBody {
   message: string;
   reason?: string;
+  status?: string;
   blocking_rule_ids: string[];
 }
 
@@ -194,4 +257,28 @@ export interface Candidate {
 
 export interface CandidatesResponse {
   candidates: Candidate[];
+}
+
+// ---------------------------------------------------------------------------
+// GET /certified
+// ---------------------------------------------------------------------------
+
+// One entry per certified run, newest first. Self-contained by design — it
+// carries the subject's own title and period, so the gallery needs no second
+// lookup against /candidates to label a card.
+export interface CertifiedRun {
+  run_id: string;
+  subject_type: SubjectType;
+  subject_id: string;
+  report_type: ReportType;
+  title: string;
+  period: string;
+  entity_type: EntityType;
+  market?: Market;
+  // The score at the moment of sign-off — a fixed historical fact, not the
+  // current state of the report.
+  overall_readiness: number | null;
+  publication_gate: PublicationGate | null;
+  certified_by: string;
+  certified_at: string;
 }

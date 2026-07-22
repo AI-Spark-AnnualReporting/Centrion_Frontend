@@ -1,7 +1,7 @@
 // Screen 3 of the Compliance Validation wizard — the publication gate.
 // Blocked while HARD checks fail; otherwise the run can be certified.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { ApiError, complianceValidation } from '@/lib/api';
@@ -12,6 +12,8 @@ import {
   ComplianceNotice,
   DARK,
   GREEN,
+  isRunDone,
+  isTerminalStatus,
   MONO,
   MUTED,
   RED,
@@ -45,6 +47,16 @@ export default function ComplianceGatePage() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
   const [certifiedBy, setCertifiedBy] = useState('');
 
+  // Nothing on this screen is meaningful until the run finishes — the gate is
+  // null and the gaps list is empty for the whole 30–60s it takes. Send an
+  // unfinished run back to the screen that waits for it.
+  const inFlight = run != null && !isTerminalStatus(run.status);
+  useEffect(() => {
+    if (inFlight && runId) {
+      navigate(`/compliance/runs/${runId}/running`, { replace: true });
+    }
+  }, [inFlight, runId, navigate]);
+
   const certify = () => {
     if (!run) return;
     setCertifying(true);
@@ -59,15 +71,26 @@ export default function ComplianceGatePage() {
       .catch((e) => {
         const body = readBlockedBody(e);
         if (body) {
+          // Case A — the run hasn't finished. Not a failure and not the user's
+          // doing; the gate simply isn't decided yet. Reload so the screen picks
+          // up the real state (and bounces to the progress screen if it's still
+          // going) rather than leaving a red error under the button.
+          if (body.status === 'running') {
+            setCertifyError(
+              'This validation is still running — it needs to finish before the report can be certified.',
+            );
+            reload();
+            return;
+          }
           if (body.blocking_rule_ids.length > 0) {
-            // Case A — real HARD failures. The gate is re-checked server-side,
+            // Case B — real HARD failures. The gate is re-checked server-side,
             // so this can fire even when the state we loaded said `open`;
             // refresh so the screen stops claiming the report is ready.
             setBlockedBy(body.blocking_rule_ids);
             setCertifyError(body.message);
             reload();
           } else {
-            // Case B — nothing was verified. There is nothing to fix and no
+            // Case C — nothing was verified. There is nothing to fix and no
             // rows to point at, so show the reason and no rule list.
             setCertifyError(body.reason || body.message);
           }
@@ -81,18 +104,24 @@ export default function ComplianceGatePage() {
   // Only unresolved HARD gaps hold the gate shut.
   const blockers = (run?.gaps ?? []).filter((g) => g.gate === 'HARD' && !g.resolved);
   const blocked = run?.publication_gate === 'blocked';
-  // A null readiness means every applicable rule returned no_data — nothing was
-  // actually verified, so certify would 409 (Case B). Predict it here rather
-  // than letting the user click into an error.
+  // Null is its own case, not a synonym for `open`: the gate wasn't decided.
+  // Certifying against an undecided gate is exactly what the 409 exists to stop.
+  const undecided = run != null && run.publication_gate == null;
+  // Null readiness means nothing was actually verified, so certify would 409.
+  // Predict it here rather than letting the user click into an error.
   const nothingVerified = run != null && run.overall_readiness == null;
-  const canCertify = run != null && !blocked && !nothingVerified;
+  // Certify 409s on a run that isn't finished, so the button stays disabled
+  // until the run reports `done` — the poll screen normally gets there first,
+  // but this is the guard that makes it true regardless of how the user arrived.
+  const runDone = isRunDone(run?.status);
+  const canCertify = run != null && runDone && !blocked && !undecided && !nothingVerified;
 
   return (
     <div>
       <ComplianceHeader />
       <ComplianceStepper activeStep={3} />
 
-      {loading ? (
+      {loading || inFlight ? (
         <Spinner pad={48} />
       ) : error || !run ? (
         <ComplianceNotice
@@ -161,26 +190,29 @@ export default function ComplianceGatePage() {
             </div>
           ) : (
             <div className="card" style={{ padding: 22, marginBottom: 14 }}>
+              {/* Three outcomes reach this branch, and only one of them is
+                  "green". `undecided` in particular must not read as ready —
+                  a null gate means no verdict, not a passing one. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span
-                  style={{ fontSize: 20, color: nothingVerified ? MUTED : GREEN, lineHeight: 1 }}
-                >
-                  {nothingVerified ? '◦' : '✓'}
+                <span style={{ fontSize: 20, color: canCertify ? GREEN : MUTED, lineHeight: 1 }}>
+                  {canCertify ? '✓' : '◦'}
                 </span>
                 <span
-                  style={{
-                    fontSize: 15,
-                    fontWeight: 800,
-                    color: nothingVerified ? MUTED : GREEN,
-                  }}
+                  style={{ fontSize: 15, fontWeight: 800, color: canCertify ? GREEN : MUTED }}
                 >
-                  {nothingVerified ? 'Nothing to certify' : 'Ready to publish'}
+                  {canCertify
+                    ? 'Ready to publish'
+                    : undecided
+                      ? 'No publication verdict'
+                      : 'Nothing to certify'}
                 </span>
               </div>
               <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#5A6080', lineHeight: 1.65 }}>
-                {nothingVerified
-                  ? 'Every applicable rule returned “no data” — no evidence source is wired for them yet, so nothing was actually verified. There is nothing to fix here; this will resolve as extractors are added.'
-                  : 'No hard-gate check is failing. Certifying records this report as validated against its enabled frameworks.'}
+                {canCertify
+                  ? 'No hard-gate check is failing. Certifying records this report as validated against its enabled frameworks.'
+                  : undecided
+                    ? 'This run didn’t reach a publication verdict, so there is no gate to certify against. Run the validation again to get one.'
+                    : 'Nothing in this run was scoreable — every applicable rule was either outside this company’s scope or answered by a filing or register outside this report. There is nothing to certify against.'}
               </p>
 
               {run.certified ? (
@@ -216,9 +248,13 @@ export default function ComplianceGatePage() {
                   >
                     {certifying
                       ? 'Certifying…'
-                      : nothingVerified
-                        ? 'Nothing to certify — awaiting data'
-                        : 'Certify'}
+                      : !runDone
+                        ? 'Waiting for the validation to finish'
+                        : undecided
+                          ? 'No verdict to certify'
+                          : nothingVerified
+                            ? 'Nothing to certify'
+                            : 'Certify'}
                   </button>
                 </div>
               )}

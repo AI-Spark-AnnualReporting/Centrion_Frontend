@@ -1,7 +1,7 @@
 // Confirms marking a hard-gate gap resolved. Modal shell mirrors
 // components/quarterly/ApproveConfirmDialog (overlay + centred card + Escape).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Gap } from '@/types/compliance';
 import { DARK, MONO, MUTED, PRIMARY } from './compliance-ui';
 
@@ -19,6 +19,17 @@ export function ResolveGapDialog({
   onClose: () => void;
 }) {
   const [reason, setReason] = useState('');
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const isHard = gap.gate === 'HARD';
+  // Resolving a gap is an audit event recorded against the user's account, so
+  // it doesn't happen without a stated justification — confirming alone isn't
+  // enough. This is what holds the Yes button shut.
+  const canConfirm = reason.trim().length > 0 && !saving;
+
+  // The reason is the only thing to fill in, so start in it.
+  useEffect(() => {
+    reasonRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,7 +43,7 @@ export function ResolveGapDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Mark this hard-gate check resolved?"
+      aria-label={isHard ? 'Mark this hard-gate check resolved?' : 'Mark this check resolved?'}
       onClick={saving ? undefined : onClose}
       style={{
         position: 'fixed',
@@ -59,7 +70,7 @@ export function ResolveGapDialog({
       >
         <div style={{ padding: '20px 22px 4px' }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: DARK }}>
-            Mark this hard-gate check resolved?
+            {isHard ? 'Mark this hard-gate check resolved?' : 'Mark this check resolved?'}
           </div>
 
           <div
@@ -80,10 +91,11 @@ export function ResolveGapDialog({
           </div>
 
           <p style={{ margin: '12px 0 0', fontSize: 11.5, color: MUTED, lineHeight: 1.6 }}>
-            This is recorded against your account with the reason, and can&apos;t be undone here.
+            {isHard
+              ? 'This clears a hard-gate check that is currently blocking publication. It’s recorded against your account and can’t be undone here.'
+              : 'This is recorded against your account and can’t be undone here.'}
           </p>
 
-          {/* The API rejects a blank reason with a 400, so it's required here. */}
           <label
             style={{
               display: 'block',
@@ -97,10 +109,13 @@ export function ResolveGapDialog({
             Reason <span style={{ color: '#DC2626' }}>*</span>
           </label>
           <textarea
+            ref={reasonRef}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             disabled={saving}
             rows={3}
+            required
+            aria-required="true"
             placeholder="How was this gap addressed? e.g. Disclosed in the standalone Sustainability Report, section 4.2."
             style={{
               width: '100%',
@@ -114,6 +129,12 @@ export function ResolveGapDialog({
               outline: 'none',
             }}
           />
+          {/* Says why the button is dead, so a disabled control isn't a puzzle. */}
+          {!reason.trim() && (
+            <div style={{ marginTop: 6, fontSize: 11, color: MUTED }}>
+              A reason is required — it’s recorded in the audit trail.
+            </div>
+          )}
 
           {error && <div style={{ marginTop: 10, fontSize: 12, color: '#DC2626' }}>{error}</div>}
         </div>
@@ -140,12 +161,13 @@ export function ResolveGapDialog({
             type="button"
             className="btn bp"
             onClick={() => onConfirm(reason.trim())}
-            disabled={saving || !reason.trim()}
+            disabled={!canConfirm}
+            title={reason.trim() ? undefined : 'Add a reason to continue'}
             style={{
               fontSize: 13,
               padding: '10px 22px',
-              opacity: saving || !reason.trim() ? 0.5 : 1,
-              cursor: saving || !reason.trim() ? 'not-allowed' : 'pointer',
+              opacity: canConfirm ? 1 : 0.5,
+              cursor: canConfirm ? 'pointer' : 'not-allowed',
             }}
           >
             {saving ? 'Saving…' : 'Yes, mark resolved'}

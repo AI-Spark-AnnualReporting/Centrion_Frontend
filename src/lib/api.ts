@@ -80,6 +80,7 @@ import type {
 import { normalizeOverview } from "@/types/admin";
 import type {
   CandidatesResponse,
+  CertifiedRun,
   CertifyResponse,
   CompliancePreview,
   ComplianceRun,
@@ -900,10 +901,14 @@ export const compliance = {
 const COMPLIANCE_BASE = "/api/v1/compliance";
 
 // Guarantee the three list fields exist so a sparse response renders an empty
-// section instead of crashing the review screen.
+// section instead of crashing the review screen. They are legitimately empty
+// for the whole 30–60s a run is in flight, so this is the normal case, not a
+// defensive edge. `publication_gate` is deliberately NOT defaulted — null is
+// meaningful ("not decided yet") and the screens branch on it.
 function normalizeRun(run: ComplianceRun): ComplianceRun {
   return {
     ...run,
+    publication_gate: run?.publication_gate ?? null,
     frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
     gaps: Array.isArray(run?.gaps) ? run.gaps : [],
     rule_detail: Array.isArray(run?.rule_detail) ? run.rule_detail : [],
@@ -920,6 +925,25 @@ export const complianceValidation = {
       query: { company_id: companyId, report_type: reportType },
     }).then((r) => (Array.isArray(r?.candidates) ? r.candidates : [])),
 
+  // Every run that has been certified, newest first. Each entry carries its
+  // subject's title and period, so the gallery renders straight from this with
+  // no second lookup. `reportType` is an optional filter.
+  //
+  // The envelope isn't pinned down, so accept a bare array or any of the usual
+  // wrappers — a gallery is not worth crashing a page over.
+  listCertified: (companyId: string, reportType?: ReportType) =>
+    request<CertifiedRun[] | Record<string, unknown>>(`${COMPLIANCE_BASE}/certified`, {
+      query: { company_id: companyId, ...(reportType ? { report_type: reportType } : {}) },
+    }).then((r) => {
+      if (Array.isArray(r)) return r as CertifiedRun[];
+      const wrapped = r as Record<string, unknown> | null;
+      for (const key of ["certified", "runs", "items", "results"]) {
+        const value = wrapped?.[key];
+        if (Array.isArray(value)) return value as CertifiedRun[];
+      }
+      return [] as CertifiedRun[];
+    }),
+
   // Runs the same rule selection the real run uses, so the preview can never
   // disagree with what executes.
   preview: (query: {
@@ -935,16 +959,20 @@ export const complianceValidation = {
       }),
     ),
 
-  // Synchronous — evaluates every check and returns when finished (no LLM
-  // calls, ~30 checks). Returns a summary only; fetch the run for the detail.
+  // Asynchronous — 202 in under a second, before anything has been checked.
+  // The run itself takes 30–60s because it reads the whole report through an
+  // LLM. There are no scores in this response: keep the run_id and poll
+  // getRun() until status is "done" or "error".
   createRun: (body: CreateRunPayload) =>
     request<CreateRunResponse>(`${COMPLIANCE_BASE}/runs`, {
       method: "POST",
       body,
     }),
 
-  // Scores are recomputed from stored results on each read, so this is always
-  // current after a resolve.
+  // The poll target, and the read for both result screens. Returns the same
+  // shape at every stage — while running, the scores are null and the lists are
+  // empty. Scores are recomputed from stored results on each read, so this is
+  // always current after a resolve.
   getRun: (runId: string) =>
     request<ComplianceRun>(
       `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}`,
@@ -957,8 +985,9 @@ export const complianceValidation = {
       { method: "POST", body: { reason } },
     ),
 
-  // Throws ApiError with a 409 and a CertifyBlockedBody `detail` when HARD
-  // checks are still failing; the gate is re-checked server-side at this point.
+  // Throws ApiError with a 409 and a CertifyBlockedBody `detail` when the run
+  // is still running (`detail.status === "running"`) or HARD checks are still
+  // failing; the gate is re-checked server-side at this point.
   certify: (runId: string) =>
     request<CertifyResponse>(
       `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certify`,
