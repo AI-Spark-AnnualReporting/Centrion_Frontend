@@ -1730,29 +1730,32 @@ export const earnings = {
       signal,
     }).then(normalizeEarningsSources),
 
-  // Upload a narrative-track source document, tagged with its type. Scoped by
-  // company + period (mirrors getSelectableSources) since no report exists yet
-  // at Setup time — the whole flow is client-side state until the single
-  // createEarningsReport call below. Endpoint path/scoping unconfirmed (Step 0)
-  // — the highest-risk guess in this file; adjust if the live backend expects
-  // something else (e.g. a pending-draft id).
-  uploadEarningsSource: (
-    companyId: string,
-    period: string,
-    file: File,
-    type: string,
-  ): Promise<SelectableSource> => {
+  // Upload narrative-track source documents to an EXISTING draft. The route is
+  // report-scoped (D-22) — there is no company-scoped upload route — so the draft
+  // must be created first (POST /earnings/reports). Multipart body: `files` (the
+  // file array) + `type` (a canonical _FILING_TYPES value: annual | interim |
+  // release | presentation | transcript — never a display label, or the backend
+  // 422s). Returns the created narrative sources (in their reported extraction
+  // state — 'extracting' until ready; never treated as ready early, D-12).
+  uploadEarningsSources: (
+    reportId: string,
+    files: File[],
+    type: SourceUploadType,
+  ): Promise<SelectableSource[]> => {
     const fd = new FormData();
-    fd.append("file", file);
+    files.forEach((f) => fd.append("files", f));
     fd.append("type", type);
-    return request<unknown>(`/api/v1/earnings/sources/upload`, {
-      method: "POST",
-      query: { company_id: companyId, period },
-      form: fd,
-    }).then((raw) => {
-      const s = normalizeEarningsSourceItem(earnRecord(raw).source ?? raw);
-      if (!s) throw new Error("Upload earnings source: response was not a source.");
-      return s;
+    return request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sources/upload`,
+      { method: "POST", form: fd },
+    ).then((raw) => {
+      const rec = earnRecord(raw);
+      if (Array.isArray(raw) || Array.isArray(rec.sources) || Array.isArray(rec.items)) {
+        return normalizeEarningsSources(raw).sources;
+      }
+      // Single-object response ({ source } or the source itself).
+      const one = normalizeEarningsSourceItem(rec.source ?? raw);
+      return one ? [one] : [];
     });
   },
 

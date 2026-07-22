@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, ApiError } from '@/lib/api';
@@ -81,6 +81,46 @@ export default function EarningsSetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ message: string; reportId: string | null } | null>(null);
 
+  // The draft created for THIS setup session. Uploads are report-scoped (D-22),
+  // so the draft must exist before uploading — we create it once and reuse the
+  // same report_id for both the upload route and Continue (never a second draft).
+  const [sessionReportId, setSessionReportId] = useState<string | null>(null);
+  const createInFlightRef = useRef<Promise<string> | null>(null);
+
+  // Create the draft once, then reuse. `createInFlightRef` collapses concurrent
+  // callers (e.g. a fast double-click) onto a single POST /earnings/reports.
+  const ensureDraft = useCallback(
+    async (srcReports: string[], srcDocs: string[]): Promise<string> => {
+      if (sessionReportId) return sessionReportId;
+      if (createInFlightRef.current) return createInFlightRef.current;
+      if (!companyId || !variant || fiscalYear == null) {
+        throw new Error('Choose the report type and period first.');
+      }
+      const p = earnings
+        .createEarningsReport({
+          company_id: companyId,
+          variant,
+          fiscal_year: fiscalYear,
+          quarter: variant === 'quarterly' ? quarter : null,
+          tone,
+          source_report_ids: srcReports,
+          source_document_ids: srcDocs,
+        })
+        .then((res) => {
+          setSessionReportId(res.report_id);
+          createInFlightRef.current = null;
+          return res.report_id;
+        })
+        .catch((err) => {
+          createInFlightRef.current = null;
+          throw err;
+        });
+      createInFlightRef.current = p;
+      return p;
+    },
+    [sessionReportId, companyId, variant, fiscalYear, quarter, tone],
+  );
+
   // Dashboard: this company's existing earnings reports (newest first).
   const [reports, setReports] = useState<EarningsReportSummary[]>([]);
   const [reportsLoading, setReportsLoading] = useState(true);
@@ -111,9 +151,11 @@ export default function EarningsSetupPage() {
     };
   }, [companyId]);
 
+  // A draft already created this session (via upload) is enough to Continue —
+  // its uploaded sources are attached server-side even while they extract.
   const ready =
-    !!companyId &&
-    canContinue({ variant, fiscalYear, quarter, tone, sourceIds });
+    !!sessionReportId ||
+    (!!companyId && canContinue({ variant, fiscalYear, quarter, tone, sourceIds }));
 
   const handleVariant = (v: EarningsVariant) => {
     setVariant(v);
@@ -121,20 +163,21 @@ export default function EarningsSetupPage() {
   };
 
   const handleContinue = async () => {
+    if (submitting) return;
+    // Reuse a draft already created this session (e.g. via upload) — never create
+    // a second one.
+    if (sessionReportId) {
+      navigate(`/earnings/${sessionReportId}/extract`);
+      return;
+    }
     if (!ready || !companyId || !variant || fiscalYear == null) return;
     setSubmitting(true);
     setError(null);
     setConflict(null);
     try {
-      const res = await earnings.createEarningsReport({
-        company_id: companyId,
-        variant,
-        fiscal_year: fiscalYear,
-        quarter: variant === 'quarterly' ? quarter : null,
-        tone,
-        ...sourceSplit,
-      });
-      navigate(`/earnings/${res.report_id}/extract`);
+      // Existing-reports path — create with the selected DB report + document ids.
+      const reportId = await ensureDraft(sourceSplit.source_report_ids, sourceSplit.source_document_ids);
+      navigate(`/earnings/${reportId}/extract`);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         setConflict(readConflict(err));
@@ -240,6 +283,7 @@ export default function EarningsSetupPage() {
                 setSourceIds(ids);
                 setSourceSplit(split);
               }}
+              ensureDraft={() => ensureDraft([], [])}
             />
           ) : (
             <div style={{ fontSize: 12, color: '#9BA3C4' }}>

@@ -23,7 +23,7 @@ const h = vi.hoisted(() => {
     navigateMock: vi.fn(),
     getSelectableSources: vi.fn(),
     createEarningsReport: vi.fn(),
-    uploadEarningsSource: vi.fn(),
+    uploadEarningsSources: vi.fn(),
     listEarningsReports: vi.fn(),
     MockApiError,
   };
@@ -47,14 +47,14 @@ vi.mock('@/lib/api', async () => {
     earnings: {
       getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
       createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
-      uploadEarningsSource: (...a: unknown[]) => h.uploadEarningsSource(...a),
+      uploadEarningsSources: (...a: unknown[]) => h.uploadEarningsSources(...a),
       listEarningsReports: (...a: unknown[]) => h.listEarningsReports(...a),
     },
     ApiError: h.MockApiError,
   };
 });
 
-const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSource, listEarningsReports, MockApiError } = h;
+const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSources, listEarningsReports, MockApiError } = h;
 
 import { formatPeriodLabel, canContinue } from '../helpers';
 import { normalizeEarningsSourceItem } from '@/lib/api';
@@ -280,42 +280,57 @@ describe('EarningsSetupPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
   });
 
-  it('uploading a file calls uploadEarningsSource with the default type and shows it tagged, extracting', async () => {
-    uploadEarningsSource.mockResolvedValueOnce({
-      report_id: null,
-      document_id: 'doc-1',
-      label: 'Q4 2025 Earnings Call Transcript',
-      report_type: null,
-      period: 'FY 2025',
-      updated_at: '2026-01-01T00:00:00Z',
-      coverage: 'partial',
-      track: 'narrative_adjusted',
-      type: 'transcript',
-      extraction_status: 'extracting',
-    });
+  it('upload path: creates the draft first (empty source_report_ids), uploads report-scoped with the chosen canonical type, then Continue reuses the same report_id', async () => {
+    createEarningsReport.mockResolvedValueOnce({ report_id: 'rep-upload' });
+    uploadEarningsSources.mockResolvedValueOnce([
+      {
+        report_id: null,
+        document_id: 'doc-1',
+        label: 'Northwind Q4 2024 Press Release',
+        report_type: null,
+        period: 'FY 2025',
+        updated_at: '2026-01-01T00:00:00Z',
+        coverage: 'partial',
+        track: 'narrative_adjusted',
+        type: 'release',
+        extraction_status: 'extracting',
+      },
+    ]);
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     await screen.findByText('Acme — FY24 Annual Report');
 
     fireEvent.click(screen.getByRole('button', { name: 'Upload new documents' }));
-    const file = new File(['transcript text'], 'q4-call.pdf', { type: 'application/pdf' });
+    // Tag the batch as a press release — canonical value 'release', not the label.
+    fireEvent.click(screen.getByRole('radio', { name: /Press release/ }));
+    const file = new File(['press release text'], 'northwind_q4_2024_press_release.pdf', { type: 'application/pdf' });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: /Upload & extract/ }));
 
-    // No per-doc type picker anymore — a single default tag is sent for all files.
+    // 1) The draft is created FIRST, with empty source_report_ids (upload-only path).
     await waitFor(() =>
-      expect(uploadEarningsSource).toHaveBeenCalledWith('co-1', 'FY-2025', file, 'annual'),
+      expect(createEarningsReport).toHaveBeenCalledWith(
+        expect.objectContaining({ variant: 'annual', fiscal_year: 2025, source_report_ids: [], source_document_ids: [] }),
+      ),
     );
-    const uploadedLabel = await screen.findByText(/Q4 2025 Earnings Call Transcript/);
+    // 2) Then the report-scoped upload fires with the file array + canonical 'release'.
+    await waitFor(() =>
+      expect(uploadEarningsSources).toHaveBeenCalledWith('rep-upload', [file], 'release'),
+    );
+
+    const uploadedLabel = await screen.findByText(/Northwind Q4 2024 Press Release/);
     const uploadedRow = uploadedLabel.closest('button[role="checkbox"]') as HTMLButtonElement;
     expect(within(uploadedRow).getByText('Extracting…')).toBeInTheDocument();
-    // Never shown as a usable official source before it's ready (D-12) — no
-    // coverage badge on the narrative row, even though the coverage field
-    // carries a stray value from the mock.
+    // Never shown as a usable official source before it's ready (D-12).
     expect(within(uploadedRow).queryByText('Full')).not.toBeInTheDocument();
     expect(within(uploadedRow).queryByText('Partial')).not.toBeInTheDocument();
+
+    // 3) Continue reuses the already-created report_id — no second draft is created.
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/extract'));
+    expect(createEarningsReport).toHaveBeenCalledTimes(1);
   });
 
   it('an extracting/failed narrative source cannot be selected', async () => {

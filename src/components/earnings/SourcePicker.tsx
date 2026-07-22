@@ -7,19 +7,17 @@ import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER } from './tokens';
 
 type Mode = 'existing' | 'upload';
 
-// Guidance only — the kinds of documents that help build the report. Uploads are
-// no longer tagged per-type in the UI; a single default tag is sent for all files.
-const UPLOAD_TYPE_NOTES: { label: string; desc: string }[] = [
-  { label: 'Annual report', desc: 'Full-year financial statements & MD&A' },
-  { label: 'Interim', desc: 'Quarterly or half-year statements' },
-  { label: 'Press release', desc: 'Earnings press release' },
-  { label: 'Presentation', desc: 'Investor / earnings deck' },
-  { label: 'Transcript', desc: 'Earnings-call transcript' },
+// Document types the backend recognises (_FILING_TYPES). `value` is the canonical
+// tag sent to the upload route — NOT the display label — or the backend 422s.
+// 'aggregator' is a backend/system-only tag, never user-selectable. All files in
+// one upload share the selected type.
+const UPLOAD_TYPES: { value: SourceUploadType; label: string; desc: string }[] = [
+  { value: 'annual', label: 'Annual report', desc: 'Full-year financial statements & MD&A' },
+  { value: 'interim', label: 'Interim', desc: 'Quarterly or half-year statements' },
+  { value: 'release', label: 'Press release', desc: 'Earnings press release' },
+  { value: 'presentation', label: 'Presentation', desc: 'Investor / earnings deck' },
+  { value: 'transcript', label: 'Transcript', desc: 'Earnings-call transcript' },
 ];
-
-// All uploads carry one tag now that the per-doc type picker is gone. 'annual' is
-// the backend-recognised default for financial source documents.
-const DEFAULT_UPLOAD_TYPE: SourceUploadType = 'annual';
 
 // Coverage → shared badge class + label (official-track rows only).
 function coverageBadge(coverage: string): { cls: string; label: string } {
@@ -48,6 +46,7 @@ export function SourcePicker({
   quarter,
   selectedIds,
   onSelectedIdsChange,
+  ensureDraft,
 }: {
   companyId: string | null;
   variant: EarningsVariant;
@@ -58,6 +57,9 @@ export function SourcePicker({
     ids: string[],
     split: { source_report_ids: string[]; source_document_ids: string[] },
   ) => void;
+  // Creates (once) and returns the draft report_id — uploads are report-scoped,
+  // so the draft must exist before we can POST to .../{report_id}/sources/upload.
+  ensureDraft: () => Promise<string>;
 }) {
   const [mode, setMode] = useState<Mode>('existing');
   const [sources, setSources] = useState<SelectableSource[]>([]);
@@ -66,6 +68,7 @@ export function SourcePicker({
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadType, setUploadType] = useState<SourceUploadType>('annual');
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
 
@@ -122,29 +125,32 @@ export function SourcePicker({
     emit(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
   };
 
-  const handleUpload = () => {
-    if (!companyId || !periodKey || uploadFiles.length === 0 || uploading) return;
+  const handleUpload = async () => {
+    if (!periodReady || uploadFiles.length === 0 || uploading) return;
     setUploading(true);
     setUploadNote(null);
-    Promise.all(uploadFiles.map((f) => earnings.uploadEarningsSource(companyId, periodKey, f, DEFAULT_UPLOAD_TYPE)))
-      .then((newSources) => {
-        // Optimistic — the new sources appear immediately (in their reported
-        // extraction state) instead of waiting on a refetch.
-        setSources((prev) => [...prev, ...newSources]);
-        setUploadFiles([]);
-        setUploadNote('Uploaded — shown under "Narrative & adjusted" while it extracts.');
-        setMode('existing');
-      })
-      .catch((err: unknown) => {
-        const msg =
-          err instanceof ApiError && typeof err.body === 'object'
-            ? 'Upload failed. Please try again.'
-            : err instanceof Error
-              ? err.message
-              : 'Upload failed. Please try again.';
-        setUploadNote(msg);
-      })
-      .finally(() => setUploading(false));
+    try {
+      // Uploads are report-scoped — create (or reuse) the draft first, then POST
+      // all files in one multipart request tagged with the selected canonical type.
+      const reportId = await ensureDraft();
+      const newSources = await earnings.uploadEarningsSources(reportId, uploadFiles, uploadType);
+      // Optimistic — the new sources appear immediately (in their reported
+      // extraction state) instead of waiting on a refetch.
+      setSources((prev) => [...prev, ...newSources]);
+      setUploadFiles([]);
+      setUploadNote('Uploaded — shown under "Narrative & adjusted" while it extracts.');
+      setMode('existing');
+    } catch (err: unknown) {
+      const msg =
+        err instanceof ApiError
+          ? `Upload failed (${err.status}). Please try again.`
+          : err instanceof Error
+            ? err.message
+            : 'Upload failed. Please try again.';
+      setUploadNote(msg);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const officialSources = sources.filter((s) => s.track !== 'narrative_adjusted');
@@ -205,37 +211,55 @@ export function SourcePicker({
         )
       ) : (
         <div>
-          {/* Guidance note — the document types that help build the report.
-              Uploads aren't tagged per-type anymore; add any of these together. */}
-          <div
-            style={{
-              marginBottom: 12,
-              padding: '12px 14px',
-              borderRadius: 10,
-              background: '#F7F8FC',
-              border: `1px solid ${BORDER}`,
-            }}
-          >
+          {!periodReady && (
+            <EmptyHint>Select a reporting period above before uploading documents.</EmptyHint>
+          )}
+          {/* Document type — pick one for this batch. The label describes it; the
+              canonical value (not the label) is what's sent to the backend. */}
+          <div style={{ marginTop: periodReady ? 0 : 12, marginBottom: 12 }}>
             <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>
-              Documents you can add — upload any of these together:
+              Document type
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {UPLOAD_TYPE_NOTES.map((t) => (
-                <div key={t.label} style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.4 }}>
-                  <span style={{ fontWeight: 700, color: INK, minWidth: 108, flexShrink: 0 }}>{t.label}</span>
-                  <span style={{ color: FAINT }}>{t.desc}</span>
-                </div>
-              ))}
+              {UPLOAD_TYPES.map((t) => {
+                const selected = uploadType === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setUploadType(t.value)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 8,
+                      textAlign: 'left',
+                      padding: '9px 12px',
+                      borderRadius: 10,
+                      cursor: 'pointer',
+                      background: selected ? ACCENT_TINT : '#fff',
+                      border: `1.5px solid ${selected ? ACCENT : BORDER}`,
+                      transition: 'border-color .12s, background .12s',
+                    }}
+                  >
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: selected ? '#2B2B8F' : INK, minWidth: 108, flexShrink: 0 }}>
+                      {t.label}
+                    </span>
+                    <span style={{ fontSize: 11.5, color: FAINT }}>{t.desc}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <DocumentUploader files={uploadFiles} onFilesChange={setUploadFiles} disabled={uploading} />
+          <DocumentUploader files={uploadFiles} onFilesChange={setUploadFiles} disabled={uploading || !periodReady} />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
             <button
               type="button"
               className="btn bp"
-              disabled={uploadFiles.length === 0 || uploading}
+              disabled={!periodReady || uploadFiles.length === 0 || uploading}
               onClick={handleUpload}
-              style={{ opacity: uploadFiles.length === 0 || uploading ? 0.55 : 1 }}
+              style={{ opacity: !periodReady || uploadFiles.length === 0 || uploading ? 0.55 : 1 }}
             >
               {uploading ? 'Uploading…' : 'Upload & extract'}
             </button>
