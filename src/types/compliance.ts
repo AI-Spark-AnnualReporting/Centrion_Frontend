@@ -10,11 +10,16 @@ export type EntityType = "corporate" | "bank" | "insurer";
 
 export type Market = "Main" | "Nomu";
 
-// Annual reports aren't rows in `reports` — they live under a reporting cycle,
-// so every run identifies its subject with a (type, id) pair.
-//   ESG / Quarterly → "report" + reports.id
-//   Annual          → "cycle"  + reporting_cycles.id
-export type SubjectType = "report" | "cycle";
+// A run's subject can live in three different places, so every run identifies
+// it with a (type, id) pair rather than a bare id.
+//   ESG / Quarterly we generated → "report"   + reports.id
+//   Annual we generated          → "cycle"    + reporting_cycles.id
+//   A file the user uploaded     → "document" + documents.id
+// An upload is deliberately NOT a report: writing one would put files nobody
+// generated into the Reports module. Callers pass the pair straight through and
+// never need to know which table it points at — with one exception, `period`,
+// which only a document requires. See CreateRunPayload.
+export type SubjectType = "report" | "cycle" | "document";
 
 // Gate strength. HARD blocks publication, SOFT is advisory, WATCH informational.
 export type Gate = "HARD" | "SOFT" | "WATCH";
@@ -84,7 +89,18 @@ export interface CreateRunPayload {
   market?: Market;
   // Empty/omitted means "no framework filter" — every applicable rule runs.
   enabled_frameworks?: string[];
+  // REQUIRED when subject_type is "document", ignored otherwise. A generated
+  // report knows its own period; an uploaded file records none, so re-running
+  // one has to be told again — and it isn't cosmetic, it decides which
+  // regulations were in force. Missing or malformed is a 422.
+  period?: string;
+  content_language?: ContentLanguage;
 }
+
+// Everything about a run except which subject it is about. The upload path
+// can't name its subject up front — the document doesn't exist until the file
+// has been read — so the two travel separately until the run reports back.
+export type RunSettings = Omit<CreateRunPayload, "subject_type" | "subject_id">;
 
 // POST /runs is 202 Accepted. It returns before a single check has been made —
 // there are no scores in this body and there is no point looking for them. Keep
@@ -94,6 +110,49 @@ export interface CreateRunResponse {
   status: RunStatus;
   checks_queued: number;
 }
+
+// ---------------------------------------------------------------------------
+// POST /runs/upload
+// ---------------------------------------------------------------------------
+
+// The other way in: validate a report we didn't generate. Same run, same poll,
+// same results — the only difference is that the subject arrives as a file
+// rather than as a row we already hold.
+//
+// This is not a JSON body. The endpoint is multipart/form-data and the api
+// layer walks these fields into a FormData; the shape exists so the call site
+// still gets named, checked fields.
+export interface UploadRunPayload {
+  // One File, never an array. The endpoint takes exactly one and the field is
+  // named `file` — every other upload in this app sends `files`.
+  file: File;
+  company_id: string;
+  report_type: ReportType;
+  // "FY-2025" for annual/esg/board_pack, "Q3-2025" for quarterly, exactly.
+  // Nothing to derive this from: an uploaded PDF carries no period record, so
+  // the user supplies it.
+  period: string;
+  entity_type: EntityType;
+  market?: Market;
+  // Same semantics as CreateRunPayload: empty/omitted means "no filter".
+  enabled_frameworks?: string[];
+  content_language?: ContentLanguage;
+}
+
+export type ContentLanguage = "english" | "arabic";
+
+// 202 Accepted, exactly like POST /runs — the run id and nothing more.
+//
+// There is deliberately no subject id here. The upload becomes a document only
+// once its text has been extracted, which hasn't happened yet at 202. Poll the
+// run: GET /runs/{run_id} carries the subject once there is one.
+export type UploadRunResponse = CreateRunResponse;
+
+// Accepted upload formats, shared by the file input's `accept` and the local
+// pre-flight check. The server enforces these too — checking here just saves
+// the user a 50 MB round trip to be told no.
+export const UPLOAD_EXTENSIONS = [".pdf", ".docx", ".xlsx", ".csv", ".txt"] as const;
+export const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // GET /runs/{run_id}
@@ -175,7 +234,10 @@ export interface RuleDetailGroup {
 export interface ComplianceRun {
   run_id: string;
   subject_type: SubjectType;
-  subject_id: string;
+  // Null when the subject is gone: a file that couldn't be read is deleted,
+  // leaving a run with a title and a period but nothing left to re-run. Only
+  // `unreadable_file` does this — llm_unavailable and internal keep theirs.
+  subject_id: string | null;
   report_type: ReportType;
   status: RunStatus;
   certified: boolean;
@@ -195,6 +257,62 @@ export interface ComplianceRun {
   // Present on `status === "error"` runs when the backend explains itself.
   error?: string;
   error_message?: string;
+  // Why it failed, when the backend knows. Null/absent on runs from before the
+  // column existed, so never branch on it without a generic fallback.
+  error_code?: RunErrorCode | null;
+}
+
+// Only `unreadable_file` is about the user's file — it's the one case where
+// telling them to try a different document is right. Everything else is our
+// side failing, and re-running the same subject is the fix. Treat an unknown
+// or missing code as "our side".
+export type RunErrorCode = "unreadable_file" | "llm_unavailable" | "internal" | (string & {});
+
+export function blamesTheFile(code: RunErrorCode | null | undefined): boolean {
+  return code === "unreadable_file";
+}
+
+// ---------------------------------------------------------------------------
+// GET /runs
+// ---------------------------------------------------------------------------
+
+// A run in the company's history, newest first. This is the authority on what
+// state a run is in — a status remembered in the browser goes stale the moment
+// the tab closes, which is exactly when a 90-second run finishes.
+//
+// Carries its own `title` and `period`, so nothing here needs a second lookup:
+// a generated run is titled with the report's name, an uploaded one with the
+// filename the user chose.
+export interface RunListItem {
+  run_id: string;
+  subject_type: SubjectType;
+  // Null on an `unreadable_file` failure — the document was deleted. The row
+  // still carries title and period, so it lists fine; it just can't be re-run.
+  subject_id: string | null;
+  report_type: ReportType;
+  title: string;
+  period: string;
+  source: CandidateSource;
+  status: RunStatus;
+  error_code: RunErrorCode | null;
+  overall_readiness: number | null;
+  publication_gate: PublicationGate | null;
+  certified: boolean;
+  certified_by: string | null;
+  certified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunsResponse {
+  runs: RunListItem[];
+}
+
+export interface ListRunsQuery {
+  report_type?: ReportType;
+  status?: RunStatus;
+  // Defaults to 20 server-side, clamped to 50.
+  limit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +371,18 @@ export interface Candidate {
   period: string;
   status: string;
   report_type: ReportType;
+  // Absent on older backends — treat a missing value as "generated".
+  source?: CandidateSource;
 }
+
+// How a candidate got here.
+//   generated — we produced it and the company approved it.
+//   upload    — the user uploaded a finished file. `title` is their filename
+//               and `status` is "locked".
+// Uploaded reports stay in this list, so re-validating one needs no second
+// upload. An uploaded annual report comes back as subject_type "report", not
+// "cycle" — nothing to special-case, the pair passes through either way.
+export type CandidateSource = "generated" | "upload";
 
 export interface CandidatesResponse {
   candidates: Candidate[];
@@ -271,8 +400,10 @@ export interface CertifiedRun {
   subject_type: SubjectType;
   subject_id: string;
   report_type: ReportType;
+  // Uploaded runs are titled with the filename the user certified.
   title: string;
   period: string;
+  source?: CandidateSource;
   entity_type: EntityType;
   market?: Market;
   // The score at the moment of sign-off — a fixed historical fact, not the

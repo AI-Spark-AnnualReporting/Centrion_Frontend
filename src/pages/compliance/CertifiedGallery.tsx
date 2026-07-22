@@ -85,6 +85,10 @@ function CertifiedCard({ run, gradient }: { run: CertifiedRun; gradient: string 
   const chips = [
     run.entity_type ? run.entity_type[0].toUpperCase() + run.entity_type.slice(1) : null,
     run.market,
+    // Certified runs carry their source too, and an uploaded one is titled with
+    // the filename — worth saying so, since that title looks unlike the ones we
+    // generate ourselves.
+    run.source === 'upload' ? 'Uploaded' : null,
   ].filter(Boolean) as string[];
 
   return (

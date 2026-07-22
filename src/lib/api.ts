@@ -87,9 +87,14 @@ import type {
   CreateRunPayload,
   CreateRunResponse,
   EntityType,
+  ListRunsQuery,
   Market,
   ReportType,
   ResolveGapResponse,
+  RunListItem,
+  RunsResponse,
+  UploadRunPayload,
+  UploadRunResponse,
 } from "@/types/compliance";
 import type {
   AssignDepartmentsPayload,
@@ -925,6 +930,14 @@ export const complianceValidation = {
       query: { company_id: companyId, report_type: reportType },
     }).then((r) => (Array.isArray(r?.candidates) ? r.candidates : [])),
 
+  // Every run for the company, newest first — running, finished and failed.
+  // The authority on what state a run is in: a status the browser remembered
+  // goes stale as soon as the tab closes, which on a 60–90s run is most of them.
+  listRuns: (companyId: string, query: ListRunsQuery = {}): Promise<RunListItem[]> =>
+    request<RunsResponse>(`${COMPLIANCE_BASE}/runs`, {
+      query: { company_id: companyId, ...query },
+    }).then((r) => (Array.isArray(r?.runs) ? r.runs : [])),
+
   // Every run that has been certified, newest first. Each entry carries its
   // subject's title and period, so the gallery renders straight from this with
   // no second lookup. `reportType` is an optional filter.
@@ -968,6 +981,32 @@ export const complianceValidation = {
       method: "POST",
       body,
     }),
+
+  // The same run, for a report we didn't generate. Multipart rather than JSON,
+  // and asynchronous in the same way: 202 first, then poll getRun().
+  //
+  // Two things differ from createRun and both bite if missed. The file field is
+  // `file`, singular — every other upload in this app posts `files`. And the
+  // period can't be looked up: an uploaded file has no record behind it, so the
+  // caller collects "FY-2025" / "Q3-2025" from the user and sends it verbatim.
+  //
+  // Slower than a picker run — the file has to be read before it can be judged
+  // — but only the wait changes, not the shape of the result.
+  createUploadRun: (body: UploadRunPayload) => {
+    const fd = new FormData();
+    fd.append("file", body.file);
+    fd.append("company_id", body.company_id);
+    fd.append("report_type", body.report_type);
+    fd.append("period", body.period);
+    fd.append("entity_type", body.entity_type);
+    if (body.market) fd.append("market", body.market);
+    // Repeated field, like every other list this API takes. Omitted entirely
+    // means "no filter" — which is why the caller blocks submit when the user
+    // has switched every framework off, rather than sending an empty list.
+    (body.enabled_frameworks ?? []).forEach((r) => fd.append("enabled_frameworks", r));
+    if (body.content_language) fd.append("content_language", body.content_language);
+    return postForm<UploadRunResponse>(`${COMPLIANCE_BASE}/runs/upload`, fd);
+  },
 
   // The poll target, and the read for both result screens. Returns the same
   // shape at every stage — while running, the scores are null and the lists are

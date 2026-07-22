@@ -1,24 +1,27 @@
 // Screen 1 of the Compliance Validation wizard — pick a subject, tune the
 // regulator frameworks, run the validation.
 
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { ApiError, complianceValidation } from '@/lib/api';
+import { rememberScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
 import type {
   Candidate,
   CompliancePreview,
-  CreateRunPayload,
+  RunSettings,
   EntityType,
   Market,
   ReportType,
   RunRejectedBody,
 } from '@/types/compliance';
+import { UPLOAD_EXTENSIONS, UPLOAD_MAX_BYTES } from '@/types/compliance';
 import { ComplianceStepper } from './ComplianceStepper';
 import { CertifiedGallery } from './CertifiedGallery';
 import type { ComplianceRunningState } from './ComplianceRunningPage';
 import { ComplianceHeader, DARK, MONO, MUTED, PRIMARY } from './compliance-ui';
+import { ResumeGallery } from './ResumeGallery';
 
 const REPORT_TYPES: { key: ReportType; label: string }[] = [
   { key: 'annual', label: 'Annual Report' },
@@ -65,6 +68,59 @@ const FRAMEWORK_LABELS: Record<string, string> = {
 // Validate. Bump this if the backend's earliest effective_from moves.
 const FIRST_RULED_YEAR = 2024;
 
+// Two ways to name the thing being validated: pick one we generated and the
+// company approved, or hand us the finished file. Everything downstream — the
+// progress screen, the review, the certificate — is the same run either way.
+type SourceMode = 'picker' | 'upload';
+
+const SOURCE_MODES: { key: SourceMode; label: string }[] = [
+  { key: 'picker', label: 'Approved reports' },
+  { key: 'upload', label: 'Upload a report' },
+];
+
+type Quarter = 'Q1' | 'Q2' | 'Q3' | 'Q4';
+
+const QUARTERS: { key: Quarter; label: string }[] = (['Q1', 'Q2', 'Q3', 'Q4'] as const).map(
+  (q) => ({ key: q, label: q }),
+);
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+// Newest first, stopping at the first year any rule was in force. Offering 2023
+// would just be offering a guaranteed rejection — the same reason the picker
+// greys out subjects that predate the rules.
+const YEAR_OPTIONS = Array.from(
+  { length: Math.max(1, CURRENT_YEAR - FIRST_RULED_YEAR + 1) },
+  (_, i) => CURRENT_YEAR - i,
+);
+
+// The backend takes the period as an exact string. Compose it in one place so
+// no screen can invent "2025-Q3" or send a bare year.
+function composePeriod(reportType: ReportType, year: number, quarter: Quarter | null): string {
+  if (reportType === 'quarterly') return quarter ? `${quarter}-${year}` : '';
+  return `FY-${year}`;
+}
+
+// Refuse locally what the server would refuse anyway — a 50 MB upload is a slow
+// way to be told the file type is wrong.
+function readFileProblem(file: File): string {
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot === -1 ? '' : file.name.slice(dot).toLowerCase();
+  if (!(UPLOAD_EXTENSIONS as readonly string[]).includes(ext)) {
+    return `${ext || 'That file type'} can’t be read. Use ${UPLOAD_EXTENSIONS.join(', ')}.`;
+  }
+  if (file.size > UPLOAD_MAX_BYTES) {
+    return `That file is ${formatSize(file.size)}. The limit is 50 MB.`;
+  }
+  return '';
+}
+
+function formatSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 // Pull a 4-digit year out of "FY-2025" / "Q4-2023" / "2024". Returns null when
 // the period doesn't carry one, in which case we leave the row enabled — better
 // a surprise 400 than hiding a valid report behind a bad guess.
@@ -78,15 +134,41 @@ function isPreRules(c: Candidate): boolean {
   return y != null && y < FIRST_RULED_YEAR;
 }
 
-// POST /runs 400s with an object detail (not FastAPI's usual string) when no
-// rule matched. The `reason` is human-written — surface it verbatim.
-function readRunRejection(err: unknown): string | null {
-  if (!(err instanceof ApiError) || err.status !== 400) return null;
-  const raw = err.body as { detail?: RunRejectedBody | string } | undefined;
-  const detail = raw?.detail;
+// `detail` comes back in three different shapes across these endpoints, and the
+// naive read prints "[object Object]" at the user for two of them:
+//   string                        — FastAPI's usual, show it
+//   { message, reason, … }        — the no-rule-matched case. `reason` is
+//                                   human-written; surface it verbatim.
+//   [{ loc, msg }]                — FastAPI's own validation errors (a missing
+//                                   file, an unparseable period). `loc` is for
+//                                   the console, `msg` is for the banner.
+function readComplianceDetail(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null;
+  const detail = (err.body as { detail?: unknown } | undefined)?.detail;
   if (!detail) return null;
-  if (typeof detail === 'string') return detail;
-  return detail.reason ?? detail.message ?? null;
+  if (typeof detail === 'string') return detail.trim() || null;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((d) => (d as { msg?: string } | null)?.msg)
+      .filter((m): m is string => Boolean(m));
+    return messages.length ? messages.join(' · ') : null;
+  }
+  const body = detail as RunRejectedBody;
+  return body.reason ?? body.message ?? null;
+}
+
+// What to put in the banner. Prefers the backend's own words — they're written
+// for the user — and falls back to something readable, because ApiError's
+// message is "API 500 Internal Server Error — https://…", which is not.
+function readRunError(err: unknown): string {
+  const detail = readComplianceDetail(err);
+  if (detail) return detail;
+  if (err instanceof ApiError) {
+    if (err.status === 403) return 'That report doesn’t belong to your company.';
+    if (err.status >= 500) return 'The compliance service couldn’t start the run. Please try again.';
+    return 'Validation failed. Please try again.';
+  }
+  return err instanceof Error ? err.message : 'Validation failed. Please try again.';
 }
 
 // ── shared bits ──────────────────────────────────────────────────────────────
@@ -126,7 +208,9 @@ function PillGroup<T extends string>({
   onChange,
 }: {
   options: { key: T; label: string }[];
-  value: T;
+  // Nullable so a group can start with nothing chosen — the quarter picker has
+  // no safe default, and defaulting it to Q1 would file Q3 reports as Q1.
+  value: T | null;
   onChange: (v: T) => void;
 }) {
   return (
@@ -227,6 +311,165 @@ function FrameworkChip({
   );
 }
 
+const FIELD_LABEL = { fontSize: 10, fontWeight: 700, color: MUTED, marginBottom: 7 } as const;
+
+// The upload half of Card 1. Two things to collect: the period, then the file.
+// The period is the interesting one — a report we generated carries its own, but
+// an uploaded PDF is just bytes, so the only way to know what it covers is to ask.
+function UploadPanel({
+  reportType,
+  file,
+  fileProblem,
+  onPickFile,
+  year,
+  onPickYear,
+  quarter,
+  onPickQuarter,
+  period,
+}: {
+  reportType: ReportType;
+  file: File | null;
+  fileProblem: string;
+  onPickFile: (f: File | null) => void;
+  year: number;
+  onPickYear: (y: number) => void;
+  quarter: Quarter | null;
+  onPickQuarter: (q: Quarter) => void;
+  period: string;
+}) {
+  const label = FIELD_LABEL;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Period first. It's the question the user isn't expecting — asking it
+          before the file, rather than under it, keeps it from reading as a
+          footnote to the upload. */}
+      <div>
+        <div style={label}>REPORTING PERIOD</div>
+        <div style={{ fontSize: 11, color: MUTED, marginBottom: 9, maxWidth: 560, lineHeight: 1.6 }}>
+          Which period does this report cover? The rules that apply depend on it, and an
+          uploaded file doesn’t tell us.
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {reportType === 'quarterly' && (
+            <PillGroup<Quarter> options={QUARTERS} value={quarter} onChange={onPickQuarter} />
+          )}
+          <select
+            value={year}
+            onChange={(e) => onPickYear(Number(e.target.value))}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 700,
+              fontFamily: 'inherit',
+              color: '#5A6080',
+              border: '1.5px solid #E2E4F0',
+              background: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          {period ? (
+            <span style={{ fontSize: 11, color: MUTED, fontFamily: MONO }}>sent as {period}</span>
+          ) : (
+            <span style={{ fontSize: 11, color: MUTED }}>Pick a quarter.</span>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <div style={label}>REPORT FILE</div>
+        <label
+          style={{
+            display: 'block',
+            padding: file ? '13px 15px' : 20,
+            borderRadius: 10,
+            border: `1.5px ${file ? 'solid' : 'dashed'} ${fileProblem ? '#FCA5A5' : file ? PRIMARY : '#E2E4F0'}`,
+            background: file && !fileProblem ? '#FAFAFF' : '#fff',
+            cursor: 'pointer',
+            textAlign: file ? 'left' : 'center',
+            transition: '.12s',
+          }}
+        >
+          <input
+            type="file"
+            accept={UPLOAD_EXTENSIONS.join(',')}
+            onChange={(e) => {
+              onPickFile(e.target.files?.[0] ?? null);
+              // Let the same file be re-picked after it was cleared — without
+              // this, choosing file A, removing it and choosing A again fires
+              // no change event.
+              e.target.value = '';
+            }}
+            style={{ display: 'none' }}
+          />
+          {file ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: DARK,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {file.name}
+                </div>
+                <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>
+                  {formatSize(file.size)} · click to replace
+                </div>
+              </div>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onPickFile(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onPickFile(null);
+                  }
+                }}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: MUTED,
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  flexShrink: 0,
+                }}
+              >
+                Remove
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: MUTED, lineHeight: 1.6 }}>
+              <span style={{ color: PRIMARY, fontWeight: 700 }}>Choose a file</span> to validate
+              <br />
+              PDF, Word, Excel, CSV or text · up to 50 MB
+            </div>
+          )}
+        </label>
+        {fileProblem && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: '#DC2626' }}>{fileProblem}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SubjectRow({
   subject,
   selected,
@@ -280,6 +523,8 @@ function SubjectRow({
           {subject.title}
         </div>
         <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>
+          {/* No "uploaded" badge: uploaded subjects only ever render under the
+              upload tab's own heading, which already says it. */}
           {[subject.period, subject.status].filter(Boolean).join(' · ')}
           {disabled && (
             <span style={{ color: '#B45309' }}> · predates all compliance rules</span>
@@ -297,12 +542,45 @@ export default function ComplianceSetupPage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? '';
 
-  const [reportType, setReportType] = useState<ReportType>('esg');
+  // ?type / ?subject / ?mode — set by every "back to set up" link so returning
+  // from a run lands on the tab it came from with its subject already picked,
+  // instead of resetting to the ESG tab and looking like the report vanished.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [reportType, setReportType] = useState<ReportType>(() => {
+    const wanted = searchParams.get('type');
+    return REPORT_TYPES.some((r) => r.key === wanted) ? (wanted as ReportType) : 'esg';
+  });
   const [entityType, setEntityType] = useState<EntityType>('corporate');
   const [market, setMarket] = useState<Market>('Main');
   // The whole candidate, not just its id — POST /runs needs the subject_type
   // that came with it, which is the backend's call, not something to re-derive.
   const [selected, setSelected] = useState<Candidate | null>(null);
+
+  // The subject to tick once the list arrives, consumed once. A ref rather than
+  // state so a later refetch can't re-arm a selection the user has since
+  // changed — coming back from a run should preselect, not overrule.
+  const preselectId = useRef(searchParams.get('subject'));
+
+  // ── the upload path ──────────────────────────────────────────────────────
+  // "Try a different file" links back here with ?mode=upload, so the tab it
+  // promised is the tab that opens.
+  const [sourceMode, setSourceMode] = useState<SourceMode>(
+    searchParams.get('mode') === 'upload' ? 'upload' : 'picker',
+  );
+  const [file, setFile] = useState<File | null>(null);
+  const [fileProblem, setFileProblem] = useState('');
+  // Null means "hasn't been touched", which is what lets the sensible default
+  // below follow the report type until the user overrides it.
+  const [year, setYear] = useState<number | null>(null);
+  const [quarter, setQuarter] = useState<Quarter | null>(null);
+
+  // A quarterly is filed inside the year it covers; an annual, ESG or board
+  // pack is written after that year has closed. So the year most likely meant
+  // differs by report type — but only until the user says otherwise.
+  const defaultYear =
+    reportType === 'quarterly' ? CURRENT_YEAR : Math.max(CURRENT_YEAR - 1, FIRST_RULED_YEAR);
+  const effectiveYear = year ?? defaultYear;
+  const period = composePeriod(reportType, effectiveYear, quarter);
 
   const [subjects, setSubjects] = useState<Candidate[]>([]);
   const [subjectsLoading, setSubjectsLoading] = useState(true);
@@ -325,6 +603,62 @@ export default function ComplianceSetupPage() {
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState('');
 
+  // One endpoint returns both, but they belong to different tabs: reports we
+  // generated and the company approved, and files the user brought us. Keeping
+  // an uploaded file in the approved list would misdescribe it — nobody
+  // approved it here — and hide it from the tab where its own re-run lives.
+  const approvedSubjects = useMemo(
+    () => subjects.filter((s) => s.source !== 'upload'),
+    [subjects],
+  );
+  const uploadedSubjects = useMemo(
+    () => subjects.filter((s) => s.source === 'upload'),
+    [subjects],
+  );
+
+  // A file and a previously uploaded report are two answers to the same
+  // question, so choosing either clears the other.
+  const pickFile = (f: File | null) => {
+    setFile(f);
+    setFileProblem(f ? readFileProblem(f) : '');
+    if (f) setSelected(null);
+    setRunError('');
+  };
+
+  const pickSubject = (subject: Candidate) => {
+    setSelected(subject);
+    if (subject.source === 'upload') {
+      setFile(null);
+      setFileProblem('');
+    }
+    setRunError('');
+  };
+
+  // Keep the tab in the URL, so the browser's own back button and a refresh
+  // both return here rather than to the default tab. `replace` — switching
+  // tabs is not a step worth pressing back through.
+  const changeReportType = (next: ReportType) => {
+    setReportType(next);
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set('type', next);
+        // The subject belonged to the tab being left.
+        params.delete('subject');
+        return params;
+      },
+      { replace: true },
+    );
+  };
+
+  const changeSourceMode = (mode: SourceMode) => {
+    setSourceMode(mode);
+    setRunError('');
+    // Don't leave a picked report armed behind an upload form, or vice versa —
+    // only the visible half of the card should be able to start a run.
+    setSelected(null);
+  };
+
   // One endpoint per tab. It fans out across reports and reporting_cycles
   // server-side and hands back the (subject_type, subject_id) pair to pass
   // straight through to POST /runs. Selection resets on tab change.
@@ -344,7 +678,22 @@ export default function ComplianceSetupPage() {
     complianceValidation
       .listCandidates(companyId, reportType)
       .then((list) => {
-        if (!cancelled) setSubjects(list);
+        if (cancelled) return;
+        setSubjects(list);
+        // Arriving from a run: tick the subject it used, so the user can go
+        // straight back to Run validation. An uploaded report is an ordinary
+        // candidate by now, which is what makes this work without re-uploading.
+        const wanted = preselectId.current;
+        if (wanted) {
+          preselectId.current = null;
+          const match = list.find((c) => c.subject_id === wanted);
+          if (match && !isPreRules(match)) {
+            setSelected(match);
+            // An uploaded subject lives on the upload tab, so open the tab that
+            // can actually show what we just selected.
+            if (match.source === 'upload') setSourceMode('upload');
+          }
+        }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -435,50 +784,125 @@ export default function ComplianceSetupPage() {
     [enabled, applicable],
   );
 
+  // Whichever half of Card 1 is showing has to be complete. The upload tab
+  // accepts either answer: a report already uploaded, or a new file with a
+  // period. The period has no default worth guessing for quarterly, so an
+  // unpicked quarter blocks here rather than 422ing later.
+  const newFileReady = file != null && !fileProblem && period !== '';
+  const sourceReady = sourceMode === 'upload' ? selected != null || newFileReady : selected != null;
+
   // An empty `enabled_frameworks` means "no filter" to the API — every rule
   // runs, the opposite of switching them all off. So block the submit instead.
-  const canRun = selected != null && enabled.length > 0 && !starting;
+  const canRun = sourceReady && enabled.length > 0 && !starting;
 
   // POST /runs is 202: it comes back before a single check has been made, with
   // no scores in the body. All we get is the run id, so the only thing to do
   // with it is hand it to the progress screen, which polls until it's done.
   const runValidation = () => {
-    if (!canRun || !selected) return;
-    const payload: CreateRunPayload = {
+    if (!canRun) return;
+    // A selection wins on either tab: re-running a report already uploaded is
+    // an ordinary run against a subject the backend holds. Uploading the same
+    // file again would duplicate the report and all its documents.
+    if (!selected) {
+      if (sourceMode === 'upload') uploadAndRun();
+      return;
+    }
+    const subject = {
       subject_type: selected.subject_type,
       subject_id: selected.subject_id,
+    };
+    const settings: RunSettings = {
       report_type: reportType,
       entity_type: entityType,
       market,
       enabled_frameworks: enabled,
+      // Required for a document and ignored otherwise. An uploaded file keeps
+      // no period of its own, so the candidate row's is the only source — and
+      // it decides which regulations were in force, so a missing one is a 422
+      // rather than a default.
+      ...(selected.subject_type === 'document' ? { period: selected.period } : {}),
     };
     setStarting(true);
     setRunError('');
     complianceValidation
-      .createRun(payload)
-      .then((res) =>
+      .createRun({ ...subject, ...settings })
+      .then((res) => {
+        // So Continue comes back to the wait, not to the top of the wizard.
+        rememberScreen(res.run_id, 'running');
         navigate(`/compliance/runs/${res.run_id}/running`, {
-          // The payload rides along so a failed run can be retried from the
+          // The settings ride along so a failed run can be retried from the
           // progress screen without re-picking everything here.
           state: {
-            payload,
+            settings,
+            subject,
             checksQueued: res.checks_queued,
             subjectTitle: selected.title,
+            // Not fromUpload even for a document: its text was extracted when
+            // it was first uploaded, so a re-run is an ordinary 30–60s run and
+            // promising 60–90 would be wrong.
           } satisfies ComplianceRunningState,
-        }),
-      )
+        });
+      })
       .catch((e) => {
         // A 400 means no rule matched this combination — there is no run to
         // open, so stay put and show the backend's own explanation.
-        const rejection = readRunRejection(e);
-        setRunError(
-          rejection ??
-            (e instanceof Error ? e.message : 'Validation failed. Please try again.'),
-        );
+        setRunError(readRunError(e));
         setStarting(false);
       });
     // No `finally` — on success this screen is unmounting into the progress
     // screen, and clearing the flag first would flash the button back to idle.
+  };
+
+  // The upload path. Same 202, same poll, same everything after — the only
+  // difference is that the subject travels in the request instead of being
+  // named by it, and that the answer takes 60–90s because the file has to be
+  // read before it can be judged.
+  //
+  // Every error this can raise comes back before any file work starts, which is
+  // why the navigate is inside the `then`: routing first would strand the user
+  // on a progress screen for a run that was never created.
+  const uploadAndRun = () => {
+    if (!file) return;
+    setStarting(true);
+    setRunError('');
+    complianceValidation
+      .createUploadRun({
+        file,
+        company_id: companyId,
+        report_type: reportType,
+        period,
+        entity_type: entityType,
+        market,
+        enabled_frameworks: enabled,
+      })
+      .then((res) => {
+        rememberScreen(res.run_id, 'running');
+        navigate(`/compliance/runs/${res.run_id}/running`, {
+          state: {
+            // Settings but no subject: the file isn't a document yet — it
+            // becomes one only once it has been read, which is after this 202.
+            // The progress screen picks the subject up from the run's first
+            // poll, so a retry re-runs the document rather than re-uploading.
+            // The File itself deliberately doesn't travel; it wouldn't survive
+            // a refresh in history state, and it isn't needed again.
+            settings: {
+              report_type: reportType,
+              entity_type: entityType,
+              market,
+              enabled_frameworks: enabled,
+              // Kept for the re-run: the document will need it too.
+              period,
+            },
+            checksQueued: res.checks_queued,
+            subjectTitle: file.name,
+            fromUpload: true,
+          } satisfies ComplianceRunningState,
+        });
+      })
+      .catch((e) => {
+        setRunError(readRunError(e));
+        setStarting(false);
+      });
   };
 
   const subjectNoun = reportType === 'annual' ? 'reporting cycle' : 'report';
@@ -492,20 +916,91 @@ export default function ComplianceSetupPage() {
       <Card
         step={1}
         title="Source"
-        caption={`Choose the report type, then the ${subjectNoun} to validate.`}
+        caption={
+          sourceMode === 'upload'
+            ? 'Validate a finished report of your own — one you’ve uploaded before, or a new file.'
+            : `Choose the report type, then the ${subjectNoun} to validate.`
+        }
       >
+        {/* First decision in the card: where the report comes from. Approved
+            reports or a file of your own — the rest of the wizard can't tell
+            the difference, this only decides how the subject arrives. Tabs
+            rather than pills so it reads as two ways into the step, not as a
+            second filter row alongside the report types below. */}
+        <div className="tabs">
+          {SOURCE_MODES.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              className={`tab ${sourceMode === m.key ? 'act' : ''}`}
+              onClick={() => changeSourceMode(m.key)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
         <PillGroup<ReportType>
           options={REPORT_TYPES}
           value={reportType}
-          onChange={setReportType}
+          onChange={changeReportType}
         />
 
         <div style={{ marginTop: 16 }}>
-          {subjectsLoading ? (
+          {sourceMode === 'upload' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {/* Files uploaded before. They stay on the backend as ordinary
+                  reports, so validating one again is a re-run — uploading the
+                  same document a second time would duplicate it and all of its
+                  extracted text. */}
+              {uploadedSubjects.length > 0 && (
+                <div>
+                  <div style={FIELD_LABEL}>ALREADY UPLOADED</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {uploadedSubjects.map((s) => (
+                      <SubjectRow
+                        key={s.subject_id}
+                        subject={s}
+                        selected={s.subject_id === selected?.subject_id}
+                        disabled={isPreRules(s)}
+                        onSelect={() => pickSubject(s)}
+                      />
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      marginTop: 18,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: MUTED,
+                    }}
+                  >
+                    <span style={{ flex: 1, height: 1, background: '#ECEEF8' }} />
+                    OR UPLOAD A NEW ONE
+                    <span style={{ flex: 1, height: 1, background: '#ECEEF8' }} />
+                  </div>
+                </div>
+              )}
+              <UploadPanel
+                reportType={reportType}
+                file={file}
+                fileProblem={fileProblem}
+                onPickFile={pickFile}
+                year={effectiveYear}
+                onPickYear={setYear}
+                quarter={quarter}
+                onPickQuarter={setQuarter}
+                period={period}
+              />
+            </div>
+          ) : subjectsLoading ? (
             <Spinner pad={24} />
           ) : subjectsError ? (
             <div style={{ fontSize: 12, color: '#DC2626' }}>{subjectsError}</div>
-          ) : subjects.length === 0 ? (
+          ) : approvedSubjects.length === 0 ? (
             <div
               style={{
                 padding: 20,
@@ -519,18 +1014,18 @@ export default function ComplianceSetupPage() {
             >
               No approved {subjectNoun}s to validate.
               <br />
-              Only approved {subjectNoun}s can be run through compliance — approve one first, then
-              come back.
+              Only approved {subjectNoun}s can be run through compliance — approve one first, or
+              upload a finished report from the tab above.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {subjects.map((s) => (
+              {approvedSubjects.map((s) => (
                 <SubjectRow
                   key={s.subject_id}
                   subject={s}
                   selected={s.subject_id === selected?.subject_id}
                   disabled={isPreRules(s)}
-                  onSelect={() => setSelected(s)}
+                  onSelect={() => pickSubject(s)}
                 />
               ))}
             </div>
@@ -615,7 +1110,13 @@ export default function ComplianceSetupPage() {
       <Card
         step={3}
         title="Validate"
-        caption="Every enabled check is read against what the report actually says. This takes 30–60 seconds — we'll show you the progress."
+        caption={
+          // Only a brand-new file pays the reading cost. Re-running something
+          // already uploaded is an ordinary run — its text is already extracted.
+          newFileReady && !selected
+            ? "Every enabled check is read against what the report actually says. A new file takes 60–90 seconds — it has to be read before it can be judged — and we'll show you the progress."
+            : "Every enabled check is read against what the report actually says. This takes 30–60 seconds — we'll show you the progress."
+        }
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <button
@@ -632,12 +1133,18 @@ export default function ComplianceSetupPage() {
           >
             {starting ? 'Starting…' : '▶ Run validation'}
           </button>
-          {!selected && (
+          {!sourceReady && (
             <span style={{ fontSize: 11.5, color: MUTED }}>
-              Select a {subjectNoun} to continue.
+              {sourceMode !== 'upload'
+                ? `Select a ${subjectNoun} to continue.`
+                : file && !fileProblem
+                  ? 'Choose a reporting period to continue.'
+                  : uploadedSubjects.length > 0
+                    ? 'Pick an uploaded report, or choose a new file.'
+                    : 'Choose a file to continue.'}
             </span>
           )}
-          {selected && enabled.length === 0 && (
+          {sourceReady && enabled.length === 0 && (
             <span style={{ fontSize: 11.5, color: MUTED }}>
               Enable at least one framework to continue.
             </span>
@@ -664,8 +1171,11 @@ export default function ComplianceSetupPage() {
         )}
       </Card>
 
-      {/* Past sign-offs for whichever report type is selected above. Renders
-          nothing until there is at least one. */}
+      {/* Unfinished business, then past sign-offs — both for whichever report
+          type is selected above, and both render nothing when empty. They sit
+          below Validate because they're where you go back to, not part of
+          setting a new run up. */}
+      <ResumeGallery companyId={companyId} reportType={reportType} />
       <CertifiedGallery companyId={companyId} reportType={reportType} />
     </div>
   );

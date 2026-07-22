@@ -17,7 +17,9 @@ import {
   MONO,
   MUTED,
   RED,
+  setupHref,
   useComplianceRun,
+  useRememberScreen,
 } from './compliance-ui';
 
 // The 409 body arrives as `{ detail: { message, reason?, blocking_rule_ids } }`,
@@ -41,6 +43,10 @@ export default function ComplianceGatePage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const { run, loading, error, setRun, reload } = useComplianceRun(runId);
+
+  // Someone who left mid-certification should come back to the gate, not to
+  // the review screen behind it.
+  useRememberScreen(runId, 'gate');
 
   const [certifying, setCertifying] = useState(false);
   const [certifyError, setCertifyError] = useState('');
@@ -132,7 +138,7 @@ export default function ComplianceGatePage() {
             <button
               type="button"
               className="btn bs"
-              onClick={() => navigate('/compliance')}
+              onClick={() => navigate(setupHref(run))}
               style={{ fontSize: 12.5, padding: '8px 16px' }}
             >
               ← Back to set up

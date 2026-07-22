@@ -41,6 +41,8 @@ import {
   safeScore,
   scoreColor,
   SeverityChip,
+  setupHref,
+  useRememberScreen,
   StatusIcon,
   statusHint,
   statusLabel,
@@ -475,6 +477,10 @@ export default function ComplianceReviewPage() {
   const navigate = useNavigate();
   const { run, loading, error, setRun, reload } = useComplianceRun(runId);
 
+  // So "Continue" from the set-up shelf comes back to the results rather than
+  // to the top of the wizard.
+  useRememberScreen(runId, 'review');
+
   // A run reached by deep link or a refresh may not be finished — it takes
   // 30–60s. There is nothing to review until it is, and every list here would
   // be empty, so send it to the screen that knows how to wait.
@@ -544,7 +550,7 @@ export default function ComplianceReviewPage() {
             <button
               type="button"
               className="btn bs"
-              onClick={() => navigate('/compliance')}
+              onClick={() => navigate(setupHref(run))}
               style={{ fontSize: 12.5, padding: '8px 16px' }}
             >
               ← Back to set up
@@ -560,7 +566,7 @@ export default function ComplianceReviewPage() {
             <button
               type="button"
               className="btn bs"
-              onClick={() => navigate('/compliance')}
+              onClick={() => navigate(setupHref(run))}
               style={{ fontSize: 12.5, padding: '8px 16px' }}
             >
               ← Back to set up
@@ -590,7 +596,7 @@ export default function ComplianceReviewPage() {
             <button
               type="button"
               className="btn bs"
-              onClick={() => navigate('/compliance')}
+              onClick={() => navigate(setupHref(run))}
               style={{ fontSize: 13, padding: '9px 18px' }}
             >
               ← Back to set up

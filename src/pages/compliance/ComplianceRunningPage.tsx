@@ -11,13 +11,20 @@ import { useCallback, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import { complianceValidation } from '@/lib/api';
-import type { CreateRunPayload } from '@/types/compliance';
+import {
+  blamesTheFile,
+  type CreateRunPayload,
+  type RunSettings,
+  type SubjectType,
+} from '@/types/compliance';
 import {
   ComplianceNotice,
   formatElapsed,
   isRunDone,
   runProgress,
+  setupHref,
   useComplianceRunPoll,
+  useRememberScreen,
 } from './compliance-ui';
 
 // Three stages, and only three, because only three are actually observable from
@@ -40,10 +47,20 @@ const TIPS = [
 // Handed over by the setup screen so a failed run can be retried from here
 // without sending the user back to re-pick everything. Absent on a deep link or
 // a refresh, in which case retry falls back to the setup screen.
+//
+// The subject travels separately from the settings because the upload path
+// doesn't have one yet: a file only becomes a document once it has been read,
+// which is after the 202. For an upload the subject comes from the run itself
+// on the first poll — so a retry still re-runs what's already there, and never
+// uploads the file a second time.
 export interface ComplianceRunningState {
-  payload?: CreateRunPayload;
+  settings?: RunSettings;
+  subject?: { subject_type: SubjectType; subject_id: string };
   checksQueued?: number;
   subjectTitle?: string;
+  // Only changes what the user is told: the wait is longer because the file has
+  // to be read first, and a failure is likelier to be about the file itself.
+  fromUpload?: boolean;
 }
 
 export default function ComplianceRunningPage() {
@@ -60,6 +77,9 @@ export default function ComplianceRunningPage() {
 
   const { run, error, elapsedMs, timedOut } = useComplianceRunPoll(runId, attempt);
 
+  // Walking away from a 60–90 second wait is the likeliest moment to leave.
+  useRememberScreen(runId, 'running');
+
   const done = isRunDone(run?.status);
   const failed = run?.status === 'error';
 
@@ -67,24 +87,41 @@ export default function ComplianceRunningPage() {
     if (runId) navigate(`/compliance/runs/${runId}`, { replace: true });
   }, [navigate, runId]);
 
-  // Start the whole run again with the same inputs. Only possible when the
-  // setup screen handed the payload over.
+  // The subject to re-run: whatever the setup screen named, or — for an upload,
+  // which had none to give — whatever the run reports once it has read the
+  // file. Null on an `unreadable_file` failure: that document was deleted, and
+  // there is nothing left to run.
+  const subject =
+    handoff?.subject ??
+    (run?.subject_id ? { subject_type: run.subject_type, subject_id: run.subject_id } : null);
+
+  // Back to the tab this run came from, with its subject still selected.
+  const backHref = setupHref({ report_type: handoff?.settings?.report_type ?? run?.report_type, ...subject });
+
   const retryRun = () => {
-    if (!handoff?.payload) {
-      navigate('/compliance');
+    // Without the settings we don't know the entity type or the framework
+    // selection, so back to set up with the subject preselected. Still a re-run
+    // of what already exists — never a second upload of the same file.
+    if (!handoff?.settings || !subject) {
+      navigate(backHref);
       return;
     }
+    // `period` rides along in the settings and is required for a document —
+    // an uploaded file records none of its own, so dropping it here would 422.
+    const payload: CreateRunPayload = { ...subject, ...handoff.settings };
     setRestarting(true);
     setRestartError('');
     complianceValidation
-      .createRun(handoff.payload)
+      .createRun(payload)
       .then((res) =>
         navigate(`/compliance/runs/${res.run_id}/running`, {
           replace: true,
           state: {
-            payload: handoff.payload,
+            settings: handoff.settings,
+            subject,
             checksQueued: res.checks_queued,
             subjectTitle: handoff.subjectTitle,
+            fromUpload: handoff.fromUpload,
           } satisfies ComplianceRunningState,
         }),
       )
@@ -98,37 +135,65 @@ export default function ComplianceRunningPage() {
     <button
       type="button"
       className="btn bs"
-      onClick={() => navigate('/compliance')}
+      onClick={() => navigate(backHref)}
       style={{ fontSize: 12.5, padding: '8px 16px' }}
     >
       ← Back to set up
     </button>
   );
 
-  // ── terminal: the report couldn't be read ────────────────────────────────
-  // This never resolves on its own, so there is nothing to wait for.
+  // ── terminal: the run failed ─────────────────────────────────────────────
+  // This never resolves on its own, so there is nothing to wait for. What to
+  // offer depends entirely on whose fault it was, and only `unreadable_file`
+  // is the file's — see the two branches below.
   if (failed) {
+    const fileToBlame = blamesTheFile(run?.error_code);
     return (
       <Shell>
         <ComplianceNotice
-          title="We couldn’t read this report"
+          title={fileToBlame ? 'We couldn’t read this file' : 'This validation didn’t finish'}
           detail={
             run?.error ||
             run?.error_message ||
-            'The validation run stopped before it could assess anything — usually because the report couldn’t be read. Nothing was scored, so there are no results to show.'
+            (fileToBlame
+              ? 'We couldn’t get any text out of this file, so nothing could be scored. The usual cause is a scanned PDF — pages saved as images, with no text layer behind them. A copy exported straight from Word, or a PDF you can select text in, will work.'
+              : // Deliberately says nothing about the file. An unknown or absent
+                // error_code lands here, and blaming a document that was read
+                // perfectly well is what sends people off to re-upload it.
+                'The run stopped before it could finish, so nothing was scored. Your report is safe and already loaded — running it again is usually all it takes.')
           }
           tone="error"
           action={
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={retryRun}
-                disabled={restarting}
-                style={{ fontSize: 12.5, padding: '9px 18px', opacity: restarting ? 0.5 : 1 }}
-              >
-                {restarting ? 'Starting…' : 'Try again'}
-              </button>
+              {fileToBlame ? (
+                <button
+                  type="button"
+                  className="btn bp"
+                  // Straight to the upload tab, without the failed subject
+                  // preselected — the whole point is a different file.
+                  onClick={() =>
+                    navigate(
+                      setupHref({ report_type: handoff?.settings?.report_type ?? run?.report_type }, 'upload'),
+                    )
+                  }
+                  style={{ fontSize: 12.5, padding: '9px 18px' }}
+                >
+                  Try a different file
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn bp"
+                  // Re-runs the subject that already exists — never a second
+                  // upload. Uploading the same file again would create another
+                  // report row and another copy of its documents every time.
+                  onClick={retryRun}
+                  disabled={restarting}
+                  style={{ fontSize: 12.5, padding: '9px 18px', opacity: restarting ? 0.5 : 1 }}
+                >
+                  {restarting ? 'Starting…' : 'Run it again'}
+                </button>
+              )}
               {backToSetup}
             </div>
           }
@@ -176,7 +241,11 @@ export default function ComplianceRunningPage() {
       <Shell>
         <ComplianceNotice
           title="This run is taking longer than expected"
-          detail="A validation normally finishes in under a minute. It may still complete — keep waiting, or come back to it from the set-up screen."
+          detail={
+            handoff?.fromUpload
+              ? 'An uploaded report normally finishes within a couple of minutes — the file has to be read before it can be checked. It may still complete — keep waiting, or come back to it from the set-up screen.'
+              : 'A validation normally finishes in under a minute. It may still complete — keep waiting, or come back to it from the set-up screen.'
+          }
           action={
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
@@ -212,8 +281,11 @@ export default function ComplianceRunningPage() {
     percent != null && queued != null
       ? `${completed} of ${queued} checks · ${percent}%`
       : [
-          handoff?.payload ? `${formatElapsed(elapsedMs)} elapsed` : null,
-          'usually 30–60s',
+          handoff?.settings ? `${formatElapsed(elapsedMs)} elapsed` : null,
+          // An upload is read before it is judged, so it runs longer. Quoting
+          // the picker path's 30–60s here would have the screen look stuck at
+          // the halfway mark of a perfectly healthy run.
+          handoff?.fromUpload ? 'usually 60–90s' : 'usually 30–60s',
           queued != null ? `${queued} ${queued === 1 ? 'check' : 'checks'} queued` : null,
         ]
           .filter(Boolean)

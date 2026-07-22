@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { complianceValidation } from '@/lib/api';
+import { rememberScreen, type ComplianceScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
 import {
   isRunDone,
@@ -13,9 +14,39 @@ import {
   type ComplianceRun,
   type Gap,
   type Gate,
+  type ReportType,
   type RuleDetailGroup,
   type Severity,
 } from '@/types/compliance';
+
+// Where "back to set up" should land. A bare /compliance drops the user on the
+// ESG tab with nothing selected — so a report they just validated under another
+// tab isn't on screen at all, and an uploaded one looks like it was never
+// saved. Carrying the tab and the subject brings them back to what they were
+// doing, ready to run again.
+// Record which screen the user has open for a run, so "Continue" can return
+// them to it rather than to the top of the wizard. Only the screen — GET /runs
+// owns the run's existence and its status, and would be right where a
+// remembered status goes stale.
+export function useRememberScreen(runId: string | undefined, screen: ComplianceScreen) {
+  useEffect(() => {
+    if (runId) rememberScreen(runId, screen);
+  }, [runId, screen]);
+}
+
+export function setupHref(
+  // subject_id is nullable: a run whose file couldn't be read has had its
+  // document deleted, so there is nothing to preselect.
+  subject?: { report_type?: ReportType; subject_id?: string | null } | null,
+  mode?: 'upload',
+): string {
+  const params = new URLSearchParams();
+  if (subject?.report_type) params.set('type', subject.report_type);
+  if (subject?.subject_id) params.set('subject', subject.subject_id);
+  if (mode) params.set('mode', mode);
+  const query = params.toString();
+  return query ? `/compliance?${query}` : '/compliance';
+}
 
 export const PRIMARY = '#4040C8';
 export const GREEN = '#16A34A';
