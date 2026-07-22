@@ -17,6 +17,9 @@ const h = vi.hoisted(() => {
     navigateMock: vi.fn(),
     getEarningsOutline: vi.fn(),
     saveEarningsOutline: vi.fn(),
+    produceEarningsReport: vi.fn(),
+    getByPollUrl: vi.fn(),
+    getNodes: vi.fn(),
     userRef: { current: { company_id: 'co-1', company_name: 'Acme' } as unknown },
     MockApiError,
   };
@@ -31,6 +34,11 @@ vi.mock('@/lib/api', () => ({
   earnings: {
     getEarningsOutline: (...a: unknown[]) => h.getEarningsOutline(...a),
     saveEarningsOutline: (...a: unknown[]) => h.saveEarningsOutline(...a),
+    produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
+  },
+  agentRuns: {
+    getByPollUrl: (...a: unknown[]) => h.getByPollUrl(...a),
+    getNodes: (...a: unknown[]) => h.getNodes(...a),
   },
   ApiError: h.MockApiError,
 }));
@@ -50,6 +58,7 @@ const sec = (over: Partial<EarningsOutlineSection>): EarningsOutlineSection => (
   source_type: null,
   mode: null,
   page_hint: null,
+  status: null,
   ...over,
 });
 
@@ -79,6 +88,9 @@ beforeEach(() => {
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
   h.getEarningsOutline.mockResolvedValue(OUTLINE);
   h.saveEarningsOutline.mockResolvedValue(OUTLINE);
+  h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
+  h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'completed', error_message: null });
+  h.getNodes.mockResolvedValue({ nodes: [] });
 });
 
 describe('EarningsOutlinePage', () => {
@@ -127,7 +139,7 @@ describe('EarningsOutlinePage', () => {
     expect(gripsAfter).toEqual(['Reorder CEO Commentary', 'Reorder Financial Highlights']);
   });
 
-  it('toggling an optional on, reordering, then Continue saves the new order + inclusion and navigates to preview', async () => {
+  it('toggling an optional on, reordering, then Continue saves the new order + inclusion, produces every section, and only then navigates to preview', async () => {
     renderPage();
     await screen.findByText('Report sections');
     // Reorder: move Financial Highlights down → [CEO, FH].
@@ -146,16 +158,69 @@ describe('EarningsOutlinePage', () => {
         ],
       }),
     );
+    // Section production starts — the AI loader takes over, never navigating early.
+    await waitFor(() => expect(h.produceEarningsReport).toHaveBeenCalledWith('rep-1'));
+    expect(await screen.findByText('Composing your report')).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalled();
+    // Only once the run genuinely completes does it redirect to Preview.
+    await waitFor(() => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'), { timeout: 3000 });
+  });
+
+  it('skips production and navigates straight to Preview when every included section is already produced', async () => {
+    // The decision reads the outline AS LOADED (before this save) — PUT's own
+    // response resets status to 'pending' on every save (even a no-op), so it
+    // can't be the signal; saveEarningsOutline's resolved value is irrelevant here.
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, status: 'produced' }),
+        sec({ section_code: 'ceo_commentary', title: 'CEO Commentary', included: true, status: 'needs_input' }),
+        sec({ section_code: 'outlook', title: 'Outlook', included: false, available: true, status: 'pending' }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Report sections');
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalled());
+    // needs_input counts as already-attempted — never re-produced by Continue.
+    expect(h.produceEarningsReport).not.toHaveBeenCalled();
     await waitFor(() => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
   });
 
-  it('a 422 on Continue surfaces the message and does not navigate', async () => {
+  it('still produces when a newly-included section has never been attempted (status: pending)', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, status: 'produced' }),
+        sec({ section_code: 'outlook', title: 'Outlook', included: true, available: true, status: 'pending' }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Report sections');
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    await waitFor(() => expect(h.produceEarningsReport).toHaveBeenCalledWith('rep-1'));
+  });
+
+  it('a 422 on Continue surfaces the message and does not navigate or start production', async () => {
     h.saveEarningsOutline.mockRejectedValueOnce(new h.MockApiError(422, { detail: 'segment_deep_dive has no data' }));
     renderPage();
     await screen.findByText('Report sections');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
     expect(await screen.findByText('segment_deep_dive has no data')).toBeInTheDocument();
     expect(h.navigateMock).not.toHaveBeenCalled();
+    expect(h.produceEarningsReport).not.toHaveBeenCalled();
+  });
+
+  it('a failed production run shows the failure screen with a working retry, never navigating to preview', async () => {
+    h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'failed', error_message: 'The pipeline crashed' });
+    renderPage();
+    await screen.findByText('Report sections');
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    expect(await screen.findByText('Report generation failed')).toBeInTheDocument();
+    expect(screen.getByText('The pipeline crashed')).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalled();
+
+    // Retry drops back to the outline, ready for another Continue click.
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByText('Report sections')).toBeInTheDocument();
   });
 
   it('guards a null companyId (no crash)', async () => {

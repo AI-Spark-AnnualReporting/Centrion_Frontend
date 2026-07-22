@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
+import type { EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { INK, MUTED, FAINT, ACCENT, DANGER } from './tokens';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -22,7 +22,6 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 // Right-hand publish panel: status, read-only included list, optional report
 // details, export (PDF/Word), and approve-and-lock with a blocker list on 409.
 export function PublishBar({
-  sections,
   details,
   locked,
   blockers,
@@ -30,7 +29,6 @@ export function PublishBar({
   onApprove,
   onExport,
 }: {
-  sections: EarningsProducedSection[];
   details?: { label: string; value: string }[];
   locked: boolean;
   blockers: EarningsApproveBlocker[] | null;
@@ -52,8 +50,6 @@ export function PublishBar({
       setExporting(null);
     }
   };
-
-  const included = sections.filter((s) => s.included);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -79,22 +75,6 @@ export function PublishBar({
         </div>
       </div>
 
-      {/* Included sections (read-only; inclusion is set on the Outline step) */}
-      <div className="card" style={{ padding: '14px 16px' }}>
-        <SectionHeader>Included sections</SectionHeader>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {included.map((s) => (
-            <div key={s.section_code} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <rect width="16" height="16" rx="4" fill={ACCENT} />
-                <path d="M4.5 8.2l2.2 2.2 4.8-4.8" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span style={{ fontSize: 12.5, color: INK }}>{s.title}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Optional report details (rendered only when the page supplies them) */}
       {details && details.length > 0 && (
         <div className="card" style={{ padding: '14px 16px' }}>
@@ -110,19 +90,22 @@ export function PublishBar({
         </div>
       )}
 
-      {/* Export */}
-      <div className="card" style={{ padding: '14px 16px' }}>
-        <SectionHeader>Export</SectionHeader>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('pdf')} disabled={exporting !== null}>
-            {exporting === 'pdf' ? 'Preparing…' : '⬇ PDF'}
-          </button>
-          <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('docx')} disabled={exporting !== null}>
-            {exporting === 'docx' ? 'Preparing…' : '⬇ Word'}
-          </button>
+      {/* Export — only once the report is approved & locked; exporting a draft
+          would hand out a document that can still change under it. */}
+      {locked && (
+        <div className="card" style={{ padding: '14px 16px' }}>
+          <SectionHeader>Export</SectionHeader>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('pdf')} disabled={exporting !== null}>
+              {exporting === 'pdf' ? 'Preparing…' : '⬇ PDF'}
+            </button>
+            <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('docx')} disabled={exporting !== null}>
+              {exporting === 'docx' ? 'Preparing…' : '⬇ Word'}
+            </button>
+          </div>
+          {exportError && <div style={{ fontSize: 11.5, color: DANGER, marginTop: 8 }}>{exportError}</div>}
         </div>
-        {exportError && <div style={{ fontSize: 11.5, color: DANGER, marginTop: 8 }}>{exportError}</div>}
-      </div>
+      )}
 
       {/* Approve & lock */}
       {!locked && (

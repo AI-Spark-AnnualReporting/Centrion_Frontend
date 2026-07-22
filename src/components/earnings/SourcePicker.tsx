@@ -1,16 +1,14 @@
 import { useEffect, useState } from 'react';
-import { earnings, ApiError } from '@/lib/api';
+import { earnings } from '@/lib/api';
 import type { EarningsVariant, EarningsQuarter, SelectableSource, SourceUploadType } from '@/types/earnings';
-import { sourcesPeriodKey, sourceKey, formatSourceType } from '@/pages/earnings/helpers';
+import { sourcesPeriodKey, sourceKey, formatSourceType, needsTypeConfirmation } from '@/pages/earnings/helpers';
 import { DocumentUploader } from './DocumentUploader';
 import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER } from './tokens';
 
-type Mode = 'existing' | 'upload';
-
-// Document types the backend recognises (_FILING_TYPES). `value` is the canonical
-// tag sent to the upload route — NOT the display label — or the backend 422s.
-// 'aggregator' is a backend/system-only tag, never user-selectable. All files in
-// one upload share the selected type.
+// Document types the backend recognises (_FILING_TYPES) — shown as GUIDANCE
+// only now (the AI detects the type on upload); also reused as the correction
+// dropdown's option list. 'aggregator' is a backend/system-only tag, never
+// offered here.
 const UPLOAD_TYPES: { value: SourceUploadType; label: string; desc: string }[] = [
   { value: 'annual', label: 'Annual report', desc: 'Full-year financial statements & MD&A' },
   { value: 'interim', label: 'Interim', desc: 'Quarterly or half-year statements' },
@@ -28,17 +26,20 @@ function coverageBadge(coverage: string): { cls: string; label: string } {
 
 // Extraction state → shared badge class + label (narrative/upload rows only).
 // Never implies "ready" before the backend actually says so (D-12).
+// 'completed' is the live backend's terminal value (confirmed against a real
+// GET .../sources response) — 'ready' is kept as an alias for naming
+// robustness, not because the backend has been observed to send it.
 function extractionBadge(status: string | null): { cls: string; label: string } {
-  if (status === 'ready') return { cls: 'badge b-gn', label: 'Ready' };
+  if (status === 'ready' || status === 'completed') return { cls: 'badge b-gn', label: 'Ready' };
   if (status === 'failed') return { cls: 'badge b-rd', label: 'Failed' };
   return { cls: 'badge b-am', label: 'Extracting…' };
 }
 
-// Block 4 — source selection. Two tracks, always shown as distinct groups:
-// Official sources (DB reports, via GET /earnings/sources) and Narrative &
-// adjusted (uploads — tagged with a type, shown honestly by extraction state
-// until they're ready). "Upload new documents" reuses the shared uploader; the
-// create endpoint consumes both source_report_ids and source_document_ids.
+// Block 4 — source selection. One screen, no tabs: existing system reports and
+// uploads are selected/staged in the same place, shown as two labelled groups
+// (D-19 — an upload never implies an official figure source). Uploading
+// itself is deferred to the page's Continue action (see EarningsSetupPage) —
+// this component only stages files via the shared uploader.
 export function SourcePicker({
   companyId,
   variant,
@@ -46,7 +47,8 @@ export function SourcePicker({
   quarter,
   selectedIds,
   onSelectedIdsChange,
-  ensureDraft,
+  uploadFiles,
+  onUploadFilesChange,
 }: {
   companyId: string | null;
   variant: EarningsVariant;
@@ -57,20 +59,13 @@ export function SourcePicker({
     ids: string[],
     split: { source_report_ids: string[]; source_document_ids: string[] },
   ) => void;
-  // Creates (once) and returns the draft report_id — uploads are report-scoped,
-  // so the draft must exist before we can POST to .../{report_id}/sources/upload.
-  ensureDraft: () => Promise<string>;
+  uploadFiles: File[];
+  onUploadFilesChange: (files: File[]) => void;
 }) {
-  const [mode, setMode] = useState<Mode>('existing');
   const [sources, setSources] = useState<SelectableSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadType, setUploadType] = useState<SourceUploadType>('annual');
-  const [uploading, setUploading] = useState(false);
-  const [uploadNote, setUploadNote] = useState<string | null>(null);
 
   const periodReady = fiscalYear != null && (variant !== 'quarterly' || quarter != null);
   const periodKey = periodReady ? sourcesPeriodKey(variant, fiscalYear as number, quarter) : null;
@@ -125,161 +120,91 @@ export function SourcePicker({
     emit(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
   };
 
-  const handleUpload = async () => {
-    if (!periodReady || uploadFiles.length === 0 || uploading) return;
-    setUploading(true);
-    setUploadNote(null);
-    try {
-      // Uploads are report-scoped — create (or reuse) the draft first, then POST
-      // all files in one multipart request tagged with the selected canonical type.
-      const reportId = await ensureDraft();
-      const newSources = await earnings.uploadEarningsSources(reportId, uploadFiles, uploadType);
-      // Optimistic — the new sources appear immediately (in their reported
-      // extraction state) instead of waiting on a refetch.
-      setSources((prev) => [...prev, ...newSources]);
-      setUploadFiles([]);
-      setUploadNote('Uploaded — shown under "Narrative & adjusted" while it extracts.');
-      setMode('existing');
-    } catch (err: unknown) {
-      const msg =
-        err instanceof ApiError
-          ? `Upload failed (${err.status}). Please try again.`
-          : err instanceof Error
-            ? err.message
-            : 'Upload failed. Please try again.';
-      setUploadNote(msg);
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const officialSources = sources.filter((s) => s.track !== 'narrative_adjusted');
   const narrativeSources = sources.filter((s) => s.track === 'narrative_adjusted');
 
   return (
     <div>
-      {/* Mode toggle */}
-      <div className="tabs" style={{ marginBottom: 14 }}>
-        {(['existing', 'upload'] as Mode[]).map((m) => (
-          <button
-            key={m}
-            type="button"
-            className={`tab ${mode === m ? 'act' : ''}`}
-            onClick={() => setMode(m)}
-          >
-            {m === 'existing' ? 'Use existing reports' : 'Upload new documents'}
+      {!periodReady ? (
+        <EmptyHint>Select a reporting period above to load available sources.</EmptyHint>
+      ) : loading ? (
+        <EmptyHint>Loading sources…</EmptyHint>
+      ) : loadError ? (
+        <div
+          role="alert"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+        >
+          <span style={{ fontSize: 12, color: '#DC2626' }}>{loadError}</span>
+          <button className="btn bs bsm" type="button" onClick={() => setRefreshKey((k) => k + 1)}>
+            Retry
           </button>
-        ))}
-      </div>
-
-      {mode === 'existing' ? (
-        !periodReady ? (
-          <EmptyHint>Select a reporting period above to load available sources.</EmptyHint>
-        ) : loading ? (
-          <EmptyHint>Loading sources…</EmptyHint>
-        ) : loadError ? (
-          <div
-            role="alert"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
-          >
-            <span style={{ fontSize: 12, color: '#DC2626' }}>{loadError}</span>
-            <button className="btn bs bsm" type="button" onClick={() => setRefreshKey((k) => k + 1)}>
-              Retry
-            </button>
-          </div>
-        ) : (
-          // Always both groups — never hidden, even when one side is empty —
-          // so the official/narrative distinction is always visible (D-19).
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <SourceGroup
-              title="Official sources"
-              subtitle="From filed reports"
-              sources={officialSources}
-              selectedIds={selectedIds}
-              onToggle={toggle}
-              emptyText="No official filings found for this period."
-            />
-            <SourceGroup
-              title="Narrative & adjusted"
-              subtitle="From your uploads"
-              sources={narrativeSources}
-              selectedIds={selectedIds}
-              onToggle={toggle}
-              emptyText='No uploads yet — switch to "Upload new documents" to add one.'
-            />
-          </div>
-        )
+        </div>
       ) : (
-        <div>
-          {!periodReady && (
-            <EmptyHint>Select a reporting period above before uploading documents.</EmptyHint>
-          )}
-          {/* Document type — pick one for this batch. The label describes it; the
-              canonical value (not the label) is what's sent to the backend. */}
-          <div style={{ marginTop: periodReady ? 0 : 12, marginBottom: 12 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: MUTED, marginBottom: 8 }}>
-              Document type
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {UPLOAD_TYPES.map((t) => {
-                const selected = uploadType === t.value;
-                return (
-                  <button
-                    key={t.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setUploadType(t.value)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 8,
-                      textAlign: 'left',
-                      padding: '9px 12px',
-                      borderRadius: 10,
-                      cursor: 'pointer',
-                      background: selected ? ACCENT_TINT : '#fff',
-                      border: `1.5px solid ${selected ? ACCENT : BORDER}`,
-                      transition: 'border-color .12s, background .12s',
-                    }}
-                  >
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color: selected ? '#2B2B8F' : INK, minWidth: 108, flexShrink: 0 }}>
-                      {t.label}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: FAINT }}>{t.desc}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <DocumentUploader files={uploadFiles} onFilesChange={setUploadFiles} disabled={uploading || !periodReady} />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-            <button
-              type="button"
-              className="btn bp"
-              disabled={!periodReady || uploadFiles.length === 0 || uploading}
-              onClick={handleUpload}
-              style={{ opacity: !periodReady || uploadFiles.length === 0 || uploading ? 0.55 : 1 }}
-            >
-              {uploading ? 'Uploading…' : 'Upload & extract'}
-            </button>
-          </div>
-          {uploadNote && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Guidance only — the AI detects the type on upload, this isn't a choice. */}
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: INK, marginBottom: 10 }}>Document types</div>
             <div
-              role="status"
               style={{
-                marginTop: 12,
-                padding: '10px 14px',
-                borderRadius: 8,
-                background: 'rgba(64,64,200,.06)',
-                border: '1px solid rgba(64,64,200,.25)',
-                color: MUTED,
-                fontSize: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: 8,
               }}
             >
-              {uploadNote}
+              {UPLOAD_TYPES.map((t) => (
+                <div
+                  key={t.value}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: ACCENT_TINT,
+                    border: `1px solid ${BORDER}`,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 800, color: ACCENT, marginBottom: 3 }}>{t.label}</div>
+                  <div style={{ fontSize: 11, color: FAINT, lineHeight: 1.4 }}>{t.desc}</div>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+
+          {/* Always both groups — never hidden, even when one side is empty —
+              so official vs narrative is always visible (D-19). */}
+          <SourceGroup
+            title="From your system — official figures"
+            subtitle="From filed reports"
+            sources={officialSources}
+            selectedIds={selectedIds}
+            onToggle={toggle}
+            emptyText="No official filings found for this period."
+          />
+
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: INK }}>Uploaded — narrative</span>
+              <span style={{ fontSize: 11, color: FAINT }}>From your uploads</span>
+            </div>
+            {narrativeSources.length === 0 ? (
+              <div style={{ fontSize: 12, color: FAINT, marginBottom: 10 }}>No uploads yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                {narrativeSources.map((s) => {
+                  const key = sourceKey(s);
+                  return (
+                    <SourceRow
+                      key={key}
+                      source={s}
+                      checked={selectedIds.includes(key)}
+                      onToggle={() => toggle(key)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            {/* Staging only — no upload call here. Continue does the actual
+                upload + classify + extract as one action (see EarningsSetupPage). */}
+            <DocumentUploader files={uploadFiles} onFilesChange={onUploadFilesChange} disabled={!periodReady} />
+          </div>
         </div>
       )}
     </div>
@@ -325,6 +250,72 @@ function SourceGroup({
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// A narrative row's type — the AI's detected classification, shown as an
+// editable dropdown so the user can correct it (D-19: never hide the type,
+// it drives sourcing). Read-only fallback when the backend hasn't told us
+// which report/draft owns this upload (no safe report id to PATCH against).
+function TypeCorrector({ source: s }: { source: SelectableSource }) {
+  const [current, setCurrent] = useState(s.type);
+  const [pending, setPending] = useState(false);
+  const editable = s.owning_report_id != null;
+  const hint = needsTypeConfirmation({ type: current, detected_type: s.detected_type, type_confidence: s.type_confidence });
+
+  if (!editable) {
+    return <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{formatSourceType(current)}</div>;
+  }
+
+  return (
+    <div
+      style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 8 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <select
+        aria-label={`Type for ${s.label}`}
+        value={current ?? ''}
+        disabled={pending}
+        onChange={async (e) => {
+          const next = e.target.value as SourceUploadType;
+          const prev = current;
+          setCurrent(next); // optimistic
+          setPending(true);
+          try {
+            const updated = await earnings.patchSourceType(
+              s.owning_report_id as string,
+              s.document_id as string,
+              next,
+            );
+            setCurrent(updated.type);
+          } catch {
+            setCurrent(prev); // revert on failure
+          } finally {
+            setPending(false);
+          }
+        }}
+        style={{
+          fontSize: 11.5,
+          fontWeight: 600,
+          color: INK,
+          border: `1px solid ${BORDER}`,
+          borderRadius: 6,
+          padding: '2px 6px',
+          background: '#fff',
+        }}
+      >
+        {UPLOAD_TYPES.map((t) => (
+          <option key={t.value} value={t.value}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+      {hint && (
+        <span role="status" style={{ fontSize: 10.5, color: '#B4730B', fontWeight: 600 }}>
+          Please confirm type
+        </span>
       )}
     </div>
   );
@@ -400,7 +391,7 @@ function SourceRow({
           {s.label}
         </div>
         {isNarrative ? (
-          <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{formatSourceType(s.type)}</div>
+          <TypeCorrector source={s} />
         ) : (
           s.period && <div style={{ fontSize: 11, color: FAINT, marginTop: 1 }}>{s.period}</div>
         )}

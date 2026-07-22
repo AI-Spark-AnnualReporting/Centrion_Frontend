@@ -5,11 +5,12 @@ import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState, isHiddenWhenOmitted } from './preview-helpers';
+import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
 import { SectionRail } from '@/components/earnings/SectionRail';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
 import { PublishBar } from '@/components/earnings/PublishBar';
+import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
 
 const POLL_INTERVAL_MS = 3000;
@@ -251,23 +252,29 @@ export default function EarningsPreviewPage() {
   // ── Loading / error ─────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="card" style={{ padding: 0 }}>
-        <Spinner pad={80} />
+      <div>
+        <EarningsStepper activeStep={4} reportId={reportId} />
+        <div className="card" style={{ padding: 0 }}>
+          <Spinner pad={80} />
+        </div>
       </div>
     );
   }
 
   if (error && sections.length === 0) {
     return (
-      <div
-        className="card"
-        role="alert"
-        style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
-      >
-        <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
-        <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
-          Retry
-        </button>
+      <div>
+        <EarningsStepper activeStep={4} reportId={reportId} />
+        <div
+          className="card"
+          role="alert"
+          style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
+        >
+          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+          <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -280,11 +287,23 @@ export default function EarningsPreviewPage() {
     (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
   );
   const included = visibleSections.filter((s) => s.included);
-  const needsGenerate = included.length > 0 && included.some((s) => earningsSectionState(s) !== 'produced');
+  // "Has this report been generated at all" — not "is every section fully
+  // produced". Once real content exists anywhere (excluding the cover, which
+  // is template-driven and doesn't indicate the narrative pipeline ran), the
+  // report counts as generated and the banner never comes back, even if an
+  // individual section is still gap-flagged (needs_input) or its status field
+  // was reset by the outline-save bug (content-first via earningsSectionState,
+  // so real content still reads 'produced' regardless of that corruption).
+  // Per-section gaps stay visible inline on each section, just not as a
+  // blanket "generate everything" prompt.
+  const substantiveIncluded = included.filter((s) => !isCoverMode(s));
+  const needsGenerate =
+    substantiveIncluded.length > 0 && !substantiveIncluded.some((s) => earningsSectionState(s) === 'produced');
   const generating = runInfo !== null;
 
   return (
     <div>
+      <EarningsStepper activeStep={4} reportId={reportId} />
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Preview your earnings report
@@ -361,7 +380,6 @@ export default function EarningsPreviewPage() {
 
           {/* Right — publish bar */}
           <PublishBar
-            sections={visibleSections}
             locked={locked}
             blockers={blockers}
             approving={approving}

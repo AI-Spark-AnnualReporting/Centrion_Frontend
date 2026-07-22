@@ -7,6 +7,7 @@ import type { EarningsFigure, EarningsFigureSource } from '@/types/earnings';
 import { needsReviewCount } from './helpers';
 import { SelectedSourcesHeader } from '@/components/earnings/SelectedSourcesHeader';
 import { FigureTable } from '@/components/earnings/FigureTable';
+import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { INK, MUTED } from '@/components/earnings/tokens';
 
 export default function EarningsExtractPage() {
@@ -89,6 +90,7 @@ export default function EarningsExtractPage() {
 
   return (
     <div>
+      <EarningsStepper activeStep={2} reportId={reportId} />
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Extract earnings data

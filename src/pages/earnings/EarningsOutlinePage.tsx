@@ -8,7 +8,28 @@ import type { EarningsOutlineSection, EarningsOutlineResponse } from '@/types/ea
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
 import { OutlineGroup } from '@/components/earnings/OutlineGroup';
 import type { OutlineDragHandlers } from '@/components/earnings/OutlineGroup';
+import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
+import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
+import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
+import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
+import { computeProgress } from '@/components/reports/QuarterlyGeneratingScreen';
+
+// Section-production loader — same "AI loader" used for the quarterly
+// Outline → Preview handoff (AiLoadingScreen + usePipelinePoll), just with
+// earnings-flavoured copy.
+const PRODUCE_MILESTONES = [
+  'Composing narrative sections',
+  'Filling the report tables',
+  'Applying your tone and voice',
+  'Finalizing the report',
+];
+const PRODUCE_TIPS = [
+  'Each section is written from your extracted figures and drivers.',
+  'Table and KPI sections are rendered directly from the numbers.',
+  'Sections that still need your input stay editable on the next screen.',
+  "You can refine any AI-written section's tone right in the preview.",
+];
 
 // Pull a human message out of an ApiError body (FastAPI puts it under `detail`,
 // which can be a string or a validation array).
@@ -52,6 +73,15 @@ export default function EarningsOutlinePage() {
   const [saveError, setSaveError] = useState<string | null>(null); // non-blocking save/422 banner
   const [retryKey, setRetryKey] = useState(0);
   const [saving, setSaving] = useState(false);
+
+  // Section production, kicked once the outline is saved. Non-null → the
+  // full-screen AI loader takes over; navigation to Preview only happens once
+  // the run genuinely completes (never early — every section must be ready).
+  const [produceRun, setProduceRun] = useState<{ run_id: string; poll_url: string } | null>(null);
+  const { state: producePoll, restart: restartProduce } = usePipelinePoll(
+    produceRun?.run_id ?? null,
+    produceRun?.poll_url ?? null,
+  );
 
   // Drag state — only the included group reorders. The active index lives in a ref
   // (no re-render needed); native HTML5 drag drives the move.
@@ -157,9 +187,21 @@ export default function EarningsOutlinePage() {
     },
   };
 
-  // ── Continue: save the arrangement, then advance to preview ────────────────
+  // ── Continue: save the arrangement, then produce ONLY if something actually
+  // needs it — a section already 'produced' or 'needs_input' has already been
+  // attempted and re-running produce on it would just redo unchanged work (or
+  // clobber a needs_input reason a fresh attempt won't resolve anyway). Only a
+  // still-'pending' included section (never attempted — e.g. newly added)
+  // triggers the loader; otherwise Preview is reached immediately, showing
+  // whatever's already stored.
+  //
+  // The decision is made from `included` as loaded BEFORE this save — NOT
+  // from PUT /outline's response. The backend resets every included section's
+  // status back to 'pending' on every save (even a no-op reorder), so reading
+  // post-save status would make this check always fire.
   const handleContinue = async () => {
     if (!reportId) return;
+    const needsProduce = included.some((s) => s.status === 'pending' || s.status == null);
     setSaving(true);
     setSaveError(null);
     const payload = {
@@ -178,7 +220,6 @@ export default function EarningsOutlinePage() {
     };
     try {
       await earnings.saveEarningsOutline(reportId, payload);
-      navigate(`/earnings/${reportId}/preview`);
     } catch (err: unknown) {
       // 422 (e.g. a stale include of an unavailable optional): surface the message
       // and refetch the outline rather than pushing on.
@@ -189,35 +230,89 @@ export default function EarningsOutlinePage() {
         setSaveError(apiErrorMessage(err, 'Failed to save the outline.'));
       }
       setSaving(false);
+      return;
+    }
+
+    if (!needsProduce) {
+      navigate(`/earnings/${reportId}/preview`);
+      return;
+    }
+
+    try {
+      const handle = await earnings.produceEarningsReport(reportId);
+      setProduceRun({ run_id: handle.run_id, poll_url: handle.poll_url });
+    } catch (err: unknown) {
+      setSaveError(apiErrorMessage(err, 'Failed to start report generation.'));
+      setSaving(false);
     }
   };
+
+  // ── Section production — full-screen loader, same one the quarterly
+  // Outline → Preview handoff uses. Takes over as soon as produce is kicked;
+  // the outline UI underneath is irrelevant once we're here.
+  if (produceRun) {
+    const phase = producePoll.phase === 'idle' ? 'running' : producePoll.phase;
+    if (phase === 'failed' || phase === 'timeout') {
+      return (
+        <GeneratingScreen
+          phase={phase}
+          errorMessage={phase === 'failed' ? producePoll.run?.error_message ?? null : null}
+          onCancel={() => setProduceRun(null)}
+          onRetry={() => setProduceRun(null)}
+          onKeepWaiting={restartProduce}
+        />
+      );
+    }
+    const progress = computeProgress(phase === 'completed' ? 'completed' : 'running', producePoll.nodes);
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 1400, overflowY: 'auto' }}>
+        <AiLoadingScreen
+          title="Composing your report"
+          subtitle="Writing each section from your figures and inputs."
+          doneTitle="Report ready"
+          doneSubtitle="Taking you to the preview…"
+          milestones={PRODUCE_MILESTONES}
+          tips={PRODUCE_TIPS}
+          controlledProgress={progress}
+          done={phase === 'completed'}
+          onDone={() => navigate(`/earnings/${reportId}/preview`)}
+        />
+      </div>
+    );
+  }
 
   // ── Loading / error / empty ───────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="card" style={{ padding: 0 }}>
-        <Spinner pad={80} />
+      <div>
+        <EarningsStepper activeStep={3} reportId={reportId} />
+        <div className="card" style={{ padding: 0 }}>
+          <Spinner pad={80} />
+        </div>
       </div>
     );
   }
 
   if (error && included.length === 0 && available.length === 0) {
     return (
-      <div
-        className="card"
-        role="alert"
-        style={{
-          padding: '16px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-        }}
-      >
-        <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
-        <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
-          Retry
-        </button>
+      <div>
+        <EarningsStepper activeStep={3} reportId={reportId} />
+        <div
+          className="card"
+          role="alert"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+          }}
+        >
+          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+          <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -226,6 +321,7 @@ export default function EarningsOutlinePage() {
 
   return (
     <div>
+      <EarningsStepper activeStep={3} reportId={reportId} />
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Arrange your report outline

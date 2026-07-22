@@ -51,8 +51,15 @@ export interface SelectableSource {
   updated_at: string | null;
   coverage: SourceCoverage; // 'full' | 'partial' — official sources only
   track: SourceTrack;
-  type: SourceUploadType | null; // upload doc type; null for official sources
+  type: SourceUploadType | null; // current value, shown in the editable dropdown; null for official sources
+  detected_type: SourceUploadType | null; // AI's original guess — never mutated by a PATCH; drives the confirm-hint
+  type_confidence: number | null; // 0–1 assumed; confirm scale live (Step 0); null for official sources
   extraction_status: SourceExtractionStatus | null; // upload-only; null for official sources
+  // The report/draft this upload belongs to — required to scope a type-correction
+  // PATCH; independent of report_id (force-null for narrative rows by design, see
+  // normalizeEarningsSourceItem). null when the backend doesn't supply it → the
+  // row's type renders read-only rather than guessing a report scope.
+  owning_report_id: string | null;
 }
 
 // The selected source shown on the Extract screen's header — the identical
@@ -152,6 +159,11 @@ export interface EarningsOutlineSection {
   source_type: string | null; // hint chip; render only when the backend provides it
   mode: string | null; // hint chip; render only when the backend provides it
   page_hint: string | null; // e.g. "~2 pages"; never fabricated
+  // Production state, same vocabulary as EarningsProducedSection.status. Lets
+  // the Outline screen tell "never produced" (pending) apart from "already
+  // resolved" (produced/needs_input) WITHOUT a separate GET /sections call —
+  // used to skip a redundant POST /produce when nothing has changed.
+  status: EarningsSectionStatus | null;
 }
 
 export interface EarningsOutlineResponse {

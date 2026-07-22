@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 // ── Mocks (vi.mock factories are hoisted → build shared state in vi.hoisted) ──
@@ -177,6 +177,15 @@ describe('deltaTone', () => {
 
 // ── Route/behaviour ─────────────────────────────────────────────────────────
 describe('EarningsExtractPage', () => {
+  it('the stepper only lets you jump to Setup/Extraction — Outline and Preview stay disabled until Continue is clicked', async () => {
+    renderPage();
+    await screen.findByText('Revenue');
+    expect(screen.getByRole('button', { name: /STEP 1 Setup/ })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /STEP 2 Extraction/ })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /STEP 3 Outline/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /STEP 4 Preview/ })).toBeDisabled();
+  });
+
   it('renders the table incl. a Derived row and a <90 flagged row', async () => {
     renderPage();
     expect(await screen.findByText('Revenue')).toBeInTheDocument();
@@ -293,6 +302,51 @@ describe('EarningsExtractPage', () => {
       await screen.findByText('No figures found for this period from the selected sources.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('renders "Sources" (not "Selected system reports") with two labelled groups, both shown even when one is empty', async () => {
+    renderPage(); // FIGS has one official source, no narrative
+    await screen.findByText('Revenue');
+    expect(screen.getByText('Sources')).toBeInTheDocument();
+    expect(screen.queryByText('Selected system reports')).not.toBeInTheDocument();
+    expect(screen.getByText('From your system — official figures')).toBeInTheDocument();
+    expect(screen.getByText('Uploaded — narrative context')).toBeInTheDocument();
+    expect(screen.getByText('No uploaded documents recorded for this report.')).toBeInTheDocument();
+  });
+
+  it('a mixed report (one official + one uploaded release) shows both in their own labelled groups', async () => {
+    h.getEarningsFigures.mockResolvedValueOnce({
+      figures: [fig({ id: 'f-rev', label: 'Revenue' })],
+      sources: [
+        source({ report_id: 'rep-official', label: 'Aramco PVT — Quarterly Report Q3-2024', track: 'official' }),
+        source({
+          report_id: null,
+          document_id: 'doc-1',
+          label: 'Q3 2024 Press Release',
+          report_type: null,
+          period: null,
+          coverage: 'partial',
+          track: 'narrative_adjusted',
+          type: 'release',
+          extraction_status: 'completed', // the live backend's terminal value
+        }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Revenue');
+
+    const officialGroup = screen.getByText('From your system — official figures').closest('div')!.parentElement!;
+    expect(within(officialGroup).getByText('Aramco PVT — Quarterly Report Q3-2024')).toBeInTheDocument();
+
+    const uploadedGroup = screen.getByText('Uploaded — narrative context').closest('div')!.parentElement!;
+    expect(within(uploadedGroup).getByText(/Q3 2024 Press Release/)).toBeInTheDocument();
+    // 'completed' (the real backend value) reads as Ready, not stuck on Extracting…
+    expect(within(uploadedGroup).getByText('Ready')).toBeInTheDocument();
+    // Never shown with an official coverage badge (D-19).
+    expect(within(uploadedGroup).queryByText('Full')).not.toBeInTheDocument();
+    expect(within(uploadedGroup).queryByText('Partial')).not.toBeInTheDocument();
+
+    expect(screen.getByText('2 sources')).toBeInTheDocument();
   });
 
   it('shows — for both Prior and Δ when comparative_status is none (Shell = no deltas)', async () => {

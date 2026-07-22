@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -24,6 +24,7 @@ const h = vi.hoisted(() => {
     getSelectableSources: vi.fn(),
     createEarningsReport: vi.fn(),
     uploadEarningsSources: vi.fn(),
+    patchSourceType: vi.fn(),
     listEarningsReports: vi.fn(),
     MockApiError,
   };
@@ -48,16 +49,25 @@ vi.mock('@/lib/api', async () => {
       getSelectableSources: (...a: unknown[]) => h.getSelectableSources(...a),
       createEarningsReport: (...a: unknown[]) => h.createEarningsReport(...a),
       uploadEarningsSources: (...a: unknown[]) => h.uploadEarningsSources(...a),
+      patchSourceType: (...a: unknown[]) => h.patchSourceType(...a),
       listEarningsReports: (...a: unknown[]) => h.listEarningsReports(...a),
     },
     ApiError: h.MockApiError,
   };
 });
 
-const { navigateMock, getSelectableSources, createEarningsReport, uploadEarningsSources, listEarningsReports, MockApiError } = h;
+const {
+  navigateMock,
+  getSelectableSources,
+  createEarningsReport,
+  uploadEarningsSources,
+  patchSourceType,
+  listEarningsReports,
+  MockApiError,
+} = h;
 
 import { formatPeriodLabel, canContinue } from '../helpers';
-import { normalizeEarningsSourceItem } from '@/lib/api';
+import { normalizeEarningsSourceItem, normalizeEarningsSources } from '@/lib/api';
 import EarningsSetupPage from '../EarningsSetupPage';
 import { ToneSelector } from '@/components/earnings/ToneSelector';
 import { DEFAULT_EARNINGS_TONE } from '@/components/earnings/tones';
@@ -146,6 +156,64 @@ describe('normalizeEarningsSourceItem', () => {
   it('drops an item with no report_id (defensive, not fabricated)', () => {
     expect(normalizeEarningsSourceItem({ label: 'Orphan', coverage: 'full' })).toBeNull();
   });
+
+  it('reads the wire field `filing_type` for an uploaded document\'s type (D-29)', () => {
+    const parsed = normalizeEarningsSourceItem({
+      report_id: null,
+      document_id: 'doc-1',
+      label: 'Northwind Press Release',
+      track: 'narrative',
+      filing_type: 'release',
+      coverage: 'partial',
+    });
+    expect(parsed?.type).toBe('release');
+  });
+});
+
+// ── Unit: sources envelope — D-29 "Unified Sources" backend rework ──────────
+describe('normalizeEarningsSources', () => {
+  it('reads the new two-group {official, uploaded} envelope (no more flat sources[]/total)', () => {
+    const { sources } = normalizeEarningsSources({
+      official: [
+        {
+          report_id: 'rep-1',
+          label: 'Acme — FY24 Annual Report',
+          report_type: 'quarterly',
+          period: 'Q4-2023',
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'full',
+          track: 'official',
+          filing_type: null,
+          extraction_status: null,
+        },
+      ],
+      uploaded: [
+        {
+          report_id: null,
+          document_id: 'doc-1',
+          label: 'Northwind Press Release',
+          report_type: null,
+          period: null,
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'partial',
+          track: 'narrative', // D-29 renamed from 'narrative_adjusted'
+          filing_type: 'release',
+          extraction_status: 'completed',
+        },
+      ],
+    });
+    expect(sources).toHaveLength(2);
+    expect(sources[0]).toMatchObject({ report_id: 'rep-1', track: 'official' });
+    expect(sources[1]).toMatchObject({ document_id: 'doc-1', track: 'narrative_adjusted', type: 'release' });
+  });
+
+  it('still reads the old flat {sources: [...]} shape as a fallback', () => {
+    const { sources } = normalizeEarningsSources({
+      sources: [{ report_id: 'rep-1', label: 'Acme', coverage: 'full' }],
+      total: 1,
+    });
+    expect(sources).toHaveLength(1);
+  });
 });
 
 // ── Component: ToneSelector default ─────────────────────────────────────────
@@ -226,12 +294,10 @@ describe('EarningsSetupPage', () => {
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    expect(await screen.findByText('Official sources')).toBeInTheDocument();
-    expect(screen.getByText('Narrative & adjusted')).toBeInTheDocument();
+    expect(await screen.findByText('From your system — official figures')).toBeInTheDocument();
+    expect(screen.getByText('Uploaded — narrative')).toBeInTheDocument();
     expect(screen.getByText('No official filings found for this period.')).toBeInTheDocument();
-    expect(
-      screen.getByText('No uploads yet — switch to "Upload new documents" to add one.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No uploads yet.')).toBeInTheDocument();
   });
 
   it('Continue is disabled until type + period + tone + ≥1 source, then creates + navigates', async () => {
@@ -280,57 +346,159 @@ describe('EarningsSetupPage', () => {
     expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
   });
 
-  it('upload path: creates the draft first (empty source_report_ids), uploads report-scoped with the chosen canonical type, then Continue reuses the same report_id', async () => {
+  it('has no tab control — both groups are labelled and visible with no prior click', async () => {
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    expect(await screen.findByText('From your system — official figures')).toBeInTheDocument();
+    expect(screen.getByText('Uploaded — narrative')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload new documents' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use existing reports' })).not.toBeInTheDocument();
+  });
+
+  it('the document-types guidance list is plain informational text, not a picker', async () => {
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    await screen.findByText('Document types');
+    expect(screen.getByText('Press release')).toBeInTheDocument();
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+  });
+
+  it('a low-confidence detected type shows an editable dropdown + confirm hint; correcting it PATCHes and clears the hint', async () => {
+    getSelectableSources.mockResolvedValueOnce({
+      sources: [
+        {
+          report_id: null,
+          document_id: 'doc-1',
+          label: 'Northwind Q4 2024 Press Release',
+          report_type: null,
+          period: 'FY 2025',
+          updated_at: '2026-01-01T00:00:00Z',
+          coverage: 'partial',
+          track: 'narrative_adjusted',
+          type: 'release',
+          detected_type: 'release',
+          type_confidence: 0.4,
+          extraction_status: 'ready',
+          owning_report_id: 'rep-upload',
+        },
+      ],
+    });
+    // The API layer's patchSourceType resolves to the lean ack shape
+    // ({report_id, document_id, type}) — it's a correction acknowledgement,
+    // not a full source row (D-29: the wire response has no label/coverage).
+    patchSourceType.mockResolvedValueOnce({
+      report_id: 'rep-upload',
+      document_id: 'doc-1',
+      type: 'annual',
+    });
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+
+    const select = await screen.findByRole('combobox', {
+      name: 'Type for Northwind Q4 2024 Press Release',
+    });
+    expect(select).toHaveValue('release');
+    expect(screen.getByText('Please confirm type')).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'annual' } });
+    await waitFor(() => expect(patchSourceType).toHaveBeenCalledWith('rep-upload', 'doc-1', 'annual'));
+    await waitFor(() => expect(select).toHaveValue('annual'));
+    expect(screen.queryByText('Please confirm type')).not.toBeInTheDocument();
+  });
+
+  it('upload-only path: staging a file enables Continue, which creates the draft, uploads, and navigates', async () => {
     createEarningsReport.mockResolvedValueOnce({ report_id: 'rep-upload' });
-    uploadEarningsSources.mockResolvedValueOnce([
-      {
-        report_id: null,
-        document_id: 'doc-1',
-        label: 'Northwind Q4 2024 Press Release',
-        report_type: null,
-        period: 'FY 2025',
-        updated_at: '2026-01-01T00:00:00Z',
-        coverage: 'partial',
-        track: 'narrative_adjusted',
-        type: 'release',
-        extraction_status: 'extracting',
-      },
-    ]);
+    // Delayed on purpose — makes the 'uploading' progress state observable
+    // instead of racing straight through to navigation within one microtask.
+    uploadEarningsSources.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve([
+                {
+                  report_id: null,
+                  document_id: 'doc-1',
+                  label: 'Northwind Q4 2024 Press Release',
+                  report_type: null,
+                  period: 'FY 2025',
+                  updated_at: '2026-01-01T00:00:00Z',
+                  coverage: 'partial',
+                  track: 'narrative_adjusted',
+                  type: 'release',
+                  detected_type: 'release',
+                  type_confidence: 0.92,
+                  extraction_status: 'extracting',
+                  owning_report_id: 'rep-upload',
+                },
+              ]),
+            10,
+          );
+        }),
+    );
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     await screen.findByText('Acme — FY24 Annual Report');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Upload new documents' }));
-    // Tag the batch as a press release — canonical value 'release', not the label.
-    fireEvent.click(screen.getByRole('radio', { name: /Press release/ }));
+    const continueBtn = () => screen.getByRole('button', { name: /Continue|Creating|Uploading/ });
+    expect(continueBtn()).toBeDisabled();
+
     const file = new File(['press release text'], 'northwind_q4_2024_press_release.pdf', { type: 'application/pdf' });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /Upload & extract/ }));
+    await waitFor(() => expect(continueBtn()).not.toBeDisabled());
 
-    // 1) The draft is created FIRST, with empty source_report_ids (upload-only path).
+    fireEvent.click(continueBtn());
+
+    // 1) The draft is created FIRST, with empty id arrays (upload-only path).
     await waitFor(() =>
       expect(createEarningsReport).toHaveBeenCalledWith(
-        expect.objectContaining({ variant: 'annual', fiscal_year: 2025, source_report_ids: [], source_document_ids: [] }),
+        expect.objectContaining({
+          variant: 'annual',
+          fiscal_year: 2025,
+          source_report_ids: [],
+          source_document_ids: [],
+        }),
       ),
     );
-    // 2) Then the report-scoped upload fires with the file array + canonical 'release'.
-    await waitFor(() =>
-      expect(uploadEarningsSources).toHaveBeenCalledWith('rep-upload', [file], 'release'),
-    );
+    // 2) Then upload fires with (reportId, files) — no manual type argument.
+    await waitFor(() => expect(uploadEarningsSources).toHaveBeenCalledWith('rep-upload', [file]));
 
-    const uploadedLabel = await screen.findByText(/Northwind Q4 2024 Press Release/);
-    const uploadedRow = uploadedLabel.closest('button[role="checkbox"]') as HTMLButtonElement;
-    expect(within(uploadedRow).getByText('Extracting…')).toBeInTheDocument();
-    // Never shown as a usable official source before it's ready (D-12).
-    expect(within(uploadedRow).queryByText('Full')).not.toBeInTheDocument();
-    expect(within(uploadedRow).queryByText('Partial')).not.toBeInTheDocument();
+    expect(await screen.findByText('Uploading and reading your documents…')).toBeInTheDocument();
 
-    // 3) Continue reuses the already-created report_id — no second draft is created.
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    // 3) Navigates on success; exactly one draft was ever created.
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/extract'));
     expect(createEarningsReport).toHaveBeenCalledTimes(1);
+  });
+
+  it('an upload failure during Continue resets the button and a retry does not create a second draft', async () => {
+    createEarningsReport.mockResolvedValueOnce({ report_id: 'rep-retry' });
+    uploadEarningsSources.mockRejectedValueOnce(new Error('network blip'));
+    uploadEarningsSources.mockResolvedValueOnce([]);
+    renderSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+    fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+    await screen.findByText('Acme — FY24 Annual Report');
+
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const continueBtn = () => screen.getByRole('button', { name: /Continue|Creating|Uploading/ });
+    fireEvent.click(continueBtn());
+
+    await waitFor(() => expect(screen.getByText('network blip')).toBeInTheDocument());
+    expect(continueBtn()).toHaveTextContent('Continue');
+
+    // Retry — ensureDraft reuses sessionReportId, staged file is still there.
+    fireEvent.click(continueBtn());
+    await waitFor(() => expect(uploadEarningsSources).toHaveBeenCalledTimes(2));
+    expect(createEarningsReport).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/extract'));
   });
 
   it('an extracting/failed narrative source cannot be selected', async () => {

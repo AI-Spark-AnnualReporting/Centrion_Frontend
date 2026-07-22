@@ -37,14 +37,17 @@ export interface EarningsSetupState {
   quarter: EarningsQuarter | null;
   tone: ReportTone | null;
   sourceIds: string[];
+  // Staged, not-yet-uploaded files also count as "has a source" — the unified
+  // Continue flow uploads them as part of the same action.
+  pendingUploadCount?: number;
 }
 
-// Continue is allowed only when type + period + tone + ≥1 source are set.
-// Quarterly additionally requires a quarter; annual does not.
+// Continue is allowed only when type + period + tone + ≥1 source (selected or
+// staged-for-upload) are set. Quarterly additionally requires a quarter.
 export function canContinue(s: EarningsSetupState): boolean {
   if (!s.variant || s.fiscalYear == null || !s.tone) return false;
   if (s.variant === 'quarterly' && s.quarter == null) return false;
-  return s.sourceIds.length > 0;
+  return s.sourceIds.length > 0 || (s.pendingUploadCount ?? 0) > 0;
 }
 
 // ─── Part 2 — figures ─────────────────────────────────────────────────────────
@@ -151,4 +154,16 @@ export function formatSourceType(type: string | null): string {
     default:
       return type ?? 'Document';
   }
+}
+
+// A low-confidence AI type guess the user hasn't actually corrected yet —
+// surfaces "please confirm type" subtly (D-19: never silently trust it).
+// Never true once `type` has genuinely diverged from `detected_type` (a real
+// correction happened), and never true for a row with no confidence signal.
+const LOW_TYPE_CONFIDENCE = 0.6; // confirm 0–1 vs 0–100 scale live (Step 0)
+
+export function needsTypeConfirmation(
+  s: Pick<SelectableSource, 'type' | 'detected_type' | 'type_confidence'>,
+): boolean {
+  return s.type_confidence != null && s.type_confidence < LOW_TYPE_CONFIDENCE && s.type === s.detected_type;
 }

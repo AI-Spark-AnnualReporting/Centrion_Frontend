@@ -76,6 +76,7 @@ import type {
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
   EarningsSectionsResponse,
+  EarningsSectionStatus,
   EarningsProduceHandle,
   SaveEarningsSectionContentPayload,
   EarningsExportFormat,
@@ -1399,6 +1400,9 @@ export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | nu
   const documentId = explicitDocumentId;
   if (!reportId && !documentId) return null;
 
+  // "narrative_adjusted" (pre-D-29) and "narrative" (D-29, Unified Sources
+  // backend rework) both normalize to the same internal track value — the
+  // .includes("narrative") check already covers both spellings.
   const trackRaw = (earnStr(o.track) ?? "").toLowerCase();
   const track: SourceTrack = trackRaw.includes("narrative")
     ? "narrative_adjusted"
@@ -1409,17 +1413,31 @@ export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | nu
         : "official";
 
   // report_type no longer falls back to a generic `o.type` — that field now
-  // has a distinct meaning (the upload doc type) since Part 6B.
+  // has a distinct meaning (the upload doc type) since Part 6B. The wire field
+  // is `filing_type` (D-29) — `type`/`document_type`/`upload_type` kept as
+  // fallbacks for naming robustness only.
   const reportType = earnStr(o.report_type);
   const type: SourceUploadType | null =
     track === "narrative_adjusted"
-      ? earnStr(o.type) ?? earnStr(o.document_type) ?? earnStr(o.upload_type)
+      ? earnStr(o.filing_type) ?? earnStr(o.type) ?? earnStr(o.document_type) ?? earnStr(o.upload_type)
       : null;
   // Not read from o.status for narrative sources — that field is already
   // claimed as a coverage fallback below for official sources.
   const extractionStatus: SourceExtractionStatus | null =
     track === "narrative_adjusted"
       ? earnStr(o.extraction_status) ?? earnStr(o.processing_status)
+      : null;
+  const detectedType: SourceUploadType | null =
+    track === "narrative_adjusted" ? earnStr(o.detected_type) ?? type : null;
+  const typeConfidence: number | null =
+    track === "narrative_adjusted" ? earnNum(o.type_confidence) ?? earnNum(o.confidence) : null;
+  // Read independently of the reportId/documentId branch above — never reuse
+  // `reportId` (force-nulled for narrative rows to keep the track split from
+  // collapsing). Distinct concept: which report/draft this upload is attached
+  // to, needed to scope a type-correction PATCH.
+  const owningReportId: string | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.report_id) ?? earnStr(o.owning_report_id) ?? earnStr(o.draft_report_id)
       : null;
 
   const period = earnStr(o.period) ?? earnStr(o.period_label);
@@ -1457,18 +1475,32 @@ export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | nu
     coverage,
     track,
     type,
+    detected_type: detectedType,
+    type_confidence: typeConfidence,
     extraction_status: extractionStatus,
+    owning_report_id: owningReportId,
   };
 }
-function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
+export function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
   const rec = earnRecord(raw);
+  // D-29 (Unified Sources backend): GET /earnings/sources now returns two
+  // labelled groups (`official` + `uploaded`) instead of one flat `sources`
+  // array + `total`. Each item's own `track` still says which pool it's from
+  // (read above), so the two groups are simply concatenated here — the old
+  // flat shapes are kept as fallbacks for naming robustness, not because both
+  // are expected to appear at once.
   const arr: unknown[] = Array.isArray(raw)
     ? raw
-    : Array.isArray(rec.sources)
-      ? (rec.sources as unknown[])
-      : Array.isArray(rec.items)
-        ? (rec.items as unknown[])
-        : [];
+    : Array.isArray(rec.official) || Array.isArray(rec.uploaded)
+      ? [
+          ...(Array.isArray(rec.official) ? (rec.official as unknown[]) : []),
+          ...(Array.isArray(rec.uploaded) ? (rec.uploaded as unknown[]) : []),
+        ]
+      : Array.isArray(rec.sources)
+        ? (rec.sources as unknown[])
+        : Array.isArray(rec.items)
+          ? (rec.items as unknown[])
+          : [];
   const sources = arr
     .map(normalizeEarningsSourceItem)
     .filter((s): s is SelectableSource => s !== null);
@@ -1588,6 +1620,7 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     source_type: earnStr(o.source_type) ?? earnStr(o.mode_hint) ?? earnStr(o.data_source),
     mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
     page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
+    status: earnStr(o.status) as EarningsSectionStatus | null,
   };
 }
 function normalizeEarningsOutline(raw: unknown): EarningsOutlineResponse {
@@ -1732,19 +1765,15 @@ export const earnings = {
 
   // Upload narrative-track source documents to an EXISTING draft. The route is
   // report-scoped (D-22) — there is no company-scoped upload route — so the draft
-  // must be created first (POST /earnings/reports). Multipart body: `files` (the
-  // file array) + `type` (a canonical _FILING_TYPES value: annual | interim |
-  // release | presentation | transcript — never a display label, or the backend
-  // 422s). Returns the created narrative sources (in their reported extraction
-  // state — 'extracting' until ready; never treated as ready early, D-12).
-  uploadEarningsSources: (
-    reportId: string,
-    files: File[],
-    type: SourceUploadType,
-  ): Promise<SelectableSource[]> => {
+  // must be created first (POST /earnings/reports). Multipart body: `files` only
+  // — no manual type. The backend auto-classifies each file (GPT-4o-mini) and
+  // returns its detected type + confidence; the user corrects it afterward via
+  // patchSourceType, never a pre-upload manual choice. Returns the created
+  // narrative sources (in their reported extraction state — 'extracting' until
+  // ready; never treated as ready early, D-12).
+  uploadEarningsSources: (reportId: string, files: File[]): Promise<SelectableSource[]> => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
-    fd.append("type", type);
     return request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sources/upload`,
       { method: "POST", form: fd },
@@ -1758,6 +1787,30 @@ export const earnings = {
       return one ? [one] : [];
     });
   },
+
+  // Correct a document's auto-detected type. `reportId` MUST be the source's
+  // own `owning_report_id`, never the page's current session id — a GET
+  // /sources row can belong to a different draft than the one this session
+  // has open. Response is the lean ack shape ({report_id, document_id,
+  // filing_type} per D-29) — NOT a full source row (no label/coverage/period),
+  // so it's read directly here rather than run through
+  // normalizeEarningsSourceItem, which would fabricate those missing fields.
+  patchSourceType: (
+    reportId: string,
+    documentId: string,
+    type: SourceUploadType,
+  ): Promise<{ report_id: string; document_id: string; type: SourceUploadType | null }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sources/${encodeURIComponent(documentId)}`,
+      { method: "PATCH", body: { type } },
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      return {
+        report_id: earnStr(o.report_id) ?? reportId,
+        document_id: earnStr(o.document_id) ?? documentId,
+        type: earnStr(o.filing_type) ?? earnStr(o.type) ?? type,
+      };
+    }),
 
   // Create the draft earnings report. JSON body (NOT multipart) carrying the
   // chosen document ids. Returns { report_id }. A duplicate active period may

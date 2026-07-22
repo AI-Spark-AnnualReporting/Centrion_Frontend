@@ -77,7 +77,11 @@ export default function EarningsSetupPage() {
   });
 
   const [formOpen, setFormOpen] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  // idle → creating (ensureDraft) → uploading (uploadEarningsSources) — drives
+  // the Continue button's label so upload+classify+extract is never a silent
+  // hang (D-19).
+  const [continueStage, setContinueStage] = useState<'idle' | 'creating' | 'uploading'>('idle');
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ message: string; reportId: string | null } | null>(null);
 
@@ -152,10 +156,13 @@ export default function EarningsSetupPage() {
   }, [companyId]);
 
   // A draft already created this session (via upload) is enough to Continue —
-  // its uploaded sources are attached server-side even while they extract.
+  // its uploaded sources are attached server-side even while they extract. A
+  // staged-but-not-yet-uploaded file also counts (Continue uploads it as part
+  // of the same action, never a separate button).
   const ready =
     !!sessionReportId ||
-    (!!companyId && canContinue({ variant, fiscalYear, quarter, tone, sourceIds }));
+    (!!companyId &&
+      canContinue({ variant, fiscalYear, quarter, tone, sourceIds, pendingUploadCount: uploadFiles.length }));
 
   const handleVariant = (v: EarningsVariant) => {
     setVariant(v);
@@ -163,20 +170,20 @@ export default function EarningsSetupPage() {
   };
 
   const handleContinue = async () => {
-    if (submitting) return;
-    // Reuse a draft already created this session (e.g. via upload) — never create
-    // a second one.
-    if (sessionReportId) {
-      navigate(`/earnings/${sessionReportId}/extract`);
-      return;
-    }
+    if (continueStage !== 'idle') return;
     if (!ready || !companyId || !variant || fiscalYear == null) return;
-    setSubmitting(true);
     setError(null);
     setConflict(null);
     try {
-      // Existing-reports path — create with the selected DB report + document ids.
+      // ensureDraft reuses sessionReportId when one already exists — never a
+      // second draft, including on a retry after a failed upload below.
+      setContinueStage('creating');
       const reportId = await ensureDraft(sourceSplit.source_report_ids, sourceSplit.source_document_ids);
+      if (uploadFiles.length > 0) {
+        setContinueStage('uploading');
+        await earnings.uploadEarningsSources(reportId, uploadFiles);
+        setUploadFiles([]);
+      }
       navigate(`/earnings/${reportId}/extract`);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
@@ -184,8 +191,10 @@ export default function EarningsSetupPage() {
       } else {
         setError(err instanceof Error ? err.message : 'Could not create the earnings report.');
       }
+      // uploadFiles is deliberately NOT cleared here — a failed upload after a
+      // successful draft-create must stay retryable without re-staging files.
     } finally {
-      setSubmitting(false);
+      setContinueStage('idle');
     }
   };
 
@@ -283,7 +292,8 @@ export default function EarningsSetupPage() {
                 setSourceIds(ids);
                 setSourceSplit(split);
               }}
-              ensureDraft={() => ensureDraft([], [])}
+              uploadFiles={uploadFiles}
+              onUploadFilesChange={setUploadFiles}
             />
           ) : (
             <div style={{ fontSize: 12, color: '#9BA3C4' }}>
@@ -344,17 +354,21 @@ export default function EarningsSetupPage() {
           <button
             type="button"
             className="btn bp"
-            disabled={!ready || submitting}
+            disabled={!ready || continueStage !== 'idle'}
             onClick={handleContinue}
             style={{
               padding: '11px 24px',
               fontSize: 13,
               fontWeight: 700,
-              opacity: !ready || submitting ? 0.55 : 1,
-              cursor: !ready || submitting ? 'not-allowed' : 'pointer',
+              opacity: !ready || continueStage !== 'idle' ? 0.55 : 1,
+              cursor: !ready || continueStage !== 'idle' ? 'not-allowed' : 'pointer',
             }}
           >
-            {submitting ? 'Creating…' : 'Continue'}
+            {continueStage === 'creating'
+              ? 'Creating…'
+              : continueStage === 'uploading'
+              ? 'Uploading and reading your documents…'
+              : 'Continue'}
           </button>
         </div>
         </div>

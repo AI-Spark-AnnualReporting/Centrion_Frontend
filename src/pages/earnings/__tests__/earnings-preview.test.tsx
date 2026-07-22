@@ -324,6 +324,25 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText('Generating your report…')).toBeInTheDocument();
   });
 
+  it('a report that has real content anywhere (excluding cover) never shows "Generate report" again, even with a genuine needs_input gap elsewhere', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        OVERVIEW,
+        // A section with no content and a status the outline-save bug could
+        // have reset to 'pending' — still must not resurrect the banner once
+        // OVERVIEW proves the report has genuinely been generated.
+        sec({ section_code: 'capital_allocation', title: 'Capital Allocation', status: 'pending', content: null }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+    expect(h.produceEarningsReport).not.toHaveBeenCalled();
+  });
+
   it('produced report renders the section rail and bodies', async () => {
     renderPage();
     // Rail lists section titles; body renders prose + table.
@@ -353,7 +372,16 @@ describe('EarningsPreviewPage', () => {
     await waitFor(() => expect(screen.queryByText(/Grounding check:/)).not.toBeInTheDocument());
   });
 
-  it('Export PDF calls downloadEarningsExport with a blob download', async () => {
+  it('Export is hidden until the report is approved & locked', async () => {
+    renderPage(); // default fixture is locked: false
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Export')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /PDF/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Word/ })).not.toBeInTheDocument();
+  });
+
+  it('Export PDF calls downloadEarningsExport with a blob download (once approved & locked)', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({ ...PRODUCED, locked: true });
     renderPage();
     await screen.findByText(/resilient full-year performance/);
     fireEvent.click(screen.getByRole('button', { name: /PDF/ }));
