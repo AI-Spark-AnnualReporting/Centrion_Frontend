@@ -2205,6 +2205,9 @@ export interface CommunicationMember {
   user_id: string;
   full_name: string;
   role: string;
+  // Presentation fields — use directly, no client-side role mapping.
+  display_role: string;
+  initials: string;
   department: string | null;
 }
 
@@ -2274,6 +2277,8 @@ export interface ThreadSummary {
   thread_id: string;
   report: ThreadReport;
   owner: ThreadOwner | null;
+  // Added alongside the review flow; null when the report isn't out for review.
+  assignment: ReviewAssignment | null;
   updated_at: string;
   last_message: ThreadLastMessage | null;
   internal_count: number;
@@ -2298,18 +2303,37 @@ export interface MessageSender {
   is_you: boolean;
 }
 
+// `kind` drives the bubble: "system" renders with the Communication Hub avatar
+// and label (ignore `sender` for the display name); "user" renders as a person.
+export type ThreadMessageKind = 'system' | 'user';
+
 export interface ThreadMessage {
   id: string;
+  kind: ThreadMessageKind;
   sender: MessageSender;
   body: string;
   mentioned_user_ids: string[];
   created_at: string;
 }
 
+// Who the report is currently out for review with. `label` is the snapshotted
+// authority title ("Board Chairman") — display-only, not a backend entity.
+export interface ReviewAssignment {
+  id: string;
+  user_id: string;
+  full_name: string;
+  label: string | null;
+  is_you: boolean;
+  assigned_at: string;
+}
+
 export interface ThreadDetail {
   thread_id: string;
   report: ThreadReport;
   owner: ThreadOwner | null;
+  assignment: ReviewAssignment | null;
+  // True only for the assigned reviewer — gates "Open as reviewer".
+  can_review: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -2467,6 +2491,131 @@ export interface DraftListResponse {
   drafts: DraftListItem[];
 }
 
+// ── Report review & approval ──────────────────────────────────────────────
+// The four UI states map straight onto reports.status. `locked`/`published`
+// also exist on finished reports — show via status_label and treat the panel
+// as read-only (can_set_status: false).
+export type ReportReviewStatus = 'draft' | 'in_review' | 'pending_approval' | 'approved';
+
+// Radio options for the hub panel — render from the API, never hardcode.
+export interface ReportStatusOption {
+  code: string;
+  label: string;
+  hint: string;
+}
+
+export interface ReportHubResponse {
+  report: ThreadReport;
+  statuses: ReportStatusOption[];
+  // False once locked/published — render the panel read-only.
+  can_set_status: boolean;
+  owner: ThreadOwner | null;
+  // Null until the report has been shared.
+  thread_id: string | null;
+  assignment: ReviewAssignment | null;
+  can_review: boolean;
+  unread_count: number;
+}
+
+export interface SetReportStatusResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+}
+
+export interface ShareReportBody {
+  // A users.id UUID from GET /communications/members — never a usr_ user_id.
+  assigned_to: string;
+  // Free-text authority title, snapshotted on the thread ("Board Chairman").
+  assigned_label?: string;
+  comment?: string;
+}
+
+// Share returns the full review-thread payload, so the thread modal can paint
+// straight from it without a second request.
+export interface ShareReportResponse extends ThreadDetailResponse {
+  report_status: string;
+}
+
+// ── Reviewer view ─────────────────────────────────────────────────────────
+
+export interface ReviewSection {
+  id: string;
+  // The number badge next to each heading.
+  order: number;
+  title: string;
+  type: string;
+}
+
+export interface ReviewCommentAuthor {
+  full_name: string;
+  initials: string;
+  is_you: boolean;
+}
+
+export interface ReviewComment {
+  id: string;
+  // Null for a comment on the report as a whole.
+  section_id: string | null;
+  section_title: string | null;
+  author: ReviewCommentAuthor;
+  body: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface ReviewViewResponse {
+  thread_id: string;
+  report: ThreadReport;
+  owner: { full_name: string; is_you: boolean } | null;
+  assignment: ReviewAssignment | null;
+  // can_act = you are the assigned reviewer. can_approve additionally requires
+  // the report to be in review — show Approve disabled, not hidden, when
+  // can_act && !can_approve.
+  can_act: boolean;
+  can_approve: boolean;
+  // Empty when the narrative hasn't been generated — hide the per-section rail.
+  sections: ReviewSection[];
+  comments: ReviewComment[];
+  // Same comments keyed by section_id; report-level ones sit under "null".
+  comments_by_section: Record<string, ReviewComment[]>;
+}
+
+export interface CreateReviewCommentBody {
+  section_id?: string | null;
+  section_title?: string | null;
+  body: string;
+}
+
+export interface CreateReviewCommentResponse {
+  comment: ReviewComment;
+}
+
+export interface ReassignReviewBody {
+  assigned_to: string;
+  assigned_label?: string;
+}
+
+export interface ReassignReviewResponse {
+  thread_id: string;
+  assigned_to: string;
+  assigned_label: string | null;
+  full_name: string;
+}
+
+export interface ApproveReviewResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+  approved_at: string;
+}
+
+export interface SendBackReviewResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+}
+
 // company_id is never sent — the backend derives it from the JWT.
 export const communications = {
   // Communication tab list. limit (1–200, default 50) / offset (default 0) are
@@ -2570,6 +2719,72 @@ export const communications = {
 
   // Saved drafts (only surface for drafts — they're not in the History list).
   drafts: () => request<DraftListResponse>("/api/v1/communications/history/drafts"),
+
+  // ── Report review & approval ─────────────────────────────────────────────
+  // One call renders the whole hub side rail. Re-fetch after any action below.
+  // 404 → report not in your company.
+  reportHub: (reportId: string) =>
+    request<ReportHubResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/hub`,
+    ),
+
+  // 403 → "approved" isn't settable here (approve from the reviewer view so a
+  // sign-off is recorded). 422 → outside draft/in_review/pending_approval.
+  // 409 → report locked or published.
+  setReportStatus: (reportId: string, status: string) =>
+    request<SetReportStatusResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/status`,
+      { method: "PATCH", body: { status } },
+    ),
+
+  // Creates or reuses the thread, assigns the reviewer, posts the system line
+  // and your comment, moves the report to in_review, notifies the reviewer.
+  // Sharing twice is expected (reassignment / a second round).
+  // 422 → assigned_to is you · 403 → not an active member · 404 → no report.
+  shareReport: (reportId: string, body: ShareReportBody) =>
+    request<ShareReportResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/share`,
+      { method: "POST", body },
+    ),
+
+  // Reviewer screen: sections, comments, and the action gates. Any company
+  // member may read this — only the write calls below are restricted.
+  reviewView: (threadId: string) =>
+    request<ReviewViewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/review`,
+    ),
+
+  // Open to any company member. Omit both section fields for a report-level
+  // comment. 422 → empty body, or a section_id not in this report.
+  addReviewComment: (threadId: string, body: CreateReviewCommentBody) =>
+    request<CreateReviewCommentResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/comments`,
+      { method: "POST", body },
+    ),
+
+  // After this the caller is no longer the reviewer — re-fetch and expect
+  // can_act: false. 403 → not the reviewer · 422 → same person · 409 → unassigned.
+  reassignReview: (threadId: string, body: ReassignReviewBody) =>
+    request<ReassignReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/reassign`,
+      { method: "POST", body },
+    ),
+
+  // The sign-off that unblocks publishing. 403 → not the assigned reviewer
+  // (admins included) · 409 → report not in review, or thread unassigned.
+  approveReview: (threadId: string, note?: string) =>
+    request<ApproveReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/approve`,
+      { method: "POST", body: note ? { note } : {} },
+    ),
+
+  // Note is REQUIRED (422 if blank). Returns the report to draft and clears the
+  // assignment. 403 → not the reviewer · 409 → report locked/published.
+  sendBackReview: (threadId: string, note: string) =>
+    request<SendBackReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-back`,
+      { method: "POST", body: { note } },
+    ),
 };
 
 // ---------------------------------------------------------------------------

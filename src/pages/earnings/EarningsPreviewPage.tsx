@@ -11,6 +11,7 @@ import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
 import { PublishBar } from '@/components/earnings/PublishBar';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
+import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
 
 const POLL_INTERVAL_MS = 3000;
@@ -378,14 +379,17 @@ export default function EarningsPreviewPage() {
             )}
           </div>
 
-          {/* Right — publish bar */}
-          <PublishBar
-            locked={locked}
-            blockers={blockers}
-            approving={approving}
-            onApprove={handleApprove}
-            onExport={handleExport}
-          />
+          {/* Right — internal discussion + publish bar */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {reportId && <ReportHubPanel reportId={reportId} />}
+            <PublishBar
+              locked={locked}
+              blockers={blockers}
+              approving={approving}
+              onApprove={handleApprove}
+              onExport={handleExport}
+            />
+          </div>
         </div>
       )}
     </div>
