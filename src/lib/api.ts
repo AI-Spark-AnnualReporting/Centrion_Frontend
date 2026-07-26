@@ -119,6 +119,13 @@ const SAR_BASE_URL = (
   import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
 
+// Public, unauthenticated PDF download — the backend sets
+// `Content-Disposition: attachment`, so a plain <a> works and no token is
+// needed. That matters: the same URL goes into the investor email, where there
+// is no JS to attach a Bearer header.
+export const publicReportDownloadUrl = (reportId: string) =>
+  `${API_BASE_URL}/api/public/reports/${reportId}/download`;
+
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
 
@@ -1764,6 +1771,407 @@ export const meetings = {
       `/api/v1/meetings/${encodeURIComponent(meetingId)}`,
       { method: "PATCH", body },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Communication Hub
+// ---------------------------------------------------------------------------
+
+// A report-type pill in the "Start a communication" modal. `count` is the
+// number of threadless reports of this type and stays constant regardless of
+// the active filter (it always reflects the unfiltered set).
+export interface ThreadlessReportType {
+  code: string;
+  label: string;
+  count: number;
+}
+
+// A report that doesn't have a communication thread yet.
+export interface ThreadlessReport {
+  id: string;
+  report_type: string;
+  period: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ThreadlessReportsResponse {
+  types: ThreadlessReportType[];
+  reports: ThreadlessReport[];
+}
+
+// A company member eligible to be @mentioned. `id` is the UUID the write
+// endpoint expects; `user_id` (usr_… string) is display-only — never send it.
+export interface CommunicationMember {
+  id: string;
+  user_id: string;
+  full_name: string;
+  role: string;
+  department: string | null;
+}
+
+export interface CommunicationMembersResponse {
+  members: CommunicationMember[];
+}
+
+export interface StartThreadBody {
+  report_id: string;
+  message: string;
+  // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface CommunicationThread {
+  id: string;
+  company_id: string;
+  report_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunicationMessage {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface StartThreadResponse {
+  thread: CommunicationThread;
+  message: CommunicationMessage;
+}
+
+// ── Communication Hub list (Communication tab) ────────────────────────────
+
+export interface ThreadReport {
+  id: string;
+  report_type: string;
+  // Display strings — use directly; report_type/status are the raw codes.
+  type_label: string;
+  period: string;
+  title: string;
+  status: string;
+  status_label: string;
+}
+
+export interface ThreadOwner {
+  user_id: string;
+  full_name: string;
+  is_you: boolean;
+}
+
+export interface ThreadLastMessage {
+  sender_full_name: string;
+  is_you: boolean;
+  preview: string;
+  created_at: string;
+}
+
+// One row in the Communication tab. Rows arrive pre-sorted (updated_at desc) —
+// don't re-sort. `owner` and `last_message` can both be null.
+export interface ThreadSummary {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  updated_at: string;
+  last_message: ThreadLastMessage | null;
+  internal_count: number;
+  unread_count: number;
+}
+
+export interface ThreadListResponse {
+  threads: ThreadSummary[];
+}
+
+export interface MarkThreadReadResponse {
+  ok: boolean;
+}
+
+// ── Thread view (message list + reply) ────────────────────────────────────
+
+export interface MessageSender {
+  user_id: string;
+  full_name: string;
+  // Raw role code (e.g. "ir") — label it on the frontend.
+  role: string;
+  is_you: boolean;
+}
+
+export interface ThreadMessage {
+  id: string;
+  sender: MessageSender;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface ThreadDetail {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Messages arrive oldest→newest, already sorted — render in order.
+export interface ThreadDetailResponse {
+  thread: ThreadDetail;
+  messages: ThreadMessage[];
+}
+
+export interface SendMessageBody {
+  message: string;
+  // Members' `id` UUIDs (NOT usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface SendMessageResponse {
+  message: ThreadMessage;
+}
+
+// ── History tab: email sends + publications ────────────────────────────────
+export type EmailAudience = 'external' | 'internal';
+export type EmailSendStatus = 'tracked' | 'scheduled' | 'draft';
+
+export interface EmailSendsStats {
+  emails_sent_ytd: number;
+  external_count: number;
+  internal_count: number;
+  avg_open_rate: number;
+  industry_open_rate: number;
+  open_rate_vs_industry: number; // signed delta vs industry
+  report_download_rate: number;
+  avg_time_on_report_seconds: number;
+  time_on_report_qoq_seconds: number | null;
+}
+
+// metrics is a different shape per audience_type.
+export type EmailSendMetrics =
+  | { opened_pct: number; downloaded_pct: number } // external
+  | { read_count: number; approved_count: number; total: number }; // internal
+
+export interface EmailSend {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  sent_at: string | null;
+  scheduled_at: string | null;
+  recipient_count: number;
+  report: { id: string; title: string } | null;
+  metrics: EmailSendMetrics;
+}
+
+export interface EmailSendsResponse {
+  stats: EmailSendsStats;
+  sends: EmailSend[];
+}
+
+export interface SendRecipientHeader {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  sent_at: string | null;
+  recipient_count: number;
+}
+
+export interface SendRecipient {
+  name: string;
+  org: string | null;
+  contact: string | null;
+  opened_at: string | null;
+  downloaded: boolean;
+  time_on_report_seconds: number | null;
+  approved_at: string | null;
+}
+
+export interface SendRecipientsResponse {
+  send: SendRecipientHeader;
+  recipients: SendRecipient[];
+}
+
+export interface Publication {
+  id: string;
+  report: { id: string; title: string; report_type: string; period: string } | null;
+  channel: string;
+  jurisdiction: string | null;
+  visibility: string;
+  watermarked: boolean;
+  published_at?: string | null;
+  published_by: { full_name: string } | null;
+}
+
+export interface PublicationsResponse {
+  stats: { total: number } & Record<string, number>;
+  publications: Publication[];
+}
+
+// ── Compose modal: draft / send ────────────────────────────────────────────
+export interface ComposeRecipient {
+  name: string; // the only required field per recipient
+  org?: string | null;
+  contact?: string | null;
+  email?: string | null;
+}
+
+export interface EmailSendSavePayload {
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label?: string;
+  body?: string;
+  report_id?: string | null;
+  status: EmailSendStatus;
+  scheduled_at?: string | null; // required only when status === 'scheduled'
+  recipients?: ComposeRecipient[];
+}
+
+// GET /{id} — the editor prefill shape (distinct from /{id}/recipients).
+export interface EmailSendDetail {
+  id: string;
+  subject: string;
+  body: string | null;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  scheduled_at: string | null;
+  report: {
+    id: string;
+    title: string;
+    pdf_path: string | null;
+    page_count: number | null;
+    file_size_mb: number | null;
+  } | null;
+  recipients: ComposeRecipient[];
+}
+
+export interface CreateEmailSendResponse {
+  send: EmailSendDetail;
+  recipient_count: number;
+}
+
+export interface UpdateEmailSendResponse {
+  send: EmailSendDetail;
+}
+
+export interface DraftListItem {
+  id: string;
+  subject: string;
+  recipient_count: number;
+  report: { id: string; title: string; period?: string } | null;
+  updated_at: string;
+}
+
+export interface DraftListResponse {
+  drafts: DraftListItem[];
+}
+
+// company_id is never sent — the backend derives it from the JWT.
+export const communications = {
+  // Communication tab list. limit (1–200, default 50) / offset (default 0) are
+  // only needed for pagination.
+  listThreads: (params?: { limit?: number; offset?: number }) =>
+    request<ThreadListResponse>("/api/v1/communications/threads", {
+      query: params,
+    }),
+
+  // Move the caller's read watermark to now for this thread → clears "N new".
+  // Fire when the user opens a thread. 404 → thread gone / not in company.
+  markThreadRead: (threadId: string) =>
+    request<MarkThreadReadResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/read`,
+      { method: "POST" },
+    ),
+
+  // Thread header + full message list (oldest→newest). 404 → thread gone.
+  getThread: (threadId: string) =>
+    request<ThreadDetailResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+    ),
+
+  // Post a reply. Bumps the thread's updated_at (reorders the list).
+  sendMessage: (threadId: string, body: SendMessageBody) =>
+    request<SendMessageResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+      { method: "POST", body },
+    ),
+
+  // All threadless reports + the type pills. `type` narrows only the reports
+  // list; the pills always reflect the full unfiltered set.
+  threadlessReports: (type?: string) =>
+    request<ThreadlessReportsResponse>(
+      "/api/v1/communications/threadless-reports",
+      { query: type ? { type } : undefined },
+    ),
+
+  // Members eligible for the @mention picker. Loaded once and filtered client-side.
+  members: () =>
+    request<CommunicationMembersResponse>("/api/v1/communications/members"),
+
+  // Start a thread on a report with a first message + optional mentions.
+  startThread: (body: StartThreadBody) =>
+    request<StartThreadResponse>("/api/v1/communications/threads", {
+      method: "POST",
+      body,
+    }),
+
+  // ── History tab ──────────────────────────────────────────────────────────
+  // Email sends + header stats. `audience` filters the list only; stats always
+  // cover everything so the header stays stable while toggling.
+  emailSends: (audience?: EmailAudience | 'all') =>
+    request<EmailSendsResponse>("/api/v1/communications/history/email-sends", {
+      query: audience && audience !== 'all' ? { audience } : undefined,
+    }),
+
+  // Per-recipient drill-down for one send.
+  sendRecipients: (sendId: string) =>
+    request<SendRecipientsResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients`,
+    ),
+
+  // CSV export — must carry the Bearer token, so fetch as a blob (no plain <a>).
+  sendRecipientsCsv: async (sendId: string): Promise<Blob> => {
+    const url = `${API_BASE_URL}/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients.csv`;
+    const headers: Record<string, string> = {};
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
+    return res.blob();
+  },
+
+  // Publications list + stats. Empty until reports are published.
+  publications: () =>
+    request<PublicationsResponse>("/api/v1/communications/history/publications"),
+
+  // ── Compose: draft / send ────────────────────────────────────────────────
+  // Create a send row (first Save draft OR first Send).
+  createEmailSend: (body: EmailSendSavePayload) =>
+    request<CreateEmailSendResponse>("/api/v1/communications/history/email-sends", {
+      method: "POST",
+      body,
+    }),
+
+  // Update an existing draft (subsequent Save / Send). All fields optional;
+  // `recipients` replaces the whole list. 409 if already tracked/scheduled.
+  updateEmailSend: (id: string, body: Partial<EmailSendSavePayload>) =>
+    request<UpdateEmailSendResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
+
+  // Reopen a draft — prefill the editor. `report.pdf_path` may be null.
+  getEmailSend: (id: string) =>
+    request<EmailSendDetail>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+    ),
+
+  // Saved drafts (only surface for drafts — they're not in the History list).
+  drafts: () => request<DraftListResponse>("/api/v1/communications/history/drafts"),
 };
 
 // ---------------------------------------------------------------------------

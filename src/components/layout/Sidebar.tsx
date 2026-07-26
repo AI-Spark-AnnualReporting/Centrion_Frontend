@@ -39,9 +39,8 @@ const NAV_ITEMS = [
     section: 'Stakeholders',
     items: [
       { key: 'meetings', label: 'Board & Meetings', path: '/meetings', icon: 'cal', badge: null },
-      // Hidden until Comms Hub is wired to the backend.
-      // { key: 'comms', label: 'Comms Hub', path: '/comms', icon: 'mail', badge: { text: 'Unread', cls: 'rd' } },
       { key: 'stakeholders', label: 'Leadership', path: '/stakeholders', icon: 'people', badge: null },
+      { key: 'comms', label: 'Communication Hub', path: '/comms', icon: 'mail', badge: null },
       { key: 'ircalendar', label: 'IR Calendar', path: '/ir-calendar', icon: 'calchk', badge: null },
     ],
   },
