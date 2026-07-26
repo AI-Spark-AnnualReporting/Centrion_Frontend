@@ -12,7 +12,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/compliance': 'Compliance',
   '/ai': 'AI Copilot',
   '/meetings': 'Board & Meetings',
-  '/comms': 'Comms Hub',
+  '/comms': 'Communication Hub',
   '/stakeholders': 'Leadership',
   '/ir-calendar': 'IR Calendar',
   '/docs': 'Document Bank',
@@ -48,7 +48,7 @@ export function AppLayout() {
   const location = useLocation();
   const pageName =
     PAGE_NAMES[location.pathname] ??
-    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
+    (location.pathname.startsWith('/communications') ? 'Communication Hub' : location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
 
   return (
     <div className="app-shell">
