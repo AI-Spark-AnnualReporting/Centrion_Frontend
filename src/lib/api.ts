@@ -73,6 +73,7 @@ import type {
   EditEarningsFigurePayload,
   EarningsOutlineSection,
   EarningsOutlineResponse,
+  EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
   EarningsSectionsResponse,
@@ -1576,6 +1577,22 @@ function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
 
 // ── Part 3 — outline ──
 // Response is untyped (200 → {}); field names follow the spec and are read
+// Which real source backs a section right now (D-29 outline feeder). Absent
+// entirely on payloads that predate this field → null, never fabricated.
+function normalizeEarningsSectionFeeder(raw: unknown): EarningsSectionFeeder | null {
+  if (raw == null) return null;
+  const o = earnRecord(raw);
+  const status = earnStr(o.status);
+  if (!status) return null;
+  return {
+    status: status as EarningsSectionFeeder["status"],
+    source_report_id: earnStr(o.source_report_id),
+    source_document_id: earnStr(o.source_document_id),
+    source_label: earnStr(o.source_label),
+    message: earnStr(o.message) ?? "",
+  };
+}
+
 // defensively. TODO(Step 0): confirm against a live GET during integration.
 function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection | null {
   const o = earnRecord(raw);
@@ -1621,6 +1638,7 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
     page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
     status: earnStr(o.status) as EarningsSectionStatus | null,
+    feeder: normalizeEarningsSectionFeeder(o.feeder),
   };
 }
 function normalizeEarningsOutline(raw: unknown): EarningsOutlineResponse {
@@ -1667,8 +1685,11 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
     // sections endpoint typically returns only the included set.
     included: "included" in o ? earnBool(o.included) : true,
     feeder_status: earnStr(o.feeder_status) ?? earnStr(feeder.status),
-    feeder_message: earnStr(o.message) ?? earnStr(feeder.message),
-    source_label: earnStr(o.source_label) ?? earnStr(feeder.document_name) ?? earnStr(feeder.label),
+    // "message" is the confirmed field name (same feeder shape as GET /outline,
+    // D-29) — kept as first choice; o.message/feeder.message are pre-D-29 guesses.
+    feeder_message: earnStr(feeder.message) ?? earnStr(o.message),
+    source_label:
+      earnStr(feeder.source_label) ?? earnStr(o.source_label) ?? earnStr(feeder.document_name) ?? earnStr(feeder.label),
     source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
     confidence: earnNum(o.confidence),
     flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
@@ -1902,20 +1923,48 @@ export const earnings = {
       { method: "POST", body: {} },
     ).then(readEarningsProduceHandle),
 
-  // Produce (or regenerate) a single section. Optional user_input for needs_input sections.
+  // Save a user's manual input for a needs_input section (typed directly, or
+  // edited after extractSectionInput prefilled it from an uploaded file).
+  // Reuses the section-produce route — the backend turns the raw text into
+  // this section's actual mode-appropriate content (table/kpi sections still
+  // need structured data, not just a stored string) and flips its feeder to
+  // ready. NOT called for a bare regenerate — there's no button for that
+  // anymore; this is the "Save" action on the needs-input form only.
   produceEarningsSection: (
     reportId: string,
     sectionCode: string,
-    body?: { user_input?: string },
+    body: { user_input: string },
   ): Promise<EarningsProducedSection> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
-      { method: "POST", body: body ?? {} },
+      { method: "POST", body },
     ).then((raw) => {
       const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
       if (!sec) throw new Error("Produce earnings section: response was not a section.");
       return sec;
     }),
+
+  // Extract text from an uploaded document to PREFILL the needs-input textarea
+  // — never saves anything on its own; the user reviews/edits the result and
+  // Save (produceEarningsSection) is the actual persist step. Route/shape
+  // TODO(Step 0): confirm live — proposed in the backend spec for this feature.
+  extractSectionInput: (
+    reportId: string,
+    sectionCode: string,
+    file: File,
+  ): Promise<string> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/extract-input`,
+      { method: "POST", form: fd },
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      const text = earnStr(o.extracted_text) ?? earnStr(o.text) ?? earnStr(o.content);
+      if (text == null) throw new Error("Extract section input: response carried no extracted text.");
+      return text;
+    });
+  },
 
   // Inline-edit a produced section's content. Unwraps a { section } envelope.
   patchEarningsSectionContent: (

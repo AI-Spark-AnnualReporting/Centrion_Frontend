@@ -6,6 +6,7 @@ import { earnings, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsOutlineSection, EarningsOutlineResponse } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
+import { isTableOfContentsSection } from './helpers';
 import { OutlineGroup } from '@/components/earnings/OutlineGroup';
 import type { OutlineDragHandlers } from '@/components/earnings/OutlineGroup';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
@@ -88,9 +89,13 @@ export default function EarningsOutlinePage() {
   const dragIndexRef = useRef<number | null>(null);
 
   // Split a response into the ordered included set + the available-to-add set.
+  // Table of Contents is dropped from both — never offered, never shown, and
+  // never sent back on save (omitting it from the PUT reads to the backend as
+  // excluded, which is exactly what we want here).
   const applyResponse = useCallback((res: EarningsOutlineResponse) => {
-    const inc = res.sections.filter((s) => s.included).sort(byDisplayOrder);
-    const av = res.sections.filter((s) => !s.included).sort(byTierThenOrder);
+    const sections = res.sections.filter((s) => !isTableOfContentsSection(s.section_code));
+    const inc = sections.filter((s) => s.included).sort(byDisplayOrder);
+    const av = sections.filter((s) => !s.included).sort(byTierThenOrder);
     setIncluded(inc);
     setAvailable(av);
   }, []);

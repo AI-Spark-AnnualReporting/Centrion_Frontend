@@ -6,6 +6,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
 import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
+import { isTableOfContentsSection } from './helpers';
 import { SectionRail } from '@/components/earnings/SectionRail';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -78,7 +79,11 @@ export default function EarningsPreviewPage() {
 
   const applyResponse = useCallback(
     (res: { sections: EarningsProducedSection[]; cover_template_key: string | null; locked: boolean }) => {
-      const sorted = res.sections.slice().sort(byDisplayOrder);
+      // Table of Contents is dropped from the earnings UI entirely — never
+      // shown on Preview even if a report's backend data already has it.
+      const sorted = res.sections
+        .filter((s) => !isTableOfContentsSection(s.section_code))
+        .sort(byDisplayOrder);
       setSections(sorted);
       setCoverTemplateKey(res.cover_template_key);
       setLocked(res.locked);
@@ -170,31 +175,48 @@ export default function EarningsPreviewPage() {
     [reportId, sections],
   );
 
-  // ── Regenerate one section (warn if edited) ─────────────────────────────────
-  const handleRegenerate = useCallback(
-    async (code: string) => {
+  // ── Needs-input: save the user's text (typed or extracted-then-edited) ──────
+  // Reuses the section-produce route with user_input — the backend turns it
+  // into real, mode-appropriate content and updates the section's feeder.
+  // Confirmed live: this response is minimal (section_code/status/content/
+  // error only) — no title/mode/source_type — so only the fields it actually
+  // carries are merged in; everything else (title, mode, …) keeps its prior,
+  // known-good value instead of being overwritten with the normalizer's
+  // code-as-title fallback.
+  const handleSaveSectionInput = useCallback(
+    async (code: string, text: string) => {
       if (!reportId) return;
-      const s = sections.find((x) => x.section_code === code) ?? null;
-      if (
-        s?.edited &&
-        !window.confirm('This section was edited. Regenerating will replace your changes. Continue?')
-      ) {
-        return;
-      }
-      setSections((list) => list.map((x) => (x.section_code === code ? { ...x, status: 'drafting' } : x)));
-      try {
-        const updated = await earnings.produceEarningsSection(reportId, code);
-        setSections((list) =>
-          list.map((x) => (x.section_code === code ? { ...updated, included: x.included } : x)),
-        );
-      } catch (err) {
-        setSections((list) =>
-          list.map((x) => (x.section_code === code ? { ...x, status: s?.status ?? 'produced' } : x)),
-        );
-        setError(apiErrorMessage(err, 'Could not regenerate the section.'));
-      }
+      const updated = await earnings.produceEarningsSection(reportId, code, { user_input: text });
+      setSections((list) =>
+        list.map((s) =>
+          s.section_code === code
+            ? {
+                ...s,
+                content: updated.content,
+                status: updated.status,
+                feeder_status: updated.feeder_status,
+                feeder_message: updated.feeder_message,
+                source_label: updated.source_label,
+                source_ref: updated.source_ref,
+                confidence: updated.confidence,
+                flag: updated.flag,
+                edited: true,
+              }
+            : s,
+        ),
+      );
     },
-    [reportId, sections],
+    [reportId],
+  );
+
+  // Extract text from an uploaded file to prefill the needs-input textarea —
+  // never touches section state itself; the form owns the draft until Save.
+  const handleExtractSectionInput = useCallback(
+    (code: string, file: File) => {
+      if (!reportId) return Promise.reject(new Error('Missing report id.'));
+      return earnings.extractSectionInput(reportId, code, file);
+    },
+    [reportId],
   );
 
   const acknowledgeFlag = useCallback((code: string) => {
@@ -369,7 +391,8 @@ export default function EarningsPreviewPage() {
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
                       onSave={(content) => handleSaveSection(s.section_code, content)}
-                      onRegenerate={() => handleRegenerate(s.section_code)}
+                      onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
+                      onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
                       onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
                     />
                   </div>

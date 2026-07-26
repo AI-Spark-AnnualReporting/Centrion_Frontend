@@ -18,6 +18,7 @@ const h = vi.hoisted(() => {
     getEarningsSections: vi.fn(),
     produceEarningsReport: vi.fn(),
     produceEarningsSection: vi.fn(),
+    extractSectionInput: vi.fn(),
     patchEarningsSectionContent: vi.fn(),
     approveEarningsReport: vi.fn(),
     downloadEarningsExport: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@/lib/api', () => ({
     getEarningsSections: (...a: unknown[]) => h.getEarningsSections(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
     produceEarningsSection: (...a: unknown[]) => h.produceEarningsSection(...a),
+    extractSectionInput: (...a: unknown[]) => h.extractSectionInput(...a),
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     approveEarningsReport: (...a: unknown[]) => h.approveEarningsReport(...a),
     downloadEarningsExport: (...a: unknown[]) => h.downloadEarningsExport(...a),
@@ -145,6 +147,16 @@ const RECONCILIATION = sec({
     ],
   }),
 });
+const SOURCES = sec({
+  section_code: 'sources_methodology',
+  title: 'Sources, Methodology & Assumptions',
+  mode: 'auto',
+  display_order: 4.5,
+  content: [
+    'Total Assets: Q1-2026 · financial-statements.pdf · p.13',
+    'Free Cash Flow: OCF − Capex',
+  ].join('\n'),
+});
 const MDNA_NOT_DISCLOSED = sec({
   section_code: 'mdna',
   title: "MD&A",
@@ -190,7 +202,6 @@ beforeEach(() => {
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
   h.getEarningsSections.mockResolvedValue(PRODUCED);
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
-  h.produceEarningsSection.mockResolvedValue(OVERVIEW);
   h.patchEarningsSectionContent.mockResolvedValue(sec({ ...OVERVIEW, content: 'Edited overview.', edited: true }));
   h.approveEarningsReport.mockResolvedValue({});
   h.downloadEarningsExport.mockResolvedValue(undefined);
@@ -270,6 +281,19 @@ describe('SectionRenderer dispatch', () => {
     expect(screen.getByText('Not broken out in the filing')).toBeInTheDocument();
   });
 
+  it('Sources, Methodology & Assumptions renders a labelled citation list, not a raw text blob', () => {
+    render(<SectionRenderer section={SOURCES} />);
+    expect(screen.getByText('Total Assets')).toBeInTheDocument();
+    expect(screen.getByText('Q1-2026')).toBeInTheDocument();
+    expect(screen.getByText('financial-statements.pdf')).toBeInTheDocument();
+    expect(screen.getByText('p.13')).toBeInTheDocument();
+    // A derived line (no " · " citation) reads as a note, not a fake citation.
+    expect(screen.getByText('Free Cash Flow')).toBeInTheDocument();
+    expect(screen.getByText(/Derived · OCF − Capex/)).toBeInTheDocument();
+    // Never the raw "Label: rest" line as one literal string.
+    expect(screen.queryByText('Total Assets: Q1-2026 · financial-statements.pdf · p.13')).not.toBeInTheDocument();
+  });
+
   it('MD&A renders the "not disclosed" line verbatim, unembellished', () => {
     render(<SectionRenderer section={MDNA_NOT_DISCLOSED} />);
     expect(screen.getByText('Not disclosed for this period.')).toBeInTheDocument();
@@ -343,6 +367,18 @@ describe('EarningsPreviewPage', () => {
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
   });
 
+  it('never shows Table of Contents, even when the backend includes it', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, sec({ section_code: 's02_toc', title: 'Table of Contents', mode: 'auto', content: null })],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Table of Contents')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Table of Contents' })).not.toBeInTheDocument();
+  });
+
   it('produced report renders the section rail and bodies', async () => {
     renderPage();
     // Rail lists section titles; body renders prose + table.
@@ -350,6 +386,165 @@ describe('EarningsPreviewPage', () => {
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
     expect(screen.getByText('Revenue')).toBeInTheDocument();
     expect(screen.getByText('SAR 4,182.6M')).toBeInTheDocument();
+  });
+
+  it('never shows a Regenerate button on any section', async () => {
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument();
+  });
+
+  it('a needs_input section with no feeder object yet (today\'s live GET /sections shape) still shows the input form, using content as the message', async () => {
+    // Confirmed live: GET /sections has no `feeder` object yet, only the flat
+    // `status` field, and a needs_input section's explanation currently
+    // arrives in `content` (e.g. "No figures were found…") rather than a
+    // dedicated message field.
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 's09_capital_allocation',
+          title: 'Capital Allocation & Returns',
+          mode: 'table',
+          status: 'needs_input',
+          content: 'No figures were found for this section in the uploaded documents. Provide the figures directly or upload a supporting document.',
+          feeder_status: null,
+          feeder_message: null,
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    expect(
+      await screen.findByText('No figures were found for this section in the uploaded documents. Provide the figures directly or upload a supporting document.'),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Type the missing information/)).toBeInTheDocument();
+  });
+
+  it('a needs_input section shows a text input + upload, not the plain "awaiting" message', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 'capital_allocation',
+          title: 'Capital Allocation',
+          content: null,
+          feeder_status: 'needs_input',
+          feeder_message: 'Awaiting financial data',
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    expect(await screen.findByText('Awaiting financial data')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Type the missing information/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload a document to extract from' })).toBeInTheDocument();
+    expect(screen.queryByText('This section is awaiting generation.')).not.toBeInTheDocument();
+    // Save is disabled until there's text to save.
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('typing into a needs_input section and saving calls produceEarningsSection with the typed text', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 'capital_allocation',
+          title: 'Capital Allocation',
+          content: null,
+          feeder_status: 'needs_input',
+          feeder_message: 'Awaiting financial data',
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    h.produceEarningsSection.mockResolvedValueOnce(
+      sec({ section_code: 'capital_allocation', title: 'Capital Allocation', content: 'SAR 12M returned to shareholders.', feeder_status: 'ready' }),
+    );
+    renderPage();
+    const textarea = await screen.findByPlaceholderText(/Type the missing information/);
+    fireEvent.change(textarea, { target: { value: 'We returned SAR 12M to shareholders this quarter.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(h.produceEarningsSection).toHaveBeenCalledWith('rep-1', 'capital_allocation', {
+        user_input: 'We returned SAR 12M to shareholders this quarter.',
+      }),
+    );
+    // The section now shows its real (backend-produced) content.
+    expect(await screen.findByText('SAR 12M returned to shareholders.')).toBeInTheDocument();
+  });
+
+  it('uploading a document extracts text into the textarea for review — without saving anything', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 'capital_allocation',
+          title: 'Capital Allocation',
+          content: null,
+          feeder_status: 'needs_input',
+          feeder_message: 'Awaiting financial data',
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    h.extractSectionInput.mockResolvedValueOnce('Extracted: SAR 12M buyback completed in Q1.');
+    renderPage();
+    await screen.findByText('Awaiting financial data');
+    const file = new File(['dummy'], 'buyback-note.pdf', { type: 'application/pdf' });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() =>
+      expect(h.extractSectionInput).toHaveBeenCalledWith('rep-1', 'capital_allocation', file),
+    );
+    const textarea = (await screen.findByPlaceholderText(/Type the missing information/)) as HTMLTextAreaElement;
+    await waitFor(() => expect(textarea.value).toBe('Extracted: SAR 12M buyback completed in Q1.'));
+    expect(h.produceEarningsSection).not.toHaveBeenCalled();
+  });
+
+  it('an external section (permanently unfixable) never shows the input form', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 'consensus_vs_actual',
+          title: 'Consensus vs Actual',
+          content: null,
+          feeder_status: 'external',
+          feeder_message: 'Requires external analyst/peer data (not yet supported)',
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Consensus vs Actual' });
+    expect(screen.queryByPlaceholderText(/Type the missing information/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload a document to extract from' })).not.toBeInTheDocument();
+  });
+
+  it('a needs_input section on a locked (approved) report shows read-only copy, not the input form', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [
+        COVER,
+        sec({
+          section_code: 'capital_allocation',
+          title: 'Capital Allocation',
+          content: null,
+          feeder_status: 'needs_input',
+          feeder_message: 'Awaiting financial data',
+        }),
+      ],
+      cover_template_key: 'classic',
+      locked: true,
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Capital Allocation' });
+    expect(screen.queryByPlaceholderText(/Type the missing information/)).not.toBeInTheDocument();
   });
 
   it('editing a section calls patchEarningsSectionContent and surfaces a returned grounding flag with acknowledge', async () => {

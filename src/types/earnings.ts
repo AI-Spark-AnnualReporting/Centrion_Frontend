@@ -144,6 +144,22 @@ export interface EditEarningsFigurePayload {
 //   PUT  /api/v1/earnings/reports/{reportId}/outline   { sections: [...] }
 // TODO(Step 0): confirm every field name against a live GET during integration.
 
+// Which real source currently backs a section (D-29 outline feeder). 'template'
+// = deterministic, no source needed (Cover, TOC, Sources). 'ready' = a real
+// source backs it — source_report_id+source_label name an official report
+// (financial/table sections), source_document_id+source_label name an
+// uploaded document (CEO/CFO quote, IR calendar). 'needs_input' = nothing
+// backs it yet, `message` explains what's missing. 'external' = permanently
+// outside what the system tracks (Consensus vs Actual, Peer Comparison) — not
+// fixable by uploading or selecting anything.
+export interface EarningsSectionFeeder {
+  status: 'ready' | 'template' | 'needs_input' | 'external' | (string & {});
+  source_report_id: string | null;
+  source_document_id: string | null;
+  source_label: string | null;
+  message: string; // always present — safe to render regardless of status
+}
+
 // Whether an optional section can actually be added — the backend tells us when a
 // section has no backing data. `available=false` → greyed, toggle disabled, never
 // silently addable (D-12). Required sections are always included regardless.
@@ -164,6 +180,10 @@ export interface EarningsOutlineSection {
   // resolved" (produced/needs_input) WITHOUT a separate GET /sections call —
   // used to skip a redundant POST /produce when nothing has changed.
   status: EarningsSectionStatus | null;
+  // Which real source backs this section right now, when the backend supplies
+  // it — null on older payloads that predate this field (read defensively,
+  // never fabricated).
+  feeder: EarningsSectionFeeder | null;
 }
 
 export interface EarningsOutlineResponse {

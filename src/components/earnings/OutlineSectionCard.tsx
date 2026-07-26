@@ -87,6 +87,24 @@ export function OutlineSectionCard({
     (h): h is string => !!h,
   );
 
+  // What actually backs this section right now, per the outline feeder
+  // (D-29). 'template' sections are self-evidently deterministic (Cover, TOC,
+  // Sources) and need no attribution line at all.
+  const feeder = section.feeder;
+  // The RECOMMENDED badge is only honest when there's a real source behind
+  // it right now — a recommended-tier section with no data yet (needs_input)
+  // or one that's permanently external isn't something to recommend adding
+  // this moment, whatever its static backend tier says.
+  const dataReady = feeder?.status === 'ready';
+  const feederText =
+    !feeder || feeder.status === 'template'
+      ? null
+      : feeder.status === 'ready' && feeder.source_label
+        ? `Sourced from ${feeder.source_label}`
+        : feeder.message;
+  const feederColor =
+    feeder?.status === 'ready' ? ACCENT : feeder?.status === 'external' ? FAINT : '#B4730B';
+
   return (
     <div
       style={{
@@ -152,9 +170,9 @@ export function OutlineSectionCard({
             {section.description}
           </div>
         )}
-        {unavailable && (
-          <div style={{ fontSize: 11, color: FAINT, marginTop: 3, fontWeight: 600 }}>
-            No data for this section
+        {feederText && (
+          <div style={{ fontSize: 11, color: feederColor, marginTop: 3, fontWeight: 600 }}>
+            {feederText}
           </div>
         )}
       </div>
@@ -167,7 +185,7 @@ export function OutlineSectionCard({
           </span>
         ))}
         {isRequired && <span className="badge b-gy">REQUIRED</span>}
-        {section.requirement === 'recommended' && <span className="badge b-gn">RECOMMENDED</span>}
+        {section.requirement === 'recommended' && dataReady && <span className="badge b-gn">RECOMMENDED</span>}
       </div>
     </div>
   );

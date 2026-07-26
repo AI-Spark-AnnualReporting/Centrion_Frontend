@@ -167,3 +167,12 @@ export function needsTypeConfirmation(
 ): boolean {
   return s.type_confidence != null && s.type_confidence < LOW_TYPE_CONFIDENCE && s.type === s.detected_type;
 }
+
+// Table of Contents is dropped from the earnings UI entirely — never offered
+// to add on the Outline screen, and never shown on Preview even if a report's
+// backend data already has it included. Matched by section_code (the "sNN_"
+// prefix is just display order and varies by report; the "_toc" suffix is the
+// stable identifier), not by title, since title is free text.
+export function isTableOfContentsSection(sectionCode: string): boolean {
+  return /toc/i.test(sectionCode);
+}

@@ -59,6 +59,7 @@ const sec = (over: Partial<EarningsOutlineSection>): EarningsOutlineSection => (
   mode: null,
   page_hint: null,
   status: null,
+  feeder: null,
   ...over,
 });
 
@@ -70,7 +71,20 @@ const OUTLINE = {
     sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, display_order: 0 }),
     sec({ section_code: 'ceo_commentary', title: 'CEO Commentary', included: true, display_order: 1 }),
     sec({ section_code: 'outlook', title: 'Outlook', included: false, available: true, display_order: 2 }),
-    sec({ section_code: 'segment_deep_dive', title: 'Segment Deep Dive', included: false, available: false, display_order: 3 }),
+    sec({
+      section_code: 'segment_deep_dive',
+      title: 'Segment Deep Dive',
+      included: false,
+      available: false,
+      display_order: 3,
+      feeder: {
+        status: 'needs_input',
+        source_report_id: null,
+        source_document_id: null,
+        source_label: null,
+        message: 'Awaiting financial data',
+      },
+    }),
   ],
 };
 
@@ -94,6 +108,24 @@ beforeEach(() => {
 });
 
 describe('EarningsOutlinePage', () => {
+  it('never shows Table of Contents, whether included or available', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        ...OUTLINE.sections,
+        sec({ section_code: 's02_toc', title: 'Table of Contents', requirement: 'recommended', included: false, available: true }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Report sections');
+    expect(screen.queryByText('Table of Contents')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Table of Contents/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalled());
+    const payload = h.saveEarningsOutline.mock.calls[0][1];
+    expect(payload.sections.some((s: { section_code: string }) => s.section_code === 's02_toc')).toBe(false);
+  });
+
   it('groups included sections under "Report sections" and the rest under "Available to add"', async () => {
     renderPage();
     expect(await screen.findByText('Report sections')).toBeInTheDocument();
@@ -112,13 +144,81 @@ describe('EarningsOutlinePage', () => {
     expect(cb).toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('renders an unavailable optional greyed, toggle disabled, with a reason — and cannot be added', async () => {
+  it('renders an unavailable optional greyed, toggle disabled, with the feeder\'s reason — and cannot be added', async () => {
     renderPage();
     const cb = await screen.findByRole('checkbox', { name: 'Include Segment Deep Dive' });
     expect(cb).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText('No data for this section')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting financial data')).toBeInTheDocument();
     fireEvent.click(cb); // disabled → no-op
     expect(screen.getByRole('checkbox', { name: 'Include Segment Deep Dive' })).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('a ready section shows "Sourced from <label>" instead of a bare availability toggle', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({
+          section_code: 'financial_highlights',
+          title: 'Financial Highlights',
+          requirement: 'required',
+          included: true,
+          feeder: {
+            status: 'ready',
+            source_report_id: 'rep-official',
+            source_document_id: null,
+            source_label: 'Quarterly Report Q1-2026',
+            message: 'Backed by an official report',
+          },
+        }),
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText('Sourced from Quarterly Report Q1-2026')).toBeInTheDocument();
+  });
+
+  it('an external section shows its permanent-limitation message, distinct styling from needs_input', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({
+          section_code: 'peer_comparison',
+          title: 'Peer / Benchmark Comparison',
+          included: false,
+          available: true,
+          feeder: {
+            status: 'external',
+            source_report_id: null,
+            source_document_id: null,
+            source_label: null,
+            message: 'Not tracked by the system',
+          },
+        }),
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText('Not tracked by the system')).toBeInTheDocument();
+  });
+
+  it('a template section (e.g. Cover) shows no feeder attribution line at all', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({
+          section_code: 'cover',
+          title: 'Cover / Header',
+          requirement: 'required',
+          included: true,
+          feeder: {
+            status: 'template',
+            source_report_id: null,
+            source_document_id: null,
+            source_label: null,
+            message: 'Deterministic — no source required',
+          },
+        }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Cover / Header');
+    expect(screen.queryByText('Deterministic — no source required')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sourced from/)).not.toBeInTheDocument();
   });
 
   it('a required section cannot be toggled off', async () => {
@@ -235,7 +335,21 @@ describe('EarningsOutlinePage', () => {
       sections: [
         sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, display_order: 0 }),
         sec({ section_code: 'outlook', title: 'Outlook', requirement: 'optional', included: false, available: true, display_order: 1 }),
-        sec({ section_code: 'market_context', title: 'Market Context', requirement: 'recommended', included: false, available: true, display_order: 2 }),
+        sec({
+          section_code: 'market_context',
+          title: 'Market Context',
+          requirement: 'recommended',
+          included: false,
+          available: true,
+          display_order: 2,
+          feeder: {
+            status: 'ready',
+            source_report_id: 'rep-1',
+            source_document_id: null,
+            source_label: 'Quarterly Report Q1-2026',
+            message: 'Sourced from Quarterly Report Q1-2026',
+          },
+        }),
       ],
     });
     renderPage();
@@ -247,6 +361,30 @@ describe('EarningsOutlinePage', () => {
     // higher display_order — tier rank wins, display_order only tiebreaks.
     expect(order).toEqual(['Include Market Context', 'Include Outlook']);
     expect(screen.getByText('RECOMMENDED')).toBeInTheDocument();
+  });
+
+  it('a recommended-tier section with no data yet does NOT show the RECOMMENDED badge', async () => {
+    h.getEarningsOutline.mockResolvedValueOnce({
+      sections: [
+        sec({
+          section_code: 'operational_kpis',
+          title: 'Operational Highlights / KPIs',
+          requirement: 'recommended',
+          included: false,
+          available: true,
+          feeder: {
+            status: 'needs_input',
+            source_report_id: null,
+            source_document_id: null,
+            source_label: null,
+            message: 'Awaiting financial data',
+          },
+        }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Operational Highlights / KPIs');
+    expect(screen.queryByText('RECOMMENDED')).not.toBeInTheDocument();
   });
 
   it('toggling an included recommended section off inserts it in tier order, not appended last', async () => {

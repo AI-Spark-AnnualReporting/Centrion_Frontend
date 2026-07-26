@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EarningsProducedSection } from '@/types/earnings';
 import { SectionRenderer } from './SectionRenderer';
+import { SectionInputForm } from './SectionInputForm';
 import { INK, MUTED, ACCENT, DANGER } from './tokens';
 
 // Inline prose editor for a produced section. Display → SectionRenderer; edit →
@@ -9,19 +10,26 @@ import { INK, MUTED, ACCENT, DANGER } from './tokens';
 // After a save, an unacknowledged grounding-violation flag is surfaced with an
 // Acknowledge control (the backend flags, it doesn't block — but an unacknowledged
 // flag blocks approve). Cover/table sections are display-only here.
+//
+// A section with nothing backing it yet (feeder_status 'needs_input' — never
+// 'external', which is permanently unfixable) renders SectionInputForm instead
+// of the normal view/edit split — there's no existing content to view or edit,
+// only information to provide.
 export function EditableProse({
   section,
   coverTemplateKey,
   locked,
   onSave,
-  onRegenerate,
+  onSaveInput,
+  onExtractInput,
   onAcknowledgeFlag,
 }: {
   section: EarningsProducedSection;
   coverTemplateKey?: string | null;
   locked: boolean;
   onSave: (content: string) => Promise<void>;
-  onRegenerate?: () => void;
+  onSaveInput?: (text: string) => Promise<void>;
+  onExtractInput?: (file: File) => Promise<string>;
   onAcknowledgeFlag?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -76,6 +84,30 @@ export function EditableProse({
 
   const showFlag = !!section.grounding_flag && !section.grounding_acknowledged;
 
+  // Nothing backs this section yet (and it's genuinely fixable — 'external'
+  // is excluded, that's a permanent limitation, not something a form can fix).
+  // GET /sections doesn't carry the outline's `feeder` object yet (confirmed
+  // live — only the flat `status` field does), so `status === 'needs_input'`
+  // is today's real signal; `feeder_status` is read too so this upgrades for
+  // free once the backend adds feeder here (see the backend spec).
+  const externallyUnfixable = section.feeder_status === 'external';
+  const needsUserInput =
+    !externallyUnfixable &&
+    (section.feeder_status === 'needs_input' || section.status === 'needs_input') &&
+    !locked &&
+    !!onSaveInput &&
+    !!onExtractInput;
+  if (needsUserInput) {
+    // Without a feeder object yet, the backend puts the explanation straight
+    // in `content` for a needs_input section (e.g. "No figures were found…");
+    // prefer that over a generic line when it's there.
+    const message =
+      section.feeder_message ??
+      (section.content && section.content.trim() ? section.content : null) ??
+      'This section needs more information.';
+    return <SectionInputForm message={message} onSave={onSaveInput} onExtract={onExtractInput} />;
+  }
+
   return (
     <div>
       {/* Section actions */}
@@ -84,11 +116,6 @@ export function EditableProse({
           {editable && !editing && (
             <button className="btn bs bsm" onClick={open}>
               Edit
-            </button>
-          )}
-          {onRegenerate && !editing && (
-            <button className="btn bs bsm" onClick={onRegenerate}>
-              Regenerate
             </button>
           )}
         </div>

@@ -5,12 +5,14 @@ import {
   isTableMode,
   isQuoteMode,
   isReconciliationMode,
+  isSourcesMode,
   readCoverValues,
   tryParseJson,
 } from '@/pages/earnings/preview-helpers';
 import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
+import { SourcesList } from './SourcesList';
 import { MUTED } from './tokens';
 
 // Prose block — split on blank lines into justified paragraphs, never a JSON blob.
@@ -79,6 +81,18 @@ export function SectionRenderer({
       );
     }
     return <ReconciliationTable content={content} />;
+  }
+
+  if (isSourcesMode(section)) {
+    if (content == null || content.trim() === '') {
+      const pending = section.status === 'pending';
+      return (
+        <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: pending ? 'italic' : 'normal' }}>
+          {pending ? 'This section is awaiting generation.' : 'No data available for this section.'}
+        </p>
+      );
+    }
+    return <SourcesList content={content} />;
   }
 
   if (content == null || content.trim() === '') {
