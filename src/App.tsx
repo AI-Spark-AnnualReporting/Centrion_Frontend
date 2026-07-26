@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
 import OnboardingPage from "./pages/OnboardingPage";
@@ -14,7 +15,8 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import MeetingsPage from "./pages/MeetingsPage";
-import { CompliancePage, CommsPage } from "./pages/OtherPages";
+import { CompliancePage } from "./pages/OtherPages";
+import CommunicationHubPage from "./pages/CommunicationHubPage";
 import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
@@ -41,6 +43,7 @@ const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage
 
 const App = () => (
   <BrowserRouter>
+    <Toaster />
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<SignupPage />} />
@@ -73,7 +76,12 @@ const App = () => (
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
-          <Route path="/comms" element={<CommsPage />} />
+          <Route path="/comms" element={<CommunicationHubPage />} />
+          {/* Notification deep-link — opens the thread-view modal on the hub. */}
+          <Route
+            path="/communications/threads/:threadId"
+            element={<CommunicationHubPage />}
+          />
           <Route path="/stakeholders" element={<StakeholdersPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/questions" element={<QuestionsPage />} />
