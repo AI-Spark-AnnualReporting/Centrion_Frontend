@@ -15,6 +15,7 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import MeetingsPage from "./pages/MeetingsPage";
+import { CommsPage } from "./pages/OtherPages";
 import { CompliancePage } from "./pages/OtherPages";
 import CommunicationHubPage from "./pages/CommunicationHubPage";
 import StakeholdersPage from "./pages/StakeholdersPage";
@@ -39,6 +40,21 @@ const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage
 
 // IR Calendar — admin + IR. Code-split; renders inside AppLayout.
 const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
+
+// Compliance Validation — 3-step wizard (Set up → Review → Gate). Code-split;
+// the run id in the URL makes Review and Gate deep-linkable.
+const ComplianceSetupPage = lazy(
+  () => import("./pages/compliance/ComplianceSetupPage"),
+);
+const ComplianceRunningPage = lazy(
+  () => import("./pages/compliance/ComplianceRunningPage"),
+);
+const ComplianceReviewPage = lazy(
+  () => import("./pages/compliance/ComplianceReviewPage"),
+);
+const ComplianceGatePage = lazy(
+  () => import("./pages/compliance/ComplianceGatePage"),
+);
 
 const App = () => (
   <BrowserRouter>
@@ -66,7 +82,21 @@ const App = () => (
           <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />
           <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
           <Route path="/kpi" element={<KPIPage />} />
-          <Route path="/compliance" element={<CompliancePage />} />
+          <Route path="/compliance" element={<ComplianceSetupPage />} />
+          {/* The 30–60s wait after POST /runs gets its own screen so the run is
+              deep-linkable and a refresh resumes polling instead of losing it. */}
+          <Route
+            path="/compliance/runs/:runId/running"
+            element={<ComplianceRunningPage />}
+          />
+          <Route
+            path="/compliance/runs/:runId"
+            element={<ComplianceReviewPage />}
+          />
+          <Route
+            path="/compliance/runs/:runId/gate"
+            element={<ComplianceGatePage />}
+          />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
           <Route path="/comms" element={<CommunicationHubPage />} />

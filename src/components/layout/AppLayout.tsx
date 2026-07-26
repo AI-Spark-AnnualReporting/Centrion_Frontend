@@ -9,7 +9,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/reports': 'Reports',
   '/reports/quarterly': 'Quarterly Reports',
   '/kpi': 'KPI Normalizer',
-  '/compliance': 'Compliance',
+  '/compliance': 'Compliance Validation',
   '/ai': 'AI Copilot',
   '/meetings': 'Board & Meetings',
   '/comms': 'Communication Hub',
@@ -48,6 +48,7 @@ export function AppLayout() {
   const location = useLocation();
   const pageName =
     PAGE_NAMES[location.pathname] ??
+    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : location.pathname.startsWith('/compliance') ? 'Compliance Validation' : 'Command Center');
     (location.pathname.startsWith('/communications') ? 'Communication Hub' : location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
 
   return (
