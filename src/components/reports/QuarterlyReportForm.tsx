@@ -139,22 +139,27 @@ function CtxPill({
   label,
   selected,
   locked,
+  disabled,
   title,
   onClick,
 }: {
   label: string;
   selected: boolean;
   locked?: boolean;
+  // Unavailable option (e.g. no prior-period data to compare against): greyed,
+  // not-allowed, non-interactive — distinct from `locked`'s dashed "always-on" look.
+  disabled?: boolean;
   title?: string;
   onClick?: () => void;
 }) {
+  const off = locked || disabled;
   return (
     <button
       type="button"
-      disabled={locked}
+      disabled={off}
       title={title}
       aria-pressed={selected}
-      onClick={locked ? undefined : onClick}
+      onClick={off ? undefined : onClick}
       style={{
         padding: '9px 16px',
         borderRadius: 999,
@@ -162,21 +167,24 @@ function CtxPill({
         fontWeight: 600,
         whiteSpace: 'nowrap',
         transition: 'border-color .15s, background .15s, color .15s',
-        cursor: locked ? 'default' : 'pointer',
-        background: locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
-        color: locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
-        border: locked
+        cursor: disabled ? 'not-allowed' : locked ? 'default' : 'pointer',
+        opacity: disabled ? 0.65 : 1,
+        background: disabled ? '#F5F5F7' : locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
+        color: disabled ? '#A9ADBD' : locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
+        border: disabled
+          ? '1.5px solid #E8E8EE'
+          : locked
           ? '1.5px dashed #4040C8'
           : `1.5px solid ${selected ? '#4040C8' : '#E4E6F1'}`,
       }}
       onMouseEnter={(e) => {
-        if (!locked && !selected) {
+        if (!off && !selected) {
           e.currentTarget.style.borderColor = '#C4C7F0';
           e.currentTarget.style.background = '#FAFAFF';
         }
       }}
       onMouseLeave={(e) => {
-        if (!locked && !selected) {
+        if (!off && !selected) {
           e.currentTarget.style.borderColor = '#E4E6F1';
           e.currentTarget.style.background = '#fff';
         }
@@ -320,7 +328,10 @@ export default function QuarterlyReportForm({
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
     prefillYear == null && existingReports.length === 0,
   );
-  const [quarter, setQuarter] = useState<Quarter>(prefillQuarter ?? 'Q1');
+  // Starts UNSELECTED so the user must explicitly pick a quarter — the comparison
+  // options stay disabled until both year and quarter are chosen (we can't know
+  // which prior periods to check for data until the target period is known).
+  const [quarter, setQuarter] = useState<Quarter | null>(prefillQuarter ?? null);
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
   // Language the generated report is written in. UI stays English/LTR — this
@@ -360,6 +371,10 @@ export default function QuarterlyReportForm({
   const [comparisonCheck, setComparisonCheck] =
     useState<'idle' | 'checking' | 'ok' | 'missing'>('idle');
   const [comparisonMissing, setComparisonMissing] = useState<ComparisonAvailability | null>(null);
+  // Per-basis prior-data availability for the chosen year+quarter (null until both
+  // are set). Drives which comparison pills are enabled. { qoq, yoy, both } where
+  // both = qoq && yoy. From the backend `comparison-availability` specs[].present.
+  const [compAvail, setCompAvail] = useState<Record<Comparison, boolean> | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -411,56 +426,51 @@ export default function QuarterlyReportForm({
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
 
-  // Picking a comparison option is the ONLY thing that surfaces the "no data"
-  // dialog. It runs its own check so the popup is a direct response to the click
-  // (selecting a year/quarter just silently gates Generate via the effect below).
-  const selectComparison = (v: Comparison) => {
-    setComparison(v);
-    if (isUploadMode || isOpenMode || !companyId || customYear == null) return;
-    quarterlyReportsApi
-      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: v })
-      .then((res) => {
-        if (!res.available) setComparisonMissing(res);
-      })
-      .catch(() => {
-        /* fail open — the effect already gates Generate */
-      });
-  };
+  // The pills are pre-disabled for unavailable bases (see compAvail), so a click
+  // only ever lands on a valid choice — just record it.
+  const selectComparison = (v: Comparison) => setComparison(v);
 
-  // Comparison-data availability check. Re-runs whenever the comparison basis or
-  // the target period changes (new-report branch only) — but only to GATE the
-  // Generate button (disabled while checking / when a required prior period is
-  // missing). It never opens the "no data" dialog: that surfaces only when the
-  // user actively picks a comparison option (see selectComparison), so simply
-  // choosing a year/quarter can't throw a popup at them.
+  // Per-basis prior-data availability. Runs once BOTH year and quarter are set
+  // (new-report branch only): a single 'both' call returns present flags for qoq
+  // AND yoy, from which we derive which comparison pills are enabled. Fails open
+  // (allow all) so a transient check error never blocks the user — the backend
+  // still only renders a comparison where data actually exists.
   useEffect(() => {
-    // Only gate a brand-new report (upload-to-existing / open modes don't set a
-    // comparison here). Needs a company + a chosen year.
-    if (isUploadMode || isOpenMode || !companyId || customYear == null) {
+    if (isUploadMode || isOpenMode || !companyId || customYear == null || quarter == null) {
+      setCompAvail(null);
       setComparisonCheck('idle');
-      setComparisonMissing(null);
       return;
     }
-    // Close any stale dialog when the inputs change — the dialog only (re)opens
-    // via selectComparison, which runs after this synchronous reset.
-    setComparisonMissing(null);
     let cancelled = false;
     setComparisonCheck('checking');
     quarterlyReportsApi
-      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison })
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: 'both' })
       .then((res) => {
         if (cancelled) return;
-        setComparisonCheck(res.available ? 'ok' : 'missing');
+        const present = (k: string) => res.specs.some((s) => s.key === k && s.present);
+        const qoq = present('qoq');
+        const yoy = present('yoy');
+        setCompAvail({ qoq, yoy, both: qoq && yoy });
+        setComparisonCheck('ok');
       })
       .catch(() => {
-        // Fail open: if the check itself errors, don't block generation on it.
         if (cancelled) return;
+        setCompAvail({ qoq: true, yoy: true, both: true });
         setComparisonCheck('ok');
       });
     return () => {
       cancelled = true;
     };
-  }, [comparison, customYear, quarter, companyId, isUploadMode, isOpenMode]);
+  }, [companyId, customYear, quarter, isUploadMode, isOpenMode]);
+
+  // Keep the selection valid: if the chosen basis isn't available, fall back to an
+  // available one (prefer YoY, then QoQ). When none are available the report is
+  // generated current-period-only (the payload omits `comparison`).
+  useEffect(() => {
+    if (!compAvail || compAvail[comparison]) return;
+    const next: Comparison | null = compAvail.yoy ? 'yoy' : compAvail.qoq ? 'qoq' : null;
+    if (next && next !== comparison) setComparison(next);
+  }, [compAvail, comparison]);
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
   // The picker is hidden — every area is always selected and sent in the
@@ -746,6 +756,7 @@ export default function QuarterlyReportForm({
       (isUploadMode && hasFiles) ||
       (!selectedReportId &&
         customYear != null &&
+        quarter != null &&
         hasFiles &&
         !langBlocked &&
         !comparisonBlocked &&
@@ -759,7 +770,9 @@ export default function QuarterlyReportForm({
         : undefined
       : customYear == null
         ? 'Select a reporting year to continue'
-        : !hasFiles
+        : quarter == null
+          ? 'Select a reporting quarter to continue'
+          : !hasFiles
             ? 'Upload at least one source document to continue'
             : anyChecking
               ? 'Checking document language…'
@@ -830,7 +843,7 @@ export default function QuarterlyReportForm({
 
     // Branch C — new report. company_type is required (guaranteed by
     // `canGenerate`, re-checked here to narrow the nullable state type).
-    if (customYear == null || companyType == null) return;
+    if (customYear == null || quarter == null || companyType == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
@@ -848,7 +861,9 @@ export default function QuarterlyReportForm({
         company_type: companyType,
         voices,
         report_tone: reportTone ?? undefined,
-        comparison,
+        // Only send a basis we actually have prior data for; otherwise omit it so
+        // the report is generated current-period-only (no empty comparison column).
+        comparison: compAvail && compAvail[comparison] ? comparison : undefined,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1131,9 +1146,14 @@ export default function QuarterlyReportForm({
               <label className="fl-label">Quarter</label>
               <select
                 className="inp sel"
-                value={quarter}
-                onChange={(e) => setQuarter(e.target.value as Quarter)}
+                value={quarter ?? ''}
+                onChange={(e) =>
+                  setQuarter(e.target.value ? (e.target.value as Quarter) : null)
+                }
               >
+                <option value="" disabled>
+                  Select quarter…
+                </option>
                 {QUARTERS.map((q) => (
                   <option key={q} value={q}>
                     {q}
@@ -1458,22 +1478,53 @@ export default function QuarterlyReportForm({
               ))}
             </CtxCard>
 
-            {/* Card 4 — comparison basis (single-select; default YoY) */}
-            <CtxCard
-              n={4}
-              title="What should this quarter be compared against?"
-              helper="Sets which prior period the figures are compared to."
-            >
-              {CTX_COMPARISONS.map((c) => (
-                <CtxPill
-                  key={c.value}
-                  label={c.label}
-                  title={c.desc}
-                  selected={comparison === c.value}
-                  onClick={() => selectComparison(c.value)}
-                />
-              ))}
-            </CtxCard>
+            {/* Card 4 — comparison basis (single-select; default YoY). Disabled
+                until year+quarter are chosen, then each basis is enabled only if we
+                have prior-period data for it (checked against qr_figures). */}
+            {(() => {
+              const periodChosen = customYear != null && quarter != null;
+              const checking = comparisonCheck === 'checking';
+              const unavailTitle: Record<Comparison, string> = {
+                yoy: 'No same-quarter-last-year data to compare against',
+                qoq: 'No previous-quarter data to compare against',
+                both: 'Needs both prior-year and prior-quarter data',
+              };
+              return (
+                <CtxCard
+                  n={4}
+                  title="What should this quarter be compared against?"
+                  helper={
+                    !periodChosen
+                      ? 'Select the reporting year and quarter first.'
+                      : checking
+                        ? 'Checking which comparisons we have data for…'
+                        : 'Only comparisons we have prior-period data for are enabled.'
+                  }
+                >
+                  {CTX_COMPARISONS.map((c) => {
+                    const avail = compAvail?.[c.value] ?? false;
+                    const disabled = !periodChosen || checking || !avail;
+                    const title = !periodChosen
+                      ? 'Select the reporting year and quarter first'
+                      : checking
+                        ? 'Checking available data…'
+                        : !avail
+                          ? unavailTitle[c.value]
+                          : c.desc;
+                    return (
+                      <CtxPill
+                        key={c.value}
+                        label={c.label}
+                        title={title}
+                        selected={comparison === c.value && avail}
+                        disabled={disabled}
+                        onClick={() => selectComparison(c.value)}
+                      />
+                    );
+                  })}
+                </CtxCard>
+              );
+            })()}
           </div>
         )}
 
