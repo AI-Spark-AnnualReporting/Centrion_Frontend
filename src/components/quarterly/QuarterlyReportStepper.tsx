@@ -5,11 +5,10 @@ interface QuarterlyReportStepperProps {
 
 const STEPS = [
   { label: 'Period' },
-  { label: 'Documents' },
   { label: 'Extraction' },
-  { label: 'Coverage' },
-  { label: 'Gaps' },
+  { label: 'Outline' },
   { label: 'Preview' },
+  { label: 'Report' },
 ];
 
 const ACCENT = '#4040C8';

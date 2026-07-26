@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 // Shared full-screen "AI processing" loader — the white card with the rotating
 // ring + pulse halos + "AI" label, a milestone checklist, a progress bar and
@@ -80,18 +80,30 @@ export interface AiLoadingScreenProps {
   doneSubtitle?: string;
   onDone?: () => void;
   tips?: string[];
+  // Controlled mode (real backend binding). When `controlledProgress` is a
+  // number, the internal simulation is disabled and this value (0–99 while
+  // running) drives the bar + milestones. `done` then eases it to 100 → onDone.
+  controlledProgress?: number;
+  // Extra content under the subtitle (e.g. backend stat tiles).
+  headerExtra?: ReactNode;
+  // Footer content (e.g. a "Run in background" button).
+  footer?: ReactNode;
 }
 
 export default function AiLoadingScreen({
   title, subtitle, milestones, done = false, doneTitle, doneSubtitle, onDone, tips = DEFAULT_TIPS,
+  controlledProgress, headerExtra, footer,
 }: AiLoadingScreenProps) {
   const [progress, setProgress] = useState(0);
   const [currentTip, setCurrentTip] = useState(0);
   const progressRef = useRef(0);
   const doneRef = useRef(false);
+  const controlled = controlledProgress != null;
 
-  // Climb toward 90% and hold; once `done`, ease to 100% then fire onDone.
+  // Simulated climb (onboarding): toward 90% and hold; once `done`, ease to
+  // 100% then fire onDone. Disabled in controlled mode.
   useEffect(() => {
+    if (controlled) return;
     const target = 9000 + milestones.length * 1400; // ms
     const start = Date.now();
     let raf = 0;
@@ -114,7 +126,35 @@ export default function AiLoadingScreen({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [done, milestones.length, onDone]);
+  }, [controlled, done, milestones.length, onDone]);
+
+  // Controlled mode (real backend progress): follow `controlledProgress` (capped
+  // at 99 while running); once `done`, ease to 100% then fire onDone.
+  useEffect(() => {
+    if (!controlled) return;
+    if (!done) {
+      const p = Math.min(99, Math.max(0, controlledProgress ?? 0));
+      progressRef.current = p;
+      setProgress(p);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      let p = progressRef.current;
+      p = Math.min(p + (100 - p) * 0.08 + 0.5, 100);
+      if (p >= 99.6) p = 100;
+      progressRef.current = p;
+      setProgress(p);
+      if (p >= 100 && !doneRef.current) {
+        doneRef.current = true;
+        if (onDone) setTimeout(onDone, 900);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [controlled, done, controlledProgress, onDone]);
 
   useEffect(() => {
     const t = setInterval(() => setCurrentTip((c) => (c + 1) % tips.length), 6000);
@@ -169,6 +209,8 @@ export default function AiLoadingScreen({
           {allDone && doneSubtitle ? doneSubtitle : subtitle}
         </p>
 
+        {headerExtra && <div style={{ marginBottom: 22 }}>{headerExtra}</div>}
+
         <div style={{ background: '#FAFBFE', border: '1px solid #ECEEF8', borderRadius: 14, padding: '10px 20px', textAlign: 'left' }}>
           {milestones.map((label, i) => (
             <MilestoneRow
@@ -217,6 +259,8 @@ export default function AiLoadingScreen({
             <strong style={{ color: '#1A1D2E' }}>Did you know?</strong> {tips[currentTip]}
           </span>
         </div>
+
+        {footer && <div style={{ marginTop: 18 }}>{footer}</div>}
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea } from '@/lib/api';
+import type { QuarterlyReportArea, ComparisonAvailability } from '@/lib/api';
+import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
 // Quarter options for the reporting-period selector.
@@ -102,6 +103,170 @@ function formatPeriod(period: string): string {
 // Sentinel value for the "+ Add new…" option in the reporting-year select.
 const ADD_NEW_SENTINEL = '__add_new__';
 
+// ─── Confirm-context Q/A (embedded on this form) ──────────────────────────────
+const CTX_COMPANY_TYPES: { label: string; value: CompanyType }[] = [
+  { label: 'Bank', value: 'bank' },
+  { label: 'Non-bank', value: 'non_bank' },
+];
+
+// Report tone — the prose style of the narrative. Default: formal_corporate.
+const CTX_TONES: { label: string; value: ReportTone; desc: string }[] = [
+  { label: 'Formal corporate', value: 'formal_corporate', desc: 'Measured, board-ready register' },
+  { label: 'Investor-focused', value: 'investor_focused', desc: 'Leads with returns and outlook' },
+  { label: 'Data-driven', value: 'data_driven', desc: 'Figures first, minimal narrative' },
+  { label: 'Executive summary', value: 'executive_summary', desc: 'Concise, decision-oriented' },
+  { label: 'Compliance-focused', value: 'compliance_focused', desc: 'Aligned to CMA / SAMA disclosure' },
+  { label: 'Strategic / visionary', value: 'strategic_visionary', desc: 'Forward-looking, thematic' },
+  { label: 'Simple and direct', value: 'simple_direct', desc: 'Plain language, no jargon' },
+];
+
+const CTX_VOICES: { label: string; value: Voice; locked?: boolean }[] = [
+  { label: 'CEO statement · always', value: 'ceo', locked: true },
+  { label: 'Chairman statement', value: 'chairman' },
+  { label: 'CFO statement', value: 'cfo' },
+];
+
+// The comparison basis — single choice. Default: year-on-year.
+const CTX_COMPARISONS: { label: string; value: Comparison; desc: string }[] = [
+  { label: 'Year on year', value: 'yoy', desc: 'vs the same quarter last year' },
+  { label: 'Previous quarter', value: 'qoq', desc: 'vs the immediately prior quarter' },
+  { label: 'Both', value: 'both', desc: 'vs prior year and prior quarter' },
+];
+
+// Capsule pill — indigo border + light fill when selected; locked pills (CEO)
+// render dashed/muted and are non-interactive.
+function CtxPill({
+  label,
+  selected,
+  locked,
+  title,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  locked?: boolean;
+  title?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      title={title}
+      aria-pressed={selected}
+      onClick={locked ? undefined : onClick}
+      style={{
+        padding: '9px 16px',
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        transition: 'border-color .15s, background .15s, color .15s',
+        cursor: locked ? 'default' : 'pointer',
+        background: locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
+        color: locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
+        border: locked
+          ? '1.5px dashed #4040C8'
+          : `1.5px solid ${selected ? '#4040C8' : '#E4E6F1'}`,
+      }}
+      onMouseEnter={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#C4C7F0';
+          e.currentTarget.style.background = '#FAFAFF';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!locked && !selected) {
+          e.currentTarget.style.borderColor = '#E4E6F1';
+          e.currentTarget.style.background = '#fff';
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+// Green "DETECTED" capsule — shown on a card whose value was auto-detected.
+function DetectedBadge() {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        borderRadius: 999,
+        background: '#E7F7EF',
+        color: '#10B981',
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        padding: '3px 9px',
+      }}
+    >
+      Detected
+    </span>
+  );
+}
+
+// Numbered question card for the embedded confirm-context questions.
+function CtxCard({
+  n,
+  title,
+  helper,
+  detected,
+  children,
+}: {
+  n: number;
+  title: string;
+  helper?: string;
+  detected?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: '1px solid #ECEEF8',
+        borderRadius: 14,
+        padding: '14px 16px 16px',
+        background: '#fff',
+        marginBottom: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+        <span
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 8,
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12,
+            fontWeight: 800,
+            color: '#4040C8',
+            background: '#EEEEFF',
+          }}
+        >
+          {n}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E', lineHeight: 1.4 }}>
+            {title}
+          </div>
+          {helper && (
+            <div style={{ fontSize: 12, color: '#5A6080', marginTop: 3, lineHeight: 1.4 }}>
+              {helper}
+            </div>
+          )}
+        </div>
+        {detected && <DetectedBadge />}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginLeft: 34 }}>{children}</div>
+    </div>
+  );
+}
+
 // Minimal shape of an existing quarterly report needed by the year dropdown.
 interface QuarterlyReportOption {
   id: string;
@@ -122,17 +287,40 @@ export default function QuarterlyReportForm({
   periodsLoading = false,
 }: QuarterlyReportFormProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Handed over when the user is routed back here to correct a period_not_found
+  // error: `prefill*` seeds the pickers (parsed from the first available period)
+  // and `periodError` drives the modal shown over this form. Read once.
+  const nav = location.state as {
+    prefillQuarter?: string;
+    prefillYear?: number;
+    periodError?: {
+      requestedPeriod: string;
+      availablePeriods: string[];
+      message: string;
+    };
+  } | null;
+  const prefillQuarter = QUARTERS.includes(nav?.prefillQuarter as Quarter)
+    ? (nav?.prefillQuarter as Quarter)
+    : null;
+  const prefillYear =
+    typeof nav?.prefillYear === 'number' ? nav.prefillYear : null;
+
+  // The period_not_found modal shown over the form. Seeded from router state and
+  // dismissible; once closed it stays closed for this mount.
+  const [periodError, setPeriodError] = useState(nav?.periodError ?? null);
 
   // Collapsible card — mirrors the ESG "Validate Report" card, open by default.
   const [genOpen, setGenOpen] = useState(true);
 
   // Reporting-year dropdown state — mirrors the ESG flow: pick an existing
   // report or "+ Add new…" → year picker.
-  const [customYear, setCustomYear] = useState<number | null>(null);
+  const [customYear, setCustomYear] = useState<number | null>(prefillYear);
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
-    existingReports.length === 0,
+    prefillYear == null && existingReports.length === 0,
   );
-  const [quarter, setQuarter] = useState<Quarter>('Q1');
+  const [quarter, setQuarter] = useState<Quarter>(prefillQuarter ?? 'Q1');
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
   // Language the generated report is written in. UI stays English/LTR — this
@@ -147,12 +335,59 @@ export default function QuarterlyReportForm({
   const [existingPeriodLabel, setExistingPeriodLabel] = useState<string | null>(null);
   const [existingCoverageLoading, setExistingCoverageLoading] = useState(false);
 
-  // Report areas come from the API — the source of truth for which cards show.
+  // Report areas come from the API. The picker UI is hidden; areas are always
+  // all-selected and sent in the generate payload.
   const [areas, setAreas] = useState<AreaCard[]>([]);
-  const [areasLoading, setAreasLoading] = useState(true);
-  const [areasError, setAreasError] = useState<string | null>(null);
   // Area whose full metric list is shown in the popup (null = closed).
   const [metricsModal, setMetricsModal] = useState<AreaCard | null>(null);
+
+  // Confirm-context answers (embedded cards), held locally until submit and sent
+  // in the single generate call. company_type is auto-selected from the detected
+  // company sector (overridable); report tone starts unselected; voices defaults
+  // to the always-on CEO.
+  const [companyType, setCompanyType] = useState<CompanyType | null>(null);
+  // Detected company type (from the detect-company-type endpoint). Drives the
+  // DETECTED badge, shown while the selection still matches the detected value.
+  const [detectedCompanyType, setDetectedCompanyType] = useState<CompanyType | null>(null);
+  // No default — the user picks a tone (or leaves it unset; backend defaults).
+  const [reportTone, setReportTone] = useState<ReportTone | null>(null);
+  const [voices, setVoices] = useState<Voice[]>(['ceo']);
+  // Comparison basis — single choice ("Confirm context" Q4). Default: YoY.
+  const [comparison, setComparison] = useState<Comparison>('yoy');
+  // Comparison-data gate. When a comparison + period are set we check the backend
+  // for prior-period figures: Generate is disabled while 'checking'; 'missing'
+  // pops the no-data dialog and keeps Generate disabled. New-report branch only.
+  const [comparisonCheck, setComparisonCheck] =
+    useState<'idle' | 'checking' | 'ok' | 'missing'>('idle');
+  const [comparisonMissing, setComparisonMissing] = useState<ComparisonAvailability | null>(null);
+
+  const toggleVoice = (v: Voice) => {
+    if (v === 'ceo') return; // always on, locked
+    setVoices((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+  };
+
+  // On mount (company known): detect the company type from its sector and
+  // pre-select it. Detection only — no report exists yet. Fail-soft: if the
+  // endpoint isn't available, the user picks manually (no badge).
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    quarterlyReportsApi
+      .detectCompanyType(companyId)
+      .then((res) => {
+        if (cancelled) return;
+        const detected = res.detected_company_type ?? null;
+        setDetectedCompanyType(detected);
+        // Pre-select only if the user hasn't already chosen.
+        if (detected) setCompanyType((prev) => prev ?? detected);
+      })
+      .catch(() => {
+        // No detection available — leave the pill unselected for manual choice.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -169,9 +404,6 @@ export default function QuarterlyReportForm({
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
-  const allSelected =
-    areas.length > 0 && selectedAreas.length === areas.length;
-
   // How many more documents can be added to the selected existing report.
   const remainingSlots =
     existingDocCount != null ? MAX_DOCUMENTS - existingDocCount : MAX_DOCUMENTS;
@@ -179,32 +411,78 @@ export default function QuarterlyReportForm({
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
 
+  // Picking a comparison option is the ONLY thing that surfaces the "no data"
+  // dialog. It runs its own check so the popup is a direct response to the click
+  // (selecting a year/quarter just silently gates Generate via the effect below).
+  const selectComparison = (v: Comparison) => {
+    setComparison(v);
+    if (isUploadMode || isOpenMode || !companyId || customYear == null) return;
+    quarterlyReportsApi
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: v })
+      .then((res) => {
+        if (!res.available) setComparisonMissing(res);
+      })
+      .catch(() => {
+        /* fail open — the effect already gates Generate */
+      });
+  };
+
+  // Comparison-data availability check. Re-runs whenever the comparison basis or
+  // the target period changes (new-report branch only) — but only to GATE the
+  // Generate button (disabled while checking / when a required prior period is
+  // missing). It never opens the "no data" dialog: that surfaces only when the
+  // user actively picks a comparison option (see selectComparison), so simply
+  // choosing a year/quarter can't throw a popup at them.
+  useEffect(() => {
+    // Only gate a brand-new report (upload-to-existing / open modes don't set a
+    // comparison here). Needs a company + a chosen year.
+    if (isUploadMode || isOpenMode || !companyId || customYear == null) {
+      setComparisonCheck('idle');
+      setComparisonMissing(null);
+      return;
+    }
+    // Close any stale dialog when the inputs change — the dialog only (re)opens
+    // via selectComparison, which runs after this synchronous reset.
+    setComparisonMissing(null);
+    let cancelled = false;
+    setComparisonCheck('checking');
+    quarterlyReportsApi
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison })
+      .then((res) => {
+        if (cancelled) return;
+        setComparisonCheck(res.available ? 'ok' : 'missing');
+      })
+      .catch(() => {
+        // Fail open: if the check itself errors, don't block generation on it.
+        if (cancelled) return;
+        setComparisonCheck('ok');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [comparison, customYear, quarter, companyId, isUploadMode, isOpenMode]);
+
   // Fetch the report-area cards once on mount. The list is company-agnostic.
+  // The picker is hidden — every area is always selected and sent in the
+  // generate payload (report scope is not a user choice).
   useEffect(() => {
     let cancelled = false;
-    setAreasLoading(true);
-    setAreasError(null);
     reportsApi
       .getQuarterlyReportAreas()
       .then((res) => {
         if (cancelled) return;
-        setAreas((res.areas ?? []).map(toAreaCard));
+        const cards = (res.areas ?? []).map(toAreaCard);
+        setAreas(cards);
+        setSelectedAreas(cards.map((c) => c.key)); // always select all
       })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setAreasError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load report areas. Please retry.',
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setAreasLoading(false);
+      .catch(() => {
+        // Areas failed to load — send none and let the backend default to all.
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
 
   // Fetch coverage for the selected existing report to get doc count + period label.
   useEffect(() => {
@@ -254,6 +532,26 @@ export default function QuarterlyReportForm({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [metricsModal]);
+
+  // Close the period_not_found modal on Escape.
+  useEffect(() => {
+    if (!periodError) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPeriodError(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [periodError]);
+
+  // Router state lives in window.history.state, which SURVIVES a page refresh —
+  // so without this the modal (and prefill) would re-appear on every reload. We
+  // captured everything into local state / initial state above, so strip the
+  // history entry's state once on mount.
+  useEffect(() => {
+    if (nav) navigate(location.pathname, { replace: true, state: null });
+    // Mount-only: `nav` is read once and cleared here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Drop any selected codes that the API no longer returns (defensive — keeps
   // the generate payload in sync with the rendered cards).
@@ -349,15 +647,6 @@ export default function QuarterlyReportForm({
     setGenError(null);
   };
 
-  const toggleArea = (key: string) => {
-    setSelectedAreas((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
-  };
-
-  const toggleSelectAll = () => {
-    setSelectedAreas(allSelected ? [] : areas.map((a) => a.key));
-  };
 
   // --- File handling (multiple) -------------------------------------------
   const openFilePicker = () => fileInputRef.current?.click();
@@ -439,14 +728,28 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  const hasAreas = selectedAreas.length > 0;
+
+  // New-report submit requires a company type (pre-selected from detection, but
+  // must be set). Report tone is default-selected and voices always has CEO, so
+  // neither gates. Report areas are always all-selected behind the scenes.
+  const contextComplete = companyType != null;
+
+  // Comparison gate blocks the new-report branch only WHILE the availability
+  // check is in flight. Missing prior data does NOT block generation — it just
+  // pops a heads-up and the report skips the comparison where data is absent.
+  const comparisonBlocked = comparisonCheck === 'checking';
 
   const canGenerate =
     !!companyId &&
     !isSubmittingGenerate &&
     (isOpenMode ||
       (isUploadMode && hasFiles) ||
-      (!selectedReportId && customYear != null && hasFiles && hasAreas && !langBlocked));
+      (!selectedReportId &&
+        customYear != null &&
+        hasFiles &&
+        !langBlocked &&
+        !comparisonBlocked &&
+        contextComplete));
 
   const disabledReason = isOpenMode
     ? undefined
@@ -456,15 +759,17 @@ export default function QuarterlyReportForm({
         : undefined
       : customYear == null
         ? 'Select a reporting year to continue'
-        : !hasAreas
-          ? 'Select at least one report area to continue'
-          : !hasFiles
+        : !hasFiles
             ? 'Upload at least one source document to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : undefined;
+                : companyType == null
+                  ? 'Select the company type to continue'
+                  : comparisonCheck === 'checking'
+                    ? 'Checking comparison data…'
+                    : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -485,9 +790,9 @@ export default function QuarterlyReportForm({
   const triggerGenerate = () => {
     if (!canGenerate || !companyId) return;
 
-    // Branch A — open existing report: navigate straight to coverage.
+    // Branch A — open existing report: navigate straight to the outline.
     if (isOpenMode && selectedReportId) {
-      navigate(`/quarterly-report/${selectedReportId}/coverage`);
+      navigate(`/quarterly-report/${selectedReportId}/outline`);
       return;
     }
 
@@ -523,12 +828,16 @@ export default function QuarterlyReportForm({
       return;
     }
 
-    // Branch C — new report.
-    if (customYear == null) return;
+    // Branch C — new report. company_type is required (guaranteed by
+    // `canGenerate`, re-checked here to narrow the nullable state type).
+    if (customYear == null || companyType == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
 
+    // Single creation call — the report is created already configured with the
+    // confirm-context answers. No separate PATCH /context (the report_id only
+    // exists after this returns, which is what previously caused the 404).
     reportsApi
       .generateQuarterly(companyId, {
         files,
@@ -536,6 +845,10 @@ export default function QuarterlyReportForm({
         quarter,
         areas: selectedAreas,
         content_language: language,
+        company_type: companyType,
+        voices,
+        report_tone: reportTone ?? undefined,
+        comparison,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -635,6 +948,7 @@ export default function QuarterlyReportForm({
             report content + export only; the app UI stays English/LTR. */}
         <div style={{ marginBottom: 18 }}>
           <label className="fl-label">Report Language</label>
+          {/* Arabic is hidden for now — English only. `language` stays 'english'. */}
           <div className="tabs" style={{ marginBottom: 0 }}>
             <button
               type="button"
@@ -642,13 +956,6 @@ export default function QuarterlyReportForm({
               onClick={() => setLanguage('english')}
             >
               English
-            </button>
-            <button
-              type="button"
-              className={`tab ${language === 'arabic' ? 'act' : ''}`}
-              onClick={() => setLanguage('arabic')}
-            >
-              العربية
             </button>
           </div>
         </div>
@@ -844,189 +1151,6 @@ export default function QuarterlyReportForm({
             <select className="inp sel" value="upload" onChange={() => {}}>
               <option value="upload">Upload new documents</option>
             </select>
-          </div>
-        )}
-
-        {/* Report areas — hidden when an existing report is selected */}
-        {!selectedReportId && (
-          <div style={{ marginBottom: 18 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 8,
-              }}
-            >
-              <label className="fl-label" style={{ marginBottom: 0 }}>
-                Report Areas{' '}
-                <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>
-              </label>
-              {areas.length > 0 && (
-                <button
-                  type="button"
-                  onClick={toggleSelectAll}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#4040C8',
-                    background: 'transparent',
-                    border: 0,
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  {allSelected ? 'Clear all' : 'Select all'}
-                </button>
-              )}
-            </div>
-
-            {areasLoading ? (
-              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-                Loading report areas…
-              </div>
-            ) : areasError ? (
-              <div
-                role="alert"
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  background: 'rgba(229,72,77,.08)',
-                  border: '1px solid rgba(229,72,77,.25)',
-                  color: '#B33A3E',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                {areasError}
-              </div>
-            ) : areas.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#9BA3C4', padding: '8px 0' }}>
-                No report areas available.
-              </div>
-            ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3,1fr)',
-                gap: 10,
-              }}
-            >
-              {areas.map((area) => {
-                const active = selectedAreas.includes(area.key);
-                return (
-                  <div
-                    key={area.key}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setMetricsModal(area)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setMetricsModal(area);
-                      }
-                    }}
-                    title="View metrics"
-                    className={`fw-chip ${active ? 'sel' : ''}`}
-                    style={{
-                      flexDirection: 'column',
-                      alignItems: 'stretch',
-                      gap: 6,
-                      padding: '12px 14px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      background: active ? '#EEEEFF' : '#fff',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 700,
-                          color: '#1A1D2E',
-                        }}
-                      >
-                        {area.title}
-                      </span>
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={active}
-                        aria-label={
-                          active
-                            ? `Deselect ${area.title}`
-                            : `Select ${area.title}`
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleArea(area.key);
-                        }}
-                        style={{
-                          width: 18,
-                          height: 18,
-                          padding: 0,
-                          borderRadius: 5,
-                          flexShrink: 0,
-                          cursor: 'pointer',
-                          border: active ? 'none' : '1.5px solid #C9CDE4',
-                          background: active ? '#4040C8' : '#fff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {active && (
-                          <svg
-                            width="11"
-                            height="11"
-                            viewBox="0 0 12 12"
-                            fill="none"
-                          >
-                            <path
-                              d="M2.5 6.2l2.2 2.2L9.5 3.6"
-                              stroke="#fff"
-                              strokeWidth="1.6"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                    {area.desc && (
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: '#5A6080',
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {area.desc}
-                      </span>
-                    )}
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '.5px',
-                        color: active ? '#4040C8' : '#9BA3C4',
-                        marginTop: 2,
-                      }}
-                    >
-                      {area.meta}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            )}
           </div>
         )}
 
@@ -1254,6 +1378,102 @@ export default function QuarterlyReportForm({
             }}
           >
             {languageWarning}
+          </div>
+        )}
+
+        {/* Confirm context — new-report mode only. Held locally and sent inside
+            the single generate call (no GET/PATCH context at creation). */}
+        {!selectedReportId && (
+          <div style={{ marginBottom: 18 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              <span style={{ width: 18, height: 2, background: '#4040C8', borderRadius: 2 }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: 1.2,
+                  textTransform: 'uppercase',
+                  color: '#4040C8',
+                }}
+              >
+                Confirm Context
+              </span>
+            </div>
+
+            {/* Card 1 — company type (auto-selected from detected sector) */}
+            <CtxCard
+              n={1}
+              title="What kind of company is this report for?"
+              helper="Sets which sections are required — banks vs non-banks differ."
+              detected={detectedCompanyType != null && companyType === detectedCompanyType}
+            >
+              {CTX_COMPANY_TYPES.map((c) => (
+                <CtxPill
+                  key={c.value}
+                  label={c.label}
+                  selected={companyType === c.value}
+                  onClick={() => setCompanyType(c.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 2 — report tone (single-select; default formal_corporate) */}
+            <CtxCard
+              n={2}
+              title="What tone should the report take?"
+              helper="Sets the writing style of the narrative."
+            >
+              {CTX_TONES.map((t) => (
+                <CtxPill
+                  key={t.value}
+                  label={t.label}
+                  title={t.desc}
+                  selected={reportTone === t.value}
+                  onClick={() => setReportTone(t.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 3 — executive voices (multi-select; CEO locked-on) */}
+            <CtxCard
+              n={3}
+              title="Which executive voices will the report carry?"
+              helper="CEO statement is always included; add the others if your report uses them."
+            >
+              {CTX_VOICES.map((v) => (
+                <CtxPill
+                  key={v.value}
+                  label={v.label}
+                  locked={v.locked}
+                  selected={v.locked ? true : voices.includes(v.value)}
+                  onClick={() => toggleVoice(v.value)}
+                />
+              ))}
+            </CtxCard>
+
+            {/* Card 4 — comparison basis (single-select; default YoY) */}
+            <CtxCard
+              n={4}
+              title="What should this quarter be compared against?"
+              helper="Sets which prior period the figures are compared to."
+            >
+              {CTX_COMPARISONS.map((c) => (
+                <CtxPill
+                  key={c.value}
+                  label={c.label}
+                  title={c.desc}
+                  selected={comparison === c.value}
+                  onClick={() => selectComparison(c.value)}
+                />
+              ))}
+            </CtxCard>
           </div>
         )}
 
@@ -1490,6 +1710,256 @@ export default function QuarterlyReportForm({
                   </>
                 )}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Period-not-found modal — shown over the (pre-filled) form when a run
+          failed because the requested quarter/year wasn't in the documents. */}
+      {periodError && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Requested period not found"
+          onClick={() => setPeriodError(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M10 6v5M10 14h.01"
+                    stroke="#D97706"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                That period isn't in your documents
+              </div>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 13,
+                  color: '#3A3F5C',
+                  lineHeight: 1.6,
+                }}
+              >
+                {periodError.message ||
+                  `The uploaded document doesn't contain data for ${formatPeriod(
+                    periodError.requestedPeriod,
+                  )}. Correct the quarter/year and upload again.`}
+              </p>
+
+              {periodError.availablePeriods.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '.5px',
+                      textTransform: 'uppercase',
+                      color: '#9BA3C4',
+                      marginBottom: 8,
+                    }}
+                  >
+                    Available period
+                    {periodError.availablePeriods.length === 1 ? '' : 's'}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {periodError.availablePeriods.map((p) => (
+                      <span
+                        key={p}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '6px 12px',
+                          borderRadius: 999,
+                          background: '#EEF0FB',
+                          border: '1px solid #DDE0F2',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#3A3F5C',
+                        }}
+                      >
+                        {formatPeriod(p)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  marginTop: 22,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPeriodError(null)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Correct &amp; re-upload
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison "no data" dialog — the chosen comparison period(s) have no
+          figures in the DB. Placeholder handling for now (dismiss + Generate
+          stays disabled until the user picks a comparison/period that has data). */}
+      {comparisonMissing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="No data to compare against"
+          onClick={() => setComparisonMissing(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                No data to compare against
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                We don't have data for{' '}
+                <strong>
+                  {comparisonMissing.specs
+                    .filter((s) => !s.present)
+                    .map((s) => s.label)
+                    .join(' and ')}
+                </strong>{' '}
+                to compare this quarter against. Pick a different comparison or reporting period to
+                continue.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
+                <button
+                  type="button"
+                  onClick={() => setComparisonMissing(null)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Got it
+                </button>
+              </div>
             </div>
           </div>
         </div>

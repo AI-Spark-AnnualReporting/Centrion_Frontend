@@ -115,7 +115,7 @@ export default function OnboardingPage() {
   const [hasSubsidiaries, setHasSubsidiaries] = useState(false);
   const [hasSukuk, setHasSukuk] = useState(false);
   const [employeeCount, setEmployeeCount] = useState('');
-  const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState('12');
+  const [fiscalYearEndMonth, setFiscalYearEndMonth] = useState(''); // mandatory — no silent default
   const [reportingCurrency, setReportingCurrency] = useState<OnboardingPayload['reporting_currency']>('SAR');
   const [primaryLanguage, setPrimaryLanguage] = useState<OnboardingPayload['primary_language']>('en');
   const [foundedYear, setFoundedYear] = useState('');
@@ -147,7 +147,9 @@ export default function OnboardingPage() {
     if (c.employee_count != null) setEmployeeCount(String(c.employee_count));
     if (c.founded_year != null) setFoundedYear(String(c.founded_year));
     if (c.headquarter_city) setHeadquarterCity(c.headquarter_city);
-    if (c.fiscal_year_end_month != null) setFiscalYearEndMonth(String(c.fiscal_year_end_month));
+    // Fiscal year end is intentionally NOT seeded from the company row: the DB defaults
+    // it to December, which would silently pre-fill and defeat the mandatory conscious
+    // choice on the Review step. It's still pre-filled from AI extraction (applyExtracted).
     if (c.reporting_currency) setReportingCurrency(c.reporting_currency as OnboardingPayload['reporting_currency']);
     if (c.primary_language) setPrimaryLanguage(c.primary_language as OnboardingPayload['primary_language']);
     if (c.listed_exchange) setListedExchange(c.listed_exchange);
@@ -267,6 +269,7 @@ export default function OnboardingPage() {
     if (!sectorId) errs.sectorId = 'Sector is required.';
     if (!companyProfile) errs.companyProfile = 'Company profile is required.';
     if (!reportingSector) errs.reportingSector = 'Reporting sector is required.';
+    if (!fiscalYearEndMonth) errs.fiscalYearEndMonth = 'Fiscal year end is required.';
     setReviewErrors(errs);
     if (Object.keys(errs).length === 0) setStep('departments');
   };
@@ -416,11 +419,17 @@ export default function OnboardingPage() {
                 </div>
                 <div className="fl">
                   <FieldLabel required ai>Fiscal year</FieldLabel>
-                  <select className="inp sel" value={fiscalYearEndMonth} onChange={(e) => setFiscalYearEndMonth(e.target.value)}>
+                  <select
+                    className={`inp sel${reviewErrors.fiscalYearEndMonth ? ' inp-error' : ''}`}
+                    value={fiscalYearEndMonth}
+                    onChange={(e) => { setFiscalYearEndMonth(e.target.value); clearReviewError('fiscalYearEndMonth'); }}
+                  >
+                    <option value="">Select month</option>
                     {MONTHS.map((m, i) => (
                       <option key={m} value={i + 1}>{m}</option>
                     ))}
                   </select>
+                  {reviewErrors.fiscalYearEndMonth && <div className="fl-err">{reviewErrors.fiscalYearEndMonth}</div>}
                 </div>
                 <div className="fl">
                   <FieldLabel required ai>Currency</FieldLabel>

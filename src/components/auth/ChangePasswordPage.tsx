@@ -21,14 +21,12 @@ export function ChangePasswordPage() {
   const navigate = useNavigate();
   const { user, changePassword, logout } = useAuth();
 
-  const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   // Keyed errors so we can show feedback under the relevant field rather
   // than just lumping everything into a single banner.
   const [errors, setErrors] = useState<{
-    old?: string;
     new?: string;
     confirm?: string;
     form?: string;
@@ -37,11 +35,8 @@ export function ChangePasswordPage() {
 
   const validate = () => {
     const next: typeof errors = {};
-    if (!oldPassword) next.old = 'Enter the temp password your admin shared.';
     if (newPassword.length < 8)
       next.new = 'New password must be at least 8 characters.';
-    else if (newPassword === oldPassword)
-      next.new = 'New password must be different from the temp one.';
     if (confirmPassword !== newPassword)
       next.confirm = 'Passwords do not match.';
     setErrors(next);
@@ -53,14 +48,13 @@ export function ChangePasswordPage() {
     if (!validate()) return;
     setSubmitting(true);
     try {
-      await changePassword(oldPassword, newPassword);
+      await changePassword(newPassword);
       navigate('/dashboard', { replace: true });
     } catch (err) {
-      // The brief calls out 401 as the only expected user-facing error path.
-      // Surface anything else under a generic banner instead of swallowing.
+      // Surface any failure under the generic banner instead of swallowing it.
       if (err instanceof ApiError) {
         if (err.status === 401) {
-          setErrors({ old: 'Old password is incorrect.' });
+          setErrors({ form: 'Could not update your password. Please try again.' });
         } else if (err.status === 422) {
           const detail = (err.body as { detail?: unknown })?.detail;
           const message =
@@ -145,31 +139,6 @@ export function ChangePasswordPage() {
           <p>Set your password to continue to the portal.</p>
 
           <div className="fl">
-            <label>Temporary password</label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              className="inp"
-              placeholder="Paste the password your admin shared"
-              value={oldPassword}
-              onChange={(e) => {
-                setOldPassword(e.target.value);
-                if (errors.old) setErrors((p) => ({ ...p, old: undefined }));
-              }}
-              onKeyDown={handleKeyDown}
-              autoComplete="current-password"
-              autoFocus
-            />
-            {errors.old && (
-              <div
-                style={{ fontSize: '11px', color: '#E5484D', marginTop: 6 }}
-                role="alert"
-              >
-                {errors.old}
-              </div>
-            )}
-          </div>
-
-          <div className="fl">
             <label>New password</label>
             <div style={{ position: 'relative' }}>
               <input
@@ -183,6 +152,7 @@ export function ChangePasswordPage() {
                 }}
                 onKeyDown={handleKeyDown}
                 autoComplete="new-password"
+                autoFocus
                 style={{ paddingRight: 36 }}
               />
               <button

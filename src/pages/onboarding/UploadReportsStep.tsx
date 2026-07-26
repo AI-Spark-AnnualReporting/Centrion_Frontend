@@ -1,12 +1,19 @@
 import { useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { companies } from '@/lib/api';
+import type { ReportValidation } from '@/lib/api';
 
-// Doc-type label sent to the backend so it can apply the tone-extraction source
-// rules (annual → tone+theme+outline; financial statements excluded for tone).
+// Doc-type label sent to the backend so it can apply the source rules (annual/esg →
+// report row + chunks + dashboard data; financial statements & other → Document Bank).
 export type ReportDocType = 'annual' | 'esg' | 'financial' | 'other';
 
 export interface UploadedReportFile {
   file: File;
   docType: ReportDocType;
+  // Filled by the inline validation step: the banked doc + detected period the submit
+  // step processes. Only slots that validated OK are handed to onProcess.
+  documentId: string | null;
+  period: string | null;
 }
 
 interface RowDef {
@@ -24,7 +31,58 @@ const ROWS: RowDef[] = [
   { icon: '📋', title: 'Other Documents', desc: 'Board packs, governance docs, MD&A · any format', docType: 'other' },
 ];
 
-function UploadRow({ row, file, onPick }: { row: RowDef; file: File | null; onPick: (f: File | null) => void }) {
+// Per-slot validation state (annual/esg are LLM-checked; financial/other just banked).
+type SlotState =
+  | { status: 'validating' }
+  | { status: 'ok'; result: ReportValidation }
+  | { status: 'invalid'; message: string }
+  | { status: 'error'; message: string };
+
+// Label the confirmed report by the SLOT the user chose (not the classifier's
+// detected_type — an integrated report can read as both annual & ESG).
+function slotLabel(docType: ReportDocType): string {
+  return docType === 'annual' ? 'Annual report' : docType === 'esg' ? 'ESG report' : 'Document';
+}
+
+function StatusLine({ state, docType }: { state: SlotState | undefined; docType: ReportDocType }) {
+  if (!state) return null;
+  if (state.status === 'validating') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, fontSize: 11.5, color: '#5A6080' }}>
+        <span className="proc-ring" style={{ width: 13, height: 13, borderWidth: 2, flexShrink: 0 }} />
+        Checking your document…
+      </div>
+    );
+  }
+  const ok = state.status === 'ok';
+  let msg: string;
+  if (state.status === 'ok') {
+    if (docType === 'annual' || docType === 'esg') {
+      const lbl = slotLabel(docType);
+      msg = state.result.period ? `${lbl} · ${state.result.period}` : `${lbl} confirmed`;
+    } else {
+      msg = state.result.message; // financial/other → "Ready."
+    }
+  } else {
+    msg = state.message;
+  }
+  const color = ok ? '#0F9D6B' : '#DC2626';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5, fontWeight: 600, color }}>
+      <span style={{ flexShrink: 0 }}>{ok ? '✓' : '⚠️'}</span>
+      <span style={{ minWidth: 0 }}>{msg}</span>
+    </div>
+  );
+}
+
+function UploadRow({
+  row, file, state, onPick,
+}: {
+  row: RowDef;
+  file: File | null;
+  state: SlotState | undefined;
+  onPick: (f: File | null) => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="ob-up-row">
@@ -34,9 +92,10 @@ function UploadRow({ row, file, onPick }: { row: RowDef; file: File | null; onPi
           <span style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E' }}>{row.title}</span>
           {row.required && <span className="ob-req">Required</span>}
         </div>
-        <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>
+        <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {file ? file.name : row.desc}
         </div>
+        <StatusLine state={state} docType={row.docType} />
       </div>
       <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
         {file ? 'Replace' : 'Upload'}
@@ -51,9 +110,10 @@ function UploadRow({ row, file, onPick }: { row: RowDef; file: File | null; onPi
   );
 }
 
-// Step 4 — collects the report documents. "Process" hands the picked files up
-// (uploaded to the Document Bank + run through report-style extraction, then the
-// new workspace dashboard opens); "Skip" passes nothing (→ welcome dashboard).
+// Step 4 — collects the report documents. Each Annual/ESG file is validated + banked the
+// moment it's attached (LLM: is this really that report + which fiscal year), so we can
+// warn on a wrong-slot upload and skip asking for the period. "Process" hands the
+// validated docs up (→ heavy ingest + the live setup screen); "Skip" passes nothing.
 export default function UploadReportsStep({
   onProcess,
   onSkip,
@@ -61,9 +121,42 @@ export default function UploadReportsStep({
   onProcess: (files: UploadedReportFile[]) => void;
   onSkip: () => void;
 }) {
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? null;
   const [picked, setPicked] = useState<Record<string, File | null>>({});
+  const [states, setStates] = useState<Record<string, SlotState | undefined>>({});
+
+  const handlePick = (row: RowDef, f: File | null) => {
+    setPicked((prev) => ({ ...prev, [row.title]: f }));
+    setStates((prev) => ({ ...prev, [row.title]: f ? { status: 'validating' } : undefined }));
+    if (!f || !companyId) return;
+    companies
+      .validateReport(companyId, f, row.docType)
+      .then((res) => {
+        setStates((prev) => ({
+          ...prev,
+          [row.title]:
+            (row.docType === 'annual' || row.docType === 'esg') && !res.valid
+              ? { status: 'invalid', message: res.message }
+              : res.document_id
+                ? { status: 'ok', result: res }
+                : { status: 'error', message: 'Upload failed — please try again.' },
+        }));
+      })
+      .catch(() => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: 'Upload failed — please try again.' } })));
+  };
+
+  const anyValidating = Object.values(states).some((s) => s?.status === 'validating');
+  const anyInvalid = Object.values(states).some((s) => s?.status === 'invalid');
+  const canProcess = !!companyId && !anyValidating && !anyInvalid;
+
   const collected: UploadedReportFile[] = ROWS
-    .map((r) => (picked[r.title] ? { file: picked[r.title] as File, docType: r.docType } : null))
+    .map((r) => {
+      const st = states[r.title];
+      const f = picked[r.title];
+      if (!f || st?.status !== 'ok') return null;
+      return { file: f, docType: r.docType, documentId: st.result.document_id, period: st.result.period };
+    })
     .filter((x): x is UploadedReportFile => !!x);
 
   return (
@@ -77,13 +170,20 @@ export default function UploadReportsStep({
             key={r.title}
             row={r}
             file={picked[r.title] ?? null}
-            onPick={(f) => setPicked((prev) => ({ ...prev, [r.title]: f }))}
+            state={states[r.title]}
+            onPick={(f) => handlePick(r, f)}
           />
         ))}
       </div>
 
-      <button type="button" className="btn-auth" style={{ marginTop: 20 }} onClick={() => onProcess(collected)}>
-        Process Reports &amp; Build Dashboard →
+      <button
+        type="button"
+        className="btn-auth"
+        style={{ marginTop: 20, opacity: canProcess ? 1 : 0.55, cursor: canProcess ? 'pointer' : 'not-allowed' }}
+        disabled={!canProcess}
+        onClick={() => canProcess && onProcess(collected)}
+      >
+        {anyValidating ? 'Checking your documents…' : 'Process Reports & Build Dashboard →'}
       </button>
 
       <button type="button" className="ob-skip" onClick={onSkip}>

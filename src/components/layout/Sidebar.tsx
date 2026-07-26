@@ -42,6 +42,7 @@ const NAV_ITEMS = [
       { key: 'meetings', label: 'Board & Meetings', path: '/meetings', icon: 'cal', badge: null },
       { key: 'stakeholders', label: 'Leadership', path: '/stakeholders', icon: 'people', badge: null },
       { key: 'comms', label: 'Communication Hub', path: '/comms', icon: 'mail', badge: null },
+      { key: 'ircalendar', label: 'IR Calendar', path: '/ir-calendar', icon: 'calchk', badge: null },
     ],
   },
   {
@@ -66,6 +67,7 @@ const icons: Record<string, JSX.Element> = {
   file: <svg viewBox="0 0 13 13" fill="none"><path d="M2 1.5h6l3 3V12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.2"/><path d="M8 1.5v3h3" stroke="currentColor" strokeWidth="1.2"/></svg>,
   question: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 5.5C5 4.7 5.7 4 6.5 4S8 4.7 8 5.5c0 .6-.3 1.1-.8 1.4L7 7.5M7 9.5v.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   user: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1.5 12c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+  calchk: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1v2M9 1v2M1 5.5h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M4.6 8.6l1.3 1.3 2.5-2.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
 };
 
 export function Sidebar() {
