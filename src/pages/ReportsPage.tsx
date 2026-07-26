@@ -53,6 +53,7 @@ interface ReportRegulatorSummary {
 interface ReportSummary {
   id: string;
   period: string;
+  report_type?: string | null;
   generation_config?: ReportGenerationConfig;
   title?: string;
   scope_type?: string;
@@ -72,8 +73,9 @@ function formatPeriod(period: string): string {
 }
 
 function isQuarterlyReport(r: ReportSummary): boolean {
-  if (r.title?.toLowerCase().includes('quarterly')) return true;
-  return /^Q[1-4][\s-]/i.test(r.period);
+  // Only true quarterly reports — earnings reports also carry Q#-YYYY periods,
+  // so filter on report_type, not the period shape or the derived title.
+  return (r.report_type ?? '').toLowerCase() === 'quarterly';
 }
 
 // "2026-04-26T07:47:38..." → "Apr 26, 2026" for the gallery card footer.
