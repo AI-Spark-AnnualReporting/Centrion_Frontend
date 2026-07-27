@@ -180,10 +180,57 @@ export function scoreColor(score: number | null | undefined): string {
   return RED;
 }
 
+// The framework cards on Review read as pass/fail rather than as a ramp: a
+// framework is either fully evidenced or it has checks outstanding, and an amber
+// middle band made "60" look nearer to done than it is. `scoreColor`'s three-step
+// ramp still governs every other compliance surface.
+export function gradeColor(score: number | null | undefined): string {
+  if (score == null || !Number.isFinite(score)) return MUTED;
+  return score >= 80 ? GREEN : RED;
+}
+
 // Clamp a score to a 0–100 integer, preserving null (= "nothing was scoreable").
 export function safeScore(n: number | null | undefined): number | null {
   if (n == null || !Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+// The API names a framework only by its regulator code, so the friendly half of
+// every label lives here. Anything unmapped falls back to the bare code — a new
+// regulator on the backend degrades to "XYZ" rather than breaking.
+export const FRAMEWORK_LABELS: Record<string, string> = {
+  CMA: 'Annual Report (CMA)',
+  TADAWUL: 'Tadawul ESG',
+  SAMA: 'SAMA Prudential',
+  IA: 'Insurance Authority',
+  SOCPA: 'Accounting Basis',
+  ZATCA: 'Zakat / Tax',
+  ISSB: 'ISSB / TCFD',
+  GRI: 'GRI',
+  ARV: 'Report Integrity',
+  MOC: 'Ministry of Commerce',
+  SASB: 'SASB',
+  ICMA: 'ICMA',
+  GHG_PROTOCOL: 'GHG Protocol',
+};
+
+export function frameworkLabel(regulator: string): string {
+  return FRAMEWORK_LABELS[regulator] ?? regulator;
+}
+
+// FrameworkScore carries no gate, so a framework's HARD/SOFT badge is read off
+// the rules that produced it: one HARD rule is enough to make the whole
+// framework blocking. A regulator missing from rule_detail is left out of the
+// map so its card shows no badge rather than a guessed one.
+export function frameworkGates(detail: RuleDetailGroup[] | undefined): Map<string, Gate> {
+  const map = new Map<string, Gate>();
+  for (const group of detail ?? []) {
+    const gates = new Set((group.rules ?? []).map((r) => r.gate));
+    if (gates.has('HARD')) map.set(group.regulator, 'HARD');
+    else if (gates.has('SOFT')) map.set(group.regulator, 'SOFT');
+    else if (gates.has('WATCH')) map.set(group.regulator, 'WATCH');
+  }
+  return map;
 }
 
 // rule_detail carries no per-group totals, so derive them from the rule rows.
