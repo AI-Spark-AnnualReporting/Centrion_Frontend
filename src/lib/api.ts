@@ -358,6 +358,9 @@ export interface GenerateQuarterlyBody {
   financial_files?: File[];
   financial_currency?: string; // e.g. "SAR"
   financial_scale?: string;    // actual | thousands | millions | billions
+  // system = map the sheet to our standard metrics + template (default).
+  // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
+  metrics_mode?: "system" | "custom";
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -993,6 +996,7 @@ export const reports = {
     }
     if (body.financial_currency) fd.append("financial_currency", body.financial_currency);
     if (body.financial_scale) fd.append("financial_scale", body.financial_scale);
+    if (body.metrics_mode) fd.append("metrics_mode", body.metrics_mode);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,

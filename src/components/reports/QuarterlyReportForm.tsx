@@ -424,6 +424,12 @@ export default function QuarterlyReportForm({
   const [isDraggingFin, setIsDraggingFin] = useState(false);
   const financialInputRef = useRef<HTMLInputElement>(null);
 
+  // System vs Custom metrics. system (default) = map the sheet to our standard
+  // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
+  // The Financial Data (Excel/CSV) field only shows in custom mode.
+  const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
+  const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
+
   // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
   // checked the moment they're added and re-checked when the language toggles.
   const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
@@ -933,6 +939,8 @@ export default function QuarterlyReportForm({
         comparison: compAvail && compAvail[comparison] ? comparison : undefined,
         // Dedicated Excel/CSV lane → lean extraction; currency/scale auto-detected.
         financial_files: financialFiles.length > 0 ? financialFiles : undefined,
+        // custom = extract the sheet's lines as-is, section-assigned (no metric map).
+        metrics_mode: metricsMode,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1243,6 +1251,78 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
+        {/* Metrics mode — System (map to our standard metrics) vs Custom (use the
+            sheet's own lines as-is). New reports only; controls whether the
+            Financial Data (Excel/CSV) field is shown. */}
+        {!isOpenMode && !isUploadMode && (
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Metrics
+              <button
+                type="button"
+                aria-label="What are System and Custom metrics?"
+                title="What are System and Custom metrics?"
+                onClick={() => setMetricsHelpOpen((v) => !v)}
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
+                  background: metricsHelpOpen ? '#4040C8' : 'transparent',
+                  color: metricsHelpOpen ? '#fff' : '#9BA3C4',
+                  fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                }}
+              >
+                ?
+              </button>
+            </label>
+
+            {metricsHelpOpen && (
+              <div
+                role="note"
+                style={{
+                  marginTop: 6, marginBottom: 4, padding: '10px 12px', borderRadius: 8,
+                  border: '1px solid #E1E4F0', background: '#F7F8FC',
+                  fontSize: 11, color: '#5A6080', lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: '#1A1D2E' }}>System metrics</strong> — we map your data to
+                our standard set of metrics and lay it out in the standard report template.
+                <br />
+                <strong style={{ color: '#1A1D2E' }}>Custom metrics</strong> — we take the figures
+                from your Excel/CSV exactly as they are, place each line in the right section, and
+                print them as-is (no mapping to our metrics).
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>
+              {(['system', 'custom'] as const).map((m) => (
+                <label
+                  key={m}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+                    fontSize: 12, fontWeight: 600,
+                    color: metricsMode === m ? '#1A1D2E' : '#5A6080',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="metrics_mode"
+                    value={m}
+                    checked={metricsMode === m}
+                    onChange={() => {
+                      setMetricsMode(m);
+                      // Leaving custom → the sheet field hides; drop any staged sheets
+                      // so a hidden field can't submit files the user can't see.
+                      if (m === 'system') setFinancialFiles([]);
+                    }}
+                    style={{ accentColor: '#4040C8', width: 14, height: 14 }}
+                  />
+                  {m === 'system' ? 'System metrics' : 'Custom metrics'}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Upload — shown for new reports and upload-to-existing mode */}
         {!isOpenMode && (
           <div style={{ marginBottom: 18 }}>
@@ -1448,8 +1528,10 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures) */}
-        {!isOpenMode && (
+        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures).
+            New reports: shown only in Custom-metrics mode (System hides it, per the
+            boss). Upload-to-existing keeps showing it (unchanged behaviour). */}
+        {!isOpenMode && (isUploadMode || metricsMode === 'custom') && (
           <div style={{ marginBottom: 18 }}>
             <label className="fl-label">
               Financial Data (Excel / CSV){' '}
