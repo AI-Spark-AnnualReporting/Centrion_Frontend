@@ -71,14 +71,31 @@ function humaniseMetric(slug: string): string {
     .join(' ');
 }
 
-// Accepted upload types for quarterly financial documents.
-const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.xlsx', '.csv'] as const;
+// Two upload lanes: narrative documents (PDF/DOCX → vision + chunks) and the
+// dedicated financial-data lane (Excel/CSV → lean, exact figure extraction).
+const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const MAX_DOCUMENTS = 5;
+const ACCEPTED_FIN_EXT = ['.xlsx', '.csv'] as const;
+const ACCEPTED_FIN_ATTR = ACCEPTED_FIN_EXT.join(',');
+const MAX_DOCUMENTS = 5;   // combined cap across both lanes
+
+const FIN_CURRENCIES = ['SAR', 'USD', 'EUR', 'GBP', 'QAR', 'AED', 'KWD', 'BHD', 'OMR'] as const;
+// UI label → backend financial_scale token.
+const FIN_SCALES: { label: string; value: string }[] = [
+  { label: 'Actual (ones)', value: 'actual' },
+  { label: 'Thousands', value: 'thousands' },
+  { label: 'Millions', value: 'millions' },
+  { label: 'Billions', value: 'billions' },
+];
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ACCEPTED_UPLOAD_EXT.some((ext) => lower.endsWith(ext));
+}
+
+function hasFinExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ACCEPTED_FIN_EXT.some((ext) => lower.endsWith(ext));
 }
 
 function formatBytes(bytes: number): string {
@@ -409,6 +426,15 @@ export default function QuarterlyReportForm({
   const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Dedicated Excel/CSV lane — exact figures via the lean spreadsheet flow. No
+  // language check (numbers, not prose). currency + scale are declared by the user
+  // so bare sheets aren't mis-scaled.
+  const [financialFiles, setFinancialFiles] = useState<File[]>([]);
+  const [financialCurrency, setFinancialCurrency] = useState<string>('SAR');
+  const [financialScale, setFinancialScale] = useState<string>('millions');
+  const [isDraggingFin, setIsDraggingFin] = useState(false);
+  const financialInputRef = useRef<HTMLInputElement>(null);
+
   // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
   // checked the moment they're added and re-checked when the language toggles.
   const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
@@ -715,6 +741,55 @@ export default function QuarterlyReportForm({
     }
   };
 
+  // ── Financial-data lane (Excel/CSV) — no language check; combined cap ──
+  const acceptFinancialFiles = (incoming: FileList | File[]) => {
+    const accepted: File[] = [];
+    let rejected = false;
+    Array.from(incoming).forEach((f) => {
+      if (hasFinExtension(f.name)) accepted.push(f);
+      else rejected = true;
+    });
+    if (rejected) {
+      setGenError(`Financial data must be a spreadsheet (${ACCEPTED_FIN_EXT.join(', ')}).`);
+    } else {
+      setGenError(null);
+    }
+    if (accepted.length === 0) return;
+    setFinancialFiles((prev) => {
+      const seen = new Set(prev.map(fileKey));
+      const merged = [...prev];
+      accepted.forEach((f) => {
+        const id = fileKey(f);
+        if (!seen.has(id)) { seen.add(id); merged.push(f); }
+      });
+      const capRemaining = Math.max(0, MAX_DOCUMENTS - files.length);
+      if (merged.length > capRemaining) {
+        setShowFileCapWarning(true);
+        return merged.slice(0, capRemaining);
+      }
+      return merged;
+    });
+  };
+
+  const handleFinInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) acceptFinancialFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  const handleFinDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFin(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      acceptFinancialFiles(e.dataTransfer.files);
+    }
+  };
+
+  const removeFinancialFile = (index: number) => {
+    setFinancialFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const openFinPicker = () => financialInputRef.current?.click();
+
   const removeFile = (index: number) => {
     const removed = files[index];
     setFiles((prev) => prev.filter((_, i) => i !== index));
@@ -738,6 +813,9 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
+  // A new report is satisfied by EITHER lane — a narrative document or a
+  // financial spreadsheet (or both).
+  const hasAnyUpload = files.length > 0 || financialFiles.length > 0;
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
@@ -757,7 +835,7 @@ export default function QuarterlyReportForm({
       (!selectedReportId &&
         customYear != null &&
         quarter != null &&
-        hasFiles &&
+        hasAnyUpload &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
@@ -772,8 +850,8 @@ export default function QuarterlyReportForm({
         ? 'Select a reporting year to continue'
         : quarter == null
           ? 'Select a reporting quarter to continue'
-          : !hasFiles
-            ? 'Upload at least one source document to continue'
+          : !hasAnyUpload
+            ? 'Upload a document or a financial spreadsheet to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
@@ -864,6 +942,10 @@ export default function QuarterlyReportForm({
         // Only send a basis we actually have prior data for; otherwise omit it so
         // the report is generated current-period-only (no empty comparison column).
         comparison: compAvail && compAvail[comparison] ? comparison : undefined,
+        // Dedicated Excel/CSV lane → lean, exact figure extraction.
+        financial_files: financialFiles.length > 0 ? financialFiles : undefined,
+        financial_currency: financialFiles.length > 0 ? financialCurrency : undefined,
+        financial_scale: financialFiles.length > 0 ? financialScale : undefined,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1179,7 +1261,6 @@ export default function QuarterlyReportForm({
           <div style={{ marginBottom: 18 }}>
             <label className="fl-label">
               Source Documents{' '}
-              {!isOpenMode && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}{' '}
               <span
                 style={{
                   fontWeight: 400,
@@ -1187,11 +1268,9 @@ export default function QuarterlyReportForm({
                   color: '#9BA3C4',
                 }}
               >
-                {isUploadMode
-                  ? existingCoverageLoading
-                    ? '(loading…)'
-                    : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`
-                  : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`}
+                {isUploadMode && existingCoverageLoading
+                  ? '(loading…)'
+                  : `(PDF, DOCX — narrative & prose)`}
               </span>
             </label>
 
@@ -1377,6 +1456,118 @@ export default function QuarterlyReportForm({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures) */}
+        {!isOpenMode && (
+          <div style={{ marginBottom: 18 }}>
+            <label className="fl-label">
+              Financial Data (Excel / CSV){' '}
+              <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
+                — recommended for accuracy
+              </span>
+            </label>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
+              Upload the statements as a spreadsheet for exact figures (no OCR). Tell us the
+              currency and scale so nothing is mis-scaled.
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }}>Currency</label>
+                <select
+                  className="inp sel"
+                  value={financialCurrency}
+                  onChange={(e) => setFinancialCurrency(e.target.value)}
+                >
+                  {FIN_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }}>Numbers are in</label>
+                <select
+                  className="inp sel"
+                  value={financialScale}
+                  onChange={(e) => setFinancialScale(e.target.value)}
+                >
+                  {FIN_SCALES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <input
+              ref={financialInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_FIN_ATTR}
+              onChange={handleFinInputChange}
+              style={{ display: 'none' }}
+            />
+
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={openFinPicker}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFinPicker(); }
+              }}
+              onDragOver={(e) => { e.preventDefault(); if (!isDraggingFin) setIsDraggingFin(true); }}
+              onDragLeave={() => setIsDraggingFin(false)}
+              onDrop={handleFinDrop}
+              className="upload-z"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                padding: '16px 20px', cursor: 'pointer',
+                borderColor: isDraggingFin ? '#2E9B57' : undefined,
+                background: isDraggingFin ? 'rgba(46,155,87,.06)' : undefined,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M10 3v10M6 7l4-4 4 4" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span style={{ fontSize: 12, color: '#5A6080' }}>
+                Click to upload or drag &amp; drop an Excel or CSV of the financial statements
+              </span>
+            </div>
+
+            {financialFiles.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
+                {financialFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}:${file.size}:${index}`}
+                    style={{
+                      position: 'relative', display: 'flex', flexDirection: 'column', gap: 6,
+                      padding: '10px 10px 8px', borderRadius: 8,
+                      border: '1px solid #2E9B57', background: 'rgba(46,155,87,.05)',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, paddingRight: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {file.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(file.size)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFinancialFile(index)}
+                      aria-label="Remove file"
+                      title="Remove file"
+                      style={{
+                        position: 'absolute', top: 6, right: 6, width: 16, height: 16,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4',
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

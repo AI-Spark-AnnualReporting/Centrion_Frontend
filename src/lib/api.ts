@@ -354,6 +354,10 @@ export interface GenerateQuarterlyBody {
   voices?: Voice[];
   report_tone?: ReportTone;
   comparison?: Comparison; // yoy | qoq | both — which prior period to compare against
+  // Dedicated Excel/CSV lane → lean, exact figure extraction (no vision).
+  financial_files?: File[];
+  financial_currency?: string; // e.g. "SAR"
+  financial_scale?: string;    // actual | thousands | millions | billions
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -983,6 +987,12 @@ export const reports = {
     }
     if (body.report_tone) fd.append("report_tone", body.report_tone);
     if (body.comparison) fd.append("comparison", body.comparison);
+    // Dedicated Excel/CSV lane → lean, exact figure extraction.
+    if (body.financial_files && body.financial_files.length > 0) {
+      body.financial_files.forEach((f) => fd.append("financial_files", f));
+    }
+    if (body.financial_currency) fd.append("financial_currency", body.financial_currency);
+    if (body.financial_scale) fd.append("financial_scale", body.financial_scale);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
