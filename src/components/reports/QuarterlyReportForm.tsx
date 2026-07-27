@@ -79,15 +79,6 @@ const ACCEPTED_FIN_EXT = ['.xlsx', '.csv'] as const;
 const ACCEPTED_FIN_ATTR = ACCEPTED_FIN_EXT.join(',');
 const MAX_DOCUMENTS = 5;   // combined cap across both lanes
 
-const FIN_CURRENCIES = ['SAR', 'USD', 'EUR', 'GBP', 'QAR', 'AED', 'KWD', 'BHD', 'OMR'] as const;
-// UI label → backend financial_scale token.
-const FIN_SCALES: { label: string; value: string }[] = [
-  { label: 'Actual (ones)', value: 'actual' },
-  { label: 'Thousands', value: 'thousands' },
-  { label: 'Millions', value: 'millions' },
-  { label: 'Billions', value: 'billions' },
-];
-
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ACCEPTED_UPLOAD_EXT.some((ext) => lower.endsWith(ext));
@@ -427,11 +418,9 @@ export default function QuarterlyReportForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dedicated Excel/CSV lane — exact figures via the lean spreadsheet flow. No
-  // language check (numbers, not prose). currency + scale are declared by the user
-  // so bare sheets aren't mis-scaled.
+  // language check (numbers, not prose). Currency + scale are auto-detected server
+  // side (sheet units → prior-period magnitude cross-check → LLM), so no inputs.
   const [financialFiles, setFinancialFiles] = useState<File[]>([]);
-  const [financialCurrency, setFinancialCurrency] = useState<string>('SAR');
-  const [financialScale, setFinancialScale] = useState<string>('millions');
   const [isDraggingFin, setIsDraggingFin] = useState(false);
   const financialInputRef = useRef<HTMLInputElement>(null);
 
@@ -942,10 +931,8 @@ export default function QuarterlyReportForm({
         // Only send a basis we actually have prior data for; otherwise omit it so
         // the report is generated current-period-only (no empty comparison column).
         comparison: compAvail && compAvail[comparison] ? comparison : undefined,
-        // Dedicated Excel/CSV lane → lean, exact figure extraction.
+        // Dedicated Excel/CSV lane → lean extraction; currency/scale auto-detected.
         financial_files: financialFiles.length > 0 ? financialFiles : undefined,
-        financial_currency: financialFiles.length > 0 ? financialCurrency : undefined,
-        financial_scale: financialFiles.length > 0 ? financialScale : undefined,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1471,31 +1458,8 @@ export default function QuarterlyReportForm({
               </span>
             </label>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
-              Upload the statements as a spreadsheet for exact figures (no OCR). Tell us the
-              currency and scale so nothing is mis-scaled.
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label className="fl-label" style={{ fontSize: 10 }}>Currency</label>
-                <select
-                  className="inp sel"
-                  value={financialCurrency}
-                  onChange={(e) => setFinancialCurrency(e.target.value)}
-                >
-                  {FIN_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label className="fl-label" style={{ fontSize: 10 }}>Numbers are in</label>
-                <select
-                  className="inp sel"
-                  value={financialScale}
-                  onChange={(e) => setFinancialScale(e.target.value)}
-                >
-                  {FIN_SCALES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
+              Upload the statements as a spreadsheet for exact figures (no OCR). Currency and
+              scale are detected automatically.
             </div>
 
             <input
