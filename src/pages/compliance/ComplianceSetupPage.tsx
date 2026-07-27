@@ -20,7 +20,14 @@ import { UPLOAD_EXTENSIONS, UPLOAD_MAX_BYTES } from '@/types/compliance';
 import { ComplianceStepper } from './ComplianceStepper';
 import { CertifiedGallery } from './CertifiedGallery';
 import type { ComplianceRunningState } from './ComplianceRunningPage';
-import { ComplianceHeader, DARK, MONO, MUTED, PRIMARY } from './compliance-ui';
+import {
+  ComplianceHeader,
+  DARK,
+  FRAMEWORK_LABELS,
+  MONO,
+  MUTED,
+  PRIMARY,
+} from './compliance-ui';
 import { ResumeGallery } from './ResumeGallery';
 
 const REPORT_TYPES: { key: ReportType; label: string }[] = [
@@ -42,25 +49,6 @@ const MARKETS: { key: Market; label: string }[] = [
   { key: 'Main', label: 'Main' },
   { key: 'Nomu', label: 'Nomu' },
 ];
-
-// GET /preview returns only a regulator code and a check count, so the friendly
-// half of each chip lives here. Anything unmapped falls back to the bare code —
-// a new regulator on the backend degrades to "XYZ · 3" rather than breaking.
-const FRAMEWORK_LABELS: Record<string, string> = {
-  CMA: 'Annual Report (CMA)',
-  TADAWUL: 'Tadawul ESG',
-  SAMA: 'SAMA Prudential',
-  IA: 'Insurance Authority',
-  SOCPA: 'Accounting Basis',
-  ZATCA: 'Zakat / Tax',
-  ISSB: 'ISSB / TCFD',
-  GRI: 'GRI',
-  ARV: 'Report Integrity',
-  MOC: 'Ministry of Commerce',
-  SASB: 'SASB',
-  ICMA: 'ICMA',
-  GHG_PROTOCOL: 'GHG Protocol',
-};
 
 // Nearly every rule carries effective_from = 2024-01-01, so a report whose
 // period ended before that matches zero rules and POST /runs rejects it. Grey
