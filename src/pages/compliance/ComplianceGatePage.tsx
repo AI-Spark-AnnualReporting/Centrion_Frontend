@@ -237,6 +237,16 @@ export default function ComplianceGatePage() {
                       by {certifiedBy}
                     </div>
                   )}
+                  <div style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn bp"
+                      onClick={() => navigate(`/compliance/runs/${run.run_id}/certificate`)}
+                      style={{ fontSize: 12.5, padding: '9px 18px' }}
+                    >
+                      View certificate →
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div style={{ marginTop: 18 }}>
@@ -287,7 +297,7 @@ export default function ComplianceGatePage() {
             </div>
           )}
 
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
               type="button"
               className="btn bs"
@@ -296,6 +306,22 @@ export default function ComplianceGatePage() {
             >
               ← Back to results
             </button>
+            {/* The certificate serves any FINISHED run, not just a certified
+                one — it titles itself as a plain validation report when the run
+                isn't cleared, so a user can take the detail away with them
+                while they're still working through gaps. Offered here for the
+                blocked and uncertified cases; the certified box has its own,
+                louder button. */}
+            {runDone && !run.certified && (
+              <button
+                type="button"
+                className="btn bs"
+                onClick={() => navigate(`/compliance/runs/${run.run_id}/certificate`)}
+                style={{ fontSize: 13, padding: '9px 18px' }}
+              >
+                View validation report
+              </button>
+            )}
           </div>
         </>
       )}

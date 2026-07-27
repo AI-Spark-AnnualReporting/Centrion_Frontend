@@ -413,3 +413,55 @@ export interface CertifiedRun {
   certified_by: string;
   certified_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// GET /runs/{run_id}/certificate.pdf
+// ---------------------------------------------------------------------------
+
+// An authed binary endpoint, so it can't be a plain <a href> — the browser
+// wouldn't attach the Bearer token. Fetched as a blob; see
+// `complianceValidation.certificatePdf`.
+//
+// It serves ANY finished run, certified or not, gate open or blocked, and the
+// document titles itself accordingly — so a user can take the detail away with
+// them while they're still working through gaps, and the PDF can't overstate
+// what it is. The certificate SCREEN branches on the same two states, from the
+// same run fields, so the two can never disagree.
+export function isClearedForPublication(run: {
+  certified?: boolean;
+  publication_gate?: PublicationGate | null;
+}): boolean {
+  return run.certified === true && run.publication_gate === "open";
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/public/verify/{code}
+// ---------------------------------------------------------------------------
+
+// Unauthenticated by design: anyone holding a printed certificate can check it
+// without an account. Call it with `auth: false` so no token is attached and a
+// 404 never trips the 401 logout path.
+export interface CertificateVerification {
+  verification_code: string;
+  company_name: string;
+  report_type: ReportType;
+  period: string;
+  overall_readiness: number | null;
+  publication_gate: PublicationGate | null;
+  certified: boolean;
+  certified_at: string;
+}
+
+// The code printed in the PDF, derived deterministically from the run's UUID:
+//   CNT-VAL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X
+// Crockford base32 (no I, L, O or U), so it survives being read aloud or typed
+// off paper. It is NOT generated in the browser — nothing here knows the
+// derivation, and a locally-invented code resolves to nothing.
+//
+// There is deliberately no validator: the endpoint answers an identical 404 for
+// a malformed code, an unknown code and an unfinished run, so that a caller
+// can't probe which runs exist. Checking the shape locally would invent a
+// distinction the API refuses to make. Normalise and send it.
+export function normalizeVerificationCode(raw: string): string {
+  return raw.trim().toUpperCase();
+}
