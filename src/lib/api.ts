@@ -1154,11 +1154,12 @@ export const quarterlyReports = {
   // "no data" dialog when a required period is missing.
   checkComparisonAvailability: (
     companyId: string,
-    params: { year: number; quarter: string; comparison: Comparison },
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
   ) =>
     request<ComparisonAvailability>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
-        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}`,
+        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}` +
+        (params.metrics_mode ? `&metrics_mode=${params.metrics_mode}` : ''),
     ),
 
   // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit

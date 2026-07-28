@@ -113,8 +113,9 @@ const ADD_NEW_SENTINEL = '__add_new__';
 
 // ─── Confirm-context Q/A (embedded on this form) ──────────────────────────────
 const CTX_COMPANY_TYPES: { label: string; value: CompanyType }[] = [
-  { label: 'Bank', value: 'bank' },
-  { label: 'Non-bank', value: 'non_bank' },
+  // Display labels only — values stay bank/non_bank so all backend logic is unchanged.
+  { label: 'Financial', value: 'bank' },
+  { label: 'Non-financial', value: 'non_bank' },
 ];
 
 // Report tone — the prose style of the narrative. Default: formal_corporate.
@@ -465,7 +466,8 @@ export default function QuarterlyReportForm({
     let cancelled = false;
     setComparisonCheck('checking');
     quarterlyReportsApi
-      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: 'both' })
+      // custom reports match the prior period by label → check prior CUSTOM data.
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: 'both', metrics_mode: metricsMode })
       .then((res) => {
         if (cancelled) return;
         const present = (k: string) => res.specs.some((s) => s.key === k && s.present);
@@ -482,7 +484,7 @@ export default function QuarterlyReportForm({
     return () => {
       cancelled = true;
     };
-  }, [companyId, customYear, quarter, isUploadMode, isOpenMode]);
+  }, [companyId, customYear, quarter, isUploadMode, isOpenMode, metricsMode]);
 
   // Keep the selection valid: if the chosen basis isn't available, fall back to an
   // available one (prefer YoY, then QoQ). When none are available the report is
