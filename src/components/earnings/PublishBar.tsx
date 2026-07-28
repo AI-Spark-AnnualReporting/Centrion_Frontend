@@ -28,6 +28,8 @@ export function PublishBar({
   approving,
   onApprove,
   onExport,
+  onOpenCoverPicker,
+  showApprove = true,
 }: {
   details?: { label: string; value: string }[];
   locked: boolean;
@@ -35,6 +37,11 @@ export function PublishBar({
   approving: boolean;
   onApprove: () => void;
   onExport: (format: EarningsExportFormat) => Promise<void>;
+  // Opens the cover-design + brand-color picker. Omitted → the card is hidden.
+  onOpenCoverPicker?: () => void;
+  // Show the Approve & lock action. Earnings hides it in favour of "Share for
+  // review" (in the review panel) as the primary publish action.
+  showApprove?: boolean;
 }) {
   const [exporting, setExporting] = useState<EarningsExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -90,6 +97,19 @@ export function PublishBar({
         </div>
       )}
 
+      {/* Cover design & brand colors — editable until the report is locked. */}
+      {onOpenCoverPicker && !locked && (
+        <div className="card" style={{ padding: '14px 16px' }}>
+          <SectionHeader>Cover &amp; colors</SectionHeader>
+          <p style={{ margin: '0 0 10px', fontSize: 11.5, color: MUTED, lineHeight: 1.5 }}>
+            Choose a cover design and brand colors for the exported report.
+          </p>
+          <button className="btn bs" style={{ width: '100%' }} onClick={onOpenCoverPicker}>
+            Choose cover &amp; colors
+          </button>
+        </div>
+      )}
+
       {/* Export — only once the report is approved & locked; exporting a draft
           would hand out a document that can still change under it. */}
       {locked && (
@@ -108,7 +128,7 @@ export function PublishBar({
       )}
 
       {/* Approve & lock */}
-      {!locked && (
+      {showApprove && !locked && (
         <div>
           <button
             className="btn bp"

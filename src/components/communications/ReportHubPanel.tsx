@@ -37,9 +37,13 @@ const ICON_LOCK = (
 export function ReportHubPanel({
   reportId,
   className = 'card',
+  showStatus = true,
 }: {
   reportId: string;
   className?: string;
+  // Hide the Draft/In-review/Approved status radio group (earnings uses the
+  // simpler status chip in its Publish bar instead).
+  showStatus?: boolean;
 }) {
   const { toast } = useToast();
 
@@ -132,6 +136,7 @@ export function ReportHubPanel({
         {label}
 
         {/* Status radio group — built from the API, never hardcoded. */}
+        {showStatus && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {statuses.map((s) => {
             const selected = s.code === report.status;
@@ -180,8 +185,9 @@ export function ReportHubPanel({
             );
           })}
         </div>
+        )}
 
-        {!can_set_status && (
+        {showStatus && !can_set_status && (
           <div style={{ fontSize: 11.5, color: '#8890AE', marginTop: 8 }}>
             {report.status_label} — this report is read-only.
           </div>

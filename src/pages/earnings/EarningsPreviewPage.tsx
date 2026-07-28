@@ -13,6 +13,8 @@ import { GenerateProgress } from '@/components/earnings/GenerateProgress';
 import { PublishBar } from '@/components/earnings/PublishBar';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
+import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
 
 const POLL_INTERVAL_MS = 3000;
@@ -78,6 +80,14 @@ export default function EarningsPreviewPage() {
   const [approving, setApproving] = useState(false);
   const [blockers, setBlockers] = useState<EarningsApproveBlocker[] | null>(null);
 
+  // ── Cover design + brand color (mirrors the quarterly picker) ──
+  const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [palettes, setPalettes] = useState<ColorPalette[]>([]);
+  const [brand, setBrand] = useState<BrandColors | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [coverApplying, setCoverApplying] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+
   const applyResponse = useCallback(
     (res: { sections: EarningsProducedSection[]; cover_template_key: string | null; locked: boolean }) => {
       // Table of Contents is dropped from the earnings UI entirely — never
@@ -141,6 +151,58 @@ export default function EarningsPreviewPage() {
       clearInterval(id);
     };
   }, [runInfo, reportId, applyResponse]);
+
+  // ── Load cover templates + palettes + the saved selection (pre-select) ──────
+  useEffect(() => {
+    if (!reportId) return;
+    let cancelled = false;
+    earnings
+      .getEarningsCoverTemplates()
+      .then((res) => {
+        if (!cancelled) setCoverTemplates(res.cover_templates ?? []);
+      })
+      .catch(() => {
+        /* picker simply has nothing to show until the backend lands */
+      });
+    earnings
+      .getEarningsColorPalettes()
+      .then((res) => {
+        if (!cancelled) setPalettes(res.color_palettes ?? []);
+      })
+      .catch(() => {});
+    earnings
+      .getEarningsCoverSelection(reportId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.cover_template_key) setCoverTemplateKey(res.cover_template_key);
+        if (res?.brand) setBrand(res.brand);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId]);
+
+  const handleCoverApply = useCallback(
+    async (payload: CoverSelectionPayload) => {
+      if (!reportId) return;
+      setCoverApplying(true);
+      setCoverError(null);
+      try {
+        const res = await earnings.saveEarningsCoverSelection(reportId, payload);
+        // Prefer the payload the user actually picked — the PATCH response may not
+        // echo cover_template_key/brand, which would reset to the default.
+        setCoverTemplateKey(res?.cover_template_key ?? payload.cover_template_key);
+        setBrand(res?.brand ?? payload.brand);
+        setPickerOpen(false);
+      } catch (err: unknown) {
+        setCoverError(apiErrorMessage(err, 'Could not save the cover selection.'));
+      } finally {
+        setCoverApplying(false);
+      }
+    },
+    [reportId],
+  );
 
   // ── Generate (produce all) ──────────────────────────────────────────────────
   const handleGenerate = async () => {
@@ -360,8 +422,19 @@ export default function EarningsPreviewPage() {
           {/* Left — section rail */}
           <SectionRail sections={visibleSections} activeCode={activeCode} onSelect={selectSection} />
 
-          {/* Center — generate state or the assembled document */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+          {/* Center — generate state or the assembled document. The chosen brand
+              color drives report-content accents (cover, headings) via
+              --brand-primary; product-UI chrome stays indigo. */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              minWidth: 0,
+              ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
+              ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+            }}
+          >
             {generating ? (
               <GenerateProgress sections={sections} />
             ) : (
@@ -402,18 +475,36 @@ export default function EarningsPreviewPage() {
             )}
           </div>
 
-          {/* Right — internal discussion + publish bar */}
+          {/* Right — publish bar, then the review/share panel below so
+              "Share for review" is the bottom-most action (in place of the
+              hidden Approve & lock). The 4-state review status radios are hidden
+              here; the Publish bar's status chip is the single source of truth. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {reportId && <ReportHubPanel reportId={reportId} />}
             <PublishBar
               locked={locked}
               blockers={blockers}
               approving={approving}
               onApprove={handleApprove}
               onExport={handleExport}
+              onOpenCoverPicker={() => setPickerOpen(true)}
+              showApprove={false}
             />
+            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} />}
           </div>
         </div>
+      )}
+
+      {pickerOpen && (
+        <CoverTemplatePicker
+          templates={coverTemplates}
+          palettes={palettes}
+          initialTemplateKey={coverTemplateKey}
+          initialBrand={brand}
+          applying={coverApplying}
+          error={coverError}
+          onApply={handleCoverApply}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </div>
   );

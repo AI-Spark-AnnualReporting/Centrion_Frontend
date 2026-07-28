@@ -1914,6 +1914,38 @@ export const earnings = {
       { method: "PUT", body: payload },
     ).then(normalizeEarningsOutline),
 
+  // ── Cover template + brand colors ──
+  // Same contract style as the quarterly picker, but earnings splits the current
+  // selection into its own report-scoped GET (quarterly folds it into
+  // cover-templates). Colors apply to accents/headings and reach the exported file.
+  getEarningsCoverTemplates: (signal?: AbortSignal): Promise<CoverTemplatesResponse> =>
+    request<CoverTemplatesResponse>(`/api/v1/earnings/cover-templates`, { signal }),
+
+  getEarningsColorPalettes: (signal?: AbortSignal): Promise<ColorPalettesResponse> =>
+    request<ColorPalettesResponse>(`/api/v1/earnings/color-palettes`, { signal }),
+
+  // The report's current cover/brand selection (for pre-select on load).
+  // cover_template_key is null until picked; brand has defaults applied. Works on
+  // locked reports (read-only).
+  getEarningsCoverSelection: (
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<CoverSelectionResponse> =>
+    request<CoverSelectionResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/cover-template`,
+      { signal },
+    ),
+
+  // Persist the chosen cover design + brand colors.
+  saveEarningsCoverSelection: (
+    reportId: string,
+    body: CoverSelectionPayload,
+  ): Promise<CoverSelectionResponse> =>
+    request<CoverSelectionResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/cover-template`,
+      { method: "PATCH", body },
+    ),
+
   // ── Part 4/5 — preview & publish ──
   // The produced sections (cover + body) for a report. Report-scoped, untyped → normalised.
   getEarningsSections: (reportId: string, signal?: AbortSignal): Promise<EarningsSectionsResponse> =>

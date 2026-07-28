@@ -62,8 +62,20 @@ export function normalizeTables(parsed: unknown): NormTable[] {
     if (Array.isArray(parsed.rows)) {
       return [{ title: asString(parsed.title), rows: parsed.rows as LooseRow[] }];
     }
-    // Plain object → 2-column key/value table.
-    return [{ rows: Object.entries(parsed).map(([k, v]) => ({ label: k, current_display: stringifyCell(v) })) }];
+    // `{title, entries:[{label, value}]}` envelope (e.g. Reporting Calendar / IR
+    // Contact) → a label/value table, each entry a row.
+    if (Array.isArray(parsed.entries)) {
+      return [{ title: asString(parsed.title), rows: parsed.entries.filter(isRecord) as LooseRow[] }];
+    }
+    // Plain object → 2-column key/value table. `title` is a caption, not a row.
+    return [
+      {
+        title: asString(parsed.title),
+        rows: Object.entries(parsed)
+          .filter(([k]) => k !== 'title')
+          .map(([k, v]) => ({ label: k, current_display: stringifyCell(v) })),
+      },
+    ];
   }
   return [];
 }

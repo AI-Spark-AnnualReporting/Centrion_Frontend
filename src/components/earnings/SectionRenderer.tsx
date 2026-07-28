@@ -8,6 +8,7 @@ import {
   isSourcesMode,
   readCoverValues,
   tryParseJson,
+  isRecord,
 } from '@/pages/earnings/preview-helpers';
 import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
@@ -108,6 +109,16 @@ export function SectionRenderer({
     // Table mode but non-JSON content → treat the string as prose; otherwise render
     // the metric/value table.
     if (tryParseJson(content) === undefined) return <Prose text={content} />;
+    return <SectionTable content={content} />;
+  }
+
+  // Fallback: some sections (e.g. Reporting Calendar / IR Contact) carry a
+  // structured JSON envelope ({title, entries:[…]} / {rows:[…]} / an array of
+  // objects) even though their mode isn't a known tabular one. Render that as a
+  // label/value table rather than dumping raw JSON. Plain prose never JSON-parses
+  // to an object/array, so it still falls through to <Prose>.
+  const parsed = tryParseJson(content);
+  if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
     return <SectionTable content={content} />;
   }
 

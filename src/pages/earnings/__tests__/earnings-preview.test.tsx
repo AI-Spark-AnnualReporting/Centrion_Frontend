@@ -22,6 +22,10 @@ const h = vi.hoisted(() => {
     patchEarningsSectionContent: vi.fn(),
     approveEarningsReport: vi.fn(),
     downloadEarningsExport: vi.fn(),
+    getEarningsCoverTemplates: vi.fn(),
+    getEarningsColorPalettes: vi.fn(),
+    getEarningsCoverSelection: vi.fn(),
+    saveEarningsCoverSelection: vi.fn(),
     getByPollUrl: vi.fn(),
     userRef: { current: { company_id: 'co-1', company_name: 'Acme' } as unknown },
     MockApiError,
@@ -42,6 +46,10 @@ vi.mock('@/lib/api', () => ({
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     approveEarningsReport: (...a: unknown[]) => h.approveEarningsReport(...a),
     downloadEarningsExport: (...a: unknown[]) => h.downloadEarningsExport(...a),
+    getEarningsCoverTemplates: (...a: unknown[]) => h.getEarningsCoverTemplates(...a),
+    getEarningsColorPalettes: (...a: unknown[]) => h.getEarningsColorPalettes(...a),
+    getEarningsCoverSelection: (...a: unknown[]) => h.getEarningsCoverSelection(...a),
+    saveEarningsCoverSelection: (...a: unknown[]) => h.saveEarningsCoverSelection(...a),
   },
   agentRuns: { getByPollUrl: (...a: unknown[]) => h.getByPollUrl(...a) },
   ApiError: h.MockApiError,
@@ -205,6 +213,10 @@ beforeEach(() => {
   h.patchEarningsSectionContent.mockResolvedValue(sec({ ...OVERVIEW, content: 'Edited overview.', edited: true }));
   h.approveEarningsReport.mockResolvedValue({});
   h.downloadEarningsExport.mockResolvedValue(undefined);
+  h.getEarningsCoverTemplates.mockResolvedValue({ cover_templates: [] });
+  h.getEarningsColorPalettes.mockResolvedValue({ color_palettes: [] });
+  h.getEarningsCoverSelection.mockResolvedValue({ cover_template_key: null, brand: null });
+  h.saveEarningsCoverSelection.mockResolvedValue({ cover_template_key: 'bold', brand: null });
   h.getByPollUrl.mockResolvedValue({ status: 'running' });
 });
 
@@ -223,6 +235,26 @@ describe('SectionRenderer dispatch', () => {
   it('renders a prose string as prose', () => {
     render(<SectionRenderer section={OVERVIEW} />);
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
+  });
+
+  it('renders a {title, entries:[…]} envelope as a label/value table even when the mode is not tabular (never raw JSON)', () => {
+    const calendar = sec({
+      section_code: 'reporting_calendar_ir_contact',
+      mode: 'template',
+      content: JSON.stringify({
+        title: 'Reporting Calendar / IR Contact',
+        entries: [
+          { label: 'next scheduled reporting/earnings date', value: '30 April 2025' },
+          { label: 'IR contact email', value: 'ir@northwindenergy.example' },
+        ],
+      }),
+    });
+    render(<SectionRenderer section={calendar} />);
+    expect(screen.getByText('next scheduled reporting/earnings date')).toBeInTheDocument();
+    expect(screen.getByText('30 April 2025')).toBeInTheDocument();
+    expect(screen.getByText('ir@northwindenergy.example')).toBeInTheDocument();
+    // The raw JSON braces must not be dumped to the page.
+    expect(screen.queryByText(/"entries"/)).not.toBeInTheDocument();
   });
 
   it('renders a cover envelope as the cover block', () => {
@@ -583,40 +615,46 @@ describe('EarningsPreviewPage', () => {
     await waitFor(() => expect(h.downloadEarningsExport).toHaveBeenCalledWith('rep-1', 'pdf'));
   });
 
-  it('Approve on a gate-failing report (409) renders the blocker list and does not lock', async () => {
-    h.approveEarningsReport.mockRejectedValueOnce(
-      new h.MockApiError(409, { detail: [{ message: 'Cash flow detail not produced' }] }),
-    );
-    renderPage();
-    await screen.findByText(/resilient full-year performance/);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve & lock' }));
-    expect(await screen.findByText('Cash flow detail not produced')).toBeInTheDocument();
-    // Still draft/editable — the approve button remains.
-    expect(screen.getByRole('button', { name: 'Approve & lock' })).toBeInTheDocument();
-    expect(screen.getByText('Draft')).toBeInTheDocument();
-  });
-
-  it('Approve success reflects the locked, read-only state', async () => {
-    renderPage();
-    await screen.findByText(/resilient full-year performance/);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve & lock' }));
-    await waitFor(() => expect(screen.getByText('Approved')).toBeInTheDocument());
-    // Locked → approve + edit controls gone.
-    expect(screen.queryByRole('button', { name: 'Approve & lock' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-  });
-
-  it('an unacknowledged grounding flag blocks approve client-side', async () => {
-    h.getEarningsSections.mockResolvedValueOnce({
-      sections: [OVERVIEW, sec({ ...PERFORMANCE, grounding_flag: 'Figure flag', grounding_acknowledged: false })],
-      cover_template_key: 'classic',
-      locked: false,
+  it('opens the cover & colors picker and saving calls saveEarningsCoverSelection with the chosen design', async () => {
+    h.getEarningsCoverTemplates.mockResolvedValueOnce({
+      cover_templates: [{ key: 'classic', name: 'Classic' }],
+    });
+    h.getEarningsColorPalettes.mockResolvedValueOnce({
+      color_palettes: [{ key: 'indigo', name: 'Indigo', primary: '#4040C8', secondary: '#5B5BD6' }],
     });
     renderPage();
     await screen.findByText(/resilient full-year performance/);
-    fireEvent.click(screen.getByRole('button', { name: 'Approve & lock' }));
-    expect(await screen.findByText(/unacknowledged figure flag/)).toBeInTheDocument();
-    expect(h.approveEarningsReport).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Choose cover & colors/i }));
+    expect(await screen.findByText('Choose cover design & colors')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Apply/ }));
+    await waitFor(() =>
+      expect(h.saveEarningsCoverSelection).toHaveBeenCalledWith(
+        'rep-1',
+        expect.objectContaining({ cover_template_key: 'classic' }),
+      ),
+    );
+  });
+
+  it('the cover picker is hidden once the report is locked (read-only)', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({ ...PRODUCED, locked: true });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByRole('button', { name: /Choose cover & colors/i })).not.toBeInTheDocument();
+  });
+
+  it('does not offer "Approve & lock" — Share for review is the publish action instead', async () => {
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByRole('button', { name: 'Approve & lock' })).not.toBeInTheDocument();
+    expect(screen.getByText('Draft')).toBeInTheDocument();
+  });
+
+  it('a locked (approved) report is read-only — status reads Approved and no Edit control', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({ ...PRODUCED, locked: true });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.getByText('Approved')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
   it('guards a null companyId (no crash)', async () => {
