@@ -3,12 +3,13 @@
 // Mirrors the shape of pages/annual-report/cycle-ui.tsx.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { complianceValidation } from '@/lib/api';
+import { ApiError, complianceValidation } from '@/lib/api';
 import { rememberScreen, type ComplianceScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
 import {
   isRunDone,
   isTerminalStatus,
+  type CertifyBlockedBody,
   type CheckEvidence,
   type CheckStatus,
   type ComplianceRun,
@@ -285,7 +286,10 @@ export function EvidenceQuote({
       >
         “{quote}”
       </div>
-      {(evidence?.section_code || evidence?.evidence_source) && (
+      {(evidence?.page != null ||
+        evidence?.section_code ||
+        evidence?.source_file ||
+        evidence?.evidence_source) && (
         <div
           style={{
             marginTop: 5,
@@ -297,9 +301,11 @@ export function EvidenceQuote({
             color: MUTED,
           }}
         >
-          {evidence?.section_code && (
+          {/* The page comes first: it's the one thing that lets the author turn
+              to the sentence in their own document and see it in context. */}
+          {evidence?.page != null && (
             <span
-              title="The report section this was read from"
+              title="Page of the source document this sentence was read from"
               style={{
                 fontFamily: MONO,
                 color: PRIMARY,
@@ -309,9 +315,29 @@ export function EvidenceQuote({
                 fontWeight: 700,
               }}
             >
-              {evidence.section_code}
+              p.{evidence.page}
             </span>
           )}
+          {/* `section_code` is often just "page-9" once a page is present —
+              redundant next to the chip above, so it's dropped in that case. */}
+          {evidence?.section_code &&
+            !(evidence.page != null && /^page[-_]?\d+$/i.test(evidence.section_code)) && (
+              <span
+                title="The report section this was read from"
+                style={{
+                  fontFamily: MONO,
+                  color: PRIMARY,
+                  background: '#EEEEFF',
+                  padding: '2px 7px',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                }}
+              >
+                {evidence.section_code}
+              </span>
+            )}
+          {/* Only worth naming when a run had more than one file behind it. */}
+          {evidence?.source_file && <span>{evidence.source_file}</span>}
           {evidence?.evidence_source && <span>{evidence.evidence_source}</span>}
         </div>
       )}
@@ -491,6 +517,124 @@ export function useComplianceRun(runId: string | undefined) {
   }, [reload]);
 
   return { run, loading, error, setRun, reload };
+}
+
+// ---------------------------------------------------------------------------
+// Certifying
+// ---------------------------------------------------------------------------
+//
+// Two screens certify: the review screen (where the gaps the decision rests on
+// are already on display) and the gate screen. The 409 handling below is the
+// whole of what makes certification safe, so it lives here once rather than
+// being copied into each — a screen that got Case A or Case B wrong would
+// silently tell a user their report was signed off when it wasn't.
+
+// The 409 body arrives as `{ detail: { message, reason?, blocking_rule_ids } }`,
+// though FastAPI sometimes returns the payload unwrapped — read both shapes.
+// `blocking_rule_ids` is normalised to an array because its emptiness is what
+// distinguishes Case B (real failures) from Case C (nothing verified).
+function readBlockedBody(err: unknown): CertifyBlockedBody | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const raw = err.body as
+    | ({ detail?: CertifyBlockedBody } & Partial<CertifyBlockedBody>)
+    | undefined;
+  const body = raw?.detail ?? (raw as CertifyBlockedBody | undefined);
+  if (!body || (!body.message && !body.reason)) return null;
+  return {
+    ...body,
+    blocking_rule_ids: Array.isArray(body.blocking_rule_ids) ? body.blocking_rule_ids : [],
+  };
+}
+
+export interface CertifyState {
+  certifying: boolean;
+  error: string;
+  // Rule ids the server named as still blocking. Non-empty only in Case B —
+  // it's what tells a real hard-gate failure apart from "nothing was verified".
+  blockedBy: string[];
+  certifiedBy: string;
+}
+
+const IDLE: CertifyState = { certifying: false, error: '', blockedBy: [], certifiedBy: '' };
+
+// POST /runs/{id}/certify with the three 409 cases handled.
+//
+// `onCertified` runs only on a real sign-off, so a caller can navigate away on
+// success without having to re-derive whether it worked. `onStale` is called
+// whenever the server's answer means the loaded run is out of date — the gate
+// is re-checked server-side, so a 409 can arrive on a run the screen believes
+// is open, and leaving that screen claiming "ready to publish" would be worse
+// than the error itself.
+export function useCertifyRun(
+  runId: string | undefined,
+  { onCertified, onStale }: { onCertified?: (certifiedBy: string) => void; onStale?: () => void } = {},
+) {
+  const [state, setState] = useState<CertifyState>(IDLE);
+
+  const certify = useCallback(() => {
+    if (!runId) return;
+    setState({ ...IDLE, certifying: true });
+    complianceValidation
+      .certify(runId)
+      .then((res) => {
+        setState({ ...IDLE, certifiedBy: res.certified_by });
+        onCertified?.(res.certified_by);
+      })
+      .catch((e) => {
+        const body = readBlockedBody(e);
+        if (!body) {
+          setState({
+            ...IDLE,
+            error: e instanceof Error ? e.message : 'Failed to certify this report.',
+          });
+          return;
+        }
+        // Case A — the run hasn't finished. Not a failure and not the user's
+        // doing; the gate simply isn't decided yet. Refresh so the screen picks
+        // up the real state rather than leaving a red error under the button.
+        if (body.status === 'running') {
+          setState({
+            ...IDLE,
+            error:
+              'This validation is still running — it needs to finish before the report can be certified.',
+          });
+          onStale?.();
+          return;
+        }
+        // Case B — real HARD failures, named so the caller can point at them.
+        if (body.blocking_rule_ids.length > 0) {
+          setState({ ...IDLE, error: body.message, blockedBy: body.blocking_rule_ids });
+          onStale?.();
+          return;
+        }
+        // Case C — nothing was verified. Nothing to fix and no rows to point
+        // at, so show the reason and no rule list.
+        setState({ ...IDLE, error: body.reason || body.message });
+      });
+  }, [runId, onCertified, onStale]);
+
+  return { ...state, certify };
+}
+
+// Whether certify would succeed, predicted from the loaded run so the user
+// isn't invited to click into a 409. Every branch here mirrors one the server
+// enforces; the server remains the authority, and `useCertifyRun` handles the
+// case where this prediction and the re-checked gate disagree.
+export function certifiability(run: ComplianceRun | null) {
+  const runDone = isRunDone(run?.status);
+  const blocked = run?.publication_gate === 'blocked';
+  // Null is its own case, not a synonym for `open`: the gate wasn't decided.
+  // Certifying against an undecided gate is exactly what the 409 exists to stop.
+  const undecided = run != null && run.publication_gate == null;
+  // Null readiness means nothing was actually verified, so certify would 409.
+  const nothingVerified = run != null && run.overall_readiness == null;
+  return {
+    runDone,
+    blocked,
+    undecided,
+    nothingVerified,
+    canCertify: run != null && runDone && !blocked && !undecided && !nothingVerified,
+  };
 }
 
 // ---------------------------------------------------------------------------

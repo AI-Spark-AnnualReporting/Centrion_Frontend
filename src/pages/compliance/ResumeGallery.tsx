@@ -9,27 +9,29 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { complianceValidation } from '@/lib/api';
-import { isDismissed, dismissRun, runHref } from '@/lib/compliance-runs';
+import { isDismissed, dismissRun, runHref, runTitle, RUN_STATE_LABEL } from '@/lib/compliance-runs';
 import { relativeSince } from '@/lib/time';
 import type { ReportType, RunListItem } from '@/types/compliance';
 import { MONO, MUTED, safeScore } from './compliance-ui';
 
 // Colour carries the state, so the shelf can be read without the labels.
 // Certified runs never appear here — they graduate to the gallery below.
+// The wording comes from lib/compliance-runs so the background dock, which
+// shows the same runs at the same time, can't describe them differently.
 const FACE: Record<string, { gradient: string; label: string; action: string }> = {
   running: {
     gradient: 'linear-gradient(135deg,#1F2A6B,#3535B5)',
-    label: 'Validating…',
+    label: RUN_STATE_LABEL.running,
     action: 'Resume →',
   },
   done: {
     gradient: 'linear-gradient(135deg,#334155,#475569)',
-    label: 'Results ready',
+    label: RUN_STATE_LABEL.done,
     action: 'Continue →',
   },
   error: {
     gradient: 'linear-gradient(135deg,#7F1D1D,#B91C1C)',
-    label: 'Didn’t finish',
+    label: RUN_STATE_LABEL.error,
     action: 'See what happened →',
   },
 };
@@ -149,7 +151,7 @@ function ResumeCard({ run, onDismiss }: { run: RunListItem; onDismiss: () => voi
             whiteSpace: 'nowrap',
           }}
         >
-          {run.title || 'Validation run'}
+          {runTitle(run.title) || 'Validation run'}
         </div>
         <div
           style={{

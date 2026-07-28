@@ -1,5 +1,6 @@
-import { lazy } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom";
+import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
@@ -55,6 +56,26 @@ const ComplianceReviewPage = lazy(
 const ComplianceGatePage = lazy(
   () => import("./pages/compliance/ComplianceGatePage"),
 );
+// The certificate for a finished run. Not gated on `certified` — the document
+// titles itself by state, so a run still working through gaps can be taken away
+// as a validation report that says it is not a clearance.
+const CertificatePage = lazy(
+  () => import("./pages/compliance/CertificatePage"),
+);
+
+// Public certificate verification. Outside ProtectedRoute and outside
+// AppLayout: the whole point is that someone holding a printed certificate can
+// check it with no account and no session.
+const VerifyCertificatePage = lazy(
+  () => import("./pages/VerifyCertificatePage"),
+);
+
+// Suspense for the code-split routes that render outside AppLayout.
+const PublicSuspense = () => (
+  <Suspense fallback={<Spinner pad={120} />}>
+    <Outlet />
+  </Suspense>
+);
 
 const App = () => (
   <BrowserRouter>
@@ -63,6 +84,15 @@ const App = () => (
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<SignupPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      {/* Public — an auditor or regulator holding a printed certificate must be
+          able to check it without an account. /verify takes a pasted code;
+          /verify/:code checks on arrival, for a shared link or a QR scan. */}
+      {/* Its own Suspense boundary — the app's only one lives inside AppLayout,
+          which these routes deliberately sit outside of. */}
+      <Route element={<PublicSuspense />}>
+        <Route path="/verify" element={<VerifyCertificatePage />} />
+        <Route path="/verify/:code" element={<VerifyCertificatePage />} />
+      </Route>
       <Route element={<ProtectedRoute />}>
         {/* Forced password rotation lives outside AppLayout so there's no
             sidebar / topbar / chatbot to distract from the required step. */}
@@ -96,6 +126,10 @@ const App = () => (
           <Route
             path="/compliance/runs/:runId/gate"
             element={<ComplianceGatePage />}
+          />
+          <Route
+            path="/compliance/runs/:runId/certificate"
+            element={<CertificatePage />}
           />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />

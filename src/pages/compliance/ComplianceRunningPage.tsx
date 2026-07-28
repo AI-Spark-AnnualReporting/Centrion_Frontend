@@ -7,10 +7,11 @@
 // moment the run reports `done`. A run that reports `error` is terminal — it
 // never becomes done — so polling stops and the user is offered a retry.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import { complianceValidation } from '@/lib/api';
+import { useComplianceRuns, useForegroundRun } from '@/context/ComplianceRunsContext';
 import {
   blamesTheFile,
   type CreateRunPayload,
@@ -80,12 +81,53 @@ export default function ComplianceRunningPage() {
   // Walking away from a 60–90 second wait is the likeliest moment to leave.
   useRememberScreen(runId, 'running');
 
+  // This screen is already polling, so the background watcher leaves this run
+  // alone for as long as it's open — one poller per run, never two. The claim
+  // releases the instant this unmounts, and the watcher picks the run up on its
+  // next tick, which is what makes "Continue in background" work.
+  useForegroundRun(runId);
+
+  const { report, forget } = useComplianceRuns();
+
+  // Everything this screen learns goes to the dock, so a run that's been left
+  // running is already named and placed there before the watcher touches it.
+  // `local` never triggers a toast — the user is looking right at it.
+  useEffect(() => {
+    if (!runId) return;
+    report(
+      {
+        runId,
+        status: run?.status ?? 'running',
+        title: handoff?.subjectTitle,
+        period: handoff?.settings?.period,
+        reportType: handoff?.settings?.report_type ?? run?.report_type,
+        certified: run?.certified,
+        errorCode: run?.error_code ?? null,
+      },
+      'local',
+    );
+  }, [
+    runId,
+    report,
+    run?.status,
+    run?.report_type,
+    run?.certified,
+    run?.error_code,
+    handoff?.subjectTitle,
+    handoff?.settings?.period,
+    handoff?.settings?.report_type,
+  ]);
+
   const done = isRunDone(run?.status);
   const failed = run?.status === 'error';
 
   const goToResults = useCallback(() => {
-    if (runId) navigate(`/compliance/runs/${runId}`, { replace: true });
-  }, [navigate, runId]);
+    if (!runId) return;
+    // The user watched this one land and is being taken straight to it, so the
+    // dock has nothing left to tell them about it.
+    forget(runId);
+    navigate(`/compliance/runs/${runId}`, { replace: true });
+  }, [navigate, runId, forget]);
 
   // The subject to re-run: whatever the setup screen named, or — for an upload,
   // which had none to give — whatever the run reports once it has read the
@@ -312,6 +354,26 @@ export default function ComplianceRunningPage() {
         progressCaption={caption}
         done={done}
         onDone={goToResults}
+        // The run is server-side and the dock is already tracking it, so
+        // leaving costs nothing: the wait continues without the user in it,
+        // and a toast brings them back when there's something to see.
+        //
+        // Withdrawn the moment the run lands, which is a second or so before
+        // this screen finishes its own hand-off animation. Leaving during that
+        // window would walk away from a run that is already done — the watcher
+        // only announces runs it saw finish, so nothing would ever announce it.
+        footer={
+          done ? undefined : (
+            <button
+              type="button"
+              className="btn bs"
+              onClick={() => navigate(backHref)}
+              style={{ fontSize: 12, padding: '8px 16px' }}
+            >
+              Continue in background →
+            </button>
+          )
+        }
       />
     </div>
   );
