@@ -1948,10 +1948,17 @@ export const earnings = {
 
   // ── Part 4/5 — preview & publish ──
   // The produced sections (cover + body) for a report. Report-scoped, untyped → normalised.
-  getEarningsSections: (reportId: string, signal?: AbortSignal): Promise<EarningsSectionsResponse> =>
+  // `includedOnly` → GET .../sections?included_only=true, so the preview shows
+  // only the sections the user selected in the outline (only included sections
+  // are ever produced anyway).
+  getEarningsSections: (
+    reportId: string,
+    includedOnly = false,
+    signal?: AbortSignal,
+  ): Promise<EarningsSectionsResponse> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections`,
-      { signal },
+      { query: includedOnly ? { included_only: true } : undefined, signal },
     ).then(normalizeEarningsSections),
 
   // Kick batch production of all included sections. Async 202-style → {run_id, poll_url};

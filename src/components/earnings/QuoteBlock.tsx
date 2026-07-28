@@ -1,5 +1,5 @@
 import { tryParseJson, isRecord, cell } from '@/pages/earnings/preview-helpers';
-import { ACCENT, INK, MUTED } from './tokens';
+import { BRAND, INK, MUTED } from './tokens';
 
 // Management commentary (S05) — verbatim quote + attribution. Field names
 // unconfirmed (Step 0); read defensively across the likely aliases.
@@ -20,7 +20,7 @@ export function QuoteBlock({ content }: { content: string | null }) {
       <blockquote
         style={{
           margin: 0,
-          borderLeft: `3px solid ${ACCENT}`,
+          borderLeft: `3px solid ${BRAND}`,
           paddingLeft: 16,
           fontSize: 15,
           fontStyle: 'italic',

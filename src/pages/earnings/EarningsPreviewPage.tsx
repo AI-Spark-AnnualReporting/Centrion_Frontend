@@ -15,7 +15,7 @@ import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
-import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
+import { INK, MUTED, FAINT, BRAND } from '@/components/earnings/tokens';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -114,7 +114,8 @@ export default function EarningsPreviewPage() {
     setLoading(true);
     setError(null);
     earnings
-      .getEarningsSections(reportId)
+      // included_only → the preview shows only the user's selected sections.
+      .getEarningsSections(reportId, true)
       .then((res) => {
         if (!cancelled) applyResponse(res);
       })
@@ -135,7 +136,7 @@ export default function EarningsPreviewPage() {
     let cancelled = false;
     const tick = async () => {
       const run = await agentRuns.getByPollUrl(runInfo.poll_url).catch(() => null);
-      const res = await earnings.getEarningsSections(reportId).catch(() => null);
+      const res = await earnings.getEarningsSections(reportId, true).catch(() => null);
       if (cancelled) return;
       if (res) applyResponse(res);
       const status = run?.status;
@@ -458,7 +459,7 @@ export default function EarningsPreviewPage() {
                       <span style={{ fontSize: 11, fontWeight: 800, color: FAINT, fontVariantNumeric: 'tabular-nums' }}>
                         {String(i + 1).padStart(2, '0')}
                       </span>
-                      <h2 style={{ fontSize: 16, fontWeight: 800, color: INK, margin: 0 }}>{s.title}</h2>
+                      <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
                     </div>
                     <EditableProse
                       section={s}

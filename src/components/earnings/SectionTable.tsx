@@ -7,7 +7,7 @@ import {
   gapReason,
   rowCitation,
 } from '@/pages/earnings/preview-helpers';
-import { INK, MUTED, ACCENT } from './tokens';
+import { INK, MUTED, BRAND } from './tokens';
 
 // ConfidenceBadge's established amber — within-feature consistency.
 const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
@@ -35,7 +35,7 @@ export function SectionTable({ content }: { content: string | null }) {
 
   const TH: React.CSSProperties = {
     padding: '8px 10px',
-    color: ACCENT,
+    color: BRAND,
     fontWeight: 700,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -47,11 +47,11 @@ export function SectionTable({ content }: { content: string | null }) {
       {tables.map((t, ti) => (
         <div key={ti} style={{ marginBottom: 20, overflowX: 'auto' }}>
           {tables.length > 1 && t.title && (
-            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: ACCENT }}>{t.title}</h3>
+            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{t.title}</h3>
           )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ borderBottom: `2px solid ${ACCENT}` }}>
+              <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
                 <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
                 <th style={{ ...TH, textAlign: 'right' }}>Value</th>
                 {showSource && <th style={{ ...TH, textAlign: 'left' }}>Source</th>}
@@ -92,7 +92,7 @@ export function SectionTable({ content }: { content: string | null }) {
                           padding: '9px 10px',
                           textAlign: 'right',
                           fontFamily: "'DM Mono', 'Courier New', monospace",
-                          color: ACCENT,
+                          color: BRAND,
                           fontWeight: 700,
                         }}
                       >
