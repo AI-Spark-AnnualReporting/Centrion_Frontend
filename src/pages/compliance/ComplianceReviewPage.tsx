@@ -8,7 +8,7 @@
 //   · A null publication gate means the gate hasn't been decided, which is NOT
 //     the same as "open". It gets its own branch everywhere it's rendered.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { complianceValidation } from '@/lib/api';
@@ -23,6 +23,7 @@ import { ComplianceStepper } from './ComplianceStepper';
 import { ResolveGapDialog } from './ResolveGapDialog';
 import {
   AMBER,
+  certifiability,
   ComplianceHeader,
   ComplianceNotice,
   ConfidenceMark,
@@ -50,6 +51,7 @@ import {
   StatusIcon,
   statusHint,
   statusLabel,
+  useCertifyRun,
   useComplianceRun,
 } from './compliance-ui';
 
@@ -599,9 +601,15 @@ function RuleAccordion({ detail }: { detail: RuleDetailGroup[] }) {
                       <EvidenceProof evidence={r.evidence} />
                     </div>
 
-                    {/* Only when there was no quote to hang it under — otherwise
-                        the pull-quote already carries the source line. */}
-                    {!r.evidence?.quote && (r.evidence?.evidence_source || r.evidence_source) && (
+                    {/* Only on `no_data`, where the source IS the answer — it
+                        names the filing or register that governs the rule
+                        instead of this report. On a fail it just describes
+                        where the checker looked, which tells the author
+                        nothing they can act on. And only when there was no
+                        quote to hang it under; the pull-quote carries its own. */}
+                    {r.status === 'no_data' &&
+                      !r.evidence?.quote &&
+                      (r.evidence?.evidence_source || r.evidence_source) && (
                       <div
                         style={{
                           marginTop: 5,
@@ -691,6 +699,47 @@ export default function ComplianceReviewPage() {
   // A run that errored has no results and never will — it doesn't become done.
   const failed = run != null && !isRunDone(run.status) && isTerminalStatus(run.status);
 
+  const goToCertificate = useCallback(() => {
+    if (runId) navigate(`/compliance/runs/${runId}/certificate`);
+  }, [runId, navigate]);
+
+  // Signing off flips the run in place and goes straight to the certificate.
+  const onCertified = useCallback(() => {
+    setRun((prev) => (prev ? { ...prev, certified: true } : prev));
+    goToCertificate();
+  }, [setRun, goToCertificate]);
+  const onStale = useCallback(() => reload(true), [reload]);
+  const {
+    certify,
+    certifying,
+    error: certifyError,
+    blockedBy,
+  } = useCertifyRun(runId, { onCertified, onStale });
+
+  const { blocked, undecided, nothingVerified, canCertify } = certifiability(run);
+
+  // When the button is disabled it has to say why. This screen is the one place
+  // a blocked run can actually be acted on — the failing gaps are in the table
+  // above — so it points at them rather than sending the user elsewhere.
+  const certifyBlockedLabel = blocked
+    ? 'Resolve hard gaps to certify'
+    : undecided
+      ? 'No verdict to certify'
+      : nothingVerified
+        ? 'Nothing to certify'
+        : 'Waiting for the validation to finish';
+
+  const certifyBlockedReason =
+    run == null || run.certified || canCertify
+      ? undefined
+      : blocked
+        ? 'Every hard-gate check must be resolved before this report can be certified.'
+        : undecided
+          ? 'This run didn’t reach a publication verdict, so there is no gate to certify against.'
+          : nothingVerified
+            ? 'Nothing in this run was scoreable, so there is nothing to certify against.'
+            : 'The validation has to finish first.';
+
   return (
     <div>
       <ComplianceHeader />
@@ -762,23 +811,68 @@ export default function ComplianceReviewPage() {
           <GapsTable gaps={run.gaps} onResolve={setTarget} readOnly={run.certified} />
           <RuleAccordion detail={run.rule_detail} />
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-            <button
-              type="button"
-              className="btn bs"
-              onClick={() => navigate(setupHref(run))}
-              style={{ fontSize: 13, padding: '9px 18px' }}
-            >
-              ← Back to set up
-            </button>
-            <button
-              type="button"
-              className="btn bp"
-              onClick={() => navigate(`/compliance/runs/${run.run_id}/gate`)}
-              style={{ fontSize: 13, padding: '10px 20px' }}
-            >
-              {run.certified ? 'View certification →' : 'Publication decision →'}
-            </button>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+              <button
+                type="button"
+                className="btn bs"
+                onClick={() => navigate(setupHref(run))}
+                style={{ fontSize: 13, padding: '9px 18px' }}
+              >
+                ← Back to set up
+              </button>
+              {/* Certification happens here rather than behind a separate gate
+                  screen: the gaps the decision rests on are already on this
+                  page, so a user who can't certify can see why without going
+                  anywhere. On success this lands on the certificate itself —
+                  the document the whole run exists to produce.
+
+                  An already-certified run just opens its certificate; certifying
+                  is not something to offer twice. */}
+              <button
+                type="button"
+                className="btn bp"
+                onClick={run.certified ? goToCertificate : certify}
+                disabled={certifying || (!run.certified && !canCertify)}
+                title={certifyBlockedReason}
+                style={{
+                  fontSize: 13,
+                  padding: '10px 20px',
+                  opacity: certifying || (!run.certified && !canCertify) ? 0.5 : 1,
+                  cursor:
+                    certifying || (!run.certified && !canCertify) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {run.certified
+                  ? 'View certificate →'
+                  : certifying
+                    ? 'Certifying…'
+                    : canCertify
+                      ? 'Certify'
+                      : certifyBlockedLabel}
+              </button>
+            </div>
+
+            {certifyError && (
+              <div
+                style={{
+                  marginTop: 12,
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  textAlign: 'right',
+                  // Case B isn't an error the user caused, so it reads muted
+                  // rather than red.
+                  color: blockedBy.length > 0 ? RED : MUTED,
+                }}
+              >
+                {certifyError}
+                {blockedBy.length > 0 && (
+                  <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 11.5 }}>
+                    {blockedBy.join(' · ')}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

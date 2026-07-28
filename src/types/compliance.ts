@@ -192,6 +192,12 @@ export interface CheckEvidence {
   found?: string[];
   missing?: string[];
   evidence_source?: string;
+  // 1-based page of the source document the quote was read from. Present on
+  // rule-detail rows that were answered by the report itself; null on the ones
+  // answered by a filing or register elsewhere, which have no page to point at.
+  page?: number | null;
+  // Which uploaded file the quote came from, when a run had more than one.
+  source_file?: string | null;
 }
 
 // Only `status === "fail"` rows appear here. This is the action list.
@@ -210,13 +216,26 @@ export interface Gap {
 }
 
 // Per-rule row in the expandable table. Note there is no description, logic or
-// parameter. `evidence` is optional throughout — treat its absence as normal.
+// parameter.
+//
+// The evidence arrives FLAT on the row — `quote`, `proof`, `section_code`,
+// `page`, `source_file` as siblings of `rule_id` — where a gap nests the same
+// information under `evidence`. Rather than make every renderer branch on which
+// shape it got, `normalizeRun()` folds the flat fields into `evidence` on the
+// way in, so downstream there is one shape. Read `evidence`; the flat fields
+// below are the wire form and are declared only so the adapter is type-checked.
 export interface RuleTrace {
   rule_id: string;
   status: CheckStatus;
   gate: Gate;
   evidence_source?: string;
   evidence?: CheckEvidence | null;
+  // ── flat wire fields (see above) ──
+  quote?: string | null;
+  proof?: string | null;
+  section_code?: string | null;
+  page?: number | null;
+  source_file?: string | null;
 }
 
 // Full per-regulator breakdown, including no_data rows.

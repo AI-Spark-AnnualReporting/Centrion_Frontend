@@ -90,10 +90,41 @@ export function isDismissed(runId: string): boolean {
   return readJson<string[]>(DISMISSED_KEY, []).includes(runId);
 }
 
+// How a run in flight describes itself. Shared because the same run shows up on
+// the set-up shelf and in the background dock at the same time, and one calling
+// it "Validating…" while the other says something else would read as two
+// different things happening. The surfaces style it differently — a gradient on
+// a card, a coloured dot on a row — so only the words live here.
+export const RUN_STATE_LABEL: Record<string, string> = {
+  running: "Validating…",
+  done: "Results ready",
+  error: "Didn’t finish",
+};
+
+export function runStateLabel(status: string | undefined): string {
+  return RUN_STATE_LABEL[status ?? ""] ?? RUN_STATE_LABEL.done;
+}
+
+// "GHG_Protocol" → "GHG Protocol". An uploaded run is titled with the filename
+// the user chose, and filenames carry underscores where the name wants spaces.
+// Hyphens are left alone: a period like "Q3-2025" reads correctly as it is, and
+// plenty of report names are legitimately hyphenated.
+export function runTitle(title: string | null | undefined): string {
+  return (title ?? "").replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Everything these two need to decide where a run belongs. Narrower than
+// RunListItem on purpose: the background watcher holds runs assembled from
+// GET /runs/{id}, which carries no title, period or timestamps, and casting one
+// into a RunListItem to ask this question would be a lie the compiler couldn't
+// catch. A RunListItem still satisfies it structurally, so existing callers are
+// unaffected.
+export type RunRef = Pick<RunListItem, "run_id" | "status" | "certified">;
+
 // Where Continue should land, from the server's state — with the local hint
 // used only to choose between two screens that are both correct for a finished
 // run. Status always comes from the API; the hint never overrides it.
-export function runScreen(run: RunListItem, hint = screenHint(run.run_id)): ComplianceScreen {
+export function runScreen(run: RunRef, hint = screenHint(run.run_id)): ComplianceScreen {
   // Still going, or dead: both belong on the progress screen, which is the one
   // that knows how to wait and how to explain a failure.
   if (run.status === "running" || run.status === "error") return "running";
@@ -103,7 +134,7 @@ export function runScreen(run: RunListItem, hint = screenHint(run.run_id)): Comp
   return hint === "gate" ? "gate" : "review";
 }
 
-export function runHref(run: RunListItem, screen = runScreen(run)): string {
+export function runHref(run: RunRef, screen = runScreen(run)): string {
   const base = `/compliance/runs/${encodeURIComponent(run.run_id)}`;
   if (screen === "running") return `${base}/running`;
   if (screen === "gate") return `${base}/gate`;

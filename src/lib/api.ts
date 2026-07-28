@@ -83,6 +83,7 @@ import type {
   CertificateVerification,
   CertifiedRun,
   CertifyResponse,
+  CheckEvidence,
   CompliancePreview,
   ComplianceRun,
   CreateRunPayload,
@@ -92,6 +93,7 @@ import type {
   Market,
   ReportType,
   ResolveGapResponse,
+  RuleDetailGroup,
   RunListItem,
   RunsResponse,
   UploadRunPayload,
@@ -925,7 +927,38 @@ function normalizeRun(run: ComplianceRun): ComplianceRun {
     publication_gate: run?.publication_gate ?? null,
     frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
     gaps: Array.isArray(run?.gaps) ? run.gaps : [],
-    rule_detail: Array.isArray(run?.rule_detail) ? run.rule_detail : [],
+    rule_detail: Array.isArray(run?.rule_detail)
+      ? run.rule_detail.map(normalizeRuleGroup)
+      : [],
+  };
+}
+
+// A rule-detail row carries its evidence FLAT — `quote`, `proof`,
+// `section_code`, `page`, `source_file` sitting next to `rule_id` — while a gap
+// nests the same information under `evidence`. Fold the flat form into
+// `evidence` here so every renderer downstream reads one shape.
+//
+// An already-nested `evidence` wins: the backend has served both forms, and a
+// row that arrives in the richer shape (with `found`/`missing`/`confidence`,
+// which the flat form has no room for) must not be flattened back down to what
+// the flat fields can express.
+function normalizeRuleGroup(group: RuleDetailGroup): RuleDetailGroup {
+  return {
+    ...group,
+    rules: (Array.isArray(group?.rules) ? group.rules : []).map((rule) => {
+      if (rule?.evidence) return rule;
+      const evidence: CheckEvidence = {};
+      if (rule?.quote) evidence.quote = rule.quote;
+      if (rule?.proof) evidence.proof = rule.proof;
+      if (rule?.section_code) evidence.section_code = rule.section_code;
+      if (rule?.page != null) evidence.page = rule.page;
+      if (rule?.source_file) evidence.source_file = rule.source_file;
+      if (rule?.evidence_source) evidence.evidence_source = rule.evidence_source;
+      // A `no_data` row legitimately carries nothing but `evidence_source`.
+      // Leave `evidence` null there rather than attaching an empty object, so
+      // the "no evidence recorded" branches stay reachable.
+      return Object.keys(evidence).length > 0 ? { ...rule, evidence } : rule;
+    }),
   };
 }
 

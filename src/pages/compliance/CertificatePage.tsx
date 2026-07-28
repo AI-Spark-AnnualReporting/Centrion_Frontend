@@ -412,40 +412,33 @@ export default function CertificatePage() {
                 VALIDATED AGAINST
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                {run.frameworks.map((f) => {
-                  // Each chip states its own framework's outcome rather than
-                  // borrowing the run's overall verdict — a certificate that
-                  // greened every chip on an 80% average would misrepresent the
-                  // frameworks that didn't pass.
-                  const ok = f.score != null && f.score >= 80;
-                  const color = gradeColor(f.score);
-                  return (
-                    <span
-                      key={f.regulator}
-                      title={
-                        f.score == null
-                          ? `${f.regulator} — nothing scoreable`
-                          : `${f.regulator} — ${f.passed}/${f.total} checks passed`
-                      }
-                      style={{
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        padding: '4px 11px',
-                        borderRadius: 999,
-                        color,
-                        border: `1px solid ${color}`,
-                        background:
-                          f.score == null
-                            ? 'transparent'
-                            : ok
-                              ? 'rgba(34,197,94,.08)'
-                              : 'rgba(239,68,68,.06)',
-                      }}
-                    >
-                      {f.score == null ? '◦' : ok ? '✓' : '✗'} {f.regulator}
-                    </span>
-                  );
-                })}
+                {/* A list of which regulators this report was checked against,
+                    not a verdict on each. The scores live in the tiles above and
+                    in each chip's tooltip; scoring the chips too made a run that
+                    is genuinely cleared for publication wear red crosses, because
+                    the 80 mark they used is stricter than the gate that actually
+                    decides certification. */}
+                {run.frameworks.map((f) => (
+                  <span
+                    key={f.regulator}
+                    title={
+                      f.score == null
+                        ? `${f.regulator} — nothing scoreable`
+                        : `${f.regulator} — ${f.passed}/${f.total} checks passed`
+                    }
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      padding: '4px 11px',
+                      borderRadius: 999,
+                      color: GREEN,
+                      border: `1px solid ${GREEN}`,
+                      background: 'rgba(34,197,94,.08)',
+                    }}
+                  >
+                    ✓ {f.regulator}
+                  </span>
+                ))}
               </div>
             </div>
           )}

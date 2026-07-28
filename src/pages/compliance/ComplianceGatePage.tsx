@@ -1,43 +1,25 @@
 // Screen 3 of the Compliance Validation wizard — the publication gate.
 // Blocked while HARD checks fail; otherwise the run can be certified.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
-import { ApiError, complianceValidation } from '@/lib/api';
-import type { CertifyBlockedBody } from '@/types/compliance';
 import { ComplianceStepper } from './ComplianceStepper';
 import {
+  certifiability,
   ComplianceHeader,
   ComplianceNotice,
   DARK,
   GREEN,
-  isRunDone,
   isTerminalStatus,
   MONO,
   MUTED,
   RED,
   setupHref,
+  useCertifyRun,
   useComplianceRun,
   useRememberScreen,
 } from './compliance-ui';
-
-// The 409 body arrives as `{ detail: { message, reason?, blocking_rule_ids } }`,
-// though FastAPI sometimes returns the payload unwrapped — read both shapes.
-// `blocking_rule_ids` is normalised to an array because its emptiness is what
-// distinguishes Case A (real failures) from Case B (nothing verified).
-function readBlockedBody(err: unknown): CertifyBlockedBody | null {
-  if (!(err instanceof ApiError) || err.status !== 409) return null;
-  const raw = err.body as
-    | ({ detail?: CertifyBlockedBody } & Partial<CertifyBlockedBody>)
-    | undefined;
-  const body = raw?.detail ?? (raw as CertifyBlockedBody | undefined);
-  if (!body || (!body.message && !body.reason)) return null;
-  return {
-    ...body,
-    blocking_rule_ids: Array.isArray(body.blocking_rule_ids) ? body.blocking_rule_ids : [],
-  };
-}
 
 export default function ComplianceGatePage() {
   const { runId } = useParams<{ runId: string }>();
@@ -48,10 +30,21 @@ export default function ComplianceGatePage() {
   // the review screen behind it.
   useRememberScreen(runId, 'gate');
 
-  const [certifying, setCertifying] = useState(false);
-  const [certifyError, setCertifyError] = useState('');
-  const [blockedBy, setBlockedBy] = useState<string[]>([]);
-  const [certifiedBy, setCertifiedBy] = useState('');
+  // Patch the loaded run so the screen flips to its certified face without a
+  // refetch. Who signed it off is held by the hook, not the run — GET /runs/{id}
+  // doesn't carry `certified_by`.
+  const onCertified = useCallback(
+    () => setRun((prev) => (prev ? { ...prev, certified: true } : prev)),
+    [setRun],
+  );
+  const onStale = useCallback(() => reload(), [reload]);
+  const {
+    certify,
+    certifying,
+    error: certifyError,
+    blockedBy,
+    certifiedBy,
+  } = useCertifyRun(runId, { onCertified, onStale });
 
   // Nothing on this screen is meaningful until the run finishes — the gate is
   // null and the gaps list is empty for the whole 30–60s it takes. Send an
@@ -63,64 +56,9 @@ export default function ComplianceGatePage() {
     }
   }, [inFlight, runId, navigate]);
 
-  const certify = () => {
-    if (!run) return;
-    setCertifying(true);
-    setCertifyError('');
-    setBlockedBy([]);
-    complianceValidation
-      .certify(run.run_id)
-      .then((res) => {
-        setCertifiedBy(res.certified_by);
-        setRun((prev) => (prev ? { ...prev, certified: res.certified } : prev));
-      })
-      .catch((e) => {
-        const body = readBlockedBody(e);
-        if (body) {
-          // Case A — the run hasn't finished. Not a failure and not the user's
-          // doing; the gate simply isn't decided yet. Reload so the screen picks
-          // up the real state (and bounces to the progress screen if it's still
-          // going) rather than leaving a red error under the button.
-          if (body.status === 'running') {
-            setCertifyError(
-              'This validation is still running — it needs to finish before the report can be certified.',
-            );
-            reload();
-            return;
-          }
-          if (body.blocking_rule_ids.length > 0) {
-            // Case B — real HARD failures. The gate is re-checked server-side,
-            // so this can fire even when the state we loaded said `open`;
-            // refresh so the screen stops claiming the report is ready.
-            setBlockedBy(body.blocking_rule_ids);
-            setCertifyError(body.message);
-            reload();
-          } else {
-            // Case C — nothing was verified. There is nothing to fix and no
-            // rows to point at, so show the reason and no rule list.
-            setCertifyError(body.reason || body.message);
-          }
-          return;
-        }
-        setCertifyError(e instanceof Error ? e.message : 'Failed to certify this report.');
-      })
-      .finally(() => setCertifying(false));
-  };
-
   // Only unresolved HARD gaps hold the gate shut.
   const blockers = (run?.gaps ?? []).filter((g) => g.gate === 'HARD' && !g.resolved);
-  const blocked = run?.publication_gate === 'blocked';
-  // Null is its own case, not a synonym for `open`: the gate wasn't decided.
-  // Certifying against an undecided gate is exactly what the 409 exists to stop.
-  const undecided = run != null && run.publication_gate == null;
-  // Null readiness means nothing was actually verified, so certify would 409.
-  // Predict it here rather than letting the user click into an error.
-  const nothingVerified = run != null && run.overall_readiness == null;
-  // Certify 409s on a run that isn't finished, so the button stays disabled
-  // until the run reports `done` — the poll screen normally gets there first,
-  // but this is the guard that makes it true regardless of how the user arrived.
-  const runDone = isRunDone(run?.status);
-  const canCertify = run != null && runDone && !blocked && !undecided && !nothingVerified;
+  const { runDone, blocked, undecided, nothingVerified, canCertify } = certifiability(run);
 
   return (
     <div>
