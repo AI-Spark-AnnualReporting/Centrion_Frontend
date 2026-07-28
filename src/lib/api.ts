@@ -383,6 +383,13 @@ export interface GenerateQuarterlyBody {
   voices?: Voice[];
   report_tone?: ReportTone;
   comparison?: Comparison; // yoy | qoq | both — which prior period to compare against
+  // Dedicated Excel/CSV lane → lean, exact figure extraction (no vision).
+  financial_files?: File[];
+  financial_currency?: string; // e.g. "SAR"
+  financial_scale?: string;    // actual | thousands | millions | billions
+  // system = map the sheet to our standard metrics + template (default).
+  // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
+  metrics_mode?: "system" | "custom";
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -1257,6 +1264,13 @@ export const reports = {
     }
     if (body.report_tone) fd.append("report_tone", body.report_tone);
     if (body.comparison) fd.append("comparison", body.comparison);
+    // Dedicated Excel/CSV lane → lean, exact figure extraction.
+    if (body.financial_files && body.financial_files.length > 0) {
+      body.financial_files.forEach((f) => fd.append("financial_files", f));
+    }
+    if (body.financial_currency) fd.append("financial_currency", body.financial_currency);
+    if (body.financial_scale) fd.append("financial_scale", body.financial_scale);
+    if (body.metrics_mode) fd.append("metrics_mode", body.metrics_mode);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
@@ -1414,11 +1428,12 @@ export const quarterlyReports = {
   // "no data" dialog when a required period is missing.
   checkComparisonAvailability: (
     companyId: string,
-    params: { year: number; quarter: string; comparison: Comparison },
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
   ) =>
     request<ComparisonAvailability>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
-        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}`,
+        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}` +
+        (params.metrics_mode ? `&metrics_mode=${params.metrics_mode}` : ''),
     ),
 
   // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit
