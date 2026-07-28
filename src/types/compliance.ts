@@ -192,6 +192,12 @@ export interface CheckEvidence {
   found?: string[];
   missing?: string[];
   evidence_source?: string;
+  // 1-based page of the source document the quote was read from. Present on
+  // rule-detail rows that were answered by the report itself; null on the ones
+  // answered by a filing or register elsewhere, which have no page to point at.
+  page?: number | null;
+  // Which uploaded file the quote came from, when a run had more than one.
+  source_file?: string | null;
 }
 
 // Only `status === "fail"` rows appear here. This is the action list.
@@ -210,13 +216,26 @@ export interface Gap {
 }
 
 // Per-rule row in the expandable table. Note there is no description, logic or
-// parameter. `evidence` is optional throughout — treat its absence as normal.
+// parameter.
+//
+// The evidence arrives FLAT on the row — `quote`, `proof`, `section_code`,
+// `page`, `source_file` as siblings of `rule_id` — where a gap nests the same
+// information under `evidence`. Rather than make every renderer branch on which
+// shape it got, `normalizeRun()` folds the flat fields into `evidence` on the
+// way in, so downstream there is one shape. Read `evidence`; the flat fields
+// below are the wire form and are declared only so the adapter is type-checked.
 export interface RuleTrace {
   rule_id: string;
   status: CheckStatus;
   gate: Gate;
   evidence_source?: string;
   evidence?: CheckEvidence | null;
+  // ── flat wire fields (see above) ──
+  quote?: string | null;
+  proof?: string | null;
+  section_code?: string | null;
+  page?: number | null;
+  source_file?: string | null;
 }
 
 // Full per-regulator breakdown, including no_data rows.
@@ -412,4 +431,56 @@ export interface CertifiedRun {
   publication_gate: PublicationGate | null;
   certified_by: string;
   certified_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// GET /runs/{run_id}/certificate.pdf
+// ---------------------------------------------------------------------------
+
+// An authed binary endpoint, so it can't be a plain <a href> — the browser
+// wouldn't attach the Bearer token. Fetched as a blob; see
+// `complianceValidation.certificatePdf`.
+//
+// It serves ANY finished run, certified or not, gate open or blocked, and the
+// document titles itself accordingly — so a user can take the detail away with
+// them while they're still working through gaps, and the PDF can't overstate
+// what it is. The certificate SCREEN branches on the same two states, from the
+// same run fields, so the two can never disagree.
+export function isClearedForPublication(run: {
+  certified?: boolean;
+  publication_gate?: PublicationGate | null;
+}): boolean {
+  return run.certified === true && run.publication_gate === "open";
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/public/verify/{code}
+// ---------------------------------------------------------------------------
+
+// Unauthenticated by design: anyone holding a printed certificate can check it
+// without an account. Call it with `auth: false` so no token is attached and a
+// 404 never trips the 401 logout path.
+export interface CertificateVerification {
+  verification_code: string;
+  company_name: string;
+  report_type: ReportType;
+  period: string;
+  overall_readiness: number | null;
+  publication_gate: PublicationGate | null;
+  certified: boolean;
+  certified_at: string;
+}
+
+// The code printed in the PDF, derived deterministically from the run's UUID:
+//   CNT-VAL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X
+// Crockford base32 (no I, L, O or U), so it survives being read aloud or typed
+// off paper. It is NOT generated in the browser — nothing here knows the
+// derivation, and a locally-invented code resolves to nothing.
+//
+// There is deliberately no validator: the endpoint answers an identical 404 for
+// a malformed code, an unknown code and an unfinished run, so that a caller
+// can't probe which runs exist. Checking the shape locally would invent a
+// distinction the API refuses to make. Normalise and send it.
+export function normalizeVerificationCode(raw: string): string {
+  return raw.trim().toUpperCase();
 }

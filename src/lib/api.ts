@@ -80,8 +80,10 @@ import type {
 import { normalizeOverview } from "@/types/admin";
 import type {
   CandidatesResponse,
+  CertificateVerification,
   CertifiedRun,
   CertifyResponse,
+  CheckEvidence,
   CompliancePreview,
   ComplianceRun,
   CreateRunPayload,
@@ -91,11 +93,13 @@ import type {
   Market,
   ReportType,
   ResolveGapResponse,
+  RuleDetailGroup,
   RunListItem,
   RunsResponse,
   UploadRunPayload,
   UploadRunResponse,
 } from "@/types/compliance";
+import { normalizeVerificationCode } from "@/types/compliance";
 import type {
   AssignDepartmentsPayload,
   AssignDepartmentsResponse,
@@ -923,7 +927,38 @@ function normalizeRun(run: ComplianceRun): ComplianceRun {
     publication_gate: run?.publication_gate ?? null,
     frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
     gaps: Array.isArray(run?.gaps) ? run.gaps : [],
-    rule_detail: Array.isArray(run?.rule_detail) ? run.rule_detail : [],
+    rule_detail: Array.isArray(run?.rule_detail)
+      ? run.rule_detail.map(normalizeRuleGroup)
+      : [],
+  };
+}
+
+// A rule-detail row carries its evidence FLAT — `quote`, `proof`,
+// `section_code`, `page`, `source_file` sitting next to `rule_id` — while a gap
+// nests the same information under `evidence`. Fold the flat form into
+// `evidence` here so every renderer downstream reads one shape.
+//
+// An already-nested `evidence` wins: the backend has served both forms, and a
+// row that arrives in the richer shape (with `found`/`missing`/`confidence`,
+// which the flat form has no room for) must not be flattened back down to what
+// the flat fields can express.
+function normalizeRuleGroup(group: RuleDetailGroup): RuleDetailGroup {
+  return {
+    ...group,
+    rules: (Array.isArray(group?.rules) ? group.rules : []).map((rule) => {
+      if (rule?.evidence) return rule;
+      const evidence: CheckEvidence = {};
+      if (rule?.quote) evidence.quote = rule.quote;
+      if (rule?.proof) evidence.proof = rule.proof;
+      if (rule?.section_code) evidence.section_code = rule.section_code;
+      if (rule?.page != null) evidence.page = rule.page;
+      if (rule?.source_file) evidence.source_file = rule.source_file;
+      if (rule?.evidence_source) evidence.evidence_source = rule.evidence_source;
+      // A `no_data` row legitimately carries nothing but `evidence_source`.
+      // Leave `evidence` null there rather than attaching an empty object, so
+      // the "no evidence recorded" branches stay reachable.
+      return Object.keys(evidence).length > 0 ? { ...rule, evidence } : rule;
+    }),
   };
 }
 
@@ -1038,6 +1073,79 @@ export const complianceValidation = {
     request<CertifyResponse>(
       `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certify`,
       { method: "POST" },
+    ),
+
+  // The certificate as a PDF. Authed and binary, so `request()` is no use here
+  // (it parses the body as JSON or text) and a plain <a href> is no use either
+  // — the browser wouldn't attach the Bearer token.
+  //
+  // Serves any FINISHED run, certified or not: 409 while it's still running or
+  // if it errored, 403 for another company's run, 404 for an unknown id. Those
+  // bodies are JSON `{ detail }`, so parse them on failure and hand the caller
+  // an ApiError it can read the server's own wording off.
+  certificatePdf: async (
+    runId: string,
+  ): Promise<{ blob: Blob; filename: string | null }> => {
+    const url = `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certificate.pdf`;
+    const full = `${API_BASE_URL}${url}`;
+    const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(full, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) {
+      const parsed: unknown = await res.json().catch(() => null);
+      throw new ApiError(res.status, res.statusText, parsed, full);
+    }
+
+    return { blob: await res.blob(), filename: attachmentFilename(res) };
+  },
+};
+
+// Read the server's own filename out of `Content-Disposition`. Returns null
+// rather than a guess when it can't — and it often can't: the header is not a
+// CORS-safelisted response header, so unless the API sends
+// `Access-Control-Expose-Headers: Content-Disposition` this reads as absent in
+// the browser even though it's on the wire. Callers own the fallback name,
+// since only they know what the file is of.
+function attachmentFilename(res: Response): string | null {
+  const header = res.headers.get("Content-Disposition");
+  if (!header) return null;
+  // RFC 5987 `filename*=UTF-8''…` wins when present — it's the one that can
+  // carry non-ASCII, which matters for Arabic report titles.
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      /* malformed percent-encoding — fall through to the plain form */
+    }
+  }
+  return header.match(/filename="([^"]+)"/i)?.[1] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Public certificate verification
+// ---------------------------------------------------------------------------
+//
+// Unauthenticated on purpose: the whole point is that someone holding a printed
+// certificate — an auditor, a regulator, an investor — can check it without an
+// account. Not under COMPLIANCE_BASE; it lives on its own public path.
+
+export const publicVerification = {
+  // 200 with the run's public facts, or 404. The 404 is the SAME for a
+  // malformed code, an unknown code and an unfinished run, so that the endpoint
+  // can't be used to probe which runs exist — callers must render one
+  // not-found state and must not try to tell them apart.
+  //
+  // `auth: false` matters twice: it sends no token (correct for a public
+  // endpoint, and the visitor may have none), and it keeps a 401 from bouncing
+  // an anonymous visitor to /login.
+  verify: (code: string) =>
+    request<CertificateVerification>(
+      `/api/v1/public/verify/${encodeURIComponent(normalizeVerificationCode(code))}`,
+      { auth: false },
     ),
 };
 
@@ -2865,6 +2973,7 @@ export const api = {
   esg,
   compliance,
   complianceValidation,
+  publicVerification,
   reports,
   chat,
   meetings,

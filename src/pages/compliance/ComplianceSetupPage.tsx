@@ -4,9 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
-import { ApiError, complianceValidation } from '@/lib/api';
+import { ApiError, companies, complianceValidation } from '@/lib/api';
 import { rememberScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
+import { useComplianceRuns } from '@/context/ComplianceRunsContext';
 import type {
   Candidate,
   CompliancePreview,
@@ -49,6 +50,19 @@ const MARKETS: { key: Market; label: string }[] = [
   { key: 'Main', label: 'Main' },
   { key: 'Nomu', label: 'Nomu' },
 ];
+
+// An approved report is one we generated for this company, so its regulators
+// aren't a choice — they follow from the company's own profile. `reporting_sector`
+// is the only field that carries this (market has no equivalent on the company,
+// so those pills stay live). A company with no sector set falls back to the
+// manual pickers rather than guessing.
+const ENTITY_BY_SECTOR: Record<string, EntityType> = {
+  bank: 'bank',
+  insurance: 'insurer',
+  general: 'corporate',
+  reit: 'corporate',
+  finance_co: 'corporate',
+};
 
 // Nearly every rule carries effective_from = 2024-01-01, so a report whose
 // period ended before that matches zero rules and POST /runs rejects it. Grey
@@ -194,28 +208,38 @@ function PillGroup<T extends string>({
   options,
   value,
   onChange,
+  locked,
+  lockedTitle,
 }: {
   options: { key: T; label: string }[];
   // Nullable so a group can start with nothing chosen — the quarter picker has
   // no safe default, and defaulting it to Q1 would file Q3 reports as Q1.
   value: T | null;
   onChange: (v: T) => void;
+  // Read-only: the value is decided elsewhere. Renders the chosen option alone
+  // — greyed-out alternatives would read as "click here", which is the one
+  // thing this state means you can't do.
+  locked?: boolean;
+  lockedTitle?: string;
 }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       {options.map((o) => {
         const on = o.key === value;
+        if (locked && !on) return null;
         return (
           <button
             key={o.key}
             type="button"
-            onClick={() => onChange(o.key)}
+            onClick={locked ? undefined : () => onChange(o.key)}
+            disabled={locked}
+            title={locked ? lockedTitle : undefined}
             style={{
               padding: '7px 14px',
               borderRadius: 999,
               fontSize: 12,
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: locked ? 'default' : 'pointer',
               fontFamily: 'inherit',
               border: `1.5px solid ${on ? PRIMARY : '#E2E4F0'}`,
               background: on ? '#EEEEFF' : '#fff',
@@ -243,26 +267,33 @@ function FrameworkChip({
   checks,
   on,
   applicable,
+  locked,
   onToggle,
 }: {
   regulator: string;
   checks: number;
   on: boolean;
   applicable: boolean;
+  // Approved reports run against exactly what the company profile says applies.
+  // The chip stays visible — it's the list of what will run — but is inert.
+  locked?: boolean;
   onToggle: () => void;
 }) {
   const label = FRAMEWORK_LABELS[regulator];
   const active = applicable && on;
+  const interactive = applicable && !locked;
   return (
     <button
       type="button"
-      onClick={applicable ? onToggle : undefined}
-      disabled={!applicable}
+      onClick={interactive ? onToggle : undefined}
+      disabled={!interactive}
       aria-pressed={active}
       title={
-        applicable
-          ? `${checks} ${checks === 1 ? 'check' : 'checks'}`
-          : "Doesn't apply to the selected entity type"
+        !applicable
+          ? "Doesn't apply to your entity type"
+          : locked
+            ? `${checks} ${checks === 1 ? 'check' : 'checks'} · set by your company profile`
+            : `${checks} ${checks === 1 ? 'check' : 'checks'}`
       }
       style={{
         display: 'inline-flex',
@@ -273,7 +304,7 @@ function FrameworkChip({
         fontSize: 11.5,
         fontWeight: 700,
         fontFamily: 'inherit',
-        cursor: applicable ? 'pointer' : 'not-allowed',
+        cursor: interactive ? 'pointer' : applicable ? 'default' : 'not-allowed',
         border: `1.5px solid ${active ? PRIMARY : 'transparent'}`,
         background: active ? '#fff' : 'transparent',
         color: active ? PRIMARY : '#C2C7DB',
@@ -529,6 +560,9 @@ export default function ComplianceSetupPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? '';
+  // So a new run is in the dock the moment it is accepted, rather than whenever
+  // the next discovery sweep happens to come round.
+  const { report: reportRun } = useComplianceRuns();
 
   // ?type / ?subject / ?mode — set by every "back to set up" link so returning
   // from a run lands on the tab it came from with its subject already picked,
@@ -538,8 +572,13 @@ export default function ComplianceSetupPage() {
     const wanted = searchParams.get('type');
     return REPORT_TYPES.some((r) => r.key === wanted) ? (wanted as ReportType) : 'esg';
   });
-  const [entityType, setEntityType] = useState<EntityType>('corporate');
+  const [pickedEntity, setPickedEntity] = useState<EntityType>('corporate');
   const [market, setMarket] = useState<Market>('Main');
+  // The company's own reporting sector, which decides the entity type for the
+  // reports we generated for it. Null while loading, and null forever if the
+  // profile doesn't record one — in both cases the manual pickers stay live
+  // rather than locking the user to a guessed default.
+  const [companySector, setCompanySector] = useState<string | null>(null);
   // The whole candidate, not just its id — POST /runs needs the subject_type
   // that came with it, which is the backend's call, not something to re-derive.
   const [selected, setSelected] = useState<Candidate | null>(null);
@@ -646,6 +685,33 @@ export default function ComplianceSetupPage() {
     // only the visible half of the card should be able to start a run.
     setSelected(null);
   };
+
+  // Fetched once, not per tab — the profile doesn't change while the wizard is
+  // open. Failures are silent: the pickers simply stay editable.
+  useEffect(() => {
+    let cancelled = false;
+    companies
+      .getMyCompany()
+      .then((c) => {
+        if (cancelled) return;
+        setCompanySector(c.reporting_sector);
+        // Also the upload tab's starting point. It stays editable there — an
+        // uploaded file may be some other entity's report — but a bank's user
+        // uploading a bank's report shouldn't have to re-say so.
+        const entity = ENTITY_BY_SECTOR[c.reporting_sector ?? ''];
+        if (entity) setPickedEntity(entity);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Locked only on the approved-reports tab. An uploaded file may well be some
+  // other entity's report, so there the profile isn't authority over anything.
+  const lockedEntity =
+    sourceMode === 'picker' ? (ENTITY_BY_SECTOR[companySector ?? ''] ?? null) : null;
+  const entityType = lockedEntity ?? pickedEntity;
 
   // One endpoint per tab. It fans out across reports and reporting_cycles
   // server-side and hands back the (subject_type, subject_id) pair to pass
@@ -755,9 +821,11 @@ export default function ComplianceSetupPage() {
 
   // Re-seed the selection whenever the applicable set changes — everything that
   // applies starts ON, and nothing that doesn't apply can linger in the payload.
+  // Also on the lock engaging: a chip switched off on the upload tab must not
+  // survive into the locked view, where there'd be no way to switch it back on.
   useEffect(() => {
     setEnabled([...applicable.keys()]);
-  }, [applicable]);
+  }, [applicable, lockedEntity]);
 
   const toggleFramework = (regulator: string) => {
     if (!applicable.has(regulator)) return; // N/A chips are inert
@@ -817,6 +885,16 @@ export default function ComplianceSetupPage() {
       .then((res) => {
         // So Continue comes back to the wait, not to the top of the wizard.
         rememberScreen(res.run_id, 'running');
+        reportRun(
+          {
+            runId: res.run_id,
+            status: res.status,
+            title: selected.title,
+            period: selected.period,
+            reportType,
+          },
+          'local',
+        );
         navigate(`/compliance/runs/${res.run_id}/running`, {
           // The settings ride along so a failed run can be retried from the
           // progress screen without re-picking everything here.
@@ -865,6 +943,12 @@ export default function ComplianceSetupPage() {
       })
       .then((res) => {
         rememberScreen(res.run_id, 'running');
+        // The uploaded file's own name is the only label there is — the run has
+        // no subject yet, and won't until the file has been read.
+        reportRun(
+          { runId: res.run_id, status: res.status, title: file.name, period, reportType },
+          'local',
+        );
         navigate(`/compliance/runs/${res.run_id}/running`, {
           state: {
             // Settings but no subject: the file isn't a document yet — it
@@ -1025,7 +1109,11 @@ export default function ComplianceSetupPage() {
       <Card
         step={2}
         title="Regulators"
-        caption="Entity type, market and report type preset the frameworks. Toggle any chip to fine-tune."
+        caption={
+          lockedEntity
+            ? 'Set from your company profile — an approved report is validated against the regulators that govern your company. Change your reporting sector on the Profile page to change these.'
+            : 'Entity type, market and report type preset the frameworks. Toggle any chip to fine-tune.'
+        }
       >
         <div style={{ display: 'flex', gap: 26, flexWrap: 'wrap' }}>
           <div>
@@ -1035,7 +1123,9 @@ export default function ComplianceSetupPage() {
             <PillGroup<EntityType>
               options={ENTITY_TYPES}
               value={entityType}
-              onChange={setEntityType}
+              onChange={setPickedEntity}
+              locked={lockedEntity != null}
+              lockedTitle="From your company profile"
             />
           </div>
           <div>
@@ -1064,6 +1154,7 @@ export default function ComplianceSetupPage() {
                     regulator={regulator}
                     checks={applicable.get(regulator) ?? 0}
                     applicable={applicable.has(regulator)}
+                    locked={lockedEntity != null}
                     on={enabled.includes(regulator)}
                     onToggle={() => toggleFramework(regulator)}
                   />
