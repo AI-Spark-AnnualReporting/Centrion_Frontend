@@ -3,16 +3,18 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { FloatingChatbot } from '../shared/FloatingChatbot';
+import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
+import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
 
 const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
   '/reports': 'Reports',
   '/reports/quarterly': 'Quarterly Reports',
   '/kpi': 'KPI Normalizer',
-  '/compliance': 'Compliance',
+  '/compliance': 'Compliance Validation',
   '/ai': 'AI Copilot',
   '/meetings': 'Board & Meetings',
-  '/comms': 'Comms Hub',
+  '/comms': 'Communication Hub',
   '/stakeholders': 'Leadership',
   '/ir-calendar': 'IR Calendar',
   '/docs': 'Document Bank',
@@ -44,25 +46,46 @@ function PageLoader() {
   );
 }
 
+// Routes with ids or sub-paths in them can't be matched exactly, so they fall
+// back to a prefix. Longest first: nothing here currently overlaps, but a
+// shorter prefix added later would otherwise silently shadow a longer one.
+const PAGE_NAME_PREFIXES: [string, string][] = [
+  ['/quarterly-report', 'Quarterly Report'],
+  ['/annual-report', 'Annual Report'],
+  ['/communications', 'Communication Hub'],
+  ['/compliance', 'Compliance Validation'],
+];
+
 export function AppLayout() {
   const location = useLocation();
   const pageName =
     PAGE_NAMES[location.pathname] ??
-    (location.pathname.startsWith('/quarterly-report') ? 'Quarterly Report' :location.pathname.startsWith('/annual-report') ? 'Annual Report' : 'Command Center');
+    PAGE_NAME_PREFIXES.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ??
+    'Command Center';
+
+  const chatbotShown = location.pathname !== '/dashboard';
 
   return (
-    <div className="app-shell">
-      <Sidebar />
-      <div className="main">
-        <Topbar pageName={pageName} />
-        <div className="content">
-          <Suspense fallback={<PageLoader />}>
-            <Outlet />
-          </Suspense>
+    // Wraps the whole authenticated shell so a compliance run stays watched
+    // wherever the user goes next — and unmounts with it on logout, taking its
+    // timers and its knowledge of another company's runs with it.
+    <ComplianceRunsProvider>
+      <div className="app-shell">
+        <Sidebar />
+        <div className="main">
+          <Topbar pageName={pageName} />
+          <div className="content">
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
+          </div>
         </div>
+        {/* Home has its own Ask Copilot card, so hide the floating chat there. */}
+        {chatbotShown && <FloatingChatbot />}
+        {/* Shown everywhere, including the dashboard: the point of the dock is
+            that it survives going off to do something else. */}
+        <ComplianceRunsDock raised={chatbotShown} />
       </div>
-      {/* Home has its own Ask Copilot card, so hide the floating chat there. */}
-      {location.pathname !== '/dashboard' && <FloatingChatbot />}
-    </div>
+    </ComplianceRunsProvider>
   );
 }

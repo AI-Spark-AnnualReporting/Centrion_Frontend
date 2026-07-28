@@ -31,8 +31,7 @@ const NAV_ITEMS = [
       { key: 'dashboard', label: 'Command Center', path: '/dashboard', icon: 'grid', badge: null },
       { key: 'reports', label: 'Reports', path: '/reports', icon: 'doc', badge: null },
       { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: null },
-      // Hidden until the Compliance feature is wired to the backend.
-      // { key: 'compliance', label: 'Compliance', path: '/compliance', icon: 'shield', badge: { text: '!', cls: 'rd' } },
+      { key: 'compliance', label: 'Compliance Validation', path: '/compliance', icon: 'shield', badge: null },
       { key: 'ai', label: 'AI Copilot', path: '/ai', icon: 'chat', badge: null },
     ],
   },
@@ -40,9 +39,8 @@ const NAV_ITEMS = [
     section: 'Stakeholders',
     items: [
       { key: 'meetings', label: 'Board & Meetings', path: '/meetings', icon: 'cal', badge: null },
-      // Hidden until Comms Hub is wired to the backend.
-      // { key: 'comms', label: 'Comms Hub', path: '/comms', icon: 'mail', badge: { text: 'Unread', cls: 'rd' } },
       { key: 'stakeholders', label: 'Leadership', path: '/stakeholders', icon: 'people', badge: null },
+      { key: 'comms', label: 'Communication Hub', path: '/comms', icon: 'mail', badge: null },
       { key: 'ircalendar', label: 'IR Calendar', path: '/ir-calendar', icon: 'calchk', badge: null },
     ],
   },

@@ -25,6 +25,21 @@ export function relativeTime(input?: string | null): string {
   return `${yr} year${yr === 1 ? "" : "s"} ago`;
 }
 
+// Same idea as relativeTime, but for an epoch-millisecond stamp — locally
+// stored records carry numbers, not API date strings. Phrased for "when did
+// this happen", so it says "just now" rather than relativeTime's "Active now".
+export function relativeSince(timestampMs: number): string {
+  const sec = Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.round(hr / 24);
+  if (day === 1) return "yesterday";
+  return `${day} days ago`;
+}
+
 // Compact "09 Jun 2026 · 14:32" timestamp used in the activity feed.
 export function shortDateTime(input?: string | null): string {
   if (!input) return "";

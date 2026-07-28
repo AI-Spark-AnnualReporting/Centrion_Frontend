@@ -79,6 +79,28 @@ import type {
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
+  CandidatesResponse,
+  CertificateVerification,
+  CertifiedRun,
+  CertifyResponse,
+  CheckEvidence,
+  CompliancePreview,
+  ComplianceRun,
+  CreateRunPayload,
+  CreateRunResponse,
+  EntityType,
+  ListRunsQuery,
+  Market,
+  ReportType,
+  ResolveGapResponse,
+  RuleDetailGroup,
+  RunListItem,
+  RunsResponse,
+  UploadRunPayload,
+  UploadRunResponse,
+} from "@/types/compliance";
+import { normalizeVerificationCode } from "@/types/compliance";
+import type {
   AssignDepartmentsPayload,
   AssignDepartmentsResponse,
   Cycle,
@@ -100,6 +122,13 @@ const API_BASE_URL = (
 const SAR_BASE_URL = (
   import.meta.env.VITE_SAR_URL ?? "http://127.0.0.1:8010"
 ).replace(/\/+$/, "");
+
+// Public, unauthenticated PDF download — the backend sets
+// `Content-Disposition: attachment`, so a plain <a> works and no token is
+// needed. That matters: the same URL goes into the investor email, where there
+// is no JS to attach a Bearer header.
+export const publicReportDownloadUrl = (reportId: string) =>
+  `${API_BASE_URL}/api/public/reports/${reportId}/download`;
 
 const TOKEN_STORAGE_KEY = "centriton_token";
 const USER_STORAGE_KEY = "centriton_user";
@@ -883,6 +912,251 @@ export const compliance = {
 };
 
 // ---------------------------------------------------------------------------
+// Compliance Validation (3-step wizard)
+// ---------------------------------------------------------------------------
+//
+// The company is derived from the report/cycle server-side and checked against
+// the JWT, so no company id is sent — a cross-company subject id returns 403.
+//
+// Note the subject pair: annual reports aren't rows in `reports`, they live
+// under a reporting cycle, so runs are keyed by (subject_type, subject_id).
+
+const COMPLIANCE_BASE = "/api/v1/compliance";
+
+// Guarantee the three list fields exist so a sparse response renders an empty
+// section instead of crashing the review screen. They are legitimately empty
+// for the whole 30–60s a run is in flight, so this is the normal case, not a
+// defensive edge. `publication_gate` is deliberately NOT defaulted — null is
+// meaningful ("not decided yet") and the screens branch on it.
+function normalizeRun(run: ComplianceRun): ComplianceRun {
+  return {
+    ...run,
+    publication_gate: run?.publication_gate ?? null,
+    frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
+    gaps: Array.isArray(run?.gaps) ? run.gaps : [],
+    rule_detail: Array.isArray(run?.rule_detail)
+      ? run.rule_detail.map(normalizeRuleGroup)
+      : [],
+  };
+}
+
+// A rule-detail row carries its evidence FLAT — `quote`, `proof`,
+// `section_code`, `page`, `source_file` sitting next to `rule_id` — while a gap
+// nests the same information under `evidence`. Fold the flat form into
+// `evidence` here so every renderer downstream reads one shape.
+//
+// An already-nested `evidence` wins: the backend has served both forms, and a
+// row that arrives in the richer shape (with `found`/`missing`/`confidence`,
+// which the flat form has no room for) must not be flattened back down to what
+// the flat fields can express.
+function normalizeRuleGroup(group: RuleDetailGroup): RuleDetailGroup {
+  return {
+    ...group,
+    rules: (Array.isArray(group?.rules) ? group.rules : []).map((rule) => {
+      if (rule?.evidence) return rule;
+      const evidence: CheckEvidence = {};
+      if (rule?.quote) evidence.quote = rule.quote;
+      if (rule?.proof) evidence.proof = rule.proof;
+      if (rule?.section_code) evidence.section_code = rule.section_code;
+      if (rule?.page != null) evidence.page = rule.page;
+      if (rule?.source_file) evidence.source_file = rule.source_file;
+      if (rule?.evidence_source) evidence.evidence_source = rule.evidence_source;
+      // A `no_data` row legitimately carries nothing but `evidence_source`.
+      // Leave `evidence` null there rather than attaching an empty object, so
+      // the "no evidence recorded" branches stay reachable.
+      return Object.keys(evidence).length > 0 ? { ...rule, evidence } : rule;
+    }),
+  };
+}
+
+export const complianceValidation = {
+  // Reports/cycles eligible for validation. The endpoint hides the fan-out
+  // across two tables: annual comes back as subject_type "cycle", everything
+  // else as "report". Only approved subjects are returned, so an empty list is
+  // an expected state, not an error.
+  listCandidates: (companyId: string, reportType: ReportType) =>
+    request<CandidatesResponse>(`${COMPLIANCE_BASE}/candidates`, {
+      query: { company_id: companyId, report_type: reportType },
+    }).then((r) => (Array.isArray(r?.candidates) ? r.candidates : [])),
+
+  // Every run for the company, newest first — running, finished and failed.
+  // The authority on what state a run is in: a status the browser remembered
+  // goes stale as soon as the tab closes, which on a 60–90s run is most of them.
+  listRuns: (companyId: string, query: ListRunsQuery = {}): Promise<RunListItem[]> =>
+    request<RunsResponse>(`${COMPLIANCE_BASE}/runs`, {
+      query: { company_id: companyId, ...query },
+    }).then((r) => (Array.isArray(r?.runs) ? r.runs : [])),
+
+  // Every run that has been certified, newest first. Each entry carries its
+  // subject's title and period, so the gallery renders straight from this with
+  // no second lookup. `reportType` is an optional filter.
+  //
+  // The envelope isn't pinned down, so accept a bare array or any of the usual
+  // wrappers — a gallery is not worth crashing a page over.
+  listCertified: (companyId: string, reportType?: ReportType) =>
+    request<CertifiedRun[] | Record<string, unknown>>(`${COMPLIANCE_BASE}/certified`, {
+      query: { company_id: companyId, ...(reportType ? { report_type: reportType } : {}) },
+    }).then((r) => {
+      if (Array.isArray(r)) return r as CertifiedRun[];
+      const wrapped = r as Record<string, unknown> | null;
+      for (const key of ["certified", "runs", "items", "results"]) {
+        const value = wrapped?.[key];
+        if (Array.isArray(value)) return value as CertifiedRun[];
+      }
+      return [] as CertifiedRun[];
+    }),
+
+  // Runs the same rule selection the real run uses, so the preview can never
+  // disagree with what executes.
+  preview: (query: {
+    report_type: ReportType;
+    entity_type: EntityType;
+    market?: Market;
+    period_end?: string;
+  }) =>
+    request<CompliancePreview>(`${COMPLIANCE_BASE}/preview`, { query }).then(
+      (p) => ({
+        ...p,
+        frameworks: Array.isArray(p?.frameworks) ? p.frameworks : [],
+      }),
+    ),
+
+  // Asynchronous — 202 in under a second, before anything has been checked.
+  // The run itself takes 30–60s because it reads the whole report through an
+  // LLM. There are no scores in this response: keep the run_id and poll
+  // getRun() until status is "done" or "error".
+  createRun: (body: CreateRunPayload) =>
+    request<CreateRunResponse>(`${COMPLIANCE_BASE}/runs`, {
+      method: "POST",
+      body,
+    }),
+
+  // The same run, for a report we didn't generate. Multipart rather than JSON,
+  // and asynchronous in the same way: 202 first, then poll getRun().
+  //
+  // Two things differ from createRun and both bite if missed. The file field is
+  // `file`, singular — every other upload in this app posts `files`. And the
+  // period can't be looked up: an uploaded file has no record behind it, so the
+  // caller collects "FY-2025" / "Q3-2025" from the user and sends it verbatim.
+  //
+  // Slower than a picker run — the file has to be read before it can be judged
+  // — but only the wait changes, not the shape of the result.
+  createUploadRun: (body: UploadRunPayload) => {
+    const fd = new FormData();
+    fd.append("file", body.file);
+    fd.append("company_id", body.company_id);
+    fd.append("report_type", body.report_type);
+    fd.append("period", body.period);
+    fd.append("entity_type", body.entity_type);
+    if (body.market) fd.append("market", body.market);
+    // Repeated field, like every other list this API takes. Omitted entirely
+    // means "no filter" — which is why the caller blocks submit when the user
+    // has switched every framework off, rather than sending an empty list.
+    (body.enabled_frameworks ?? []).forEach((r) => fd.append("enabled_frameworks", r));
+    if (body.content_language) fd.append("content_language", body.content_language);
+    return postForm<UploadRunResponse>(`${COMPLIANCE_BASE}/runs/upload`, fd);
+  },
+
+  // The poll target, and the read for both result screens. Returns the same
+  // shape at every stage — while running, the scores are null and the lists are
+  // empty. Scores are recomputed from stored results on each read, so this is
+  // always current after a resolve.
+  getRun: (runId: string) =>
+    request<ComplianceRun>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}`,
+    ).then(normalizeRun),
+
+  // `reason` is required and cannot be blank — the API 400s otherwise.
+  resolveGap: (resultId: string, reason: string) =>
+    request<ResolveGapResponse>(
+      `${COMPLIANCE_BASE}/results/${encodeURIComponent(resultId)}/resolve`,
+      { method: "POST", body: { reason } },
+    ),
+
+  // Throws ApiError with a 409 and a CertifyBlockedBody `detail` when the run
+  // is still running (`detail.status === "running"`) or HARD checks are still
+  // failing; the gate is re-checked server-side at this point.
+  certify: (runId: string) =>
+    request<CertifyResponse>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certify`,
+      { method: "POST" },
+    ),
+
+  // The certificate as a PDF. Authed and binary, so `request()` is no use here
+  // (it parses the body as JSON or text) and a plain <a href> is no use either
+  // — the browser wouldn't attach the Bearer token.
+  //
+  // Serves any FINISHED run, certified or not: 409 while it's still running or
+  // if it errored, 403 for another company's run, 404 for an unknown id. Those
+  // bodies are JSON `{ detail }`, so parse them on failure and hand the caller
+  // an ApiError it can read the server's own wording off.
+  certificatePdf: async (
+    runId: string,
+  ): Promise<{ blob: Blob; filename: string | null }> => {
+    const url = `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certificate.pdf`;
+    const full = `${API_BASE_URL}${url}`;
+    const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(full, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) {
+      const parsed: unknown = await res.json().catch(() => null);
+      throw new ApiError(res.status, res.statusText, parsed, full);
+    }
+
+    return { blob: await res.blob(), filename: attachmentFilename(res) };
+  },
+};
+
+// Read the server's own filename out of `Content-Disposition`. Returns null
+// rather than a guess when it can't — and it often can't: the header is not a
+// CORS-safelisted response header, so unless the API sends
+// `Access-Control-Expose-Headers: Content-Disposition` this reads as absent in
+// the browser even though it's on the wire. Callers own the fallback name,
+// since only they know what the file is of.
+function attachmentFilename(res: Response): string | null {
+  const header = res.headers.get("Content-Disposition");
+  if (!header) return null;
+  // RFC 5987 `filename*=UTF-8''…` wins when present — it's the one that can
+  // carry non-ASCII, which matters for Arabic report titles.
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      /* malformed percent-encoding — fall through to the plain form */
+    }
+  }
+  return header.match(/filename="([^"]+)"/i)?.[1] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Public certificate verification
+// ---------------------------------------------------------------------------
+//
+// Unauthenticated on purpose: the whole point is that someone holding a printed
+// certificate — an auditor, a regulator, an investor — can check it without an
+// account. Not under COMPLIANCE_BASE; it lives on its own public path.
+
+export const publicVerification = {
+  // 200 with the run's public facts, or 404. The 404 is the SAME for a
+  // malformed code, an unknown code and an unfinished run, so that the endpoint
+  // can't be used to probe which runs exist — callers must render one
+  // not-found state and must not try to tell them apart.
+  //
+  // `auth: false` matters twice: it sends no token (correct for a public
+  // endpoint, and the visitor may have none), and it keeps a 401 from bouncing
+  // an anonymous visitor to /login.
+  verify: (code: string) =>
+    request<CertificateVerification>(
+      `/api/v1/public/verify/${encodeURIComponent(normalizeVerificationCode(code))}`,
+      { auth: false },
+    ),
+};
+
+// ---------------------------------------------------------------------------
 // Reports
 // ---------------------------------------------------------------------------
 
@@ -1623,6 +1897,407 @@ export const meetings = {
 };
 
 // ---------------------------------------------------------------------------
+// Communication Hub
+// ---------------------------------------------------------------------------
+
+// A report-type pill in the "Start a communication" modal. `count` is the
+// number of threadless reports of this type and stays constant regardless of
+// the active filter (it always reflects the unfiltered set).
+export interface ThreadlessReportType {
+  code: string;
+  label: string;
+  count: number;
+}
+
+// A report that doesn't have a communication thread yet.
+export interface ThreadlessReport {
+  id: string;
+  report_type: string;
+  period: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ThreadlessReportsResponse {
+  types: ThreadlessReportType[];
+  reports: ThreadlessReport[];
+}
+
+// A company member eligible to be @mentioned. `id` is the UUID the write
+// endpoint expects; `user_id` (usr_… string) is display-only — never send it.
+export interface CommunicationMember {
+  id: string;
+  user_id: string;
+  full_name: string;
+  role: string;
+  department: string | null;
+}
+
+export interface CommunicationMembersResponse {
+  members: CommunicationMember[];
+}
+
+export interface StartThreadBody {
+  report_id: string;
+  message: string;
+  // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface CommunicationThread {
+  id: string;
+  company_id: string;
+  report_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunicationMessage {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface StartThreadResponse {
+  thread: CommunicationThread;
+  message: CommunicationMessage;
+}
+
+// ── Communication Hub list (Communication tab) ────────────────────────────
+
+export interface ThreadReport {
+  id: string;
+  report_type: string;
+  // Display strings — use directly; report_type/status are the raw codes.
+  type_label: string;
+  period: string;
+  title: string;
+  status: string;
+  status_label: string;
+}
+
+export interface ThreadOwner {
+  user_id: string;
+  full_name: string;
+  is_you: boolean;
+}
+
+export interface ThreadLastMessage {
+  sender_full_name: string;
+  is_you: boolean;
+  preview: string;
+  created_at: string;
+}
+
+// One row in the Communication tab. Rows arrive pre-sorted (updated_at desc) —
+// don't re-sort. `owner` and `last_message` can both be null.
+export interface ThreadSummary {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  updated_at: string;
+  last_message: ThreadLastMessage | null;
+  internal_count: number;
+  unread_count: number;
+}
+
+export interface ThreadListResponse {
+  threads: ThreadSummary[];
+}
+
+export interface MarkThreadReadResponse {
+  ok: boolean;
+}
+
+// ── Thread view (message list + reply) ────────────────────────────────────
+
+export interface MessageSender {
+  user_id: string;
+  full_name: string;
+  // Raw role code (e.g. "ir") — label it on the frontend.
+  role: string;
+  is_you: boolean;
+}
+
+export interface ThreadMessage {
+  id: string;
+  sender: MessageSender;
+  body: string;
+  mentioned_user_ids: string[];
+  created_at: string;
+}
+
+export interface ThreadDetail {
+  thread_id: string;
+  report: ThreadReport;
+  owner: ThreadOwner | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Messages arrive oldest→newest, already sorted — render in order.
+export interface ThreadDetailResponse {
+  thread: ThreadDetail;
+  messages: ThreadMessage[];
+}
+
+export interface SendMessageBody {
+  message: string;
+  // Members' `id` UUIDs (NOT usr_ `user_id`). Empty array if none.
+  mentioned_user_ids: string[];
+}
+
+export interface SendMessageResponse {
+  message: ThreadMessage;
+}
+
+// ── History tab: email sends + publications ────────────────────────────────
+export type EmailAudience = 'external' | 'internal';
+export type EmailSendStatus = 'tracked' | 'scheduled' | 'draft';
+
+export interface EmailSendsStats {
+  emails_sent_ytd: number;
+  external_count: number;
+  internal_count: number;
+  avg_open_rate: number;
+  industry_open_rate: number;
+  open_rate_vs_industry: number; // signed delta vs industry
+  report_download_rate: number;
+  avg_time_on_report_seconds: number;
+  time_on_report_qoq_seconds: number | null;
+}
+
+// metrics is a different shape per audience_type.
+export type EmailSendMetrics =
+  | { opened_pct: number; downloaded_pct: number } // external
+  | { read_count: number; approved_count: number; total: number }; // internal
+
+export interface EmailSend {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  sent_at: string | null;
+  scheduled_at: string | null;
+  recipient_count: number;
+  report: { id: string; title: string } | null;
+  metrics: EmailSendMetrics;
+}
+
+export interface EmailSendsResponse {
+  stats: EmailSendsStats;
+  sends: EmailSend[];
+}
+
+export interface SendRecipientHeader {
+  id: string;
+  subject: string;
+  audience_type: EmailAudience;
+  sent_at: string | null;
+  recipient_count: number;
+}
+
+export interface SendRecipient {
+  name: string;
+  org: string | null;
+  contact: string | null;
+  opened_at: string | null;
+  downloaded: boolean;
+  time_on_report_seconds: number | null;
+  approved_at: string | null;
+}
+
+export interface SendRecipientsResponse {
+  send: SendRecipientHeader;
+  recipients: SendRecipient[];
+}
+
+export interface Publication {
+  id: string;
+  report: { id: string; title: string; report_type: string; period: string } | null;
+  channel: string;
+  jurisdiction: string | null;
+  visibility: string;
+  watermarked: boolean;
+  published_at?: string | null;
+  published_by: { full_name: string } | null;
+}
+
+export interface PublicationsResponse {
+  stats: { total: number } & Record<string, number>;
+  publications: Publication[];
+}
+
+// ── Compose modal: draft / send ────────────────────────────────────────────
+export interface ComposeRecipient {
+  name: string; // the only required field per recipient
+  org?: string | null;
+  contact?: string | null;
+  email?: string | null;
+}
+
+export interface EmailSendSavePayload {
+  subject: string;
+  audience_type: EmailAudience;
+  audience_label?: string;
+  body?: string;
+  report_id?: string | null;
+  status: EmailSendStatus;
+  scheduled_at?: string | null; // required only when status === 'scheduled'
+  recipients?: ComposeRecipient[];
+}
+
+// GET /{id} — the editor prefill shape (distinct from /{id}/recipients).
+export interface EmailSendDetail {
+  id: string;
+  subject: string;
+  body: string | null;
+  audience_type: EmailAudience;
+  audience_label: string;
+  status: EmailSendStatus;
+  scheduled_at: string | null;
+  report: {
+    id: string;
+    title: string;
+    pdf_path: string | null;
+    page_count: number | null;
+    file_size_mb: number | null;
+  } | null;
+  recipients: ComposeRecipient[];
+}
+
+export interface CreateEmailSendResponse {
+  send: EmailSendDetail;
+  recipient_count: number;
+}
+
+export interface UpdateEmailSendResponse {
+  send: EmailSendDetail;
+}
+
+export interface DraftListItem {
+  id: string;
+  subject: string;
+  recipient_count: number;
+  report: { id: string; title: string; period?: string } | null;
+  updated_at: string;
+}
+
+export interface DraftListResponse {
+  drafts: DraftListItem[];
+}
+
+// company_id is never sent — the backend derives it from the JWT.
+export const communications = {
+  // Communication tab list. limit (1–200, default 50) / offset (default 0) are
+  // only needed for pagination.
+  listThreads: (params?: { limit?: number; offset?: number }) =>
+    request<ThreadListResponse>("/api/v1/communications/threads", {
+      query: params,
+    }),
+
+  // Move the caller's read watermark to now for this thread → clears "N new".
+  // Fire when the user opens a thread. 404 → thread gone / not in company.
+  markThreadRead: (threadId: string) =>
+    request<MarkThreadReadResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/read`,
+      { method: "POST" },
+    ),
+
+  // Thread header + full message list (oldest→newest). 404 → thread gone.
+  getThread: (threadId: string) =>
+    request<ThreadDetailResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+    ),
+
+  // Post a reply. Bumps the thread's updated_at (reorders the list).
+  sendMessage: (threadId: string, body: SendMessageBody) =>
+    request<SendMessageResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/messages`,
+      { method: "POST", body },
+    ),
+
+  // All threadless reports + the type pills. `type` narrows only the reports
+  // list; the pills always reflect the full unfiltered set.
+  threadlessReports: (type?: string) =>
+    request<ThreadlessReportsResponse>(
+      "/api/v1/communications/threadless-reports",
+      { query: type ? { type } : undefined },
+    ),
+
+  // Members eligible for the @mention picker. Loaded once and filtered client-side.
+  members: () =>
+    request<CommunicationMembersResponse>("/api/v1/communications/members"),
+
+  // Start a thread on a report with a first message + optional mentions.
+  startThread: (body: StartThreadBody) =>
+    request<StartThreadResponse>("/api/v1/communications/threads", {
+      method: "POST",
+      body,
+    }),
+
+  // ── History tab ──────────────────────────────────────────────────────────
+  // Email sends + header stats. `audience` filters the list only; stats always
+  // cover everything so the header stays stable while toggling.
+  emailSends: (audience?: EmailAudience | 'all') =>
+    request<EmailSendsResponse>("/api/v1/communications/history/email-sends", {
+      query: audience && audience !== 'all' ? { audience } : undefined,
+    }),
+
+  // Per-recipient drill-down for one send.
+  sendRecipients: (sendId: string) =>
+    request<SendRecipientsResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients`,
+    ),
+
+  // CSV export — must carry the Bearer token, so fetch as a blob (no plain <a>).
+  sendRecipientsCsv: async (sendId: string): Promise<Blob> => {
+    const url = `${API_BASE_URL}/api/v1/communications/history/email-sends/${encodeURIComponent(sendId)}/recipients.csv`;
+    const headers: Record<string, string> = {};
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
+    return res.blob();
+  },
+
+  // Publications list + stats. Empty until reports are published.
+  publications: () =>
+    request<PublicationsResponse>("/api/v1/communications/history/publications"),
+
+  // ── Compose: draft / send ────────────────────────────────────────────────
+  // Create a send row (first Save draft OR first Send).
+  createEmailSend: (body: EmailSendSavePayload) =>
+    request<CreateEmailSendResponse>("/api/v1/communications/history/email-sends", {
+      method: "POST",
+      body,
+    }),
+
+  // Update an existing draft (subsequent Save / Send). All fields optional;
+  // `recipients` replaces the whole list. 409 if already tracked/scheduled.
+  updateEmailSend: (id: string, body: Partial<EmailSendSavePayload>) =>
+    request<UpdateEmailSendResponse>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+      { method: "PATCH", body },
+    ),
+
+  // Reopen a draft — prefill the editor. `report.pdf_path` may be null.
+  getEmailSend: (id: string) =>
+    request<EmailSendDetail>(
+      `/api/v1/communications/history/email-sends/${encodeURIComponent(id)}`,
+    ),
+
+  // Saved drafts (only surface for drafts — they're not in the History list).
+  drafts: () => request<DraftListResponse>("/api/v1/communications/history/drafts"),
+};
+
+// ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------
 
@@ -2312,6 +2987,8 @@ export const api = {
   agents,
   esg,
   compliance,
+  complianceValidation,
+  publicVerification,
   reports,
   chat,
   meetings,
