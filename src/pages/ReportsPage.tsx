@@ -53,6 +53,7 @@ interface ReportRegulatorSummary {
 interface ReportSummary {
   id: string;
   period: string;
+  report_type?: string | null;
   generation_config?: ReportGenerationConfig;
   title?: string;
   scope_type?: string;
