@@ -166,6 +166,11 @@ export interface OutlineResponse {
   total_catalogue?: number;
   // Whole-outline freeze — true once the outline is locked (read-only).
   locked?: boolean;
+  // True while the ingest worker is still writing figures. Until it flips false a
+  // section's feeder is a snapshot of a moving target: "needs_input" may just mean
+  // "not extracted yet". The page polls on this and freezes edits while it's true.
+  ingest_running?: boolean;
+  ingest_run_id?: string | null;
   sections: OutlineSection[];
 }
 

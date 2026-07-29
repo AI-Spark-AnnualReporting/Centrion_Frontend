@@ -5,7 +5,7 @@ import {
   clearActivePipeline,
   saveActivePipeline,
 } from "@/lib/active-pipeline";
-import { reports as reportsApi } from "@/lib/api";
+import { reports as reportsApi, quarterlyReports, ApiError } from "@/lib/api";
 import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
 import {
   QuarterlyGeneratingScreen,
@@ -15,6 +15,7 @@ import AiLoadingScreen from "@/pages/onboarding/AiLoadingScreen";
 import { useAuth } from "@/context/AuthContext";
 import { isPeriodNotFound } from "@/types/report";
 import type { CoverageResponse } from "@/types/report";
+import type { OutlineSavePayload } from "@/types/quarterly";
 
 // The quarterly "Generate Report" loader reuses the onboarding workspace loader
 // (AiLoadingScreen). These milestones/tips are the quarterly-flavoured copy.
@@ -127,6 +128,16 @@ export interface ProcessingPageState {
   // Where a completed quarterly run hands off. Extraction → "outline" (default);
   // section-production (produceAll, kicked from the Outline) → "preview".
   quarterlyNext?: "outline" | "preview";
+  // Set when the caller navigated BEFORE a run existed, so the user reaches the
+  // loader on the click instead of watching a dead button. Locking an outline takes
+  // a few seconds and produceAll can only be kicked after it, so the Outline page
+  // used to await all of that before navigating. With this, ProcessingPage performs
+  // save → lock → produceAll itself and fills in runId/pollUrl when they arrive.
+  // runId/pollUrl are sent as "" in that case.
+  bootstrap?: {
+    kind: "quarterly-produce";
+    outlinePayload: OutlineSavePayload;
+  };
 }
 
 export default function ProcessingPage() {
@@ -135,9 +146,48 @@ export default function ProcessingPage() {
   const { user } = useAuth();
   const state = location.state as ProcessingPageState | null;
 
-  const pollUrl = state?.pollUrl ?? null;
-  const runId = state?.runId ?? null;
+  // A bootstrapped run has no ids yet — the caller sent "" and we resolve them here.
+  // `||` (not `??`) so those empty strings fall through to the resolved values.
+  const [bootRun, setBootRun] = useState<{ runId: string; pollUrl: string } | null>(null);
+  const pollUrl = state?.pollUrl || bootRun?.pollUrl || null;
+  const runId = state?.runId || bootRun?.runId || null;
   const { state: poll, restart } = usePipelinePoll(runId, pollUrl);
+
+  // Bootstrap: save + lock the outline, then kick produceAll. Runs ONCE, after the
+  // loader is already on screen, which is the whole point — these calls take several
+  // seconds and used to happen while the user stared at a disabled button.
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    const boot = state?.bootstrap;
+    if (!boot || !state?.companyId || !state?.reportId) return;
+    if (state.runId || bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    const companyId = state.companyId;
+    const reportId = state.reportId;
+
+    (async () => {
+      try {
+        await quarterlyReports.saveOutline(companyId, reportId, boot.outlinePayload);
+        await quarterlyReports.lockOutline(companyId, reportId);
+        const handle = await quarterlyReports.produceAll(companyId, reportId);
+        if (handle?.run_id && handle?.poll_url) {
+          setBootRun({ runId: handle.run_id, pollUrl: handle.poll_url });
+          return;
+        }
+        // Batch produce didn't come back with a handle — Preview can still produce
+        // each section individually, so hand off there rather than stranding the user.
+        navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+      } catch (err: unknown) {
+        // 409 = already locked elsewhere; sections are (being) produced. Don't
+        // re-kick production, just go look at them. Same rule the Outline page used.
+        if (err instanceof ApiError && err.status === 409) {
+          navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+          return;
+        }
+        navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+      }
+    })();
+  }, [state, navigate]);
 
   // Coverage is fetched on this page on completion so the handoff back to
   // /reports renders the report immediately (no intermediate loader flash).
@@ -157,11 +207,13 @@ export default function ProcessingPage() {
   }, [readyReportId, navigate, state?.quarterlyNext]);
 
   // Persist the active run so the user can resume from /reports if they leave.
+  // Keyed off the RESOLVED ids, not state.*, so a bootstrapped run is persisted too
+  // once its ids arrive (state.runId/pollUrl stay "" for those).
   useEffect(() => {
-    if (!state || !state.pollUrl || !state.companyId) return;
+    if (!state || !pollUrl || !runId || !state.companyId) return;
     saveActivePipeline({
-      runId: state.runId,
-      pollUrl: state.pollUrl,
+      runId,
+      pollUrl,
       reportId: state.reportId,
       companyId: state.companyId,
       fileName: state.fileName,
@@ -169,7 +221,7 @@ export default function ProcessingPage() {
       reportType: state.reportType,
       period: state.period,
     });
-  }, [state]);
+  }, [state, runId, pollUrl]);
 
   useEffect(() => {
     if (poll.phase === "failed") {
@@ -246,8 +298,9 @@ export default function ProcessingPage() {
       });
   }, [poll, navigate, state]);
 
-  // Deep link / refresh — nothing to poll.
-  if (!state || !pollUrl) {
+  // Deep link / refresh — nothing to poll. A bootstrapping run has no pollUrl yet
+  // (it's still locking the outline), so it must NOT fall in here.
+  if (!state || (!pollUrl && !state.bootstrap)) {
     return (
       <GeneratingScreen
         phase="failed"
