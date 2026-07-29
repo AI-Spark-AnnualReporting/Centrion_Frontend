@@ -205,7 +205,7 @@ export interface Department {
   is_system?: boolean | null;
   initial_prompt?: string | null;
   system_prompt?: string | null;
-  // Head of Department for this department (SAR HOD flow). Populated by
+  // HR Lead for this department (SAR `hod` role flow). Populated by
   // GET /admin/departments; set when an admin creates/edits an `hod` user.
   hod_user_id?: string | null;
   hod_name?: string | null;

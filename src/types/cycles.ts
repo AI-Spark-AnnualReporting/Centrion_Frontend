@@ -134,7 +134,7 @@ export interface ResolveSectionsResponse {
 
 // POST /api/v1/admin/cycles/{id}/assign-departments
 export interface AssignDepartmentsPayload {
-  // HOD flow: department-only. The dept's HOD is resolved server-side; user_id is ignored.
+  // HR Lead flow: department-only. The dept's HR Lead is resolved server-side; user_id is ignored.
   assignments: { department_id: string; user_id?: string }[];
 }
 
