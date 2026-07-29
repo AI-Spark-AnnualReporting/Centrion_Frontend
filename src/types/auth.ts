@@ -5,7 +5,7 @@ export interface AuthUser {
   email: string;
   full_name: string;
   // `ir` users come from the Admin Console invite flow — read-only.
-  // `hod` (Head of Department) works in the SAR app like PM/department_user.
+  // `hod` (HR Lead) works in the SAR app like PM/department_user.
   role: "admin" | "project_manager" | "hod" | "department_user" | "ir";
   company_id?: string | null;
   company_name?: string | null;

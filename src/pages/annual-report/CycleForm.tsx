@@ -8,7 +8,7 @@ const PRIMARY = '#4040C8';
 const WORKFLOW_STEPS = [
   'Admin creates the cycle — sets the name, fiscal year, dates, and assigns a Project Manager',
   'PM configures the cycle — writes the kickoff brief, adds department timelines, activates it',
-  'HOD curates & reviews — refines the AI-generated questions for their department and reviews each answer',
+  'HR Lead curates & reviews — refines the AI-generated questions for their department and reviews each answer',
   'Departments answer AI-generated questions — each department submits their narrative',
   'PM reviews & generates the final report',
 ];

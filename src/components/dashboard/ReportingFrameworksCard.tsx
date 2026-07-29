@@ -194,7 +194,7 @@ export function ReportingFrameworksCard() {
 
       {/* Revenue — one bar per year (all financial periods) */}
       <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid #ECEEF8' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: '#9BA3C4', marginBottom: 14 }}>Revenue</div>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: '#9BA3C4', marginBottom: 14 }}>Revenue Comparison</div>
         {revBars.length === 0 ? (
           <div style={{ fontSize: 12, color: '#9BA3C4', paddingBottom: 6 }}>Revenue appears once your annual report is processed.</div>
         ) : (

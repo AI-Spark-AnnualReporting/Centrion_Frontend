@@ -147,9 +147,9 @@ function InviteModal({
       const dept = departments.find((d) => d.id === departmentId);
       if (dept?.has_hod) {
         const ok = window.confirm(
-          `${dept.department_name} already has a Head of Department` +
+          `${dept.department_name} already has an HR Lead` +
             (dept.hod_name ? ` (${dept.hod_name})` : '') +
-            `. Creating this user will replace them as the HOD. Continue?`,
+            `. Creating this user will replace them as the HR Lead. Continue?`,
         );
         if (!ok) return;
       }
@@ -269,7 +269,7 @@ function InviteModal({
                 departmentId &&
                 departments.find((d) => d.id === departmentId)?.has_hod && (
                   <div style={{ marginTop: 6, fontSize: 10.5, color: '#B45309', fontWeight: 600 }}>
-                    ⚠ This department already has an HOD
+                    ⚠ This department already has an HR Lead
                     {departments.find((d) => d.id === departmentId)?.hod_name
                       ? ` (${departments.find((d) => d.id === departmentId)?.hod_name})`
                       : ''}
