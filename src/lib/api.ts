@@ -494,6 +494,30 @@ export const auth = {
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
 
+  // Self-service reset, for users who can't log in at all (so no JWT — unlike
+  // changePassword above). Query params, same as login/register: that's what
+  // the backend reads.
+  //
+  // Always resolves 200 for any email — unknown address, suspended account and
+  // a real send are byte-identical, so the form can't be used to enumerate
+  // accounts. `reset_link` comes back only while the backend runs DEBUG=true.
+  forgotPassword: (email: string) =>
+    request<{ sent: boolean; reset_link?: string }>(
+      "/api/v1/auth/forgot-password",
+      { method: "POST", query: { email }, auth: false },
+    ),
+
+  // Consumes the single-use token from the emailed link (valid 30 min). 400 is
+  // the catch-all for expired / malformed / already-used — deliberately one
+  // message, so don't try to distinguish them. Also clears must_change_password
+  // and activates a pending invitee.
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ reset: boolean }>("/api/v1/auth/reset-password", {
+      method: "POST",
+      query: { token, new_password: newPassword },
+      auth: false,
+    }),
+
   // First-login onboarding for self-registered admins. Unlike the other auth
   // calls this sends a JSON body, and returns a freshly-issued token whose JWT
   // now carries onboarding_completed = true.

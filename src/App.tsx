@@ -4,6 +4,10 @@ import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
+import {
+  ForgotPasswordPage,
+  ResetPasswordPage,
+} from "./components/auth/PasswordResetPages";
 import OnboardingPage from "./pages/OnboardingPage";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -83,6 +87,11 @@ const App = () => (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<SignupPage />} />
+      {/* Public by necessity — a user who can't sign in has no session to
+          protect these with. /reset-password is the target of the emailed
+          link; the token in its query string is the only identity proof. */}
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/signup" element={<SignupPage />} />
       {/* Public — an auditor or regulator holding a printed certificate must be
           able to check it without an account. /verify takes a pasted code;

@@ -333,6 +333,42 @@ All paths are under `${VITE_API_URL}`. `{companyId}` etc. are path params. Funct
 | POST | `/api/v1/auth/login` | `auth.login` | → `LoginResponse` (access_token, user) |
 | POST | `/api/v1/auth/change-password` | `auth.changePassword` | old_password, new_password (query) |
 | GET | `/api/v1/auth/me` | `auth.me` | → `UserProfile` |
+| POST | `/api/v1/auth/forgot-password` | `auth.forgotPassword` | email (query) → `{ sent: true }` |
+| POST | `/api/v1/auth/reset-password` | `auth.resetPassword` | token, new_password (query) → `{ reset: true }` |
+
+#### Password reset
+
+Screens live in `src/components/auth/PasswordResetPages.tsx`, routed at
+`/forgot-password` and `/reset-password` — both public, since a user who can't
+sign in has no session to gate them with. Query params, like `login`/`register`.
+
+```
+POST /api/v1/auth/forgot-password?email=…
+  200: { "sent": true }         ← for ANY email. Unknown address, suspended
+                                  account and a real send are byte-identical,
+                                  so the form can't be used to enumerate
+                                  accounts. Suspended users get no mail.
+  200: { "sent": true, "reset_link": "…" }   ← only while the backend runs
+                                  DEBUG=true. The UI shows it as a "Dev only"
+                                  link, and only in a dev build. If the backend
+                                  has no PUBLIC_BASE_URL set, reset_link is the
+                                  bare token, so the UI builds the local URL.
+  422: email param missing
+
+POST /api/v1/auth/reset-password?token=…&new_password=…
+  200: { "reset": true }        ← also clears must_change_password and flips a
+                                  pending invitee to active. The user then
+                                  signs in normally; the UI sends them to
+                                  /login with a "Password updated" banner.
+  400: { "detail": "Invalid or expired reset link" } — one message covering
+       expired (>30 min) / malformed / wrong-purpose / already-used. The UI
+       doesn't try to distinguish them either; all four need a fresh link.
+  422: password under 8 chars → shown inline under the field
+```
+
+Note for local testing: `EMAIL_ENABLED=false` still returns `{"sent": true}`
+without delivering anything — the endpoint deliberately doesn't leak send
+status. That's what the dev-only link on the success screen is for.
 
 ### Companies
 | Method | Path | Function |
