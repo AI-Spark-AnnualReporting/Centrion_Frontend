@@ -83,21 +83,17 @@ export default function DashboardPage() {
 
   return (
     <div>
-      {/* Header */}
+      {/* Header — tab switcher on the left (matches the design's top-left placement; the
+          page title/company line already live in the topbar breadcrumb + welcome banner). */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.5px', marginBottom: 3 }}>Command Center</h2>
-          <p style={{ fontSize: 12, color: '#5A6080' }}>{displayName} &nbsp;·&nbsp; ESG &amp; IR Intelligence Overview</p>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          {/* Home (workspace) tab — admin only, sits to the left of ESG. */}
+          {isAdmin && <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>}
+          <button className={`tab ${activeTab === 'esg' ? 'act' : ''}`} onClick={() => setActiveTab('esg')}>ESG</button>
+          {/* Financial tab hidden until the financial dashboard is wired up. */}
+          <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
         </div>
-        {/* Right — tab switcher with the action button stacked just beneath it (close, right-aligned) */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
-          <div className="tabs" style={{ marginBottom: 0 }}>
-            {/* Home (workspace) tab — admin only, sits to the left of ESG. */}
-            {isAdmin && <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>}
-            <button className={`tab ${activeTab === 'esg' ? 'act' : ''}`} onClick={() => setActiveTab('esg')}>ESG</button>
-            {/* Financial tab hidden until the financial dashboard is wired up. */}
-            <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
-          </div>
+        <div>
           {/* ESG → Generate Report, Board → Schedule Meeting, Home → nothing. */}
           {activeTab === 'brd' && (
             <button

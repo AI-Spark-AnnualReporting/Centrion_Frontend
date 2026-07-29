@@ -110,18 +110,18 @@ function deltaPct(fin: FinancialData | null, keys: string[]): number | null {
 // card's value slot while that KPI is still being computed.
 function AiRingLoader() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 11, margin: '5px 0 3px' }}>
-      <div style={{ position: 'relative', width: 34, height: 34, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <svg width="34" height="34" viewBox="0 0 36 36" fill="none" style={{ position: 'absolute', inset: 0, animation: 'spin 1.2s linear infinite' }}>
-          <circle cx="18" cy="18" r="15" stroke="#ECEEFF" strokeWidth="3" />
-          <path d="M18 3a15 15 0 0 1 15 15" stroke="#4040C8" strokeWidth="3" strokeLinecap="round" />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '2px 0' }}>
+      <div style={{ position: 'relative', width: 54, height: 54, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="54" height="54" viewBox="0 0 36 36" fill="none" style={{ position: 'absolute', inset: 0, animation: 'spin 1.2s linear infinite' }}>
+          <circle cx="18" cy="18" r="15" stroke="rgba(255,255,255,.25)" strokeWidth="3" />
+          <path d="M18 3a15 15 0 0 1 15 15" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ position: 'absolute', animation: 'spin 0.9s linear infinite reverse' }}>
-          <path d="M12 2.5a9.5 9.5 0 0 1 9.5 9.5" stroke="#7C3AED" strokeWidth="2.5" strokeLinecap="round" />
+        <svg width="35" height="35" viewBox="0 0 24 24" fill="none" style={{ position: 'absolute', animation: 'spin 0.9s linear infinite reverse' }}>
+          <path d="M12 2.5a9.5 9.5 0 0 1 9.5 9.5" stroke="rgba(255,255,255,.7)" strokeWidth="2.5" strokeLinecap="round" />
         </svg>
-        <span style={{ position: 'relative', fontSize: 8, fontWeight: 800, color: '#4040C8', letterSpacing: '.3px' }}>AI</span>
+        <span style={{ position: 'relative', fontSize: 12.5, fontWeight: 800, color: '#fff', letterSpacing: '.3px' }}>AI</span>
       </div>
-      <span style={{ fontSize: 11.5, fontWeight: 600, color: '#9BA3C4' }}>Computing…</span>
+      <span style={{ fontSize: 24, fontWeight: 600, color: '#fff' }}>Computing…</span>
     </div>
   );
 }
@@ -138,34 +138,31 @@ function KpiCard({
   sub?: string | null;
   loading?: boolean;
 }) {
-  const hasData = !loading && value !== null;
-  const barColor = hasData ? accent : '#E4E8F2';
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 18px 18px', flex: 1 }}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase' }}>{label}</div>
+    <div style={{ background: 'rgba(53,53,181,.88)', borderBottom: '3px solid #AEAEF0', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 157 }}>
+      <div style={{ padding: '16px 18px 18px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: '.6px', color: '#fff' }}>{label}</div>
         {loading ? (
           <AiRingLoader />
         ) : value === null ? (
           <>
-            <div style={{ fontSize: 23, fontWeight: 800, color: '#C7CBDA', margin: '8px 0 4px', letterSpacing: '-.5px' }}>—</div>
-            <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>Not enough data yet</div>
+            <div style={{ fontSize: 34, fontWeight: 800, color: 'rgba(255,255,255,.5)', margin: '8px 0 4px', letterSpacing: '-.5px' }}>—</div>
+            <div style={{ fontSize: 16, color: 'rgba(255,255,255,.7)' }}>Not enough data yet</div>
           </>
         ) : (
           <>
-            <div style={{ fontSize: 23, fontWeight: 800, color: '#1A1D2E', margin: '6px 0 4px', letterSpacing: '-.5px' }}>{value}</div>
+            <div style={{ fontSize: 34, fontWeight: 800, color: '#fff', margin: '4px 0', letterSpacing: '-.5px' }}>{value}</div>
             {typeof delta === 'number' ? (
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: delta >= 0 ? '#0F9D6B' : '#E5484D', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: delta >= 0 ? '#86EFAC' : '#FCA5A5', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span>{delta >= 0 ? '▲' : '▼'}</span>
                 <span>{deltaUnit === 'pts' ? `${Math.round(Math.abs(delta))} pts` : `${Math.abs(delta).toFixed(1)}%`}{deltaLabel ? ` ${deltaLabel}` : ''}</span>
               </div>
             ) : (
-              <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>{sub ?? ''}</div>
+              <div style={{ fontSize: 16, color: 'rgba(255,255,255,.85)' }}>{sub ?? ''}</div>
             )}
           </>
         )}
       </div>
-      <div style={{ height: 3, background: barColor }} />
     </div>
   );
 }

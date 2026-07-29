@@ -115,15 +115,15 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
               </div>
               <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 0 : 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1D2E' }}>{e.title}</span>
+                  <span style={{ fontSize: 18, fontWeight: 600, color: '#1A1D2E' }}>{e.title}</span>
                   {e.tone === 'urgent' && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>URGENT</span>
+                    <span style={{ fontSize: 10, fontWeight: 400, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>URGENT</span>
                   )}
                   {e.kind === 'filed' && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#0F9D6B', background: 'rgba(15,157,107,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>COMPLETED</span>
+                    <span style={{ fontSize: 10, fontWeight: 400, color: '#0F9D6B', background: 'rgba(15,157,107,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>COMPLETED</span>
                   )}
                 </div>
-                <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{e.subtitle}</div>
+                <div style={{ fontSize: 14, color: '#9BA3C4', marginTop: 2 }}>{e.subtitle}</div>
                 {e.cta && (
                   <button
                     type="button"

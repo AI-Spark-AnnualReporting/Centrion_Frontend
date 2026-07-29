@@ -46,8 +46,8 @@ export function Topbar({ pageName }: TopbarProps) {
           onClick={handleLogout}
           style={{
             marginLeft: 12,
-            padding: '6px 12px',
-            fontSize: 11,
+            padding: '7px 13px',
+            fontSize: 14,
             fontWeight: 600,
             color: '#5A6080',
             background: 'transparent',

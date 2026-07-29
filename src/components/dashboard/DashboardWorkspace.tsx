@@ -13,6 +13,7 @@ import { ShareholderCommsCard } from '@/components/dashboard/ShareholderCommsCar
 import { ReportingFrameworksCard } from '@/components/dashboard/ReportingFrameworksCard';
 import { EsgComparisonsCard } from '@/components/dashboard/EsgComparisonsCard';
 import { AskCopilotCard } from '@/components/dashboard/AskCopilotCard';
+import welcomeBannerBg from '@/assets/welcome-banner-bg.png';
 
 /**
  * Personal welcome dashboard — shown after onboarding once report documents have
@@ -49,7 +50,7 @@ interface WorkspaceDoc {
   created_at?: string;
 }
 
-const CARD_TITLE: React.CSSProperties = { fontSize: 15, fontWeight: 800, color: '#1A1D2E' };
+const CARD_TITLE: React.CSSProperties = { fontSize: 16, fontWeight: 800, color: '#1A1D2E' };
 
 function StatCard({ accent, label, value, sub }: { accent: string; label: string; value: string; sub: string }) {
   return (
@@ -220,22 +221,33 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Welcome banner — decorative masthead with the company's name/overview line */}
+      <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 20, height: 268 }}>
+        <img src={welcomeBannerBg} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(117deg, #fff 15.5%, rgba(255,255,255,0) 46%)' }} />
+        <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 45px' }}>
+          <h1 style={{ fontSize: 54, fontWeight: 600, color: '#1A1D2E', letterSpacing: '-.6px', margin: 0, lineHeight: 1 }}>Welcome back!</h1>
+          <p style={{ fontSize: 12, fontWeight: 500, color: 'rgba(0,0,0,.6)', margin: '10px 0 0' }}>
+            {company?.name || companyName} &nbsp;·&nbsp; ESG &amp; IR Intelligence Overview
+          </p>
+        </div>
+      </div>
+
       {/* Top row — company hero (left, ~60%) + disclosure timeline (right, ~40%) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 20, alignItems: 'stretch' }}>
         {/* Hero — company workspace masthead (reshaped: narrower + taller, stacked) */}
-        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '26px 28px', color: '#fff', background: 'linear-gradient(135deg, #4A47D4 0%, #3736AE 55%, #2E2D93 100%)', boxShadow: '0 18px 40px rgba(53,53,181,.28)' }}>
-          {/* Soft depth glows */}
-          <div style={{ position: 'absolute', top: -70, right: -50, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,255,255,.16), transparent 70%)' }} />
+        <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '26px 28px', color: '#1A1D2E', background: 'rgba(26,26,255,.06)' }}>
+          {/* Soft depth glow */}
           <div style={{ position: 'absolute', bottom: -100, left: -30, width: 240, height: 240, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,.4), transparent 70%)' }} />
           {/* Split: identity (left) · metadata list + pills as a right-aligned block */}
           <div style={{ position: 'relative', display: 'flex', height: '100%', gap: 28, alignItems: 'flex-start' }}>
             {/* Left — identity: name, status, website */}
             <div style={{ flex: '0 0 40%', minWidth: 0 }}>
               <div>
-                <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-.6px', lineHeight: 1.12, margin: 0, textShadow: '0 2px 12px rgba(15,15,50,.2)', overflowWrap: 'break-word' }}>
+                <h1 style={{ fontSize: 42, fontWeight: 700, color: '#3535B5', letterSpacing: '-.6px', lineHeight: 1.12, margin: 0, overflowWrap: 'break-word' }}>
                   {company?.name || companyName}
                 </h1>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, fontSize: 12.5, fontWeight: 500, opacity: 0.92 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, fontSize: 12.5, fontWeight: 500, color: 'rgba(0,0,0,.72)' }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ADE80', boxShadow: '0 0 0 3px rgba(74,222,128,.25)', flexShrink: 0 }} />
                   <span>{subline}</span>
                 </div>
@@ -244,13 +256,13 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                     href={company.website_url}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none' }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 13, fontWeight: 600, color: '#1A1D2E', textDecoration: 'none' }}
                   >
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
-                      <circle cx="7" cy="7" r="5.6" stroke="rgba(255,255,255,.75)" strokeWidth="1.3" />
-                      <path d="M1.4 7h11.2M7 1.4c1.7 1.6 2.5 3.5 2.5 5.6S8.7 11 7 12.6C5.3 11 4.5 9.1 4.5 7S5.3 3 7 1.4z" stroke="rgba(255,255,255,.75)" strokeWidth="1.3" strokeLinejoin="round" />
+                      <circle cx="7" cy="7" r="5.6" stroke="rgba(0,0,0,.55)" strokeWidth="1.3" />
+                      <path d="M1.4 7h11.2M7 1.4c1.7 1.6 2.5 3.5 2.5 5.6S8.7 11 7 12.6C5.3 11 4.5 9.1 4.5 7S5.3 3 7 1.4z" stroke="rgba(0,0,0,.55)" strokeWidth="1.3" strokeLinejoin="round" />
                     </svg>
-                    <span style={{ borderBottom: '1px solid rgba(255,255,255,.4)', paddingBottom: 1 }}>{hostOf(company.website_url)}</span>
+                    <span style={{ borderBottom: '1px solid rgba(0,0,0,.3)', paddingBottom: 1 }}>{hostOf(company.website_url)}</span>
                   </a>
                 )}
               </div>
@@ -265,8 +277,8 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                         return (
                           <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                             <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[idx % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[idx % DOT_COLORS.length]}40`, flexShrink: 0 }} />
-                            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
-                            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(0,0,0,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1A1D2E', whiteSpace: 'nowrap' }}>{f.value}</span>
                           </div>
                         );
                       })}
@@ -275,7 +287,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                   {flags.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 18 }}>
                       {flags.map((fl) => (
-                        <span key={fl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.16)', padding: '3px 10px', borderRadius: 20 }}>
+                        <span key={fl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#3535B5', background: 'rgba(53,53,181,.08)', border: '1px solid rgba(53,53,181,.16)', padding: '3px 10px', borderRadius: 20 }}>
                           <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ADE80' }} />
                           {fl}
                         </span>
@@ -294,8 +306,8 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                   {rightFacts.map((f, i) => (
                     <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: DOT_COLORS[i % DOT_COLORS.length], boxShadow: `0 0 0 3px ${DOT_COLORS[i % DOT_COLORS.length]}40`, flexShrink: 0 }} />
-                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(255,255,255,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap' }}>{f.value}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: 'rgba(0,0,0,.45)', minWidth: 130, flexShrink: 0 }}>{f.label}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: '#1A1D2E', whiteSpace: 'nowrap' }}>{f.value}</span>
                     </div>
                   ))}
                 </div>
@@ -376,11 +388,11 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
             ) : (
               <>
                 {company?.description && (
-                  <p style={{ fontSize: 13.5, color: '#3A3F58', lineHeight: 1.65, margin: '0 0 18px' }}>{company.description}</p>
+                  <p style={{ fontSize: 16, color: '#3A3F58', lineHeight: 1.65, margin: '0 0 18px' }}>{company.description}</p>
                 )}
                 {themeChips.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 8 }}>Key themes</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.6px', color: '#9BA3C4', textTransform: 'uppercase', marginBottom: 8 }}>Key themes</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {themeChips.map((t) => (
                         <span key={t} style={{ fontSize: 12, fontWeight: 600, color: '#3B52E0', background: '#ECEEFF', padding: '5px 12px', borderRadius: 20 }}>{t}</span>
@@ -398,7 +410,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                         return (
                           <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
                             <span style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: s.bg, border: `1px solid ${s.color}22` }}>{s.icon}</span>
-                            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#3A3F58', lineHeight: 1.5, paddingTop: 5 }}>{h.text}</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: '#3A3F58', lineHeight: 1.5, paddingTop: 5 }}>{h.text}</span>
                           </div>
                         );
                       })}
@@ -427,9 +439,9 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                   const sc = docStatusColor(doc.extraction_status);
                   return (
                     <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
-                      <span style={{ fontSize: 9, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)', padding: '4px 6px', borderRadius: 6, textTransform: 'uppercase', flexShrink: 0 }}>{doc.file_type || 'doc'}</span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={doc.filename}>{doc.filename}</span>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: sc.color, background: sc.bg, padding: '3px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '.4px', flexShrink: 0 }}>{doc.extraction_status || 'processing'}</span>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)', padding: '4px 6px', borderRadius: 6, textTransform: 'uppercase', flexShrink: 0 }}>{doc.file_type || 'doc'}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={doc.filename}>{doc.filename}</span>
+                      <span style={{ fontSize: 10, fontWeight: 400, color: sc.color, background: sc.bg, padding: '3px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '.4px', flexShrink: 0 }}>{doc.extraction_status || 'processing'}</span>
                     </div>
                   );
                 })
@@ -462,9 +474,9 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
               <div style={CARD_TITLE}>Your Departments</div>
-              <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{departments.length} departments configured for {companyName}</div>
+              <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>{departments.length} departments configured for {companyName}</div>
             </div>
-            {isAdmin && <button type="button" onClick={() => navigate('/admin-console/departments')} style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>Manage →</button>}
+            {isAdmin && <button type="button" onClick={() => navigate('/admin-console/departments')} style={{ fontSize: 14, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer' }}>Manage →</button>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 10, marginTop: 14 }}>
             {departments.map((d, i) => (
@@ -472,7 +484,7 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                 <span style={{ fontSize: 10, fontWeight: 800, color: AGENT_COLORS[i % AGENT_COLORS.length], background: `${AGENT_COLORS[i % AGENT_COLORS.length]}14`, padding: '3px 7px', borderRadius: 6, flexShrink: 0 }}>
                   {(d.department_code || d.department_name || '?').slice(0, 3).toUpperCase()}
                 </span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.department_name}</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: 600, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.department_name}</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: '#10B981', fontWeight: 600, flexShrink: 0 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} /> Ready
                 </span>

@@ -114,7 +114,7 @@ export function Sidebar() {
       <div className="sb-header">
         <div className="sb-logo">
           <div className="sb-lmark">
-            <svg viewBox="0 0 14 14" fill="none" width="14" height="14">
+            <svg viewBox="0 0 14 14" fill="none" width="21" height="21">
               <rect x=".5" y=".5" width="5.5" height="5.5" rx="1" fill="white" />
               <rect x="8" y=".5" width="5.5" height="5.5" rx="1" fill="white" opacity=".4" />
               <rect x=".5" y="8" width="5.5" height="5.5" rx="1" fill="white" opacity=".4" />
