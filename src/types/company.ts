@@ -1,3 +1,5 @@
+import type { BrandColors } from "@/types/brand";
+
 export interface Sector {
   id: string;
   code: string;
@@ -74,6 +76,12 @@ export interface Company {
   report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
   esg_frameworks?: string[] | null;
+  // Branding captured on the onboarding Brand step. brand_colors is the company
+  // default for report headings/covers — a report's own picker choice wins over it.
+  // The logo is NOT here: GET /companies/me strips logo_base64 to keep the
+  // payload small. Use companies.getMyCompanyLogo() when you need to render it.
+  brand_identity?: string | null;
+  brand_colors?: BrandColors | null;
   // Onboarding deep-ingest state — drives the dashboard card (fetch) + the setup screen.
   report_extraction_status?: string | null; // 'processing' | 'done' | 'failed'
   onboarding_progress?: { stage?: string; detail?: string; percent?: number } | null;

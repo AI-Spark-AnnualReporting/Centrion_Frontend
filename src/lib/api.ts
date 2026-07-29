@@ -503,6 +503,18 @@ export const auth = {
       body: payload,
     }),
 
+  // Brand step: read the uploaded brand language guideline (PDF/DOCX) to plain
+  // text. Stateless — the text rides along in the onboarding payload and is
+  // saved to companies.brand_identity at submit, not here.
+  extractBrandLanguage: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<{ text: string; chars: number }>(
+      "/api/v1/auth/onboarding/extract-brand-language",
+      form,
+    );
+  },
+
   // Default departments the admin can opt into during onboarding.
   onboardingDepartmentOptions: () =>
     request<{ departments: DepartmentOption[] }>(
@@ -548,6 +560,12 @@ export const companies = {
   // The caller's own company (resolved from the JWT) — backs the Profile page
   // Company Details card. PATCH accepts a partial of the editable fields.
   getMyCompany: () => request<Company>("/api/v1/companies/me"),
+
+  // The logo lives behind its own endpoint because it's ~1.4 MB of inline
+  // base64 and getMyCompany() runs on nearly every page — fetch it only where
+  // the logo is actually rendered.
+  getMyCompanyLogo: () =>
+    request<{ logo_base64: string | null }>("/api/v1/companies/me/logo"),
 
   updateMyCompany: (body: Partial<Company>) =>
     request<Company>("/api/v1/companies/me", { method: "PATCH", body }),
@@ -1463,6 +1481,11 @@ export const quarterlyReports = {
     request<ColorPalettesResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/color-palettes`,
     ),
+
+  // Same palettes, company-unscoped — global reference data, auth only. Used by
+  // the onboarding Brand step, which runs before there's a report to scope to.
+  getColorPalettesGlobal: () =>
+    request<ColorPalettesResponse>("/api/v1/reports/quarterly/color-palettes"),
 
   // Persist the chosen cover design + brand colors; re-renders the cover +
   // report accents. Colors apply to accents/headings only (body stays dark).
