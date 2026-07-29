@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { team, type TeamMember } from '@/lib/api';
+import { downloadText } from '@/lib/utils';
 
 // Backend `position_type` enum — only these five values are accepted by the
 // API. Anything else returns 422, so the form must never send a stale value.
@@ -26,27 +27,11 @@ export const POSITION_OPTIONS: Array<{ value: PositionType; label: string }> = [
   { value: 'other', label: POSITION_LABELS.other },
 ];
 
-function generateTempPassword(): string {
-  const chars =
-    'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const len = 12;
-  const out: string[] = [];
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const buf = new Uint32Array(len);
-    crypto.getRandomValues(buf);
-    for (let i = 0; i < len; i++) out.push(chars[buf[i] % chars.length]);
-  } else {
-    for (let i = 0; i < len; i++)
-      out.push(chars[Math.floor(Math.random() * chars.length)]);
-  }
-  return out.join('');
-}
-
 interface AddPersonDialogProps {
   companyId: string;
   companyName: string;
   onClose: () => void;
-  onAdded: (member: TeamMember, tempPassword: string) => void;
+  onAdded: (member: TeamMember) => void;
 }
 
 export default function AddPersonDialog({
@@ -62,6 +47,13 @@ export default function AddPersonDialog({
   const [bio, setBio] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Only set when the backend couldn't email the invite — then the admin has
+  // to pass the password on, so the dialog stays open to show it.
+  const [undelivered, setUndelivered] = useState<{
+    message: string;
+    tempPassword: string;
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const canSubmit =
     firstName.trim().length > 0 &&
@@ -74,29 +66,33 @@ export default function AddPersonDialog({
     setSubmitting(true);
     setError(null);
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    const tempPassword = generateTempPassword();
     try {
-      const res = await team.create<TeamMember | string>(companyId, {
+      // No temp_password: the backend generates one and emails it.
+      const res = await team.create(companyId, {
         email: email.trim(),
         full_name: fullName,
-        temp_password: tempPassword,
         position_type: positionType,
         bio: bio.trim() || undefined,
         // External meeting guests (consultants, investors, board members) are
         // view-only participants — provision them as IR, never department_user.
         role: 'ir',
       });
-      const member: TeamMember =
-        typeof res === 'object' && res !== null && 'id' in res
-          ? (res as TeamMember)
-          : {
-              id: '',
-              email: email.trim(),
-              full_name: fullName,
-              position_type: positionType,
-              status: 'pending',
-            };
-      onAdded(member, tempPassword);
+      const member: TeamMember = res.member ?? {
+        id: '',
+        email: email.trim(),
+        full_name: fullName,
+        position_type: positionType,
+        status: 'pending',
+      };
+      onAdded(member);
+      if (res.email_sent === false && res.temp_password) {
+        setUndelivered({
+          message: res.email_message ?? 'The invite email could not be sent.',
+          tempPassword: res.temp_password,
+        });
+        setSubmitting(false);
+        return;
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add person.');
@@ -158,6 +154,99 @@ export default function AddPersonDialog({
             </svg>
           </button>
         </div>
+        {undelivered ? (
+          <div style={{ padding: '4px 24px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              role="alert"
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: '#B45309',
+                background: 'rgba(245,158,11,.1)',
+                border: '1px solid rgba(245,158,11,.28)',
+                padding: '8px 12px',
+                borderRadius: 8,
+              }}
+            >
+              {undelivered.message} It won&apos;t be shown again.
+            </div>
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 10,
+                background: '#F2F3FA',
+                border: '1px solid #E2E4F0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+              }}
+            >
+              <code
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: '#1A1D2E',
+                  fontFamily: "'DM Mono', ui-monospace, monospace",
+                  letterSpacing: '.5px',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {undelivered.tempPassword}
+              </code>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(undelivered.tempPassword).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1800);
+                    });
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadText(
+                      `centriyon-temp-password-${email.trim().replace(/[^\w.@-]/g, '_')}.txt`,
+                      [
+                        'Centriyon — Temporary password',
+                        '',
+                        `Account:            ${email.trim()}`,
+                        `Temporary password: ${undelivered.tempPassword}`,
+                        '',
+                      ].join('\n'),
+                    )
+                  }
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: '#4040C8',
+                    background: '#fff',
+                    border: '1.5px solid #E2E4F0',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Download
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div
           style={{
             padding: '4px 24px 18px',
@@ -267,6 +356,7 @@ export default function AddPersonDialog({
             </div>
           )}
         </div>
+        )}
         <div
           style={{
             padding: '14px 24px 18px',
@@ -276,28 +366,30 @@ export default function AddPersonDialog({
             gap: 8,
           }}
         >
+          {!undelivered && (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              style={{
+                padding: '9px 18px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#5A6080',
+                background: '#fff',
+                border: '1.5px solid #E2E4F0',
+                borderRadius: 10,
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                opacity: submitting ? 0.5 : 1,
+              }}
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="button"
-            onClick={onClose}
-            disabled={submitting}
-            style={{
-              padding: '9px 18px',
-              fontSize: 12,
-              fontWeight: 600,
-              color: '#5A6080',
-              background: '#fff',
-              border: '1.5px solid #E2E4F0',
-              borderRadius: 10,
-              cursor: submitting ? 'not-allowed' : 'pointer',
-              opacity: submitting ? 0.5 : 1,
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
+            onClick={undelivered ? onClose : handleSubmit}
+            disabled={!undelivered && (!canSubmit || submitting)}
             style={{
               padding: '9px 18px',
               fontSize: 12,
@@ -306,12 +398,12 @@ export default function AddPersonDialog({
               background: '#4040C8',
               border: 'none',
               borderRadius: 10,
-              cursor: !canSubmit || submitting ? 'not-allowed' : 'pointer',
-              opacity: !canSubmit || submitting ? 0.55 : 1,
+              cursor: !undelivered && (!canSubmit || submitting) ? 'not-allowed' : 'pointer',
+              opacity: !undelivered && (!canSubmit || submitting) ? 0.55 : 1,
               boxShadow: '0 3px 10px rgba(64,64,200,.25)',
             }}
           >
-            {submitting ? 'Adding…' : 'Add Person'}
+            {undelivered ? 'Done' : submitting ? 'Adding…' : 'Add Person'}
           </button>
         </div>
       </div>

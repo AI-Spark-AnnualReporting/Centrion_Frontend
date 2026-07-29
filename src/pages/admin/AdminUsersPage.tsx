@@ -19,6 +19,7 @@ import type {
 } from '@/types/admin';
 import { relativeTime } from '@/lib/time';
 import { initialsOf, gradientFor } from '@/lib/avatar';
+import { downloadText } from '@/lib/utils';
 
 const PRIMARY = '#4040C8';
 type View = 'users' | 'matrix';
@@ -311,8 +312,11 @@ function InviteModal({
   );
 }
 
-// ── Temp-password modal (shown once) ───────────────────────────────────────
-function TempPasswordModal({
+// ── Invite result modal ────────────────────────────────────────────────────
+// The backend emails the temp password itself. When that worked there's no
+// reason to put a live credential on screen — only when delivery failed does
+// the admin become the delivery mechanism.
+function InviteResultModal({
   result,
   onClose,
 }: {
@@ -326,6 +330,21 @@ function TempPasswordModal({
       setTimeout(() => setCopied(false), 1800);
     });
   };
+  const emailed = result.email_sent === true;
+  // A .txt the admin can hand over / keep until the user is onboarded. The
+  // email address is in the file too — a bare password in Downloads is useless
+  // a week later.
+  const download = () =>
+    downloadText(
+      `centriyon-temp-password-${result.email.replace(/[^\w.@-]/g, '_')}.txt`,
+      [
+        'Centriyon — Temporary password',
+        '',
+        `Account:            ${result.email}`,
+        `Temporary password: ${result.temp_password}`,
+        '',
+      ].join('\n'),
+    );
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
@@ -335,50 +354,81 @@ function TempPasswordModal({
       >
         <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>User invited</div>
         <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6 }}>
-          Share this temporary password with <strong>{result.email}</strong>. They’ll set their own
-          on first login.
+          {emailed ? (
+            result.email_message ?? `Invite sent to ${result.email}.`
+          ) : (
+            <>
+              Share this temporary password with <strong>{result.email}</strong>. They’ll set their
+              own on first login.
+            </>
+          )}
         </div>
-        <div
-          style={{
-            marginTop: 16,
-            padding: 16,
-            borderRadius: 12,
-            background: '#F2F3FA',
-            border: '1px solid #E2E4F0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-          }}
-        >
-          <code
+
+        {emailed ? (
+          <div
             style={{
-              fontSize: 18,
-              fontWeight: 700,
-              color: '#1A1D2E',
-              fontFamily: "'DM Mono', monospace",
-              letterSpacing: '.5px',
-              wordBreak: 'break-all',
+              marginTop: 14,
+              fontSize: 11,
+              color: '#166534',
+              background: 'rgba(34,197,94,.1)',
+              borderRadius: 8,
+              padding: '8px 10px',
             }}
           >
-            {result.temp_password}
-          </code>
-          <button className="btn bp bsm" onClick={copy} type="button" style={{ flexShrink: 0 }}>
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
-        <div
-          style={{
-            marginTop: 12,
-            fontSize: 11,
-            color: '#B45309',
-            background: 'rgba(245,158,11,.1)',
-            borderRadius: 8,
-            padding: '8px 10px',
-          }}
-        >
-          ⚠ This password will only be shown once.
-        </div>
+            They&apos;ll be asked to set their own password on first login.
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 11,
+                color: '#B45309',
+                background: 'rgba(245,158,11,.1)',
+                borderRadius: 8,
+                padding: '8px 10px',
+              }}
+            >
+              ⚠ {result.email_message ?? 'The invite email could not be sent.'} It won&apos;t be
+              shown again.
+            </div>
+            <div
+              style={{
+                marginTop: 12,
+                padding: 16,
+                borderRadius: 12,
+                background: '#F2F3FA',
+                border: '1px solid #E2E4F0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+              }}
+            >
+              <code
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: '#1A1D2E',
+                  fontFamily: "'DM Mono', monospace",
+                  letterSpacing: '.5px',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {result.temp_password}
+              </code>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button className="btn bp bsm" onClick={copy} type="button">
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+                <button className="btn bs bsm" onClick={download} type="button">
+                  Download
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
         <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end' }}>
           <button className="btn bp" onClick={onClose} type="button">
             Done
@@ -574,7 +624,7 @@ export default function AdminUsersPage() {
         />
       )}
       {inviteResult && (
-        <TempPasswordModal result={inviteResult} onClose={() => setInviteResult(null)} />
+        <InviteResultModal result={inviteResult} onClose={() => setInviteResult(null)} />
       )}
     </div>
   );

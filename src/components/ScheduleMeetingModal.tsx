@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  meetings as meetingsApi,
-  team,
-  ApiError,
-  type TeamMember,
-} from '@/lib/api';
+import { meetings as meetingsApi, team, type TeamMember } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import type {
   CreateMeetingBody,
   Meeting,
@@ -70,6 +66,7 @@ export default function ScheduleMeetingModal({
   companyId: string | null;
   companyName: string;
 }) {
+  const { toast } = useToast();
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const [form, setForm] = useState<ModalState>(() => {
     if (initialDate && toIsoDate(initialDate) >= todayIso) {
@@ -181,17 +178,17 @@ export default function ScheduleMeetingModal({
     try {
       const res = await meetingsApi.create(body);
       onCreated(res.meeting);
+      // The modal closes on success, so the invite outcome has to land in a
+      // toast. Shown even when the send succeeded — the message is where the
+      // backend reports participants it couldn't reach.
+      toast({
+        title: 'Meeting scheduled',
+        description: res.email_message ?? undefined,
+        variant: res.email_sent === false ? 'destructive' : undefined,
+      });
       onClose();
     } catch (e) {
-      const msg =
-        e instanceof ApiError
-          ? typeof e.body === 'object' && e.body && 'detail' in (e.body as Record<string, unknown>)
-            ? String((e.body as { detail?: unknown }).detail)
-            : `${e.status} ${e.statusText}`
-          : e instanceof Error
-            ? e.message
-            : 'Failed to schedule meeting.';
-      setError(msg);
+      setError(e instanceof Error ? e.message : 'Failed to schedule meeting.');
       setSubmitting(false);
     }
   };
@@ -445,7 +442,7 @@ export default function ScheduleMeetingModal({
                     }
                   }}
                   placeholder={
-                    form.participants.length === 0 ? 'Type a name or email…' : ''
+                    form.participants.length === 0 ? 'Type an email address…' : ''
                   }
                   style={{
                     flex: 1,
@@ -509,9 +506,14 @@ export default function ScheduleMeetingModal({
                           padding: '10px 12px',
                         }}
                       >
-                        {participantQuery.trim()
-                          ? 'No matches.'
-                          : 'No more people to add.'}
+                        {/* Enter only adds a match or a valid address, so a
+                            typed name would otherwise vanish with no reason
+                            given. */}
+                        {!participantQuery.trim()
+                          ? 'No more people to add.'
+                          : /\S+@\S+\.\S+/.test(participantQuery.trim())
+                            ? 'Press Enter to invite this address.'
+                            : 'No matches. Participants are invited by email — type a full address.'}
                       </div>
                     ) : (
                       participantSuggestions.map((m) => (

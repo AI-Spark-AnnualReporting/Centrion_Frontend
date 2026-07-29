@@ -229,15 +229,8 @@ export function ResetPasswordPage() {
       if (err instanceof ApiError && err.status === 400) {
         setErrors({ form: 'This reset link has expired or already been used. Request a new one.' });
       } else if (err instanceof ApiError && err.status === 422) {
-        const detail = (err.body as { detail?: unknown })?.detail;
-        setErrors({
-          new:
-            typeof detail === 'string'
-              ? detail
-              : Array.isArray(detail) && detail[0]?.msg
-                ? String(detail[0].msg)
-                : 'New password did not meet the requirements.',
-        });
+        // ApiError.message is already the backend's `detail`.
+        setErrors({ new: err.message || 'New password did not meet the requirements.' });
       } else {
         setErrors({ form: 'Could not reset your password. Please try again.' });
       }

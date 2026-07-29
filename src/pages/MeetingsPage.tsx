@@ -3,9 +3,11 @@ import { meetings as meetingsApi, ApiError } from '@/lib/api';
 import type {
   Meeting,
   MeetingPlatform,
+  MeetingResponse,
   MeetingType,
 } from '@/types/meeting';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -166,6 +168,7 @@ function MeetingDetailModal({
   onClose: () => void;
   onUpdated: (m: Meeting) => void;
 }) {
+  const { toast } = useToast();
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const [current, setCurrent] = useState<Meeting>(meeting);
   const [editing, setEditing] = useState(false);
@@ -210,6 +213,21 @@ function MeetingDetailModal({
   const update = <K extends keyof ModalState>(key: K, value: ModalState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  // Participants the backend can't email. It accepts them (they still show as
+  // attendees) but silently can't notify them.
+  const unreachable = form.participants.filter((p) => !p.includes('@'));
+
+  // Invitation / cancellation email outcome. Both fields are null when the
+  // backend sent nothing at all (no real change, or the meeting is completed),
+  // and that's not worth a toast.
+  const notifyEmailOutcome = (res: MeetingResponse) => {
+    if (res.email_sent == null || !res.email_message) return;
+    toast({
+      title: res.email_message,
+      variant: res.email_sent ? undefined : 'destructive',
+    });
+  };
+
   const save = async () => {
     if (!form.title.trim() || !form.date || !form.time) {
       setError('Title, date, and time are required.');
@@ -234,17 +252,10 @@ function MeetingDetailModal({
       });
       setCurrent(res.meeting);
       onUpdated(res.meeting);
+      notifyEmailOutcome(res);
       setEditing(false);
     } catch (e) {
-      const msg =
-        e instanceof ApiError
-          ? typeof e.body === 'object' && e.body && 'detail' in (e.body as Record<string, unknown>)
-            ? String((e.body as { detail?: unknown }).detail)
-            : `${e.status} ${e.statusText}`
-          : e instanceof Error
-            ? e.message
-            : 'Failed to update meeting.';
-      setError(msg);
+      setError(e instanceof Error ? e.message : 'Failed to update meeting.');
     } finally {
       setSubmitting(false);
     }
@@ -254,14 +265,15 @@ function MeetingDetailModal({
     setSubmitting(true);
     setError(null);
     try {
+      // PATCH rather than DELETE on purpose: DELETE is a bodyless 204, so it
+      // can't tell us whether the participants were told.
       const res = await meetingsApi.update(current.id, { status: 'cancelled' });
       setCurrent(res.meeting);
       onUpdated(res.meeting);
+      notifyEmailOutcome(res);
       onClose();
     } catch (e) {
-      const msg =
-        e instanceof ApiError ? `${e.status} ${e.statusText}` : e instanceof Error ? e.message : 'Failed to cancel meeting.';
-      setError(msg);
+      setError(e instanceof Error ? e.message : 'Failed to cancel meeting.');
       setSubmitting(false);
     }
   };
@@ -355,8 +367,15 @@ function MeetingDetailModal({
                         .filter(Boolean),
                     )
                   }
-                  placeholder="Comma-separated emails or names"
+                  placeholder="Comma-separated email addresses"
                 />
+                {/* Only addresses can be invited. Saying so here beats letting
+                    the organiser find out from the post-save toast. */}
+                {unreachable.length > 0 && (
+                  <div style={{ fontSize: 11, color: '#B45309', marginTop: 5 }}>
+                    No email address for {unreachable.join(', ')} — they won&apos;t be notified.
+                  </div>
+                )}
               </div>
               <div>
                 <span className="fl-label">

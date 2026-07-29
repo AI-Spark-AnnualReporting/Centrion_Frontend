@@ -184,6 +184,23 @@ function handleUnauthorized() {
   }
 }
 
+// FastAPI puts the human-readable reason in `detail` — a plain string for
+// raised HTTPExceptions ("Email already registered") and an array of
+// {loc, msg} objects for 422 validation failures. Anything else is not worth
+// guessing at.
+function detailOf(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail.trim() || null;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => (d && typeof d === "object" ? (d as { msg?: unknown }).msg : null))
+      .filter((m): m is string => typeof m === "string" && m.length > 0);
+    if (msgs.length) return msgs.join(". ");
+  }
+  return null;
+}
+
 export class ApiError<TBody = unknown> extends Error {
   constructor(
     public status: number,
@@ -191,7 +208,11 @@ export class ApiError<TBody = unknown> extends Error {
     public body: TBody,
     public url: string,
   ) {
-    super(`API ${status} ${statusText} — ${url}`);
+    // Prefer the backend's own words. Callers all over the app surface
+    // `err.message` straight into the UI, and "API 409 Conflict — http://…"
+    // tells the user nothing while "Email already registered" tells them
+    // exactly what to fix. Status and url stay on the instance for debugging.
+    super(detailOf(body) ?? `API ${status} ${statusText} — ${url}`);
     this.name = "ApiError";
   }
 }
@@ -715,10 +736,10 @@ export interface TeamMember {
 export interface CreateTeamMemberBody {
   email: string;
   full_name: string;
-  // Backend forces a password rotation on first login (must_change_password=TRUE),
-  // so this is just an opaque starter — generate it on the client and surface
-  // the value back to the admin so they can share it with the new user.
-  temp_password: string;
+  // Omit it: the backend generates a 12-char password, emails it to the new
+  // member, and returns it so the admin can hand it over if the mail failed.
+  // Still accepted (8-char minimum) if a caller wants to choose one.
+  temp_password?: string;
   title?: string;
   position_type?: string;
   role?: string;
@@ -742,6 +763,17 @@ export interface ListTeamQuery {
   position_type?: string;
   role?: string;
   include_inactive?: boolean;
+}
+
+// POST response. `member` is the long-standing key; the rest arrived with
+// invite emails. `temp_password` is the only time the value is ever returned —
+// show it to the admin only when `email_sent` is false, since otherwise the
+// new member already has it in their inbox.
+export interface CreateTeamMemberResponse {
+  member: TeamMember;
+  temp_password?: string;
+  email_sent?: boolean;
+  email_message?: string;
 }
 
 // The list endpoint is loosely typed on the server side (returns "string" in
@@ -768,7 +800,7 @@ export const team = {
     return unwrapTeamList(raw);
   },
 
-  create: <T = TeamMember | string>(companyId: string, body: CreateTeamMemberBody) =>
+  create: <T = CreateTeamMemberResponse>(companyId: string, body: CreateTeamMemberBody) =>
     request<T>(`/api/v1/companies/${encodeURIComponent(companyId)}/team`, {
       method: "POST",
       body,
