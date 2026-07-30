@@ -88,6 +88,15 @@ export default function ScheduleMeetingModal({
       setError('Meeting date cannot be in the past.');
       return;
     }
+    // Required: the invitation email is useless without somewhere to go.
+    if (!form.linkOrLocation.trim()) {
+      setError(
+        form.platform === 'in_person'
+          ? 'A location is required.'
+          : 'A meeting URL is required.',
+      );
+      return;
+    }
     const body: CreateMeetingBody = {
       title: form.title.trim(),
       meeting_date: form.date,
@@ -97,7 +106,7 @@ export default function ScheduleMeetingModal({
       platform: form.platform,
       participants: form.participants,
       agenda: form.agenda.trim(),
-      link_or_location: form.linkOrLocation.trim() || undefined,
+      link_or_location: form.linkOrLocation.trim(),
     };
     setSubmitting(true);
     setError(null);
@@ -110,7 +119,7 @@ export default function ScheduleMeetingModal({
       toast({
         title: 'Meeting scheduled',
         description: res.email_message ?? undefined,
-        variant: res.email_sent === false ? 'destructive' : undefined,
+        variant: res.email_sent === false ? 'destructive' : 'success',
       });
       onClose();
     } catch (e) {
@@ -193,7 +202,8 @@ export default function ScheduleMeetingModal({
           />
           <div>
             <span className="fl-label">
-              {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}
+              {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}{' '}
+              <span style={{ color: '#E5484D' }}>*</span>
             </span>
             <input
               className="inp"
