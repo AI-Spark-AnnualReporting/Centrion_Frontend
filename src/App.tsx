@@ -19,6 +19,7 @@ import KPIPage from "./pages/KPIPage";
 import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
+import BrandIdentityPage from "./pages/BrandIdentityPage";
 import MeetingsPage from "./pages/MeetingsPage";
 import { CommsPage } from "./pages/OtherPages";
 import { CompliancePage } from "./pages/OtherPages";
@@ -162,6 +163,12 @@ const App = () => (
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/questions" element={<QuestionsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          {/* Brand Identity — the onboarding Brand step's three values, editable
+              after the fact. Admin-only because PATCH /companies/me is; the
+              sidebar item is gated to match so it's never a dead link. */}
+          <Route element={<ProtectedRoute requiredRole="admin" />}>
+            <Route path="/brand-identity" element={<BrandIdentityPage />} />
+          </Route>
           {/* Admin Console — admin-only, rendered inside the main shell so the
               sidebar's expandable Admin section drives navigation. */}
           <Route element={<ProtectedRoute requiredRole="admin" />}>

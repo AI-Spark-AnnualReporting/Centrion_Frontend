@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { OnboardingPayload } from '@/types/auth';
 import type { Company, Sector } from '@/types/company';
+import type { BrandColors, ExtractedGuideline, PickedLogo } from '@/types/brand';
+import { FALLBACK_COLOR_PALETTES } from '@/types/brand';
+import BrandStep from '@/pages/onboarding/BrandStep';
 import DepartmentSelectionStep from '@/pages/onboarding/DepartmentSelectionStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
 import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
@@ -45,10 +48,18 @@ const PREPARE_STEPS = [
   'Organising your details',
 ];
 
-type Step = 'loading' | 'intel' | 'analysing' | 'review' | 'departments' | 'upload' | 'processing';
+type Step = 'loading' | 'intel' | 'analysing' | 'review' | 'brand' | 'departments' | 'upload' | 'processing';
+
+// Seed for the Brand step until the company row (or the user) says otherwise —
+// the same first preset the backend falls back to in _resolve_brand.
+const DEFAULT_BRAND_COLORS: BrandColors = {
+  primary: FALLBACK_COLOR_PALETTES[0].primary,
+  secondary: FALLBACK_COLOR_PALETTES[0].secondary,
+  palette_key: FALLBACK_COLOR_PALETTES[0].key,
+};
 
 // Left-panel benefit cards per step.
-const LEFT_CARDS: Record<'intel' | 'review' | 'departments' | 'upload', { t: string; s: string }[]> = {
+const LEFT_CARDS: Record<'intel' | 'review' | 'brand' | 'departments' | 'upload', { t: string; s: string }[]> = {
   intel: [
     { t: '🔍 Smart extraction', s: 'We read your company profile document' },
     { t: '✏️ Fully editable', s: 'Review and correct before you continue' },
@@ -57,6 +68,11 @@ const LEFT_CARDS: Record<'intel' | 'review' | 'departments' | 'upload', { t: str
   review: [
     { t: '✅ Auto-filled for you', s: 'Description, sector & details from your sources' },
     { t: '🔒 You confirm the rest', s: 'Profile, Shariah, subsidiaries & sukuk' },
+  ],
+  brand: [
+    { t: '🎨 Your colors, your reports', s: 'Applied to headings & cover pages' },
+    { t: '🖋 Written in your voice', s: 'Your brand identity shapes the tone' },
+    { t: '↩️ Change it anytime', s: 'Override the colors on any single report' },
   ],
   departments: [
     { t: 'Tailored to your org', s: 'Currency, fiscal year & language' },
@@ -129,6 +145,13 @@ export default function OnboardingPage() {
     getSectors().then(setSectors).catch(() => setSectors([]));
   }, []);
 
+  // Brand step. The logo is carried as a base64 data URI and stored inline on
+  // the company row (companies.logo_base64) — there is no upload step.
+  const [logo, setLogo] = useState<PickedLogo | null>(null);
+  // The guideline document's extracted text — saved to companies.brand_identity.
+  const [guideline, setGuideline] = useState<ExtractedGuideline | null>(null);
+  const [brandColors, setBrandColors] = useState<BrandColors>(DEFAULT_BRAND_COLORS);
+
   // Department selection
   const [selectedDeptCodes, setSelectedDeptCodes] = useState<string[]>([]);
 
@@ -159,6 +182,16 @@ export default function OnboardingPage() {
     if (typeof c.is_shariah === 'boolean') setIsShariah(c.is_shariah);
     if (typeof c.has_subsidiaries === 'boolean') setHasSubsidiaries(c.has_subsidiaries);
     if (typeof c.has_sukuk === 'boolean') setHasSukuk(c.has_sukuk);
+    // Brand colors are seeded so re-running onboarding shows the existing choice
+    // rather than silently resetting to the default palette. The guideline isn't:
+    // a stored blob of document text can't be shown back as "a file you uploaded".
+    if (c.brand_colors?.primary && c.brand_colors?.secondary) {
+      setBrandColors({
+        primary: c.brand_colors.primary,
+        secondary: c.brand_colors.secondary,
+        palette_key: c.brand_colors.palette_key || 'custom',
+      });
+    }
   };
 
   // On entry: load the company. If signup extraction is still running, poll;
@@ -248,6 +281,10 @@ export default function OnboardingPage() {
       website_url: websiteUrl.trim() || null,
       headquarter_city: headquarterCity.trim() || null,
       listed_exchange: listedExchange.trim() || null,
+      // Brand step.
+      brand_identity: guideline?.text ?? null,
+      brand_colors: brandColors,
+      logo_base64: logo?.dataUri ?? null,
     };
   };
 
@@ -271,7 +308,7 @@ export default function OnboardingPage() {
     if (!reportingSector) errs.reportingSector = 'Reporting sector is required.';
     if (!fiscalYearEndMonth) errs.fiscalYearEndMonth = 'Fiscal year end is required.';
     setReviewErrors(errs);
-    if (Object.keys(errs).length === 0) setStep('departments');
+    if (Object.keys(errs).length === 0) setStep('brand');
   };
 
   // ---- Full-screen interstitials (no shell) -------------------------------
@@ -299,7 +336,7 @@ export default function OnboardingPage() {
     return <SetupInProgressAnimation payload={buildPayload()} files={uploadedFiles} />;
   }
 
-  const stepNumber = { intel: 1, review: 2, departments: 3, upload: 4 }[step];
+  const stepNumber = { intel: 1, review: 2, brand: 3, departments: 4, upload: 5 }[step];
   const cards = LEFT_CARDS[step];
 
   return (
@@ -465,11 +502,24 @@ export default function OnboardingPage() {
             </>
           )}
 
+          {step === 'brand' && (
+            <BrandStep
+              logo={logo}
+              onLogoChange={setLogo}
+              guideline={guideline}
+              onGuidelineChange={setGuideline}
+              brandColors={brandColors}
+              onBrandColorsChange={setBrandColors}
+              onBack={() => setStep('review')}
+              onContinue={() => setStep('departments')}
+            />
+          )}
+
           {step === 'departments' && (
             <DepartmentSelectionStep
               selectedCodes={selectedDeptCodes}
               onSelect={setSelectedDeptCodes}
-              onBack={() => setStep('review')}
+              onBack={() => setStep('brand')}
               onSubmit={() => setStep('upload')}
               onOptionsLoaded={() => {}}
             />

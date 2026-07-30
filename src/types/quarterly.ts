@@ -1,3 +1,5 @@
+import type { BrandColors } from "@/types/brand";
+
 // ─────────────────────────── Confirm Context ───────────────────────────
 // The confirm-context Q/A answers, collected on the quarterly setup form and
 // persisted (before processing) via PATCH .../context. company_type is
@@ -363,19 +365,10 @@ export interface CoverTemplate {
   is_default?: boolean;
 }
 
-export interface ColorPalette {
-  key: string;
-  name: string;
-  primary: string;
-  secondary: string;
-}
-
-// palette_key is 'custom' (or '') when the primary/secondary are custom hex values.
-export interface BrandColors {
-  primary: string;
-  secondary: string;
-  palette_key: string;
-}
+// ColorPalette + BrandColors moved to types/brand.ts — the onboarding Brand step
+// collects the same shape and shouldn't have to import from quarterly. Re-exported
+// so existing `from '@/types/quarterly'` imports keep working.
+export type { ColorPalette, BrandColors } from "@/types/brand";
 
 // PATCH body.
 export interface CoverSelectionPayload {

@@ -70,6 +70,49 @@ function docStatusColor(status?: string): { color: string; bg: string } {
   return { color: '#B45309', bg: 'rgba(245,158,11,.15)' };
 }
 
+/**
+ * Shown when the report-style extraction isn't running and produced nothing — either it
+ * finished empty, or (for companies onboarded before the ingest step existed) it never
+ * ran at all. Both used to render an endless spinner waiting on nothing.
+ */
+function StyleEmptyState({
+  failed, busy, error, onRun,
+}: {
+  failed: boolean;
+  busy: boolean;
+  error: string;
+  onRun: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '6px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <span style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: failed ? 'rgba(239,68,68,.12)' : '#FDF3E2' }}>
+          {failed ? '!' : '✦'}
+        </span>
+        <div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>
+            {failed ? "We couldn't read your reports" : "We haven't analysed your reports yet"}
+          </div>
+          <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2, lineHeight: 1.55 }}>
+            {failed
+              ? 'Something went wrong last time we tried to learn the tone, themes and highlights of your reports. You can run it again.'
+              : 'Analyse your uploaded reports to learn their tone, themes and highlights. It takes a couple of minutes and runs in the background.'}
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={busy}
+        style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: ACCENT, background: '#ECEEFF', border: 'none', borderRadius: 8, padding: '7px 14px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }}
+      >
+        {busy ? 'Starting…' : failed ? 'Try again' : 'Analyse my reports'}
+      </button>
+      {error && <div style={{ fontSize: 12, color: '#DC2626' }}>{error}</div>}
+    </div>
+  );
+}
+
 export function DashboardWorkspace({ company: companyProp, companyName }: { company: Company | null; companyName: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -83,6 +126,12 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   // "wait for it to land" poll so the card never spins forever.
   const [stylePollDone, setStylePollDone] = useState(false); // budget elapsed without report_tone
   const [styleRetry, setStyleRetry] = useState(0);           // bump to restart the poll
+  const [restarting, setRestarting] = useState(false);       // re-analyse POST in flight
+  const [restartError, setRestartError] = useState('');
+
+  // The real "is anything running" signal. Read off the LOCAL company state, never the
+  // prop: the dashboard gate fetches the company once, so companyProp goes stale on mount.
+  const extractionStatus = company?.report_extraction_status ?? null;
 
   // Use the company the gate fetched; fall back to fetching it ourselves.
   useEffect(() => {
@@ -107,8 +156,14 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
   // slow backoff for up to a few minutes (large reports + the LLM can be slow),
   // updating company + docs live (no reload). If the budget elapses without
   // report_tone, flip to a soft "taking longer" state instead of spinning forever.
+  //
+  // Only poll while an extraction is genuinely RUNNING. A company that never went
+  // through onboarding has report_extraction_status NULL with nothing in flight, so
+  // polling for report_tone there waits on an event that can never happen — which is
+  // what made this card spin forever on every mount.
   useEffect(() => {
     if (!companyId || companyProp?.report_tone) return;
+    if (extractionStatus !== 'processing') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const startedAt = Date.now();
@@ -130,19 +185,38 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
         if (fresh) setCompany(fresh);
         if (d.status === 'fulfilled') setDocs(d.value?.documents ?? []);
         if (fresh?.report_tone) return;                                  // done — styleReady flips
+        // The run finished without producing a tone: stop waiting and let the render
+        // fall through to the actionable empty state.
+        if (fresh && fresh.report_extraction_status !== 'processing') return;
         if (Date.now() - startedAt >= MAX_WAIT_MS) { setStylePollDone(true); return; }
         timer = setTimeout(tick, nextDelay());
       });
     };
     timer = setTimeout(tick, nextDelay());
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [companyId, companyProp?.report_tone, styleRetry]);
+  }, [companyId, companyProp?.report_tone, extractionStatus, styleRetry]);
 
-  // "Check again" from the card's taking-longer state: re-check now and restart the poll.
-  const recheckStyle = () => {
-    setStylePollDone(false);
-    setStyleRetry((n) => n + 1);
-    if (companyId) companiesApi.getMyCompany().then(setCompany).catch(() => {});
+  // Actually run the extraction over the documents already in the Document Bank, then
+  // restart the poll. Re-reading alone (what this used to do) can never help a company
+  // whose extraction never ran — there is nothing to re-read.
+  const runStyleExtraction = () => {
+    if (!companyId || restarting) return;
+    setRestarting(true);
+    setRestartError('');
+    companiesApi
+      .refreshReportStyle(companyId)
+      .then((res) => {
+        if (res?.status === 'skipped') {
+          setRestartError('No readable reports found. Upload a PDF or Word report first.');
+          return;
+        }
+        setStylePollDone(false);
+        // Reflect 'processing' immediately so the poll arms without waiting for a fetch.
+        setCompany((c) => (c ? { ...c, report_extraction_status: 'processing' } : c));
+        setStyleRetry((n) => n + 1);
+      })
+      .catch(() => setRestartError("We couldn't start the analysis. Please try again."))
+      .finally(() => setRestarting(false));
   };
 
   // Real department agents — endpoint is admin-gated, so only admins fetch it.
@@ -349,7 +423,17 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
           <div style={{ height: 1, background: '#ECEEF8', margin: '14px 0' }} />
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 6 }}>
             {!styleReady ? (
-              stylePollDone ? (
+              // Nothing is running and nothing landed — say so and offer the work, rather
+              // than spinning on an event that will never arrive. Covers a run that
+              // finished empty ('failed'/'done') and a company that never ran one (null).
+              extractionStatus !== 'processing' ? (
+                <StyleEmptyState
+                  failed={extractionStatus === 'failed'}
+                  busy={restarting}
+                  error={restartError}
+                  onRun={runStyleExtraction}
+                />
+              ) : stylePollDone ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '6px 0' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                     <span style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, background: '#FDF3E2' }}>⏳</span>
@@ -360,7 +444,8 @@ export function DashboardWorkspace({ company: companyProp, companyName }: { comp
                       </div>
                     </div>
                   </div>
-                  <button type="button" onClick={recheckStyle} style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: ACCENT, background: '#ECEEFF', border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer' }}>Check again</button>
+                  <button type="button" onClick={runStyleExtraction} disabled={restarting} style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: ACCENT, background: '#ECEEFF', border: 'none', borderRadius: 8, padding: '7px 14px', cursor: restarting ? 'default' : 'pointer', opacity: restarting ? 0.5 : 1 }}>{restarting ? 'Starting…' : 'Check again'}</button>
+                  {restartError && <div style={{ fontSize: 12, color: '#DC2626' }}>{restartError}</div>}
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0' }}>
