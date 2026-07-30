@@ -53,7 +53,7 @@ function PageLoader() {
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
   ['/annual-report', 'Annual Report'],
-  ['/earnings', 'Earnings Report']
+  ['/earnings', 'Earnings Report'],
   ['/communications', 'Communication Hub'],
   ['/compliance', 'Compliance Validation'],
 ];
