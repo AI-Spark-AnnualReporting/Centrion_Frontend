@@ -38,6 +38,12 @@ export interface MeetingListResponse {
 
 export interface MeetingResponse {
   meeting: Meeting;
+  // Invitation-email outcome. Worth showing even when true, because the
+  // message also reports who was skipped ("1 entry had no email address").
+  // Both are null on PATCH when nothing was sent at all — no real change, or
+  // the meeting is already completed.
+  email_sent?: boolean | null;
+  email_message?: string | null;
 }
 
 export interface CreateMeetingBody {
