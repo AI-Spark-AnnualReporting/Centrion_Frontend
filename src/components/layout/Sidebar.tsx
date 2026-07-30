@@ -14,7 +14,7 @@ const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: b
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
 ];
 
-// Sub-sections shown when the "Reports Validation" item is expanded — the two
+// Sub-sections shown when the "Reports Validator" item is expanded — the two
 // validation/compliance-checking tools, kept separate from the report
 // generation flows above so "Reports" isn't overloaded with unrelated tools.
 const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; end?: boolean }[] = [
@@ -39,7 +39,7 @@ const NAV_ITEMS = [
     items: [
       { key: 'dashboard', label: 'Command Center', path: '/dashboard', icon: 'grid', badge: null },
       { key: 'reports', label: 'Reports', path: '/reports/quarterly', icon: 'doc', badge: null },
-      { key: 'reportsValidation', label: 'Reports Validation', path: '/reports', icon: 'shield', badge: null },
+      { key: 'reportsValidation', label: 'Reports Validator', path: '/reports', icon: 'shield', badge: null },
       { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: null },
       { key: 'ai', label: 'AI Copilot', path: '/ai', icon: 'chat', badge: null },
     ],
@@ -84,7 +84,7 @@ export function Sidebar() {
   const { user, logout } = useAuth();
 
   // Excludes the bare '/reports' path — that's ESG Validator's route, now
-  // under "Reports Validation" below — but still covers /reports/quarterly.
+  // under "Reports Validator" below — but still covers /reports/quarterly.
   const reportsActive =
     location.pathname.startsWith('/reports/') || location.pathname.startsWith('/earnings');
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
