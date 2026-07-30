@@ -14,6 +14,7 @@ import type {
   OnboardingPayload,
   OnboardingResponse,
 } from "@/types/auth";
+import type { DetectedBrandColors } from "@/types/brand";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
@@ -515,6 +516,19 @@ export const auth = {
       form,
     );
   },
+
+  // Read the brand colors out of an uploaded logo, so the user doesn't have to
+  // find their own hex codes. Takes the same data URI stored in
+  // companies.logo_base64. Stateless — the caller applies the result to the
+  // picker and only persists it on save.
+  //
+  // primary is null when the logo carries no color at all (white/black only),
+  // which means "change nothing" rather than "no answer".
+  detectLogoColors: (logoBase64: string) =>
+    request<DetectedBrandColors>("/api/v1/auth/onboarding/detect-logo-colors", {
+      method: "POST",
+      body: { logo_base64: logoBase64 },
+    }),
 
   // Default departments the admin can opt into during onboarding.
   onboardingDepartmentOptions: () =>

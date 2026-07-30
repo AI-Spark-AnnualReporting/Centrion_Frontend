@@ -28,6 +28,13 @@ describe("Brand step against the real api module", () => {
     expect(typeof auth.extractBrandLanguage).toBe("function");
   });
 
+  it("exposes the logo-colour endpoint the step calls", () => {
+    // The mocked suite stubs @/lib/api, so a missing export there shows up as a
+    // detection failure the step deliberately swallows — invisible. This is the
+    // only test that would catch it.
+    expect(typeof auth.detectLogoColors).toBe("function");
+  });
+
   it("mounts without throwing", async () => {
     render(
       <BrandStep

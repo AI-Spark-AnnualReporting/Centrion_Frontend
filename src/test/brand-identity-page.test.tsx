@@ -19,6 +19,7 @@ const getMyCompany = vi.fn();
 const getMyCompanyLogo = vi.fn();
 const updateMyCompany = vi.fn();
 const extractBrandLanguage = vi.fn();
+const detectLogoColors = vi.fn();
 const getColorPalettesGlobal = vi.fn();
 
 // Mock the real export names — see onboarding-brand-step.test.tsx for why that
@@ -29,7 +30,10 @@ vi.mock("@/lib/api", () => ({
     getMyCompanyLogo: () => getMyCompanyLogo(),
     updateMyCompany: (body: unknown) => updateMyCompany(body),
   },
-  auth: { extractBrandLanguage: (f: File) => extractBrandLanguage(f) },
+  auth: {
+    extractBrandLanguage: (f: File) => extractBrandLanguage(f),
+    detectLogoColors: (uri: string) => detectLogoColors(uri),
+  },
   quarterlyReports: { getColorPalettesGlobal: () => getColorPalettesGlobal() },
 }));
 
@@ -73,6 +77,13 @@ const fileInputs = () => document.querySelectorAll('input[type="file"]');
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Here rather than in setup() so a test can override it BEFORE rendering —
+  // setup() would otherwise reset it and quietly ignore the override.
+  detectLogoColors.mockResolvedValue({
+    primary: "#0A5F55", secondary: "#E4A11B",
+    palette_key: "custom", source: "vision",
+    candidates: ["#0A5F55", "#E4A11B"],
+  });
 });
 
 describe("Brand Identity page — what it shows", () => {
@@ -224,5 +235,97 @@ describe("Brand Identity page — uploads", () => {
 
     expect(saveButton()).toBeDisabled();
     expect(screen.getByText(/1 characters over the limit/i)).toBeInTheDocument();
+  });
+});
+
+// Auto-filling the colors from a re-uploaded logo. On this page the stakes are
+// higher than in onboarding: there is already a SAVED brand, so an unwanted
+// detection has something real to clobber. Nothing persists without Save.
+describe("Brand Identity page — colors detected from the logo", () => {
+  const replaceLogo = () =>
+    fireEvent.change(fileInputs()[0], { target: { files: [pngFile("new-mark.png")] } });
+
+  it("applies the detected colors and offers undo", async () => {
+    await setup();
+    replaceLogo();
+
+    expect(await screen.findByRole("button", { name: /undo/i })).toBeInTheDocument();
+    expect(document.querySelector(".ob-char-count")).toBeTruthy();   // page intact
+    expect(detectLogoColors.mock.calls[0][0]).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("makes the page dirty so the detected colors can be saved", async () => {
+    await setup();
+    replaceLogo();
+    await screen.findByRole("button", { name: /undo/i });
+
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    // Both the new logo AND the colors it produced go up together.
+    expect(updateMyCompany).toHaveBeenCalledWith(expect.objectContaining({
+      brand_colors: { primary: "#0A5F55", secondary: "#E4A11B", palette_key: "custom" },
+      logo_base64: expect.stringMatching(/^data:image\/png;base64,/),
+    }));
+  });
+
+  it("undo restores the saved colors, leaving only the logo changed", async () => {
+    await setup();
+    replaceLogo();
+    fireEvent.click(await screen.findByRole("button", { name: /undo/i }));
+
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    const payload = updateMyCompany.mock.calls[0][0];
+    expect(payload).toHaveProperty("logo_base64");
+    expect(payload).not.toHaveProperty("brand_colors");
+  });
+
+  it("leaves the saved colors alone when the logo carries no color", async () => {
+    detectLogoColors.mockResolvedValue({
+      primary: null, secondary: null, palette_key: "custom",
+      source: "none", candidates: [],
+    });
+    await setup();
+    replaceLogo();
+
+    await waitFor(() => expect(detectLogoColors).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /navy & gold/i }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("a failed detection never becomes a logo error", async () => {
+    detectLogoColors.mockRejectedValue(new Error("model exploded"));
+    await setup();
+    replaceLogo();
+
+    // Wait on a POSITIVE condition. Reading the logo is async, so waiting for
+    // the progress line to be ABSENT would pass instantly — before the upload
+    // even landed — proving nothing and leaving pending work to leak into the
+    // next test. Save becoming enabled is proof the logo actually replaced.
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await waitFor(() => expect(detectLogoColors).toHaveBeenCalled());
+
+    expect(screen.queryByText(/reading your logo.s colors/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn.t read that image/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/model exploded/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+  });
+
+  it("is not attempted for a logo that failed validation", async () => {
+    await setup();
+    fireEvent.change(fileInputs()[0], {
+      target: { files: [pngFile("big.png", 2 * 1024 * 1024)] },
+    });
+    expect(detectLogoColors).not.toHaveBeenCalled();
+  });
+
+  it("stops crediting the logo once the user picks a color by hand", async () => {
+    await setup();
+    replaceLogo();
+    await screen.findByRole("button", { name: /undo/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /violet & cyan/i }));
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
   });
 });

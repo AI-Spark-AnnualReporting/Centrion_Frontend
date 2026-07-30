@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
+import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
 import { Spinner } from '@/components/shared/Spinner';
 import { auth, companies, quarterlyReports } from '@/lib/api';
 import type { BrandColors, ColorPalette } from '@/types/brand';
@@ -61,6 +62,7 @@ export default function BrandIdentityPage() {
   const [logoError, setLogoError] = useState('');
   const [docError, setDocError] = useState('');
   const [reading, setReading] = useState(false);
+  const logoColors = useLogoBrandColors(setColors);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,11 +113,20 @@ export default function BrandIdentityPage() {
 
   const acceptLogo = (f: File | null) => {
     setLogoError('');
-    if (!f) { setLogo(null); return; }
+    if (!f) {
+      setLogo(null);
+      logoColors.forget();   // the note would be stale, and any detection moot
+      return;
+    }
     const invalid = validateLogoFile(f);
     if (invalid) { setLogoError(invalid); return; }
     readLogoFile(f)
-      .then((picked) => setLogo({ dataUri: picked.dataUri, name: picked.name, size: picked.size }))
+      .then((picked) => {
+        setLogo({ dataUri: picked.dataUri, name: picked.name, size: picked.size });
+        // Fill the colors from the new logo. Nothing persists until Save, so an
+        // unwanted result costs the user one Undo click.
+        logoColors.detectFrom(picked.dataUri, colors);
+      })
       .catch((err: Error) => setLogoError(err.message));
   };
 
@@ -240,6 +251,11 @@ export default function BrandIdentityPage() {
                 }
                 removeLabel="Remove logo"
               />
+              <LogoColorNote
+                detecting={logoColors.detecting}
+                applied={logoColors.applied}
+                onUndo={logoColors.undo}
+              />
             </div>
           </div>
 
@@ -316,7 +332,14 @@ export default function BrandIdentityPage() {
               <p className="ob-brand-hint" style={{ marginTop: 0 }}>
                 You can still override these on any individual report.
               </p>
-              <BrandColorPicker palettes={palettes} value={colors} onChange={setColors} />
+              {/* forget() first: a colour the user picked by hand must not be
+                  relabelled as "set from your logo", nor overwritten by a
+                  detection that is still in flight. */}
+              <BrandColorPicker
+                palettes={palettes}
+                value={colors}
+                onChange={(next) => { logoColors.forget(); setColors(next); }}
+              />
             </div>
           </div>
 

@@ -20,6 +20,7 @@ describe("Brand Identity page against the real api module", () => {
     expect(typeof companies.getMyCompanyLogo).toBe("function");
     expect(typeof companies.updateMyCompany).toBe("function");
     expect(typeof auth.extractBrandLanguage).toBe("function");
+    expect(typeof auth.detectLogoColors).toBe("function");
     expect(typeof quarterlyReports.getColorPalettesGlobal).toBe("function");
   });
 

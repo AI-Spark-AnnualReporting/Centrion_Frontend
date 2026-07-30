@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
+import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
 import { auth, quarterlyReports } from '@/lib/api';
 import type {
   BrandColors,
@@ -56,6 +57,7 @@ export default function BrandStep({
   const [logoError, setLogoError] = useState('');
   const [docError, setDocError] = useState('');
   const [reading, setReading] = useState(false);
+  const logoColors = useLogoBrandColors(onBrandColorsChange);
 
   // Same presets the report builder's cover picker offers, so a company that
   // picks "Navy & Gold" here sees the identical pill there.
@@ -76,11 +78,20 @@ export default function BrandStep({
   // companies.logo_base64 and rendered straight into the report cover.
   const acceptLogo = (f: File | null) => {
     setLogoError('');
-    if (!f) { onLogoChange(null); return; }
+    if (!f) {
+      onLogoChange(null);
+      logoColors.forget();   // the note would be stale, and any detection moot
+      return;
+    }
     const invalid = validateLogoFile(f);
     if (invalid) { setLogoError(invalid); return; }
     readLogoFile(f)
-      .then(onLogoChange)
+      .then((picked) => {
+        onLogoChange(picked);
+        // Fill the colors from the logo. Fire-and-forget — the step is usable
+        // the instant the preview appears, whatever this does.
+        logoColors.detectFrom(picked.dataUri, brandColors);
+      })
       .catch((err: Error) => setLogoError(err.message));
   };
 
@@ -139,6 +150,11 @@ export default function BrandStep({
           }
           removeLabel="Remove logo"
         />
+        <LogoColorNote
+          detecting={logoColors.detecting}
+          applied={logoColors.applied}
+          onUndo={logoColors.undo}
+        />
       </div>
 
       {/* ── Brand language guideline ───────────────────────────── */}
@@ -189,7 +205,14 @@ export default function BrandStep({
           These become the default colors for the <strong>headings and cover pages</strong> of
           every report you generate. You can still override them on any individual report.
         </p>
-        <BrandColorPicker palettes={palettes} value={brandColors} onChange={onBrandColorsChange} />
+        {/* forget() first: a colour the user picked by hand must not be
+            relabelled as "set from your logo", nor overwritten by a detection
+            that is still in flight. */}
+        <BrandColorPicker
+          palettes={palettes}
+          value={brandColors}
+          onChange={(next) => { logoColors.forget(); onBrandColorsChange(next); }}
+        />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>

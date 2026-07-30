@@ -15,6 +15,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const getColorPalettesGlobal = vi.fn();
 const extractBrandLanguage = vi.fn();
+const detectLogoColors = vi.fn();
 
 // Mock the real export names. Getting this wrong is not a hypothetical: an
 // earlier version stubbed a `reports` object that doesn't own the palette
@@ -22,7 +23,10 @@ const extractBrandLanguage = vi.fn();
 // test in onboarding-brand-api-contract.test.tsx is the backstop for that.
 vi.mock("@/lib/api", () => ({
   quarterlyReports: { getColorPalettesGlobal: () => getColorPalettesGlobal() },
-  auth: { extractBrandLanguage: (f: File) => extractBrandLanguage(f) },
+  auth: {
+    extractBrandLanguage: (f: File) => extractBrandLanguage(f),
+    detectLogoColors: (uri: string) => detectLogoColors(uri),
+  },
 }));
 
 const { default: BrandStep } = await import("@/pages/onboarding/BrandStep");
@@ -81,6 +85,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   getColorPalettesGlobal.mockResolvedValue({ color_palettes: PALETTES });
   extractBrandLanguage.mockResolvedValue({ text: "Voice: plain-spoken.", chars: 20 });
+  detectLogoColors.mockResolvedValue({
+    primary: "#0A5F55", secondary: "#E4A11B",
+    palette_key: "custom", source: "vision",
+    candidates: ["#0A5F55", "#E4A11B"],
+  });
 });
 
 describe("nothing on this step is required", () => {
@@ -294,5 +303,118 @@ describe("brand colors", () => {
   it("tells the user where these colors get used", async () => {
     await setup();
     expect(screen.getByText(/headings and cover pages/i)).toBeInTheDocument();
+  });
+});
+
+// Auto-filling the colors from the logo. The rule that matters: detection is a
+// convenience bolted onto a picker that already works, so it must never damage
+// the upload or a choice the user made themselves.
+describe("brand colors detected from the logo", () => {
+  const pickLogo = () =>
+    fireEvent.change(document.querySelectorAll('input[type="file"]')[0], {
+      target: { files: [pngFile()] },
+    });
+
+  it("applies the detected colors after a logo is picked", async () => {
+    const props = await setup();
+    pickLogo();
+
+    await waitFor(() =>
+      expect(props.onBrandColorsChange).toHaveBeenCalledWith({
+        primary: "#0A5F55", secondary: "#E4A11B", palette_key: "custom",
+      }),
+    );
+    // Sent the base64 data URI, which is what the endpoint validates and what
+    // ends up in companies.logo_base64 — not the File.
+    expect(detectLogoColors).toHaveBeenCalledTimes(1);
+    expect(detectLogoColors.mock.calls[0][0]).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("shows progress, then the undo affordance", async () => {
+    await setup();
+    pickLogo();
+
+    expect(await screen.findByText(/reading your logo.s colors/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /undo/i })).toBeInTheDocument();
+  });
+
+  it("restores the previous colors on undo", async () => {
+    const props = await setup();
+    pickLogo();
+
+    fireEvent.click(await screen.findByRole("button", { name: /undo/i }));
+    expect(props.onBrandColorsChange).toHaveBeenLastCalledWith(DEFAULT_BRAND);
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+  });
+
+  it("changes nothing when the logo carries no color", async () => {
+    detectLogoColors.mockResolvedValue({
+      primary: null, secondary: null, palette_key: "custom",
+      source: "none", candidates: [],
+    });
+    const props = await setup();
+    pickLogo();
+
+    await waitFor(() => expect(detectLogoColors).toHaveBeenCalled());
+    expect(props.onBrandColorsChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+  });
+
+  it("a failed detection never becomes a logo error", async () => {
+    // The logo itself was read fine. Reporting a detection failure as an image
+    // problem would be a lie, and it's what happens if the call isn't isolated.
+    detectLogoColors.mockRejectedValue(new Error("model exploded"));
+    const props = await setup();
+    pickLogo();
+
+    // Both waits are POSITIVE conditions. Waiting for the progress line to be
+    // ABSENT would pass instantly — before the logo was even read — and leave
+    // pending work to settle inside the next test.
+    await waitFor(() => expect(props.onLogoChange).toHaveBeenCalled());
+    await waitFor(() => expect(detectLogoColors).toHaveBeenCalled());
+
+    expect(screen.queryByText(/couldn.t read that image/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/model exploded/i)).not.toBeInTheDocument();
+    expect(props.onBrandColorsChange).not.toHaveBeenCalled();
+  });
+
+  it("is not attempted for a logo that failed validation", async () => {
+    await setup();
+    fireEvent.change(document.querySelectorAll('input[type="file"]')[0], {
+      target: { files: [pngFile("big.png", 2 * 1024 * 1024)] },
+    });
+    expect(detectLogoColors).not.toHaveBeenCalled();
+  });
+
+  it("stops crediting the logo once the user picks a color by hand", async () => {
+    await setup();
+    pickLogo();
+    await screen.findByRole("button", { name: /undo/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /navy & gold/i }));
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+  });
+
+  it("a slow detection cannot overwrite a color the user just chose", async () => {
+    // Detection resolves only after the manual pick, and must be discarded.
+    let release: (v: unknown) => void = () => {};
+    detectLogoColors.mockReturnValue(new Promise((r) => { release = r; }));
+
+    const props = await setup();
+    pickLogo();
+    // Reading the logo to base64 is itself async, so wait until detection is
+    // genuinely in flight — otherwise the click lands before it even starts and
+    // the test proves nothing.
+    await screen.findByText(/reading your logo.s colors/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /navy & gold/i }));
+    const callsBefore = props.onBrandColorsChange.mock.calls.length;
+
+    release({ primary: "#0A5F55", secondary: "#E4A11B", palette_key: "custom",
+              source: "vision", candidates: [] });
+    await waitFor(() =>
+      expect(screen.queryByText(/reading your logo.s colors/i)).not.toBeInTheDocument(),
+    );
+    expect(props.onBrandColorsChange.mock.calls.length).toBe(callsBefore);
   });
 });

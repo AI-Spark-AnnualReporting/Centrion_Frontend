@@ -40,6 +40,23 @@ export interface ExtractedGuideline {
   chars: number;
 }
 
+// What POST /auth/onboarding/detect-logo-colors returns for an uploaded logo.
+//
+// The hexes always come from real pixels in the image — the model only chooses
+// which sampled colour is the primary and which is the secondary, so `source`
+// says how that choice was reached:
+//   "vision" — the model picked from the sampled candidates
+//   "pixels" — the model was unusable; the two largest hue families were used
+//   "none"   — the logo has no colour (white/black only), so primary is null
+//              and the caller must leave the current colours alone
+export interface DetectedBrandColors {
+  primary: string | null;
+  secondary: string | null;
+  palette_key: string;
+  source: "vision" | "pixels" | "none";
+  candidates: string[];
+}
+
 // Mirrors PRESET_COLOR_PALETTES in Centriton/brand_constants.py. Only used as a
 // fallback when GET /reports/quarterly/color-palettes can't be reached, so the
 // Brand step never blocks onboarding on a network hiccup.
