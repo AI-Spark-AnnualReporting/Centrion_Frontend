@@ -4,6 +4,7 @@ import { reports as reportsApi, sarCycles } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Cycle } from '@/types/cycles';
 import { ProgressBar, safePct } from '@/pages/annual-report/cycle-ui';
+import { statusPill, type StatusPill } from './report-status';
 
 /**
  * Active Reports — real reports from reports.list (status derived from generation_config),
@@ -53,27 +54,11 @@ function coveragePct(r: ReportRow): number | null {
   return Math.max(0, Math.min(100, Math.round(p <= 1 ? p * 100 : p)));
 }
 
-// The real reports.status vocabulary (schema.sql `valid_report_status`). Colours are the
-// existing badge palette from index.css — no new colour enters the system here.
-const STATUS_PILL: Record<string, { text: string; color: string; bg: string }> = {
-  draft:            { text: 'DRAFT',            color: '#5A6080', bg: '#E8EAF5' },
-  in_review:        { text: 'IN REVIEW',        color: '#B45309', bg: 'rgba(245,158,11,.12)' },
-  pending_approval: { text: 'PENDING APPROVAL', color: '#7C3AED', bg: 'rgba(139,92,246,.12)' },
-  approved:         { text: 'APPROVED',         color: '#16A34A', bg: 'rgba(34,197,94,.12)' },
-  locked:           { text: 'LOCKED',           color: '#0D9488', bg: 'rgba(20,184,166,.12)' },
-  published:        { text: 'PUBLISHED',        color: '#2563EB', bg: 'rgba(59,130,246,.12)' },
-};
-
-const UNKNOWN_STATUS = { color: '#5A6080', bg: '#E8EAF5' };
-
 // Docs banked at onboarding carry no generation_config and all sit at 'draft' — "you
-// uploaded this" tells the reader more, so it wins. Everything else shows its real status;
-// an unrecognised future code still renders (greyed, humanised) rather than vanishing.
-function statusPill(r: ReportRow, uploaded: boolean): { text: string; color: string; bg: string } {
+// uploaded this" tells the reader more, so it wins. Everything else shows its real status.
+function rowPill(r: ReportRow, uploaded: boolean): StatusPill {
   if (uploaded) return { text: 'UPLOADED', color: ACCENT, bg: 'rgba(64,64,200,.12)' };
-  const key = (r.status ?? '').trim().toLowerCase();
-  if (!key) return STATUS_PILL.draft;
-  return STATUS_PILL[key] ?? { ...UNKNOWN_STATUS, text: key.toUpperCase().replace(/_/g, ' ') };
+  return statusPill(r.status);
 }
 
 // Three independent reasons the coverage bar carries no meaning:
@@ -159,7 +144,7 @@ export function ActiveReportsCard() {
           // No generation_config ⇒ the app didn't generate this; it was uploaded at onboarding.
           const gc = r.generation_config;
           const uploaded = !gc || Object.keys(gc).length === 0;
-          const status = statusPill(r, uploaded);
+          const status = rowPill(r, uploaded);
           return (
             <div key={r.id} style={{ display: 'flex', gap: 11, alignItems: 'center', padding: '11px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
               <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)' }}>{initials(r.report_type)}</span>
