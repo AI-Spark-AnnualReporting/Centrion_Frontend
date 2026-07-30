@@ -167,6 +167,24 @@ export default function ProcessingPage() {
 
     (async () => {
       try {
+        // Guard against redoing save → lock → produceAll on a revisit — this
+        // effect re-runs from scratch on every fresh mount of this page (e.g.
+        // the browser back/forward button can remount it with this exact same
+        // bootstrap state), but `bootstrappedRef` only protects against a
+        // second run WITHIN one mount. Check the outline's real, current lock
+        // status first: if it's already locked, sections were already
+        // produced on an earlier pass, so just go look at them instead of
+        // regenerating everything again.
+        const current = await quarterlyReports.getOutline(companyId, reportId).catch(() => null);
+        const alreadyLocked =
+          current != null &&
+          (current.locked === true ||
+            (current.sections.length > 0 && current.sections.every((s) => s.locked)));
+        if (alreadyLocked) {
+          navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+          return;
+        }
+
         await quarterlyReports.saveOutline(companyId, reportId, boot.outlinePayload);
         await quarterlyReports.lockOutline(companyId, reportId);
         const handle = await quarterlyReports.produceAll(companyId, reportId);
