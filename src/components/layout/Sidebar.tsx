@@ -3,17 +3,25 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
-// types offered on the Reports page. ESG opens the in-app page; Annual lives in
-// the separate workspace app and is routed by role.
+// generation flows offered on the Reports page. Annual lives in the separate
+// workspace app and is routed by role. (ESG Validator lives under "Reports
+// Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
 const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: boolean; end?: boolean }[] = [
-  // `end` → highlight only on an exact path match, so ESG isn't also "active"
-  // on /reports/quarterly (which startsWith('/reports')).
-  { key: 'esg', label: 'ESG Validator', path: '/reports', end: true },
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly' },
   { key: 'earnings', label: 'Earnings', path: '/earnings/setup' },
   // Annual: admins manage cycles in-app at /annual-report; PMs/departments
   // still go to the external workspace app (routed by role in goAnnual()).
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
+];
+
+// Sub-sections shown when the "Reports Validation" item is expanded — the two
+// validation/compliance-checking tools, kept separate from the report
+// generation flows above so "Reports" isn't overloaded with unrelated tools.
+const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; end?: boolean }[] = [
+  // `end` → highlight only on an exact /reports match, so this isn't also
+  // "active" on /reports/quarterly (which startsWith('/reports')).
+  { key: 'esg', label: 'ESG Validator', path: '/reports', end: true },
+  { key: 'compliance', label: 'Compliance Validation', path: '/compliance' },
 ];
 
 // Admin Console sub-sections — mirror the pages under /admin-console. Shown only
@@ -30,9 +38,9 @@ const NAV_ITEMS = [
     section: 'IR System',
     items: [
       { key: 'dashboard', label: 'Command Center', path: '/dashboard', icon: 'grid', badge: null },
-      { key: 'reports', label: 'Reports', path: '/reports', icon: 'doc', badge: null },
+      { key: 'reports', label: 'Reports', path: '/reports/quarterly', icon: 'doc', badge: null },
+      { key: 'reportsValidation', label: 'Reports Validation', path: '/reports', icon: 'shield', badge: null },
       { key: 'kpi', label: 'KPI Normalizer', path: '/kpi', icon: 'chart', badge: null },
-      { key: 'compliance', label: 'Compliance Validation', path: '/compliance', icon: 'shield', badge: null },
       { key: 'ai', label: 'AI Copilot', path: '/ai', icon: 'chat', badge: null },
     ],
   },
@@ -75,9 +83,15 @@ export function Sidebar() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
+  // Excludes the bare '/reports' path — that's ESG Validator's route, now
+  // under "Reports Validation" below — but still covers /reports/quarterly.
   const reportsActive =
-    location.pathname.startsWith('/reports') || location.pathname.startsWith('/earnings');
+    location.pathname.startsWith('/reports/') || location.pathname.startsWith('/earnings');
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
+
+  const validationActive =
+    location.pathname === '/reports' || location.pathname.startsWith('/compliance');
+  const [validationOpen, setValidationOpen] = useState(validationActive);
 
   const adminActive = location.pathname.startsWith('/admin-console');
   const [adminOpen, setAdminOpen] = useState(adminActive);
@@ -200,6 +214,61 @@ export function Sidebar() {
                         />
                         {child.label}
                       </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : item.key === 'reportsValidation' ? (
+              <div key={item.key}>
+                <button
+                  className={`sb-item ${validationActive && !validationOpen ? 'act' : ''}`}
+                  onClick={() => setValidationOpen((o) => !o)}
+                  aria-expanded={validationOpen}
+                >
+                  {icons[item.icon]}
+                  {item.label}
+                  <svg
+                    viewBox="0 0 12 12"
+                    width="11"
+                    height="11"
+                    fill="none"
+                    style={{
+                      marginLeft: 'auto',
+                      flexShrink: 0,
+                      opacity: 0.6,
+                      transition: '.15s',
+                      transform: validationOpen ? 'rotate(180deg)' : 'none',
+                    }}
+                  >
+                    <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                {validationOpen && (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {REPORTS_VALIDATION_CHILDREN.map((child) => {
+                      const childActive = child.end
+                        ? location.pathname === child.path
+                        : location.pathname.startsWith(child.path);
+                      return (
+                        <button
+                          key={child.key}
+                          className={`sb-item ${childActive ? 'act' : ''}`}
+                          style={{ paddingLeft: 34, fontSize: 11 }}
+                          onClick={() => handleNav(child.path)}
+                        >
+                          <span
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: '50%',
+                              background: 'currentColor',
+                              opacity: 0.45,
+                              flexShrink: 0,
+                            }}
+                          />
+                          {child.label}
+                        </button>
                       );
                     })}
                   </div>
