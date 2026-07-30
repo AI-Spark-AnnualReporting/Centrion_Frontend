@@ -103,7 +103,9 @@ import type {
   InviteUserResponse,
   PermissionMatrix,
   RawAdminOverview,
+  RegenerateTempPasswordResponse,
   SavePermissionsPayload,
+  TempPasswordResponse,
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
@@ -3410,6 +3412,25 @@ export const adminConsole = {
       method: "POST",
       body,
     }),
+
+  // Reveal the temp password of a user who hasn't set their own yet. Its own
+  // call rather than a field on `listUsers` so a live credential only leaves
+  // the server when an admin actually asks (and the read can be audited).
+  // Only worth calling when the row says `has_temp_password`; a user who has
+  // since rotated 409s, and ApiError carries the backend's explanation.
+  getTempPassword: (userId: string) =>
+    request<TempPasswordResponse>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/temp-password`,
+    ),
+
+  // Issue a fresh temp password: invalidates the old one, re-emails it, and
+  // returns it so the admin can still hand it over if delivery failed. 409s
+  // for a user with their own password — they go through "Forgot password".
+  regenerateTempPassword: (userId: string) =>
+    request<RegenerateTempPasswordResponse>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/regenerate-password`,
+      { method: "POST" },
+    ),
 
   // Reassign a user's department (department_user role only). Pass null to clear.
   updateUserDepartment: (userId: string, departmentId: string | null) =>

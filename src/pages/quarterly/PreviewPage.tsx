@@ -23,6 +23,7 @@ import {
   sourceTypeLabel,
   seedFromOutline,
   byDisplayOrder,
+  isTableOfContentsSection,
 } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Outline conventions) ────────────────────
@@ -321,8 +322,12 @@ export default function PreviewPage() {
       .getOutline(companyId, reportId)
       .then(async (res) => {
         if (cancelled) return;
+        // The Table of Contents is generated from the finished document, so there is
+        // nothing to preview or produce for it here. Dropping it from this list is
+        // display-only — it stays in the saved outline and in the assembled report.
         const included = (res.sections ?? [])
           .filter((s) => s.included && !s.hidden_duplicate)
+          .filter((s) => !isTableOfContentsSection(s.section_code))
           .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);

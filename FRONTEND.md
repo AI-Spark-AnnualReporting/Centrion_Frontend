@@ -464,6 +464,28 @@ status. That's what the dev-only link on the success screen is for.
 | PATCH | `/api/v1/admin/users/{userId}/role` | `admin.updateUserRole` |
 | PATCH | `/api/v1/admin/users/{userId}/status` | `admin.updateUserStatus` |
 | GET | `/api/v1/admin/stats` | `admin.platformStats` |
+| GET | `/api/v1/admin/users/{userId}/temp-password` | `adminConsole.getTempPassword` |
+| POST | `/api/v1/admin/users/{userId}/regenerate-password` | `adminConsole.regenerateTempPassword` |
+
+**Temp-password reveal / regenerate** — an admin can read a temp password for as
+long as the invite is open, and mint a new one:
+
+```
+GET  /api/v1/admin/users/{userId}/temp-password
+  200: { "user_id": "usr_1", "temp_password": "aB3#kQ9zXm2p" }
+  409: { "detail": "This user has set their own password — there is no
+                    temporary password to show" }
+
+POST /api/v1/admin/users/{userId}/regenerate-password
+  200: { "temp_password": "…", "email_sent": true, "email_message": "…" }
+  409: { "detail": "This user has set their own password. Ask them to use
+                    'Forgot password' instead." }
+```
+
+The users list carries `has_temp_password` (true until the user sets their own
+password) — that's what gates the reveal control in the UI. The 409s are the
+backstop for a row that went stale between load and click; `ApiError.message`
+is the `detail`, so both are rendered verbatim.
 
 ### Lookups (no auth required)
 | Method | Path | Function |
