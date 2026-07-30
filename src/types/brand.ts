@@ -56,6 +56,83 @@ export const PRIMARY_NOTE =
 export const SECONDARY_NOTE =
   "Used for highlights, KPI numbers, dividers, and accent borders.";
 
+// ─── upload limits, shared by the onboarding Brand step and the Brand Identity
+// page. Both screens accept the same files and must reject them identically, so
+// the constants and the file readers live here rather than in either screen.
+
+// Cap on companies.brand_identity — mirrors MAX_BRAND_IDENTITY_CHARS in
+// Centriton/brand_constants.py, which in turn matches the extractor's own
+// truncation point, so anything extract_text can produce is storable.
+export const MAX_BRAND_IDENTITY = 24000;
+
+// PNG/JPEG only, capped to match MAX_LOGO_BYTES in Centriton/brand_constants.py.
+// The logo is stored inline on the company row as base64, so the cap is about
+// row size, not upload bandwidth.
+export const LOGO_MAX_BYTES = 1024 * 1024;
+// Some browsers report a .jpg as image/jpg; the backend normalizes it.
+export const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
+export const LOGO_ACCEPT = '.png,.jpg,.jpeg,image/png,image/jpeg';
+
+// Mirrors _PROFILE_ALLOWED_EXTS in Centriton/routes/auth_routes.py.
+export const DOC_ACCEPT = '.pdf,.docx';
+export const DOC_EXTS = ['.pdf', '.docx'];
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function hasExt(name: string, exts: string[]): boolean {
+  return exts.some((e) => name.toLowerCase().endsWith(e));
+}
+
+/** Decoded byte length of a base64 data URI, without decoding it.
+ *
+ * The stored logo arrives as bytes alone — no filename, no size — so this is
+ * the only way to show its weight when the Brand Identity page loads one back.
+ */
+export function dataUriBytes(dataUri: string): number {
+  const payload = dataUri.slice(dataUri.indexOf(',') + 1);
+  if (!payload) return 0;
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+}
+
+/** Why a picked logo is unusable, or null when it's fine.
+ *
+ * Deliberately synchronous and separate from readLogoFile: type and size are
+ * knowable without touching the file, so rejecting on them must paint the error
+ * in the same tick as the pick — not a microtask later.
+ */
+export function validateLogoFile(f: File): string | null {
+  if (!LOGO_TYPES.includes(f.type)) return 'That file type isn’t supported. Use a PNG or JPG.';
+  if (f.size > LOGO_MAX_BYTES) return `That image is ${formatBytes(f.size)} — the limit is 1 MB.`;
+  return null;
+}
+
+/** Read an already-validated logo to the base64 data URI stored in
+ * companies.logo_base64 — the exact string the report exporter renders.
+ *
+ * Rejects with the user-facing message, so both screens word it identically.
+ */
+export function readLogoFile(f: File): Promise<PickedLogo> {
+  return new Promise((resolve, reject) => {
+    const unreadable = new Error('We couldn’t read that image. Try another file.');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUri = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUri.startsWith('data:image/')) {
+        reject(unreadable);
+        return;
+      }
+      resolve({ name: f.name, size: f.size, dataUri });
+    };
+    reader.onerror = () => reject(unreadable);
+    reader.readAsDataURL(f);
+  });
+}
+
 // ─── colour helpers ───────────────────────────────────────────────────────────
 
 /** '#abc' / 'aabbcc' / '#AABBCC' → '#aabbcc'. Null when it isn't a hex color. */

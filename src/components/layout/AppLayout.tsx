@@ -20,6 +20,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',
+  '/brand-identity': 'Brand Identity',
   '/admin-console': 'Admin Console',
   '/admin-console/users': 'Users & Roles',
   '/admin-console/departments': 'Departments',

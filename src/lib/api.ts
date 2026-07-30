@@ -17,6 +17,7 @@ import type {
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
+  CompanyBrandUpdate,
   CreateCompanyRequest,
   CreateCompanyResponse,
   Sector,
@@ -567,7 +568,10 @@ export const companies = {
   getMyCompanyLogo: () =>
     request<{ logo_base64: string | null }>("/api/v1/companies/me/logo"),
 
-  updateMyCompany: (body: Partial<Company>) =>
+  // CompanyBrandUpdate widens this beyond Company because logo_base64 is
+  // write-only — accepted here, stripped from GET /companies/me. Note the
+  // response IS the full row, logo included (~1.4 MB), unlike the GET.
+  updateMyCompany: (body: Partial<Company> & CompanyBrandUpdate) =>
     request<Company>("/api/v1/companies/me", { method: "PATCH", body }),
 
   getDigitalTwin: <T = unknown>(companyId: string, period?: string) =>
@@ -611,6 +615,15 @@ export const companies = {
       form,
     );
   },
+
+  // Re-run tone/theme/highlights extraction over the documents ALREADY in the Document
+  // Bank — no re-upload. What the dashboard's "What we learned from your reports" card
+  // triggers when it has nothing to show. Non-blocking; poll report_extraction_status.
+  // Returns { status: 'processing' | 'skipped' } — 'skipped' means no documents to read.
+  refreshReportStyle: (companyId: string): Promise<{ status: string }> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/refresh-report-style`, {
+      method: "POST",
+    }),
 
   // Inline onboarding validation: LLM-check one Annual/ESG file, bank it, and return the
   // verdict + detected fiscal year + a document_id the submit step will process.

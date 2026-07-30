@@ -24,7 +24,20 @@ const ADMIN_CHILDREN: { key: string; label: string; path: string; end?: boolean 
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
 ];
 
-const NAV_ITEMS = [
+// Explicitly typed (like REPORT_CHILDREN / ADMIN_CHILDREN above) because only
+// some items carry `adminOnly` — inferred, the array element would be a union
+// and reading .adminOnly off it wouldn't compile.
+const NAV_ITEMS: {
+  section: string;
+  items: {
+    key: string;
+    label: string;
+    path: string;
+    icon: string;
+    badge: { cls: string; text: string } | null;
+    adminOnly?: boolean;
+  }[];
+}[] = [
   {
     section: 'IR System',
     items: [
@@ -50,6 +63,9 @@ const NAV_ITEMS = [
       { key: 'docs', label: 'Document Bank', path: '/docs', icon: 'file', badge: null },
       { key: 'questions', label: 'Questions Bank', path: '/questions', icon: 'question', badge: null },
       { key: 'profile', label: 'Profile', path: '/profile', icon: 'user', badge: null },
+      // Admin-only to match PATCH /companies/me — ProtectedRoute bounces every
+      // other role to /dashboard, so showing it to them would be a dead link.
+      { key: 'brand', label: 'Brand Identity', path: '/brand-identity', icon: 'brand', badge: null, adminOnly: true },
     ],
   },
 ];
@@ -67,6 +83,7 @@ const icons: Record<string, JSX.Element> = {
   question: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 5.5C5 4.7 5.7 4 6.5 4S8 4.7 8 5.5c0 .6-.3 1.1-.8 1.4L7 7.5M7 9.5v.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   user: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1.5 12c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   calchk: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1v2M9 1v2M1 5.5h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M4.6 8.6l1.3 1.3 2.5-2.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  brand: <svg viewBox="0 0 13 13" fill="none"><path d="M2.5 11.5V3a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 10.5 3v8.5l-4-2.2-4 2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><circle cx="6.5" cy="5" r="1.4" stroke="currentColor" strokeWidth="1.2"/></svg>,
 };
 
 export function Sidebar() {
@@ -131,7 +148,7 @@ export function Sidebar() {
       {NAV_ITEMS.map((section) => (
         <div key={section.section}>
           <div className="sb-sec">{section.section}</div>
-          {section.items.map((item) =>
+          {section.items.filter((i) => !i.adminOnly || user?.role === 'admin').map((item) =>
             item.key === 'reports' ? (
               <div key={item.key}>
                 <button

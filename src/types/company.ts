@@ -112,3 +112,14 @@ export type CompanyEditableFields = Pick<
   | "has_sukuk"
   | "reporting_sector"
 >;
+
+// The branding an admin can change via PATCH /companies/me, from the Brand
+// Identity page. Separate from Company because logo_base64 is WRITE-ONLY here:
+// PATCH accepts it, GET /companies/me strips it (read it back from
+// companies.getMyCompanyLogo()), so putting it on Company would misdescribe
+// every GET response. Passing null for any of the three clears that column.
+export type CompanyBrandUpdate = {
+  brand_identity?: string | null;
+  brand_colors?: BrandColors | null;
+  logo_base64?: string | null;
+};

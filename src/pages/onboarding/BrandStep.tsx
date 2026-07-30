@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import BrandColorPicker from '@/components/brand/BrandColorPicker';
+import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import { auth, quarterlyReports } from '@/lib/api';
 import type {
   BrandColors,
@@ -7,7 +8,16 @@ import type {
   ExtractedGuideline,
   PickedLogo,
 } from '@/types/brand';
-import { FALLBACK_COLOR_PALETTES } from '@/types/brand';
+import {
+  DOC_ACCEPT,
+  DOC_EXTS,
+  FALLBACK_COLOR_PALETTES,
+  LOGO_ACCEPT,
+  formatBytes,
+  hasExt,
+  readLogoFile,
+  validateLogoFile,
+} from '@/types/brand';
 
 // Step 3 — the company's branding: a logo, a brand language guideline document,
 // and the brand colors that become the default for every report this company
@@ -17,30 +27,11 @@ import { FALLBACK_COLOR_PALETTES } from '@/types/brand';
 // browser and stored inline on the companies row; the guideline document is sent
 // to the backend, which returns its extracted text for companies.brand_identity.
 // Nothing is persisted until onboarding is submitted.
-
-export const MAX_BRAND_IDENTITY = 24000;
-
-// PNG/JPEG only, capped to match MAX_LOGO_BYTES in Centriton/brand_constants.py.
-// The logo is stored inline on the company row as base64, so the cap is about
-// row size, not upload bandwidth.
-const LOGO_MAX_BYTES = 1024 * 1024;
-// Some browsers report a .jpg as image/jpg; the backend normalizes it.
-const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
-const LOGO_ACCEPT = '.png,.jpg,.jpeg,image/png,image/jpeg';
-
-// Mirrors _PROFILE_ALLOWED_EXTS in Centriton/routes/auth_routes.py.
-const DOC_ACCEPT = '.pdf,.docx';
-const DOC_EXTS = ['.pdf', '.docx'];
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function hasExt(name: string, exts: string[]): boolean {
-  return exts.some((e) => name.toLowerCase().endsWith(e));
-}
+//
+// The same three fields are editable after onboarding on the Brand Identity page
+// (pages/BrandIdentityPage.tsx), which is why the limits, the file readers and
+// the upload control itself live in types/brand.ts and components/brand/ rather
+// than here.
 
 export default function BrandStep({
   logo,
@@ -86,25 +77,11 @@ export default function BrandStep({
   const acceptLogo = (f: File | null) => {
     setLogoError('');
     if (!f) { onLogoChange(null); return; }
-    if (!LOGO_TYPES.includes(f.type)) {
-      setLogoError('That file type isn’t supported. Use a PNG or JPG.');
-      return;
-    }
-    if (f.size > LOGO_MAX_BYTES) {
-      setLogoError(`That image is ${formatBytes(f.size)} — the limit is 1 MB.`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUri = typeof reader.result === 'string' ? reader.result : '';
-      if (!dataUri.startsWith('data:image/')) {
-        setLogoError('We couldn’t read that image. Try another file.');
-        return;
-      }
-      onLogoChange({ name: f.name, size: f.size, dataUri });
-    };
-    reader.onerror = () => setLogoError('We couldn’t read that image. Try another file.');
-    reader.readAsDataURL(f);
+    const invalid = validateLogoFile(f);
+    if (invalid) { setLogoError(invalid); return; }
+    readLogoFile(f)
+      .then(onLogoChange)
+      .catch((err: Error) => setLogoError(err.message));
   };
 
   // The backend does the PDF/DOCX text extraction (same extractor the step-1
@@ -140,7 +117,7 @@ export default function BrandStep({
       {/* ── Logo ───────────────────────────────────────────────── */}
       <div className="ob-brand-section">
         <FieldHead title="Company logo" optional />
-        <UploadBox
+        <BrandUploadBox
           icon="🖼️"
           prompt="Drag your logo here"
           hint="PNG or JPG · up to 1 MB"
@@ -171,7 +148,7 @@ export default function BrandStep({
           Upload your brand or tone-of-voice document — we’ll use it to shape how everything
           we write for you reads.
         </p>
-        <UploadBox
+        <BrandUploadBox
           icon="📄"
           prompt="Drag your guideline here"
           hint="PDF or DOCX"
@@ -229,88 +206,5 @@ function FieldHead({ title, optional }: { title: string; optional?: boolean }) {
       <span className="ob-brand-title">{title}</span>
       {optional && <span className="ob-brand-optional">Optional</span>}
     </div>
-  );
-}
-
-// One compact upload control for both fields: dashed drop target until something
-// is picked, then a filled row of the same height (so the field never jumps).
-function UploadBox({
-  icon, prompt, hint, accept, error, busy, busyLabel, filled, removeLabel, onPick,
-}: {
-  icon: string;
-  prompt: string;
-  hint: string;
-  accept: string;
-  error?: string;
-  busy?: boolean;
-  busyLabel?: string;
-  filled?: React.ReactNode;
-  removeLabel: string;
-  onPick: (f: File | null) => void;
-}) {
-  const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  return (
-    <>
-      {filled ? (
-        <div className="ob-logo-preview">
-          {filled}
-          <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
-            Replace
-          </button>
-          <button
-            type="button"
-            className="ob-logo-remove"
-            onClick={() => onPick(null)}
-            aria-label={removeLabel}
-            title={removeLabel}
-          >
-            ✕
-          </button>
-        </div>
-      ) : (
-        <div
-          className={`ob-drop ob-drop-compact${dragOver ? ' over' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            onPick(e.dataTransfer.files?.[0] ?? null);
-          }}
-        >
-          <div style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }} aria-hidden>{icon}</div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="ob-drop-prompt">{busy ? busyLabel : prompt}</div>
-            <div className="ob-drop-hint">
-              {busy ? (
-                <span className="proc-ring" style={{ width: 12, height: 12, borderWidth: 2, display: 'inline-block', verticalAlign: 'middle' }} />
-              ) : hint}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="ob-browse ob-browse-inline"
-            disabled={busy}
-            onClick={() => inputRef.current?.click()}
-          >
-            Browse files
-          </button>
-        </div>
-      )}
-
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          onPick(e.target.files?.[0] ?? null);
-          e.target.value = ''; // re-picking the same file must still fire onChange
-        }}
-      />
-      {error && <div className="fl-err">{error}</div>}
-    </>
   );
 }
