@@ -2,6 +2,14 @@ import { useState } from 'react';
 import type { EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { INK, MUTED, FAINT, ACCENT, DANGER } from './tokens';
 
+// "2026-07-30T09:16:44Z" → "Jul 30, 2026" (mirrors EarningsReportCard's date format).
+function formatApprovedDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -24,6 +32,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 export function PublishBar({
   details,
   locked,
+  approvedAt,
   blockers,
   approving,
   onApprove,
@@ -33,6 +42,10 @@ export function PublishBar({
 }: {
   details?: { label: string; value: string }[];
   locked: boolean;
+  // When present, the status line reads "Approved <date>" instead of the
+  // generic "final & locked" — omit (or pass null) when the backend hasn't
+  // supplied a real approval timestamp, never fabricate one.
+  approvedAt?: string | null;
   blockers: EarningsApproveBlocker[] | null;
   approving: boolean;
   onApprove: () => void;
@@ -77,7 +90,11 @@ export function PublishBar({
             {locked ? 'Approved' : 'Draft'}
           </span>
           <span style={{ fontSize: 12, color: MUTED, marginLeft: 2 }}>
-            {locked ? '· final & locked' : '· editing in progress'}
+            {locked
+              ? formatApprovedDate(approvedAt ?? null)
+                ? `· approved ${formatApprovedDate(approvedAt ?? null)}`
+                : '· final & locked'
+              : '· editing in progress'}
           </span>
         </div>
       </div>
@@ -116,10 +133,10 @@ export function PublishBar({
         <div className="card" style={{ padding: '14px 16px' }}>
           <SectionHeader>Export</SectionHeader>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('pdf')} disabled={exporting !== null}>
+            <button className="btn bp" style={{ flex: 1 }} onClick={() => void runExport('pdf')} disabled={exporting !== null}>
               {exporting === 'pdf' ? 'Preparing…' : '⬇ PDF'}
             </button>
-            <button className="btn bs" style={{ flex: 1 }} onClick={() => void runExport('docx')} disabled={exporting !== null}>
+            <button className="btn bp" style={{ flex: 1 }} onClick={() => void runExport('docx')} disabled={exporting !== null}>
               {exporting === 'docx' ? 'Preparing…' : '⬇ Word'}
             </button>
           </div>

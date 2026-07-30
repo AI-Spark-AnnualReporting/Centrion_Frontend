@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
-import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
+import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
 import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
@@ -60,17 +60,26 @@ function readBlockers(body: unknown): EarningsApproveBlocker[] {
     .filter((b): b is EarningsApproveBlocker => b !== null);
 }
 
+// A report is done-and-locked once it's reached any of these statuses — same
+// set the dashboard cards already use to decide "View" vs "Continue".
+const FINISHED_STATUSES = ['approved', 'locked', 'published', 'complete', 'completed'];
+
 export default function EarningsPreviewPage() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  // Endpoints are report-scoped (no company_id); read defensively so a null user
-  // never crashes the page.
-  void (user?.company_id ?? null);
+  const companyId = user?.company_id ?? null;
 
   const [sections, setSections] = useState<EarningsProducedSection[]>([]);
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
-  const [locked, setLocked] = useState(false);
+  // GET /sections doesn't carry the report's true approval status at all
+  // (confirmed live — it returns only {report_id, sections}); `sectionsLocked`
+  // is kept in case a future backend response starts including it, but
+  // `reportStatus` (fetched separately below, from the one place status
+  // actually lives today) is the real source of truth.
+  const [sectionsLocked, setSectionsLocked] = useState(false);
+  const [reportStatus, setReportStatus] = useState<EarningsReportSummary | null>(null);
+  const locked = sectionsLocked || FINISHED_STATUSES.includes(reportStatus?.status ?? '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -97,7 +106,7 @@ export default function EarningsPreviewPage() {
         .sort(byDisplayOrder);
       setSections(sorted);
       setCoverTemplateKey(res.cover_template_key);
-      setLocked(res.locked);
+      setSectionsLocked(res.locked);
       setActiveCode((cur) => cur ?? sorted[0]?.section_code ?? null);
     },
     [],
@@ -129,6 +138,25 @@ export default function EarningsPreviewPage() {
       cancelled = true;
     };
   }, [reportId, retryKey, applyResponse]);
+
+  // ── Load the report's real status (approved/locked/etc.) ────────────────────
+  // Refetched on retryKey too, in case the same bump that reloads sections
+  // should also pick up an approval that just landed.
+  useEffect(() => {
+    if (!reportId || !companyId) return;
+    let cancelled = false;
+    earnings
+      .getEarningsReportSummary(companyId, reportId)
+      .then((summary) => {
+        if (!cancelled) setReportStatus(summary);
+      })
+      .catch(() => {
+        /* status just won't upgrade past whatever sectionsLocked already says */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId, companyId, retryKey]);
 
   // ── Poll while a produce run is active ──────────────────────────────────────
   useEffect(() => {
@@ -317,7 +345,7 @@ export default function EarningsPreviewPage() {
     setError(null);
     try {
       await earnings.approveEarningsReport(reportId);
-      setLocked(true);
+      setSectionsLocked(true);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         const list = readBlockers(err.body);
@@ -339,7 +367,7 @@ export default function EarningsPreviewPage() {
   if (loading) {
     return (
       <div>
-        <EarningsStepper activeStep={4} reportId={reportId} />
+        <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
         <div className="card" style={{ padding: 0 }}>
           <Spinner pad={80} />
         </div>
@@ -350,7 +378,7 @@ export default function EarningsPreviewPage() {
   if (error && sections.length === 0) {
     return (
       <div>
-        <EarningsStepper activeStep={4} reportId={reportId} />
+        <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
         <div
           className="card"
           role="alert"
@@ -389,7 +417,7 @@ export default function EarningsPreviewPage() {
 
   return (
     <div>
-      <EarningsStepper activeStep={4} reportId={reportId} />
+      <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Preview your earnings report
@@ -483,6 +511,7 @@ export default function EarningsPreviewPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <PublishBar
               locked={locked}
+              approvedAt={reportStatus?.approved_at ?? null}
               blockers={blockers}
               approving={approving}
               onApprove={handleApprove}
@@ -490,7 +519,7 @@ export default function EarningsPreviewPage() {
               onOpenCoverPicker={() => setPickerOpen(true)}
               showApprove={false}
             />
-            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} />}
+            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
           </div>
         </div>
       )}

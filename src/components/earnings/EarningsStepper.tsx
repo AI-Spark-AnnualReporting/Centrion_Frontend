@@ -15,8 +15,18 @@ type StepState = 'done' | 'active' | 'upcoming';
 // need to be told they've arrived. Done/active steps are clickable (jump back
 // to something already reached); an upcoming step is disabled — it can only
 // be reached by actually completing the current screen's Continue action, not
-// by skipping ahead via the stepper.
-export function EarningsStepper({ activeStep, reportId }: { activeStep: number; reportId?: string | null }) {
+// by skipping ahead via the stepper. Once the report is approved & locked,
+// EVERY step besides the current one is disabled — an approved report is
+// final, so there's no going back to re-edit Setup/Extraction/Outline either.
+export function EarningsStepper({
+  activeStep,
+  reportId,
+  locked = false,
+}: {
+  activeStep: number;
+  reportId?: string | null;
+  locked?: boolean;
+}) {
   const navigate = useNavigate();
   const activeIndex = activeStep - 1; // 0-based
 
@@ -29,7 +39,7 @@ export function EarningsStepper({ activeStep, reportId }: { activeStep: number; 
           const circleColor = state === 'active' ? '#fff' : state === 'done' ? ACCENT : FAINT;
           const stepLabelColor = state === 'active' ? ACCENT : state === 'done' ? FAINT : '#B7BCD6';
           const titleColor = state === 'upcoming' ? FAINT : INK;
-          const disabled = (i > 0 && !reportId) || state === 'upcoming';
+          const disabled = locked ? i !== activeIndex : (i > 0 && !reportId) || state === 'upcoming';
 
           return (
             <div
@@ -39,7 +49,13 @@ export function EarningsStepper({ activeStep, reportId }: { activeStep: number; 
               <button
                 type="button"
                 disabled={disabled}
-                title={state === 'upcoming' ? 'Complete the current step to continue' : undefined}
+                title={
+                  locked && i !== activeIndex
+                    ? 'This report is approved and locked — it can no longer be edited.'
+                    : state === 'upcoming'
+                      ? 'Complete the current step to continue'
+                      : undefined
+                }
                 onClick={() => navigate(step.path(reportId ?? ''))}
                 style={{
                   display: 'flex',
