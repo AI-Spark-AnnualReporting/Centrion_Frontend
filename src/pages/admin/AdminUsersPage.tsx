@@ -416,6 +416,176 @@ function InviteResultModal({
   );
 }
 
+// ── Temp password (expanded row) ───────────────────────────────────────────
+// Only rendered while the invite is still open: the backend drops its readable
+// copy the moment the user sets their own password, so an active user has
+// nothing to show here. Revealing is a deliberate click, not a field on the
+// list, so a live credential is only fetched when the admin asks for it.
+function TempPasswordControls({ user }: { user: AdminUserRow }) {
+  const { toast } = useToast();
+  const [password, setPassword] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'reveal' | 'regen' | null>(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const reveal = async () => {
+    setBusy('reveal');
+    setError('');
+    try {
+      const res = await adminConsole.getTempPassword(user.user_id);
+      setPassword(res.temp_password);
+    } catch (e) {
+      // A row that went stale (they activated since it loaded) 409s, and the
+      // backend's `detail` already says exactly that — show it as-is.
+      setError(e instanceof Error ? e.message : 'Could not read the temporary password.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const regenerate = async () => {
+    setConfirming(false);
+    setBusy('regen');
+    setError('');
+    try {
+      const res = await adminConsole.regenerateTempPassword(user.user_id);
+      setPassword(res.temp_password);
+      toast({
+        title: 'Temporary password regenerated',
+        description: res.email_sent
+          ? (res.email_message ?? `The new password was emailed to ${user.email}.`)
+          : `${res.email_message ?? 'The email could not be sent.'} Copy it below and pass it on.`,
+        variant: res.email_sent ? 'success' : 'default',
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not regenerate the temporary password.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copy = () => {
+    if (!password) return;
+    navigator.clipboard?.writeText(password).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>Temporary password</span>
+      {password ? (
+        <>
+          <code
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: '#1A1D2E',
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: '.5px',
+              background: '#F2F3FA',
+              border: '1px solid #E2E4F0',
+              borderRadius: 6,
+              padding: '5px 9px',
+              wordBreak: 'break-all',
+            }}
+          >
+            {password}
+          </code>
+          <button
+            className="btn bs bsm"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              copy();
+            }}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </>
+      ) : (
+        user.has_temp_password && (
+          <button
+            className="btn bs bsm"
+            type="button"
+            disabled={busy !== null}
+            onClick={(e) => {
+              e.stopPropagation();
+              reveal();
+            }}
+          >
+            {busy === 'reveal' ? 'Showing…' : 'Show'}
+          </button>
+        )
+      )}
+      <button
+        className="btn bs bsm"
+        type="button"
+        disabled={busy !== null}
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirming(true);
+        }}
+      >
+        {busy === 'regen' ? 'Regenerating…' : 'Regenerate'}
+      </button>
+      {error && (
+        <span style={{ fontSize: 10, color: '#E5484D' }} role="alert">
+          {error}
+        </span>
+      )}
+      {confirming && (
+        <RegenerateConfirmModal
+          email={user.email}
+          onCancel={() => setConfirming(false)}
+          onConfirm={regenerate}
+        />
+      )}
+    </div>
+  );
+}
+
+// Regenerating invalidates a password the user may already be holding, so it
+// gets a confirmation — in the page's own modal shell rather than the browser's
+// window.confirm, which can't be styled and reads as a security warning.
+function RegenerateConfirmModal({
+  email,
+  onCancel,
+  onConfirm,
+}: {
+  email: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div
+        className="modal-content"
+        style={{ width: 420, padding: 24 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>
+          Regenerate temporary password?
+        </div>
+        <div style={{ fontSize: 12, color: '#5A6080', marginTop: 8, lineHeight: 1.6 }}>
+          A new temporary password will be issued for <strong>{email}</strong> and emailed to
+          them. Their current one stops working immediately.
+        </div>
+        <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn bs" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn bp" type="button" onClick={onConfirm}>
+            Regenerate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminUsersPage() {
   const { user: me } = useAuth();
   const [view, setView] = useState<View>('users');
@@ -920,6 +1090,14 @@ function UsersView(props: {
                               >
                                 Reactivate user
                               </button>
+                            )}
+
+                            {/* Until they activate. `has_temp_password` alone
+                                isn't enough: an invite created before the
+                                backend had an encryption key has nothing
+                                stored, and regenerating is the way out. */}
+                            {(u.status === 'invited' || u.has_temp_password) && (
+                              <TempPasswordControls user={u} />
                             )}
 
                             {u.status === 'invited' && u.invite_link && (

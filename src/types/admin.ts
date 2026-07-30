@@ -158,6 +158,10 @@ export interface AdminUserRow {
   department_name?: string | null;
   department_code?: string | null;
   invite_link?: string | null;
+  // True while the backend still holds a readable copy of the temp password —
+  // i.e. the invite is open and the user hasn't set their own yet. It drops to
+  // false the moment they rotate, which is what hides the reveal control.
+  has_temp_password?: boolean | null;
 }
 
 // ── Invite (POST /api/v1/admin/users/invite) ───────────────────────────────
@@ -176,6 +180,23 @@ export interface InviteUserResponse {
   // NOT go out — otherwise it's a live credential sitting on screen for no
   // reason. Optional on the client so a backend that predates the email
   // fields falls back to showing it (`email_sent` undefined → falsy).
+  temp_password: string;
+  email_sent?: boolean;
+  email_message?: string;
+}
+
+// ── Temp password ──────────────────────────────────────────────────────────
+// GET /users/{userId}/temp-password reveals the stored copy. A user who has
+// set their own password 409s instead — there is no "empty" success shape.
+export interface TempPasswordResponse {
+  user_id: string;
+  temp_password: string;
+}
+
+// POST /users/{userId}/regenerate-password issues a fresh one and re-emails it,
+// same as the original invite — so the delivery fields mirror
+// InviteUserResponse. Also 409s once the user has their own password.
+export interface RegenerateTempPasswordResponse {
   temp_password: string;
   email_sent?: boolean;
   email_message?: string;
