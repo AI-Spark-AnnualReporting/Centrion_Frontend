@@ -9,6 +9,18 @@ export function isCoverSection(s: Pick<ProducedSection, 'section_code'>): boolea
   return /cover/i.test(s.section_code);
 }
 
+// The Table of Contents is generated from the finished document (source_type
+// "Template", mode "auto"), so it has nothing to show or configure while the report
+// is still being built. Hide it on Outline and Preview; it stays in the outline the
+// backend saves and still appears in the assembled report.
+//
+// Matched on the exact code — a loose /toc/ test would not match this one anyway
+// ("table_of_contents" contains no "toc"), and a substring match risks catching an
+// unrelated future section.
+export function isTableOfContentsSection(sectionCode: string): boolean {
+  return sectionCode === 'table_of_contents';
+}
+
 // Ascending sort by display_order — the single source of section order shared by
 // the Outline, Preview and Assembled-report screens (and honored by the backend
 // export). Null/undefined orders coalesce to 0.

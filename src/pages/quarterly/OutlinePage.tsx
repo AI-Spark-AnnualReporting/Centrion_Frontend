@@ -7,7 +7,7 @@ import { quarterlyReports, ApiError } from '@/lib/api';
 import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
-import { byDisplayOrder } from '@/components/quarterly/sectionState';
+import { byDisplayOrder, isTableOfContentsSection } from '@/components/quarterly/sectionState';
 
 // ─── colours (shared quarterly conventions) ──────────────────────────────────
 const ACCENT = '#4040C8';
@@ -373,8 +373,21 @@ export default function OutlinePage() {
     };
   }, []);
 
+  // The Table of Contents is hidden on this screen (see isTableOfContentsSection), but
+  // it stays in `required` so every autosaved payload still carries it and it still
+  // reaches the assembled report. Only the rendering and the counts skip it.
+  //
+  // Row numbers are assigned per VISIBLE row so a hidden section leaves no gap; the
+  // drag handlers keep using the real array index, so reordering is untouched.
+  const requiredNumbers: (number | null)[] = [];
+  let visibleRequiredCount = 0;
+  for (const s of required) {
+    if (isTableOfContentsSection(s.section_code)) requiredNumbers.push(null);
+    else requiredNumbers.push(++visibleRequiredCount);
+  }
+
   const includedCount =
-    required.length + optionals.filter((o) => o.included).length;
+    visibleRequiredCount + optionals.filter((o) => o.included).length;
 
   // ── Persist (debounced PUT) ───────────────────────────────────────────────
   // includedOnly: post-lock the SET is frozen, so a reorder must carry ONLY the
@@ -816,7 +829,7 @@ export default function OutlinePage() {
       {/* Scrollable body */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 28px 20px' }}>
         {/* REQUIRED group */}
-        {required.length > 0 && (
+        {visibleRequiredCount > 0 && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="ch">
               <span className="ct">
@@ -827,7 +840,7 @@ export default function OutlinePage() {
               className="cb"
               style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
             >
-              {required.map((s, i) => (
+              {required.map((s, i) => requiredNumbers[i] === null ? null : (
                 <div
                   key={s.section_code}
                   onDragOver={onDragOver('required', i)}
@@ -835,7 +848,7 @@ export default function OutlinePage() {
                 >
                   <SectionRow
                     section={s}
-                    number={i + 1}
+                    number={requiredNumbers[i] as number}
                     locked={isLocked}
                     ingesting={ingesting}
                     isRequired
@@ -874,7 +887,7 @@ export default function OutlinePage() {
                 >
                   <SectionRow
                     section={s}
-                    number={required.length + i + 1}
+                    number={visibleRequiredCount + i + 1}
                     locked={isLocked}
                     ingesting={ingesting}
                     isRequired={false}
