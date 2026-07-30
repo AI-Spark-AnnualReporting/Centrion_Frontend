@@ -2286,6 +2286,22 @@ export const earnings = {
       signal,
     }).then(normalizeEarningsReportsList),
 
+  // A single report's true status/approval info. There's no singular GET
+  // /earnings/reports/{id} endpoint — GET /sections doesn't carry status at
+  // all (confirmed live: it returns only {report_id, sections}), so this is
+  // the one place a report's real approved/locked state actually lives.
+  getEarningsReportSummary: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsReportSummary | null> =>
+    request<unknown>(`/api/v1/earnings/reports`, {
+      query: { company_id: companyId },
+      signal,
+    })
+      .then(normalizeEarningsReportsList)
+      .then((res) => res.reports.find((r) => r.report_id === reportId) ?? null),
+
   // ── Part 2 — figures ──
   // The reviewed figure set for a report. Path takes report_id ONLY (no
   // company_id). The FIRST load triggers the backend resolve, so it may be slow.

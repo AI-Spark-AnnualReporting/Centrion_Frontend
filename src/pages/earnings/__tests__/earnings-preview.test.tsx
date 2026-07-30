@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
   return {
     navigateMock: vi.fn(),
     getEarningsSections: vi.fn(),
+    getEarningsReportSummary: vi.fn(),
     produceEarningsReport: vi.fn(),
     produceEarningsSection: vi.fn(),
     extractSectionInput: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: h.userRef.curr
 vi.mock('@/lib/api', () => ({
   earnings: {
     getEarningsSections: (...a: unknown[]) => h.getEarningsSections(...a),
+    getEarningsReportSummary: (...a: unknown[]) => h.getEarningsReportSummary(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
     produceEarningsSection: (...a: unknown[]) => h.produceEarningsSection(...a),
     extractSectionInput: (...a: unknown[]) => h.extractSectionInput(...a),
@@ -209,6 +211,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
   h.getEarningsSections.mockResolvedValue(PRODUCED);
+  h.getEarningsReportSummary.mockResolvedValue(null);
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
   h.patchEarningsSectionContent.mockResolvedValue(sec({ ...OVERVIEW, content: 'Edited overview.', edited: true }));
   h.approveEarningsReport.mockResolvedValue({});

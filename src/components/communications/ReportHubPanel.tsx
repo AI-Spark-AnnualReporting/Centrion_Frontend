@@ -38,12 +38,18 @@ export function ReportHubPanel({
   reportId,
   className = 'card',
   showStatus = true,
+  readOnly = false,
 }: {
   reportId: string;
   className?: string;
   // Hide the Draft/In-review/Approved status radio group (earnings uses the
   // simpler status chip in its Publish bar instead).
   showStatus?: boolean;
+  // Hide the "Share again"/"Share for review" action — once a report is
+  // approved & locked there's nothing left to re-share for review. "Discuss"
+  // (viewing the existing thread) still renders, since past discussion stays
+  // relevant after approval.
+  readOnly?: boolean;
 }) {
   const { toast } = useToast();
 
@@ -220,14 +226,16 @@ export function ReportHubPanel({
 
         {/* Actions */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-          <button
-            type="button"
-            className="btn bp"
-            style={{ width: '100%' }}
-            onClick={() => setShowShare(true)}
-          >
-            {thread_id ? 'Share again' : 'Share for review'}
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="btn bp"
+              style={{ width: '100%' }}
+              onClick={() => setShowShare(true)}
+            >
+              {thread_id ? 'Share again' : 'Share for review'}
+            </button>
+          )}
 
           {thread_id && (
             <button
