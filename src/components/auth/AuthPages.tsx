@@ -36,8 +36,18 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [showRegisteredBanner, setShowRegisteredBanner] = useState<boolean>(
-    (location.state as { registered?: boolean } | null)?.registered === true,
+  // Same green banner serves both arrivals: straight from signup, and back
+  // from a completed password reset (which ends with "now sign in").
+  const arrivedFrom = location.state as {
+    registered?: boolean;
+    passwordReset?: boolean;
+  } | null;
+  const [banner, setBanner] = useState<string | null>(
+    arrivedFrom?.registered
+      ? 'Account created successfully. Please sign in.'
+      : arrivedFrom?.passwordReset
+        ? 'Password updated. Please sign in with your new password.'
+        : null,
   );
 
   const handleLogin = async () => {
@@ -96,9 +106,9 @@ export function LoginPage() {
         <div className="auth-r">
           <h2>Welcome back</h2>
           <p>Sign in to your Centriyon account</p>
-          {showRegisteredBanner && (
+          {banner && (
             <div style={{ fontSize: '11px', color: '#30A46C', marginBottom: '10px' }} role="status">
-              Account created successfully. Please sign in.
+              {banner}
             </div>
           )}
           <div className="fl">
@@ -110,7 +120,7 @@ export function LoginPage() {
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
-                if (showRegisteredBanner) setShowRegisteredBanner(false);
+                if (banner) setBanner(null);
               }}
             />
           </div>
@@ -124,7 +134,7 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-                  if (showRegisteredBanner) setShowRegisteredBanner(false);
+                  if (banner) setBanner(null);
                 }}
                 onKeyDown={handleKeyDown}
                 style={{ paddingRight: 36 }}
@@ -171,7 +181,7 @@ export function LoginPage() {
             <label className="flex items-center gap-[6px] text-[#5A6080] cursor-pointer">
               <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ accentColor: '#4040C8' }} /> Remember me
             </label>
-            <a className="text-[#4040C8] cursor-pointer">Forgot password?</a>
+            <a className="text-[#4040C8] cursor-pointer" onClick={() => navigate('/forgot-password')}>Forgot password?</a>
           </div>
           <button className="btn-auth" onClick={handleLogin} disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign in to Portal'}

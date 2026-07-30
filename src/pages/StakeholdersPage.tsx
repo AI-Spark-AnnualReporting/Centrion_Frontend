@@ -172,27 +172,6 @@ function tabForPosition(p: PositionType): TabKey {
   return 'other';
 }
 
-// 12-char password using the browser CSPRNG. Backend forces rotation on
-// first login (must_change_password=TRUE), so this just needs to be hard
-// enough to discourage guessing while the new user logs in.
-function generateTempPassword(): string {
-  const chars =
-    'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const len = 12;
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const bytes = new Uint8Array(len);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes)
-      .map((b) => chars[b % chars.length])
-      .join('');
-  }
-  let out = '';
-  for (let i = 0; i < len; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return out;
-}
-
 interface PersonFormState {
   firstName: string;
   lastName: string;
@@ -216,7 +195,10 @@ const EMPTY_FORM: PersonFormState = {
 interface CreatedCredential {
   fullName: string;
   email: string;
-  tempPassword: string;
+  // Only carried when the invite email failed — otherwise the new member
+  // already has the password and there's nothing to hand over.
+  tempPassword?: string;
+  message?: string;
 }
 
 export default function StakeholdersPage() {
@@ -298,14 +280,13 @@ export default function StakeholdersPage() {
   const handleSubmit = async () => {
     if (!canSubmit || submitting || !companyId) return;
     const fullNameValue = `${form.firstName.trim()} ${form.lastName.trim()}`.trim();
-    const tempPassword = generateTempPassword();
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await team.create(companyId, {
+      // No temp_password: the backend generates one and emails it to them.
+      const res = await team.create(companyId, {
         email: form.email.trim(),
         full_name: fullNameValue,
-        temp_password: tempPassword,
         title: form.role.trim() || undefined,
         position_type: form.positionType,
         bio: form.bio.trim() || undefined,
@@ -322,7 +303,9 @@ export default function StakeholdersPage() {
       setCreatedCredential({
         fullName: fullNameValue,
         email: form.email.trim(),
-        tempPassword,
+        // Only surface the password when the email didn't go out.
+        tempPassword: res.email_sent === false ? res.temp_password : undefined,
+        message: res.email_message,
       });
     } catch (err) {
       setSubmitError(
@@ -630,9 +613,14 @@ interface CredentialBannerProps {
   onDismiss: () => void;
 }
 
+// Green "added" banner. It only turns into a credential hand-off when the
+// backend couldn't email the invite — a delivered password has no business
+// being on screen.
 function CredentialBanner({ credential, onDismiss }: CredentialBannerProps) {
   const [copied, setCopied] = useState(false);
+  const handCarry = credential.tempPassword != null;
   const handleCopy = async () => {
+    if (!credential.tempPassword) return;
     try {
       await navigator.clipboard.writeText(credential.tempPassword);
       setCopied(true);
@@ -659,43 +647,51 @@ function CredentialBanner({ credential, onDismiss }: CredentialBannerProps) {
     >
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>
-          {credential.fullName} added — share their temp password
+          {credential.fullName} added
+          {handCarry ? ' — share their temp password' : ''}
         </div>
         <div style={{ fontSize: 11, color: '#166534', marginTop: 3 }}>
-          {credential.email}. They&apos;ll be required to change it on first login.
+          {handCarry
+            ? `${credential.message ?? 'The invite email could not be sent.'} Pass this on to ${credential.email} yourself — it won't be shown again.`
+            : (credential.message ?? `Invite sent to ${credential.email}.`)}{' '}
+          They&apos;ll set their own password on first login.
         </div>
       </div>
-      <code
-        style={{
-          fontFamily: "'DM Mono', ui-monospace, monospace",
-          fontSize: 12,
-          fontWeight: 700,
-          color: '#1A1D2E',
-          background: '#fff',
-          border: '1px solid #BBE5C5',
-          padding: '5px 10px',
-          borderRadius: 6,
-          letterSpacing: '.5px',
-        }}
-      >
-        {credential.tempPassword}
-      </code>
-      <button
-        type="button"
-        onClick={handleCopy}
-        style={{
-          padding: '6px 12px',
-          fontSize: 11,
-          fontWeight: 700,
-          color: '#fff',
-          background: '#16A34A',
-          border: 'none',
-          borderRadius: 6,
-          cursor: 'pointer',
-        }}
-      >
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
+      {handCarry && (
+        <>
+          <code
+            style={{
+              fontFamily: "'DM Mono', ui-monospace, monospace",
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#1A1D2E',
+              background: '#fff',
+              border: '1px solid #BBE5C5',
+              padding: '5px 10px',
+              borderRadius: 6,
+              letterSpacing: '.5px',
+            }}
+          >
+            {credential.tempPassword}
+          </code>
+          <button
+            type="button"
+            onClick={handleCopy}
+            style={{
+              padding: '6px 12px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#fff',
+              background: '#16A34A',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </>
+      )}
       <button
         type="button"
         onClick={onDismiss}

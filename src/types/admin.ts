@@ -172,7 +172,13 @@ export interface InviteUserPayload {
 export interface InviteUserResponse {
   user_id: string;
   email: string;
-  temp_password: string; // Shown to the admin exactly once
+  // Still returned always, but only worth showing when the invite email did
+  // NOT go out — otherwise it's a live credential sitting on screen for no
+  // reason. Optional on the client so a backend that predates the email
+  // fields falls back to showing it (`email_sent` undefined → falsy).
+  temp_password: string;
+  email_sent?: boolean;
+  email_message?: string;
 }
 
 // ── Permissions (GET/PUT /api/v1/admin/permissions) ────────────────────────
