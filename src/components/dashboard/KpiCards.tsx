@@ -5,12 +5,18 @@ import type { Company } from '@/types/company';
 
 /**
  * KPI cards row — Revenue, Net Profit, ESG Score. Real numbers when the backend has
- * them; while onboarding is still computing a card's value, the value slot shows the
- * "AI" ring loader (the card heading stays). Nothing is fabricated.
- *   • Revenue / Net Profit — value + YoY from the `financial` digital-twin (RAG-extracted).
+ * them; while the ingest is genuinely still running, the value slot shows the "AI" ring
+ * loader (the card heading stays). Nothing is fabricated.
+ *   • Revenue / Net Profit — value + YoY from the `financial` digital-twin. The backend
+ *     serves ANNUAL-sourced rows only, so a quarterly upload never moves these figures;
+ *     with no annual report there is nothing to show and the card says so.
  *   • ESG Score — found/total*100 from the ESG harvester (esg.getScores), shown as N.N/100.
- * Cards poll until the data lands (or onboarding finishes), so numbers appear without a reload.
+ * Cards poll while the ingest runs, so numbers appear without a reload; once it stops, a
+ * missing value resolves to the card's empty state rather than spinning indefinitely.
  */
+
+// Why these two tiles can be empty on a company that has uploaded plenty of documents.
+const ANNUAL_ONLY_NOTE = 'This figure is drawn from your annual report. Produce one to see it here.';
 
 // ---- Financial digital-twin state shapes ----
 interface FinancialPeriod {
@@ -128,6 +134,7 @@ function AiRingLoader() {
 
 function KpiCard({
   label, accent, value, delta, deltaLabel, deltaUnit = 'pct', sub, loading,
+  emptyText = 'Not enough data yet',
 }: {
   label: string;
   accent: string;
@@ -137,6 +144,9 @@ function KpiCard({
   deltaUnit?: 'pct' | 'pts';
   sub?: string | null;
   loading?: boolean;
+  // Shown in place of the value when the figure isn't available — explains what would
+  // make it appear, rather than leaving the reader with a bare dash.
+  emptyText?: string;
 }) {
   const hasData = !loading && value !== null;
   const barColor = hasData ? accent : '#E4E8F2';
@@ -149,7 +159,7 @@ function KpiCard({
         ) : value === null ? (
           <>
             <div style={{ fontSize: 23, fontWeight: 800, color: '#C7CBDA', margin: '8px 0 4px', letterSpacing: '-.5px' }}>—</div>
-            <div style={{ fontSize: 11.5, color: '#9BA3C4' }}>Not enough data yet</div>
+            <div style={{ fontSize: 11.5, color: '#9BA3C4', lineHeight: 1.5 }}>{emptyText}</div>
           </>
         ) : (
           <>
@@ -177,11 +187,15 @@ export function KpiCards({ company }: { company: Company | null }) {
   const [loading, setLoading] = useState(true);
   const [fin, setFin] = useState<FinancialData | null>(null);
   const [esgScore, setEsgScore] = useState<{ overall: number; period: string | null; prevOverall: number | null; prevPeriod: string | null } | null>(null);
-  // onboarding_progress.percent stays <100 until the KPI step finishes — drives the
-  // per-card "computing" loader and the poll.
-  const [progressPercent, setProgressPercent] = useState<number | null>(
-    company?.onboarding_progress?.percent ?? null,
+  // 'processing' means the onboarding ingest is genuinely still running, so a missing value
+  // may yet arrive. Deliberately NOT onboarding_progress.percent: that counter is left stuck
+  // below 100 by any crashed ingest, which kept these cards spinning forever.
+  const [ingesting, setIngesting] = useState<boolean>(
+    company?.report_extraction_status === 'processing',
   );
+  // The poll stopped (value landed, ingest finished, or budget elapsed). Without this the
+  // cards kept spinning silently after the poll gave up.
+  const [pollDone, setPollDone] = useState(false);
 
   useEffect(() => {
     if (!companyId) { setLoading(false); return; }
@@ -202,11 +216,15 @@ export function KpiCards({ company }: { company: Company | null }) {
       ]);
       if (cancelled) return;
 
-      const pct = coRes.status === 'fulfilled' ? coRes.value?.onboarding_progress?.percent ?? null : null;
-      setProgressPercent(pct);
+      // A failed read must not be mistaken for "the ingest finished" — keep polling instead.
+      const co = coRes.status === 'fulfilled' ? coRes.value : null;
+      const stillIngesting = co ? co.report_extraction_status === 'processing' : true;
+      if (co) setIngesting(stillIngesting);
 
       const finData = twinRes.status === 'fulfilled' ? parseTwinData(twinRes.value) : null;
-      setFin(finData);
+      // Only overwrite on a successful read, so a transient failure can't replace a good
+      // figure with the "no annual report yet" empty state.
+      if (twinRes.status === 'fulfilled') setFin(finData);
 
       let esgPresent = false;
       if (esgRes.status === 'fulfilled') {
@@ -227,10 +245,11 @@ export function KpiCards({ company }: { company: Company | null }) {
 
       const li = finData?.periods?.[0]?.line_items;
       const finPresent = Boolean(li && (li.revenue != null || li.net_profit != null));
-      const running = pct != null && pct < 100;
       const allPresent = finPresent && esgPresent;
-      if (running && !allPresent && Date.now() - startedAt < MAX_WAIT) {
+      if (stillIngesting && !allPresent && Date.now() - startedAt < MAX_WAIT) {
         timer = setTimeout(tick, nextDelay());
+      } else {
+        setPollDone(true);
       }
     };
     tick();
@@ -251,10 +270,10 @@ export function KpiCards({ company }: { company: Company | null }) {
   const netDelta = deltaPct(fin, ['net_profit', 'net_income']);
   const netAccent = typeof netDelta === 'number' && netDelta < 0 ? '#E5484D' : '#0F9D6B';
 
-  // A card shows the "AI" loader while the first fetch is in flight, or while onboarding
-  // is still computing KPIs and this card's value hasn't landed yet.
-  const running = progressPercent != null && progressPercent < 100;
-  const cardLoading = (present: boolean) => loading || (running && !present);
+  // A card shows the "AI" loader only while something is genuinely still running: the first
+  // fetch, or an in-flight ingest that hasn't exhausted the poll budget. Once the poll stops
+  // a missing value resolves to the card's empty state — never an endless spinner.
+  const cardLoading = (present: boolean) => loading || (!present && ingesting && !pollDone);
 
   // ESG year-over-year: points delta vs the previous scored period (mockup: "▲ +6 pts vs 2024").
   const esgDelta = esgScore && esgScore.prevOverall != null ? esgScore.overall - esgScore.prevOverall : null;
@@ -270,6 +289,7 @@ export function KpiCards({ company }: { company: Company | null }) {
         delta={revenueDelta}
         deltaLabel={deltaLabel}
         sub={latestLabel}
+        emptyText={ANNUAL_ONLY_NOTE}
       />
       <KpiCard
         label="Net Profit"
@@ -279,6 +299,7 @@ export function KpiCards({ company }: { company: Company | null }) {
         delta={netDelta}
         deltaLabel={deltaLabel}
         sub={latestLabel}
+        emptyText={ANNUAL_ONLY_NOTE}
       />
       <KpiCard
         label="ESG Score"

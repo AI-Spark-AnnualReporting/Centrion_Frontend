@@ -19,9 +19,13 @@ interface ReportRow {
   report_type?: string | null;
   generated_at?: string | null;
   title?: string | null;
-  coverage?: { percentage?: number | null } | null;
+  // metrics_total is the size of the ESG indicator universe this report was measured
+  // against — 0 means the coverage metric doesn't apply, not "0% covered".
+  coverage?: { percentage?: number | null; metrics_total?: number | null } | null;
   // Set only when the app generated the report; null for docs uploaded at onboarding.
   generation_config?: Record<string, unknown> | null;
+  // reports.status — draft | in_review | pending_approval | approved | locked | published.
+  status?: string | null;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -47,6 +51,40 @@ function coveragePct(r: ReportRow): number | null {
   const p = r.coverage?.percentage;
   if (p == null || !Number.isFinite(p)) return null;
   return Math.max(0, Math.min(100, Math.round(p <= 1 ? p * 100 : p)));
+}
+
+// The real reports.status vocabulary (schema.sql `valid_report_status`). Colours are the
+// existing badge palette from index.css — no new colour enters the system here.
+const STATUS_PILL: Record<string, { text: string; color: string; bg: string }> = {
+  draft:            { text: 'DRAFT',            color: '#5A6080', bg: '#E8EAF5' },
+  in_review:        { text: 'IN REVIEW',        color: '#B45309', bg: 'rgba(245,158,11,.12)' },
+  pending_approval: { text: 'PENDING APPROVAL', color: '#7C3AED', bg: 'rgba(139,92,246,.12)' },
+  approved:         { text: 'APPROVED',         color: '#16A34A', bg: 'rgba(34,197,94,.12)' },
+  locked:           { text: 'LOCKED',           color: '#0D9488', bg: 'rgba(20,184,166,.12)' },
+  published:        { text: 'PUBLISHED',        color: '#2563EB', bg: 'rgba(59,130,246,.12)' },
+};
+
+const UNKNOWN_STATUS = { color: '#5A6080', bg: '#E8EAF5' };
+
+// Docs banked at onboarding carry no generation_config and all sit at 'draft' — "you
+// uploaded this" tells the reader more, so it wins. Everything else shows its real status;
+// an unrecognised future code still renders (greyed, humanised) rather than vanishing.
+function statusPill(r: ReportRow, uploaded: boolean): { text: string; color: string; bg: string } {
+  if (uploaded) return { text: 'UPLOADED', color: ACCENT, bg: 'rgba(64,64,200,.12)' };
+  const key = (r.status ?? '').trim().toLowerCase();
+  if (!key) return STATUS_PILL.draft;
+  return STATUS_PILL[key] ?? { ...UNKNOWN_STATUS, text: key.toUpperCase().replace(/_/g, ' ') };
+}
+
+// Three independent reasons the coverage bar carries no meaning:
+//   • uploaded docs have no generation progress at all;
+//   • quarterly reports are never measured on ESG coverage (product decision);
+//   • an empty indicator universe scores 0% by construction, not by performance — the
+//     backend's _pct returns 0.0 rather than null when the denominator is zero.
+function showCoverageBar(r: ReportRow, uploaded: boolean, pct: number | null): boolean {
+  if (uploaded || pct == null) return false;
+  if ((r.report_type ?? '').toLowerCase() === 'quarterly') return false;
+  return Boolean(r.coverage?.metrics_total);
 }
 
 // Cycle progress — prefer the server-computed value, fall back to submitted/total.
@@ -118,20 +156,19 @@ export function ActiveReportsCard() {
         <>
         {rows.map((r, i) => {
           const pct = coveragePct(r);
-          // Reports uploaded at onboarding carry no generation_config (the app didn't
-          // generate them) — mark those UPLOADED (indigo), not READY.
+          // No generation_config ⇒ the app didn't generate this; it was uploaded at onboarding.
           const gc = r.generation_config;
           const uploaded = !gc || Object.keys(gc).length === 0;
-          const status = uploaded
-            ? { text: 'UPLOADED', color: '#4040C8', bg: 'rgba(64,64,200,.12)' }
-            : { text: 'READY', color: '#16A34A', bg: 'rgba(34,197,94,.12)' };
+          const status = statusPill(r, uploaded);
           return (
             <div key={r.id} style={{ display: 'flex', gap: 11, alignItems: 'center', padding: '11px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}>
               <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)' }}>{initials(r.report_type)}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title || typeLabel(r.report_type)}</div>
                 <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 1 }}>{typeLabel(r.report_type)} · {(r.period || '').replace('-', ' ')}</div>
-                {pct != null && (
+                {/* An empty 0% bar reads as "stalled" — only draw it where the coverage
+                    figure actually measures something. See showCoverageBar. */}
+                {showCoverageBar(r, uploaded, pct) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                     <div style={{ flex: 1, height: 5, borderRadius: 999, background: '#EEF0F6', overflow: 'hidden' }}>
                       <div style={{ width: `${pct}%`, height: '100%', background: pct >= 75 ? '#16A34A' : pct >= 50 ? '#E8A33D' : '#E5484D', borderRadius: 999 }} />

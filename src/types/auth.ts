@@ -1,3 +1,4 @@
+import type { BrandColors } from "@/types/brand";
 import type { CompanyRecord } from "@/types/company";
 
 export interface AuthUser {
@@ -72,6 +73,12 @@ export interface OnboardingPayload {
   website_url?: string | null;
   headquarter_city?: string | null;
   listed_exchange?: string | null;
+  // Brand step. brand_identity is required by the wizard (min 20 chars) but
+  // optional server-side; brand_colors becomes the company's default report
+  // brand; logo_base64 is a PNG/JPEG data URI stored inline on the company row.
+  brand_identity?: string | null;
+  brand_colors?: BrandColors | null;
+  logo_base64?: string | null;
 }
 
 // GET /api/v1/auth/onboarding/department-options — the default departments the
