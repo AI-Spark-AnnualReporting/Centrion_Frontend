@@ -1471,11 +1471,20 @@ export const quarterlyReports = {
   // ── Outline (step 6) ──
   // The report's section catalogue. saveOutline persists include+order (PUT);
   // lockOutline freezes it (POST). Backend returns 409 on edits after lock.
-  getOutline: (companyId: string, reportId: string, signal?: AbortSignal) =>
-    request<OutlineResponse>(
+  getOutline: (companyId: string, reportId: string, signal?: AbortSignal): Promise<OutlineResponse> =>
+    request<Record<string, unknown>>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
       { signal },
-    ),
+    ).then((raw) => ({
+      ...(raw as unknown as OutlineResponse),
+      // Confirmed live: the real field is `outline_locked` — `locked` was never
+      // actually present on this response, so every "is this outline already
+      // locked, don't re-produce" check (Outline page, Processing bootstrap)
+      // could only ever fire if every OPTIONAL section also happened to be
+      // individually locked (they never are — only required sections lock).
+      // Read both names defensively; this is the one place that needs it.
+      locked: Boolean(raw.locked ?? raw.outline_locked),
+    })),
 
   saveOutline: (
     companyId: string,
