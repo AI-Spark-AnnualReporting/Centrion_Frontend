@@ -25,6 +25,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin-console/departments': 'Departments',
   '/annual-report': 'Annual Report',
   '/annual-report/cycles/new': 'New Cycle',
+  '/earnings/setup': 'Earnings Report',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -52,6 +53,7 @@ function PageLoader() {
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
   ['/annual-report', 'Annual Report'],
+  ['/earnings', 'Earnings Report']
   ['/communications', 'Communication Hub'],
   ['/compliance', 'Compliance Validation'],
 ];

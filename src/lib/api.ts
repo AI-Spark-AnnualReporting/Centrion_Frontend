@@ -61,6 +61,32 @@ import type {
   SectionExtractResponse,
 } from "@/types/quarterly";
 import type {
+  CreateEarningsReportPayload,
+  CreateEarningsReportResponse,
+  SelectableSource,
+  SelectableSourcesResponse,
+  SourceCoverage,
+  SourceTrack,
+  SourceUploadType,
+  SourceExtractionStatus,
+  EarningsFigure,
+  EarningsFigureSource,
+  EarningsFiguresResponse,
+  EditEarningsFigurePayload,
+  EarningsOutlineSection,
+  EarningsOutlineResponse,
+  EarningsSectionFeeder,
+  SaveEarningsOutlinePayload,
+  EarningsProducedSection,
+  EarningsSectionsResponse,
+  EarningsSectionStatus,
+  EarningsProduceHandle,
+  SaveEarningsSectionContentPayload,
+  EarningsExportFormat,
+  EarningsReportSummary,
+  EarningsReportsListResponse,
+} from "@/types/earnings";
+import type {
   CreateMeetingBody,
   MeetingListResponse,
   MeetingResponse,
@@ -1713,6 +1739,705 @@ export const quarterlyReports = {
 };
 
 // ---------------------------------------------------------------------------
+// Earnings report — Part 1 (Setup). Two live endpoints (Centriyon API):
+//   GET  /api/v1/earnings/sources?company_id&period   (untyped 200)
+//   POST /api/v1/earnings/reports   (application/json; 201)
+// Both responses are untyped in the OpenAPI schema, so we normalise defensively
+// and CONFIRM the exact field names against a live response during integration.
+// ---------------------------------------------------------------------------
+function earnStr(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+function earnRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+}
+// One shape, one normalizer — GET /earnings/sources and the figures response's
+// `sources` header both return this same report-backed object (report_id,
+// label, report_type, period, updated_at, coverage). Field names are read
+// defensively for naming robustness only; this never falls back to
+// reconstructing a source from figure rows.
+export function normalizeEarningsSourceItem(raw: unknown): SelectableSource | null {
+  const o = earnRecord(raw);
+
+  // The document-id pool is only populated from an EXPLICIT document field —
+  // never from the generic id fallbacks below, or a single generic id on the
+  // raw payload would populate both report_id and document_id at once and
+  // collapse the track distinction (Part 6B).
+  const explicitDocumentId = earnStr(o.document_id) ?? earnStr(o.doc_id);
+  const reportId = explicitDocumentId
+    ? null
+    : earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(o.source_id);
+  const documentId = explicitDocumentId;
+  if (!reportId && !documentId) return null;
+
+  // "narrative_adjusted" (pre-D-29) and "narrative" (D-29, Unified Sources
+  // backend rework) both normalize to the same internal track value — the
+  // .includes("narrative") check already covers both spellings.
+  const trackRaw = (earnStr(o.track) ?? "").toLowerCase();
+  const track: SourceTrack = trackRaw.includes("narrative")
+    ? "narrative_adjusted"
+    : trackRaw.includes("official")
+      ? "official"
+      : documentId
+        ? "narrative_adjusted"
+        : "official";
+
+  // report_type no longer falls back to a generic `o.type` — that field now
+  // has a distinct meaning (the upload doc type) since Part 6B. The wire field
+  // is `filing_type` (D-29) — `type`/`document_type`/`upload_type` kept as
+  // fallbacks for naming robustness only.
+  const reportType = earnStr(o.report_type);
+  const type: SourceUploadType | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.filing_type) ?? earnStr(o.type) ?? earnStr(o.document_type) ?? earnStr(o.upload_type)
+      : null;
+  // Not read from o.status for narrative sources — that field is already
+  // claimed as a coverage fallback below for official sources.
+  const extractionStatus: SourceExtractionStatus | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.extraction_status) ?? earnStr(o.processing_status)
+      : null;
+  const detectedType: SourceUploadType | null =
+    track === "narrative_adjusted" ? earnStr(o.detected_type) ?? type : null;
+  const typeConfidence: number | null =
+    track === "narrative_adjusted" ? earnNum(o.type_confidence) ?? earnNum(o.confidence) : null;
+  // Read independently of the reportId/documentId branch above — never reuse
+  // `reportId` (force-nulled for narrative rows to keep the track split from
+  // collapsing). Distinct concept: which report/draft this upload is attached
+  // to, needed to scope a type-correction PATCH.
+  const owningReportId: string | null =
+    track === "narrative_adjusted"
+      ? earnStr(o.report_id) ?? earnStr(o.owning_report_id) ?? earnStr(o.draft_report_id)
+      : null;
+
+  const period = earnStr(o.period) ?? earnStr(o.period_label);
+  // Never a filename. If the backend omits a label, show report type + period
+  // instead of falling back to a raw id.
+  const composedLabel = [reportType, period].filter(Boolean).join(" ") || null;
+  const label =
+    earnStr(o.label) ??
+    earnStr(o.title) ??
+    earnStr(o.name) ??
+    composedLabel ??
+    "Untitled report";
+  // The o.status fallback only applies once extractionStatus hasn't already
+  // claimed it — otherwise an upload's extraction state could leak into
+  // coverage (e.g. coverage: "extracting").
+  const covRaw = (
+    earnStr(o.coverage) ??
+    earnStr(o.coverage_status) ??
+    (extractionStatus ? null : earnStr(o.status)) ??
+    ""
+  ).toLowerCase();
+  const coverage: SourceCoverage = covRaw.includes("full")
+    ? "full"
+    : covRaw.includes("partial")
+      ? "partial"
+      : covRaw || "partial";
+  const updatedAt = earnStr(o.updated_at) ?? earnStr(o.updatedAt);
+  return {
+    report_id: reportId,
+    document_id: documentId,
+    label,
+    report_type: reportType,
+    period,
+    updated_at: updatedAt,
+    coverage,
+    track,
+    type,
+    detected_type: detectedType,
+    type_confidence: typeConfidence,
+    extraction_status: extractionStatus,
+    owning_report_id: owningReportId,
+  };
+}
+export function normalizeEarningsSources(raw: unknown): SelectableSourcesResponse {
+  const rec = earnRecord(raw);
+  // D-29 (Unified Sources backend): GET /earnings/sources now returns two
+  // labelled groups (`official` + `uploaded`) instead of one flat `sources`
+  // array + `total`. Each item's own `track` still says which pool it's from
+  // (read above), so the two groups are simply concatenated here — the old
+  // flat shapes are kept as fallbacks for naming robustness, not because both
+  // are expected to appear at once.
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.official) || Array.isArray(rec.uploaded)
+      ? [
+          ...(Array.isArray(rec.official) ? (rec.official as unknown[]) : []),
+          ...(Array.isArray(rec.uploaded) ? (rec.uploaded as unknown[]) : []),
+        ]
+      : Array.isArray(rec.sources)
+        ? (rec.sources as unknown[])
+        : Array.isArray(rec.items)
+          ? (rec.items as unknown[])
+          : [];
+  const sources = arr
+    .map(normalizeEarningsSourceItem)
+    .filter((s): s is SelectableSource => s !== null);
+  return { sources };
+}
+function readCreatedEarningsReportId(raw: unknown): CreateEarningsReportResponse {
+  const o = earnRecord(raw);
+  const nested = earnRecord(o.report);
+  const id = earnStr(o.report_id) ?? earnStr(o.id) ?? earnStr(nested.report_id) ?? earnStr(nested.id);
+  if (!id) throw new Error("Create earnings report: response did not include a report_id.");
+  return { report_id: id };
+}
+function earnBool(v: unknown): boolean {
+  return v === true || v === "true" || v === 1;
+}
+function earnNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return null;
+}
+function normalizeEarningsFigure(raw: unknown): EarningsFigure | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.id) ?? earnStr(o.figure_id) ?? earnStr(o.metric_key);
+  if (!id) return null;
+  const src = earnRecord(o.source);
+  return {
+    id,
+    metric_key: earnStr(o.metric_key) ?? earnStr(o.key) ?? id,
+    label: earnStr(o.label) ?? earnStr(o.metric_label) ?? earnStr(o.name) ?? id,
+    value: earnNum(o.value),
+    unit: earnStr(o.unit) ?? earnStr(o.units),
+    period: earnStr(o.period) ?? earnStr(o.period_label),
+    source_document_id:
+      earnStr(o.source_document_id) ?? earnStr(o.document_id) ?? earnStr(src.document_id),
+    source_report_id:
+      earnStr(o.source_report_id) ?? earnStr(o.report_id) ?? earnStr(src.report_id),
+    source_label:
+      earnStr(o.source_label) ?? earnStr(o.source_name) ?? earnStr(src.label) ?? earnStr(src.title),
+    source_ref: earnStr(o.source_ref) ?? earnStr(o.reference) ?? earnStr(src.ref) ?? earnStr(src.page),
+    confidence: earnNum(o.confidence),
+    is_derived: earnBool(o.is_derived) || earnBool(o.derived),
+    derivation: earnStr(o.derivation) ?? earnStr(o.formula),
+    flag: earnStr(o.flag) ?? earnStr(o.status),
+    edited: earnBool(o.edited) || earnBool(o.is_edited) || earnBool(o.manual),
+    prior_value: earnNum(o.prior_value),
+    prior_period: earnStr(o.prior_period),
+    change_pct: earnNum(o.change_pct),
+    comparative_status: earnStr(o.comparative_status),
+  };
+}
+function normalizeEarningsFigures(raw: unknown): EarningsFiguresResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.figures)
+      ? (rec.figures as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const figures = arr
+    .map(normalizeEarningsFigure)
+    .filter((f): f is EarningsFigure => f !== null);
+  const srcArr: unknown[] = Array.isArray(rec.sources)
+    ? (rec.sources as unknown[])
+    : Array.isArray(rec.source_documents)
+      ? (rec.source_documents as unknown[])
+      : [];
+  const sources = srcArr
+    .map(normalizeEarningsSourceItem)
+    .filter((s): s is EarningsFigureSource => s !== null);
+  return { figures, sources };
+}
+
+// ── Part 3 — outline ──
+// Response is untyped (200 → {}); field names follow the spec and are read
+// Which real source backs a section right now (D-29 outline feeder). Absent
+// entirely on payloads that predate this field → null, never fabricated.
+function normalizeEarningsSectionFeeder(raw: unknown): EarningsSectionFeeder | null {
+  if (raw == null) return null;
+  const o = earnRecord(raw);
+  const status = earnStr(o.status);
+  if (!status) return null;
+  return {
+    status: status as EarningsSectionFeeder["status"],
+    source_report_id: earnStr(o.source_report_id),
+    source_document_id: earnStr(o.source_document_id),
+    source_label: earnStr(o.source_label),
+    message: earnStr(o.message) ?? "",
+  };
+}
+
+// defensively. TODO(Step 0): confirm against a live GET during integration.
+function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id) ?? earnStr(o.key);
+  if (!code) return null;
+  // Sector-excluded sections never reach the type — dropped exactly like a
+  // malformed row. Field name unconfirmed (Step 0); hedges both possibilities
+  // (backend omits them entirely, or returns them flagged).
+  const sectorExcluded =
+    earnBool(o.sector_excluded) || earnBool(o.excluded_by_sector) || earnBool(o.not_applicable_sector);
+  if (sectorExcluded) return null;
+  const requirementRaw = (earnStr(o.requirement) ?? earnStr(o.requirement_level) ?? "").toLowerCase();
+  const requirement: EarningsOutlineSection["requirement"] = requirementRaw.includes("required")
+    ? "required"
+    : requirementRaw.includes("recommend")
+      ? "recommended"
+      : requirementRaw.includes("optional")
+        ? "optional"
+        : requirementRaw || "optional";
+  const displayOrder =
+    earnNum(o.display_order) ?? earnNum(o.order) ?? earnNum(o.section_number) ?? 0;
+  // A required section is always available/included; an optional's availability
+  // defaults to true unless the backend explicitly says false.
+  const available =
+    requirement === "required"
+      ? true
+      : "available" in o
+        ? earnBool(o.available)
+        : !(earnBool(o.unavailable) || earnBool(o.no_data));
+  return {
+    section_code: code,
+    title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
+    section_number: earnNum(o.section_number) ?? earnNum(o.number),
+    display_order: displayOrder,
+    included:
+      requirement === "required"
+        ? true
+        : earnBool(o.included) || earnBool(o.selected) || earnBool(o.is_included),
+    requirement,
+    available,
+    source_type: earnStr(o.source_type) ?? earnStr(o.mode_hint) ?? earnStr(o.data_source),
+    mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
+    page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
+    status: earnStr(o.status) as EarningsSectionStatus | null,
+    feeder: normalizeEarningsSectionFeeder(o.feeder),
+  };
+}
+function normalizeEarningsOutline(raw: unknown): EarningsOutlineResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.sections)
+      ? (rec.sections as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const sections = arr
+    .map(normalizeEarningsOutlineSection)
+    .filter((s): s is EarningsOutlineSection => s !== null);
+  return { sections };
+}
+
+// ── Part 4/5 — produced sections ──
+// Response untyped ({}); field names follow the spec and are read defensively.
+// TODO(Step 0): confirm against a live GET /sections during integration.
+function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  // content can arrive as a string (prose) or an object/array (table/kpi/cover);
+  // stringify objects so the shared renderers can JSON.parse them.
+  const rawContent = o.content ?? o.body ?? o.text;
+  const content =
+    rawContent == null
+      ? null
+      : typeof rawContent === "string"
+        ? rawContent
+        : JSON.stringify(rawContent);
+  const feeder = earnRecord(o.feeder);
+  return {
+    section_code: code,
+    title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    display_order: earnNum(o.display_order) ?? earnNum(o.order) ?? 0,
+    source_type: earnStr(o.source_type) ?? earnStr(o.type),
+    mode: earnStr(o.mode) ?? earnStr(o.render_mode) ?? "generate",
+    status: (earnStr(o.status) ?? "pending") as EarningsProducedSection["status"],
+    content,
+    // Default to included=true unless the payload explicitly excludes it — the
+    // sections endpoint typically returns only the included set.
+    included: "included" in o ? earnBool(o.included) : true,
+    feeder_status: earnStr(o.feeder_status) ?? earnStr(feeder.status),
+    // "message" is the confirmed field name (same feeder shape as GET /outline,
+    // D-29) — kept as first choice; o.message/feeder.message are pre-D-29 guesses.
+    feeder_message: earnStr(feeder.message) ?? earnStr(o.message),
+    source_label:
+      earnStr(feeder.source_label) ?? earnStr(o.source_label) ?? earnStr(feeder.document_name) ?? earnStr(feeder.label),
+    source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
+    confidence: earnNum(o.confidence),
+    flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
+    grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
+    grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
+    edited: earnBool(o.edited) || earnBool(o.is_edited),
+  };
+}
+function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.sections)
+      ? (rec.sections as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const sections = arr
+    .map(normalizeEarningsSection)
+    .filter((s): s is EarningsProducedSection => s !== null);
+  const cover = earnRecord(rec.cover);
+  return {
+    sections,
+    cover_template_key:
+      earnStr(rec.cover_template_key) ?? earnStr(cover.template_key) ?? earnStr(cover.cover_template_key),
+    locked: earnBool(rec.locked) || earnBool(rec.approved) || earnStr(rec.status) === "approved",
+  };
+}
+function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
+  const o = earnRecord(raw);
+  const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
+  const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  if (!runId || !pollUrl) {
+    throw new Error("Produce earnings report: response did not include run_id/poll_url.");
+  }
+  return { run_id: runId, poll_url: pollUrl };
+}
+
+// ── Earnings dashboard — report list ──
+// Response untyped ({ reports: [...] }); field names come from the backend
+// dashboard contract and are read defensively.
+function normalizeEarningsReportSummary(raw: unknown): EarningsReportSummary | null {
+  const o = earnRecord(raw);
+  const id = earnStr(o.report_id) ?? earnStr(o.id);
+  if (!id) return null;
+  const period = earnStr(o.period) ?? earnStr(o.period_key) ?? "";
+  const status = (earnStr(o.status) ?? "draft").toLowerCase();
+  // Fallbacks keep the card sensible if the backend omits a field.
+  const periodDisplay = earnStr(o.period_display) ?? (period ? period.replace(/-/g, " ") : "—");
+  const finished = ["approved", "locked", "published", "complete", "completed"].includes(status);
+  return {
+    report_id: id,
+    title: earnStr(o.title) ?? "Earnings Report",
+    variant: earnStr(o.variant) ?? earnStr(o.report_variant) ?? "quarterly",
+    tone: earnStr(o.tone),
+    period,
+    period_display: periodDisplay,
+    status,
+    action: earnStr(o.action) ?? (finished ? "View" : "Continue"),
+    version: earnStr(o.version),
+    generated_at: earnStr(o.generated_at) ?? earnStr(o.created_at),
+    updated_at: earnStr(o.updated_at),
+    approved_at: earnStr(o.approved_at),
+    locked_at: earnStr(o.locked_at),
+  };
+}
+function normalizeEarningsReportsList(raw: unknown): EarningsReportsListResponse {
+  const rec = earnRecord(raw);
+  const arr: unknown[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray(rec.reports)
+      ? (rec.reports as unknown[])
+      : Array.isArray(rec.items)
+        ? (rec.items as unknown[])
+        : [];
+  const reports = arr
+    .map(normalizeEarningsReportSummary)
+    .filter((r): r is EarningsReportSummary => r !== null);
+  return { reports };
+}
+
+export const earnings = {
+  // The selectable "existing report" sources for a company + period. Period is a
+  // string the backend keys on (format TBD — confirm live; we pass e.g. "FY-2025").
+  getSelectableSources: (
+    companyId: string,
+    period: string,
+    signal?: AbortSignal,
+  ): Promise<SelectableSourcesResponse> =>
+    request<unknown>(`/api/v1/earnings/sources`, {
+      query: { company_id: companyId, period },
+      signal,
+    }).then(normalizeEarningsSources),
+
+  // Upload narrative-track source documents to an EXISTING draft. The route is
+  // report-scoped (D-22) — there is no company-scoped upload route — so the draft
+  // must be created first (POST /earnings/reports). Multipart body: `files` only
+  // — no manual type. The backend auto-classifies each file (GPT-4o-mini) and
+  // returns its detected type + confidence; the user corrects it afterward via
+  // patchSourceType, never a pre-upload manual choice. Returns the created
+  // narrative sources (in their reported extraction state — 'extracting' until
+  // ready; never treated as ready early, D-12).
+  uploadEarningsSources: (reportId: string, files: File[]): Promise<SelectableSource[]> => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    return request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sources/upload`,
+      { method: "POST", form: fd },
+    ).then((raw) => {
+      const rec = earnRecord(raw);
+      if (Array.isArray(raw) || Array.isArray(rec.sources) || Array.isArray(rec.items)) {
+        return normalizeEarningsSources(raw).sources;
+      }
+      // Single-object response ({ source } or the source itself).
+      const one = normalizeEarningsSourceItem(rec.source ?? raw);
+      return one ? [one] : [];
+    });
+  },
+
+  // Correct a document's auto-detected type. `reportId` MUST be the source's
+  // own `owning_report_id`, never the page's current session id — a GET
+  // /sources row can belong to a different draft than the one this session
+  // has open. Response is the lean ack shape ({report_id, document_id,
+  // filing_type} per D-29) — NOT a full source row (no label/coverage/period),
+  // so it's read directly here rather than run through
+  // normalizeEarningsSourceItem, which would fabricate those missing fields.
+  patchSourceType: (
+    reportId: string,
+    documentId: string,
+    type: SourceUploadType,
+  ): Promise<{ report_id: string; document_id: string; type: SourceUploadType | null }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sources/${encodeURIComponent(documentId)}`,
+      { method: "PATCH", body: { type } },
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      return {
+        report_id: earnStr(o.report_id) ?? reportId,
+        document_id: earnStr(o.document_id) ?? documentId,
+        type: earnStr(o.filing_type) ?? earnStr(o.type) ?? type,
+      };
+    }),
+
+  // Create the draft earnings report. JSON body (NOT multipart) carrying the
+  // chosen document ids. Returns { report_id }. A duplicate active period may
+  // surface as a 409 (not in the OpenAPI schema, but handled by callers).
+  createEarningsReport: (
+    payload: CreateEarningsReportPayload,
+  ): Promise<CreateEarningsReportResponse> =>
+    request<unknown>(`/api/v1/earnings/reports`, {
+      method: "POST",
+      body: payload,
+    }).then(readCreatedEarningsReportId),
+
+  // ── Dashboard — list a company's earnings reports (newest first) ──
+  // company_id defaults to the caller's JWT company; pass it explicitly to match
+  // the create contract. Optional status filter + limit (1–200, default 50).
+  listEarningsReports: (
+    companyId?: string,
+    opts?: { status?: string; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<EarningsReportsListResponse> =>
+    request<unknown>(`/api/v1/earnings/reports`, {
+      query: {
+        ...(companyId ? { company_id: companyId } : {}),
+        ...(opts?.status ? { status: opts.status } : {}),
+        ...(opts?.limit != null ? { limit: opts.limit } : {}),
+      },
+      signal,
+    }).then(normalizeEarningsReportsList),
+
+  // ── Part 2 — figures ──
+  // The reviewed figure set for a report. Path takes report_id ONLY (no
+  // company_id). The FIRST load triggers the backend resolve, so it may be slow.
+  getEarningsFigures: (reportId: string, signal?: AbortSignal): Promise<EarningsFiguresResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures`,
+      { signal },
+    ).then(normalizeEarningsFigures),
+
+  // Edit a single figure's value (+ optional unit). Returns the updated figure
+  // (untyped → normalised defensively; also unwraps a `{ figure }` envelope).
+  patchEarningsFigure: (
+    reportId: string,
+    figureId: string,
+    body: EditEarningsFigurePayload,
+  ): Promise<EarningsFigure> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/${encodeURIComponent(figureId)}`,
+      { method: "PATCH", body },
+    ).then((raw) => {
+      const fig = normalizeEarningsFigure(earnRecord(raw).figure ?? raw);
+      if (!fig) throw new Error("Edit earnings figure: response was not a figure.");
+      return fig;
+    }),
+
+  // ── Part 3 — outline ──
+  // The report outline (included + available sections). Path takes report_id ONLY
+  // (no company_id), mirroring the figures endpoints. Response untyped → normalised.
+  getEarningsOutline: (reportId: string, signal?: AbortSignal): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
+      { signal },
+    ).then(normalizeEarningsOutline),
+
+  // Save the arrangement (inclusion + order). Returns the re-normalised outline
+  // when the backend echoes it; callers may ignore the body. A 422 (e.g. a stale
+  // include of an unavailable optional) throws ApiError for the caller to surface.
+  saveEarningsOutline: (
+    reportId: string,
+    payload: SaveEarningsOutlinePayload,
+  ): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
+      { method: "PUT", body: payload },
+    ).then(normalizeEarningsOutline),
+
+  // ── Cover template + brand colors ──
+  // Same contract style as the quarterly picker, but earnings splits the current
+  // selection into its own report-scoped GET (quarterly folds it into
+  // cover-templates). Colors apply to accents/headings and reach the exported file.
+  getEarningsCoverTemplates: (signal?: AbortSignal): Promise<CoverTemplatesResponse> =>
+    request<CoverTemplatesResponse>(`/api/v1/earnings/cover-templates`, { signal }),
+
+  getEarningsColorPalettes: (signal?: AbortSignal): Promise<ColorPalettesResponse> =>
+    request<ColorPalettesResponse>(`/api/v1/earnings/color-palettes`, { signal }),
+
+  // The report's current cover/brand selection (for pre-select on load).
+  // cover_template_key is null until picked; brand has defaults applied. Works on
+  // locked reports (read-only).
+  getEarningsCoverSelection: (
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<CoverSelectionResponse> =>
+    request<CoverSelectionResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/cover-template`,
+      { signal },
+    ),
+
+  // Persist the chosen cover design + brand colors.
+  saveEarningsCoverSelection: (
+    reportId: string,
+    body: CoverSelectionPayload,
+  ): Promise<CoverSelectionResponse> =>
+    request<CoverSelectionResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/cover-template`,
+      { method: "PATCH", body },
+    ),
+
+  // ── Part 4/5 — preview & publish ──
+  // The produced sections (cover + body) for a report. Report-scoped, untyped → normalised.
+  // `includedOnly` → GET .../sections?included_only=true, so the preview shows
+  // only the sections the user selected in the outline (only included sections
+  // are ever produced anyway).
+  getEarningsSections: (
+    reportId: string,
+    includedOnly = false,
+    signal?: AbortSignal,
+  ): Promise<EarningsSectionsResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections`,
+      { query: includedOnly ? { included_only: true } : undefined, signal },
+    ).then(normalizeEarningsSections),
+
+  // Kick batch production of all included sections. Async 202-style → {run_id, poll_url};
+  // poll with agentRuns.getByPollUrl, then re-fetch getEarningsSections on completion.
+  produceEarningsReport: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: {} },
+    ).then(readEarningsProduceHandle),
+
+  // Save a user's manual input for a needs_input section (typed directly, or
+  // edited after extractSectionInput prefilled it from an uploaded file).
+  // Reuses the section-produce route — the backend turns the raw text into
+  // this section's actual mode-appropriate content (table/kpi sections still
+  // need structured data, not just a stored string) and flips its feeder to
+  // ready. NOT called for a bare regenerate — there's no button for that
+  // anymore; this is the "Save" action on the needs-input form only.
+  produceEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    body: { user_input: string },
+  ): Promise<EarningsProducedSection> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
+      { method: "POST", body },
+    ).then((raw) => {
+      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      if (!sec) throw new Error("Produce earnings section: response was not a section.");
+      return sec;
+    }),
+
+  // Extract text from an uploaded document to PREFILL the needs-input textarea
+  // — never saves anything on its own; the user reviews/edits the result and
+  // Save (produceEarningsSection) is the actual persist step. Route/shape
+  // TODO(Step 0): confirm live — proposed in the backend spec for this feature.
+  extractSectionInput: (
+    reportId: string,
+    sectionCode: string,
+    file: File,
+  ): Promise<string> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/extract-input`,
+      { method: "POST", form: fd },
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      const text = earnStr(o.extracted_text) ?? earnStr(o.text) ?? earnStr(o.content);
+      if (text == null) throw new Error("Extract section input: response carried no extracted text.");
+      return text;
+    });
+  },
+
+  // Inline-edit a produced section's content. Unwraps a { section } envelope.
+  patchEarningsSectionContent: (
+    reportId: string,
+    sectionCode: string,
+    body: SaveEarningsSectionContentPayload,
+  ): Promise<EarningsProducedSection> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/content`,
+      { method: "PATCH", body },
+    ).then((raw) => {
+      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      if (!sec) throw new Error("Edit earnings section: response was not a section.");
+      return sec;
+    }),
+
+  // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body
+  // carries the blocker list (read defensively in the UI).
+  approveEarningsReport: (reportId: string): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST", body: {} },
+    ),
+
+  // Export DOCX/PDF. Binary response → bypass request<T>() (which parses JSON) and
+  // use fetchWithAuth + blob, mirroring quarterlyReports.downloadExport. Prefers the
+  // server Content-Disposition filename when present.
+  downloadEarningsExport: async (
+    reportId: string,
+    format: EarningsExportFormat,
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/export`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format }) },
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    // Prefer the server-provided filename (Content-Disposition), else synthesize one.
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    const serverName = match ? decodeURIComponent(match[1].trim()) : null;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = serverName || `${(filename || "earnings-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Agent runs — polling endpoint for async pipelines kicked off by generate /
 // addDocuments / documents.upload.
 // ---------------------------------------------------------------------------
@@ -1930,6 +2655,9 @@ export interface CommunicationMember {
   user_id: string;
   full_name: string;
   role: string;
+  // Presentation fields — use directly, no client-side role mapping.
+  display_role: string;
+  initials: string;
   department: string | null;
 }
 
@@ -1999,6 +2727,8 @@ export interface ThreadSummary {
   thread_id: string;
   report: ThreadReport;
   owner: ThreadOwner | null;
+  // Added alongside the review flow; null when the report isn't out for review.
+  assignment: ReviewAssignment | null;
   updated_at: string;
   last_message: ThreadLastMessage | null;
   internal_count: number;
@@ -2023,18 +2753,37 @@ export interface MessageSender {
   is_you: boolean;
 }
 
+// `kind` drives the bubble: "system" renders with the Communication Hub avatar
+// and label (ignore `sender` for the display name); "user" renders as a person.
+export type ThreadMessageKind = 'system' | 'user';
+
 export interface ThreadMessage {
   id: string;
+  kind: ThreadMessageKind;
   sender: MessageSender;
   body: string;
   mentioned_user_ids: string[];
   created_at: string;
 }
 
+// Who the report is currently out for review with. `label` is the snapshotted
+// authority title ("Board Chairman") — display-only, not a backend entity.
+export interface ReviewAssignment {
+  id: string;
+  user_id: string;
+  full_name: string;
+  label: string | null;
+  is_you: boolean;
+  assigned_at: string;
+}
+
 export interface ThreadDetail {
   thread_id: string;
   report: ThreadReport;
   owner: ThreadOwner | null;
+  assignment: ReviewAssignment | null;
+  // True only for the assigned reviewer — gates "Open as reviewer".
+  can_review: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -2192,6 +2941,131 @@ export interface DraftListResponse {
   drafts: DraftListItem[];
 }
 
+// ── Report review & approval ──────────────────────────────────────────────
+// The four UI states map straight onto reports.status. `locked`/`published`
+// also exist on finished reports — show via status_label and treat the panel
+// as read-only (can_set_status: false).
+export type ReportReviewStatus = 'draft' | 'in_review' | 'pending_approval' | 'approved';
+
+// Radio options for the hub panel — render from the API, never hardcode.
+export interface ReportStatusOption {
+  code: string;
+  label: string;
+  hint: string;
+}
+
+export interface ReportHubResponse {
+  report: ThreadReport;
+  statuses: ReportStatusOption[];
+  // False once locked/published — render the panel read-only.
+  can_set_status: boolean;
+  owner: ThreadOwner | null;
+  // Null until the report has been shared.
+  thread_id: string | null;
+  assignment: ReviewAssignment | null;
+  can_review: boolean;
+  unread_count: number;
+}
+
+export interface SetReportStatusResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+}
+
+export interface ShareReportBody {
+  // A users.id UUID from GET /communications/members — never a usr_ user_id.
+  assigned_to: string;
+  // Free-text authority title, snapshotted on the thread ("Board Chairman").
+  assigned_label?: string;
+  comment?: string;
+}
+
+// Share returns the full review-thread payload, so the thread modal can paint
+// straight from it without a second request.
+export interface ShareReportResponse extends ThreadDetailResponse {
+  report_status: string;
+}
+
+// ── Reviewer view ─────────────────────────────────────────────────────────
+
+export interface ReviewSection {
+  id: string;
+  // The number badge next to each heading.
+  order: number;
+  title: string;
+  type: string;
+}
+
+export interface ReviewCommentAuthor {
+  full_name: string;
+  initials: string;
+  is_you: boolean;
+}
+
+export interface ReviewComment {
+  id: string;
+  // Null for a comment on the report as a whole.
+  section_id: string | null;
+  section_title: string | null;
+  author: ReviewCommentAuthor;
+  body: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface ReviewViewResponse {
+  thread_id: string;
+  report: ThreadReport;
+  owner: { full_name: string; is_you: boolean } | null;
+  assignment: ReviewAssignment | null;
+  // can_act = you are the assigned reviewer. can_approve additionally requires
+  // the report to be in review — show Approve disabled, not hidden, when
+  // can_act && !can_approve.
+  can_act: boolean;
+  can_approve: boolean;
+  // Empty when the narrative hasn't been generated — hide the per-section rail.
+  sections: ReviewSection[];
+  comments: ReviewComment[];
+  // Same comments keyed by section_id; report-level ones sit under "null".
+  comments_by_section: Record<string, ReviewComment[]>;
+}
+
+export interface CreateReviewCommentBody {
+  section_id?: string | null;
+  section_title?: string | null;
+  body: string;
+}
+
+export interface CreateReviewCommentResponse {
+  comment: ReviewComment;
+}
+
+export interface ReassignReviewBody {
+  assigned_to: string;
+  assigned_label?: string;
+}
+
+export interface ReassignReviewResponse {
+  thread_id: string;
+  assigned_to: string;
+  assigned_label: string | null;
+  full_name: string;
+}
+
+export interface ApproveReviewResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+  approved_at: string;
+}
+
+export interface SendBackReviewResponse {
+  report_id: string;
+  status: string;
+  status_label: string;
+}
+
 // company_id is never sent — the backend derives it from the JWT.
 export const communications = {
   // Communication tab list. limit (1–200, default 50) / offset (default 0) are
@@ -2295,6 +3169,72 @@ export const communications = {
 
   // Saved drafts (only surface for drafts — they're not in the History list).
   drafts: () => request<DraftListResponse>("/api/v1/communications/history/drafts"),
+
+  // ── Report review & approval ─────────────────────────────────────────────
+  // One call renders the whole hub side rail. Re-fetch after any action below.
+  // 404 → report not in your company.
+  reportHub: (reportId: string) =>
+    request<ReportHubResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/hub`,
+    ),
+
+  // 403 → "approved" isn't settable here (approve from the reviewer view so a
+  // sign-off is recorded). 422 → outside draft/in_review/pending_approval.
+  // 409 → report locked or published.
+  setReportStatus: (reportId: string, status: string) =>
+    request<SetReportStatusResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/status`,
+      { method: "PATCH", body: { status } },
+    ),
+
+  // Creates or reuses the thread, assigns the reviewer, posts the system line
+  // and your comment, moves the report to in_review, notifies the reviewer.
+  // Sharing twice is expected (reassignment / a second round).
+  // 422 → assigned_to is you · 403 → not an active member · 404 → no report.
+  shareReport: (reportId: string, body: ShareReportBody) =>
+    request<ShareReportResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/share`,
+      { method: "POST", body },
+    ),
+
+  // Reviewer screen: sections, comments, and the action gates. Any company
+  // member may read this — only the write calls below are restricted.
+  reviewView: (threadId: string) =>
+    request<ReviewViewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/review`,
+    ),
+
+  // Open to any company member. Omit both section fields for a report-level
+  // comment. 422 → empty body, or a section_id not in this report.
+  addReviewComment: (threadId: string, body: CreateReviewCommentBody) =>
+    request<CreateReviewCommentResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/comments`,
+      { method: "POST", body },
+    ),
+
+  // After this the caller is no longer the reviewer — re-fetch and expect
+  // can_act: false. 403 → not the reviewer · 422 → same person · 409 → unassigned.
+  reassignReview: (threadId: string, body: ReassignReviewBody) =>
+    request<ReassignReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/reassign`,
+      { method: "POST", body },
+    ),
+
+  // The sign-off that unblocks publishing. 403 → not the assigned reviewer
+  // (admins included) · 409 → report not in review, or thread unassigned.
+  approveReview: (threadId: string, note?: string) =>
+    request<ApproveReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/approve`,
+      { method: "POST", body: note ? { note } : {} },
+    ),
+
+  // Note is REQUIRED (422 if blank). Returns the report to draft and clears the
+  // assignment. 403 → not the reviewer · 409 → report locked/published.
+  sendBackReview: (threadId: string, note: string) =>
+    request<SendBackReviewResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-back`,
+      { method: "POST", body: { note } },
+    ),
 };
 
 // ---------------------------------------------------------------------------

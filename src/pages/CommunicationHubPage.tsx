@@ -25,6 +25,10 @@ import {
   type DraftListItem,
 } from '@/lib/api';
 import type { Company } from '@/types/company';
+import { NewThreadModal } from '@/components/communications/NewThreadModal';
+import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
+import { ReviewerView } from '@/components/communications/ReviewerView';
+import { abbreviateName, initials, relativeTime } from '@/components/communications/helpers';
 
 /* ══════════════════════════════════════════════════════════════════════
    Communication Hub
@@ -3151,6 +3155,8 @@ export default function CommunicationHubPage() {
   const [draftsRefresh, setDraftsRefresh] = useState(0);
   const [showPublish, setShowPublish] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(routeThreadId ?? null);
+  // Reviewer screen, opened from the thread modal's "Open as reviewer".
+  const [reviewThreadId, setReviewThreadId] = useState<string | null>(null);
 
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3202,7 +3208,32 @@ export default function CommunicationHubPage() {
 
   return (
     <div>
-      {activeThreadId && <ThreadViewModal threadId={activeThreadId} onClose={closeThread} />}
+      {activeThreadId && (
+        <ThreadViewModal
+          threadId={activeThreadId}
+          onClose={closeThread}
+          onOpenReview={(id) => {
+            setActiveThreadId(null);
+            setReviewThreadId(id);
+          }}
+        />
+      )}
+      {reviewThreadId && (
+        <ReviewerView
+          threadId={reviewThreadId}
+          onClose={() => {
+            setReviewThreadId(null);
+            if (routeThreadId) navigate('/comms', { replace: true });
+            void fetchThreads();
+          }}
+          // Back chevron → return to the thread we came from.
+          onBack={() => {
+            setActiveThreadId(reviewThreadId);
+            setReviewThreadId(null);
+          }}
+          onChanged={() => void fetchThreads()}
+        />
+      )}
       {(externalThread || reopenDraftId) && (
         <ExternalEmailModal
           report={externalThread?.report ?? null}
