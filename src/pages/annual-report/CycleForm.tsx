@@ -8,6 +8,7 @@ const PRIMARY = '#4040C8';
 const WORKFLOW_STEPS = [
   'Admin creates the cycle — sets the name, fiscal year, dates, and assigns a Project Manager',
   'PM configures the cycle — writes the kickoff brief, adds department timelines, activates it',
+  'HR Lead curates & reviews — refines the AI-generated questions for their department and reviews each answer',
   'Departments answer AI-generated questions — each department submits their narrative',
   'PM reviews & generates the final report',
 ];
@@ -214,20 +215,47 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 18 }}>
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Cycle Start Date *</label>
-              <input className="inp" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <input
+                className="inp"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStartDate(v);
+                  // Downstream dates can't precede the new start — clear them
+                  // instead of leaving a now-invalid value in place.
+                  if (endDate && endDate < v) setEndDate('');
+                  if (submissionDeadline && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+              />
             </div>
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Cycle End Date *</label>
-              <input className="inp" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <input
+                className="inp"
+                type="date"
+                min={startDate || undefined}
+                value={endDate}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v && startDate && v < startDate) return;
+                  setEndDate(v);
+                  if (submissionDeadline && v && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+              />
             </div>
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Submission Deadline *</label>
               <input
                 className="inp"
                 type="date"
-                min={today}
+                min={endDate && endDate > today ? endDate : today}
                 value={submissionDeadline}
-                onChange={(e) => setSubmissionDeadline(e.target.value && e.target.value < today ? '' : e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const floor = endDate && endDate > today ? endDate : today;
+                  setSubmissionDeadline(v && v < floor ? '' : v);
+                }}
               />
             </div>
           </div>

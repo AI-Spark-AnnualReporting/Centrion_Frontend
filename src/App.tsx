@@ -1,5 +1,6 @@
-import { lazy } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom";
+import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
@@ -15,6 +16,7 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import MeetingsPage from "./pages/MeetingsPage";
+import { CommsPage } from "./pages/OtherPages";
 import { CompliancePage } from "./pages/OtherPages";
 import CommunicationHubPage from "./pages/CommunicationHubPage";
 import StakeholdersPage from "./pages/StakeholdersPage";
@@ -41,6 +43,44 @@ const AdminDepartmentsPage = lazy(
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
 
+// IR Calendar — admin + IR. Code-split; renders inside AppLayout.
+const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
+
+// Compliance Validation — 3-step wizard (Set up → Review → Gate). Code-split;
+// the run id in the URL makes Review and Gate deep-linkable.
+const ComplianceSetupPage = lazy(
+  () => import("./pages/compliance/ComplianceSetupPage"),
+);
+const ComplianceRunningPage = lazy(
+  () => import("./pages/compliance/ComplianceRunningPage"),
+);
+const ComplianceReviewPage = lazy(
+  () => import("./pages/compliance/ComplianceReviewPage"),
+);
+const ComplianceGatePage = lazy(
+  () => import("./pages/compliance/ComplianceGatePage"),
+);
+// The certificate for a finished run. Not gated on `certified` — the document
+// titles itself by state, so a run still working through gaps can be taken away
+// as a validation report that says it is not a clearance.
+const CertificatePage = lazy(
+  () => import("./pages/compliance/CertificatePage"),
+);
+
+// Public certificate verification. Outside ProtectedRoute and outside
+// AppLayout: the whole point is that someone holding a printed certificate can
+// check it with no account and no session.
+const VerifyCertificatePage = lazy(
+  () => import("./pages/VerifyCertificatePage"),
+);
+
+// Suspense for the code-split routes that render outside AppLayout.
+const PublicSuspense = () => (
+  <Suspense fallback={<Spinner pad={120} />}>
+    <Outlet />
+  </Suspense>
+);
+
 const App = () => (
   <BrowserRouter>
     <Toaster />
@@ -48,6 +88,15 @@ const App = () => (
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<SignupPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      {/* Public — an auditor or regulator holding a printed certificate must be
+          able to check it without an account. /verify takes a pasted code;
+          /verify/:code checks on arrival, for a shared link or a QR scan. */}
+      {/* Its own Suspense boundary — the app's only one lives inside AppLayout,
+          which these routes deliberately sit outside of. */}
+      <Route element={<PublicSuspense />}>
+        <Route path="/verify" element={<VerifyCertificatePage />} />
+        <Route path="/verify/:code" element={<VerifyCertificatePage />} />
+      </Route>
       <Route element={<ProtectedRoute />}>
         {/* Forced password rotation lives outside AppLayout so there's no
             sidebar / topbar / chatbot to distract from the required step. */}
@@ -73,7 +122,25 @@ const App = () => (
           <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
           <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
           <Route path="/kpi" element={<KPIPage />} />
-          <Route path="/compliance" element={<CompliancePage />} />
+          <Route path="/compliance" element={<ComplianceSetupPage />} />
+          {/* The 30–60s wait after POST /runs gets its own screen so the run is
+              deep-linkable and a refresh resumes polling instead of losing it. */}
+          <Route
+            path="/compliance/runs/:runId/running"
+            element={<ComplianceRunningPage />}
+          />
+          <Route
+            path="/compliance/runs/:runId"
+            element={<ComplianceReviewPage />}
+          />
+          <Route
+            path="/compliance/runs/:runId/gate"
+            element={<ComplianceGatePage />}
+          />
+          <Route
+            path="/compliance/runs/:runId/certificate"
+            element={<CertificatePage />}
+          />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
           <Route path="/comms" element={<CommunicationHubPage />} />
@@ -106,6 +173,7 @@ const App = () => (
               path="/annual-report/cycles/:cycleId"
               element={<CycleDetailPage />}
             />
+            <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>
       </Route>

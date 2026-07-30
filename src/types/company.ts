@@ -74,6 +74,9 @@ export interface Company {
   report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
   esg_frameworks?: string[] | null;
+  // Onboarding deep-ingest state — drives the dashboard card (fetch) + the setup screen.
+  report_extraction_status?: string | null; // 'processing' | 'done' | 'failed'
+  onboarding_progress?: { stage?: string; detail?: string; percent?: number } | null;
   plan_name: string | null;
   plan_renewal_date: string | null;
   max_seats: number | null;

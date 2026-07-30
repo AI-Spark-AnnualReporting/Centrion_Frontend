@@ -276,7 +276,7 @@ export default function CycleDetailPage() {
       .catch(() => setAllDepartments([]));
 
     // Hydrate from any existing assignments on the cycle (usually empty for a
-    // fresh draft). The dept's HOD comes from allDepartments, not the assignment.
+    // fresh draft). The dept's HR Lead comes from allDepartments, not the assignment.
     setAssigned(
       (overview?.departments ?? []).map((d) => ({
         department_id: d.department_id,
@@ -309,7 +309,7 @@ export default function CycleDetailPage() {
     return d?.has_hod ?? !!d?.hod_user_id;
   };
 
-  // Every added department must have a Head of Department before the cycle can be submitted.
+  // Every added department must have an HR Lead before the cycle can be submitted.
   const canSubmit = assigned.length > 0 && assigned.every((a) => deptHasHod(a.department_id));
 
   // Submit = assign departments (bulk). The cycle stays in draft; it only goes
@@ -413,7 +413,7 @@ export default function CycleDetailPage() {
                 type="button"
                 onClick={handleSubmitCycle}
                 disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Add at least one department, and each must have a Head of Department assigned' : undefined}
+                title={!canSubmit ? 'Add at least one department, and each must have an HR Lead assigned' : undefined}
               >
                 {submitting ? 'Submitting…' : '✓ Submit'}
               </button>

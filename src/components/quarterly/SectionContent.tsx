@@ -79,9 +79,26 @@ function Prose({ text }: { text: string }) {
 
 // ─── table ────────────────────────────────────────────────────────────────────
 type LooseRow = Record<string, unknown>;
+// One prior period a comparison table compares against (YoY/QoQ). `key` is
+// "yoy"/"qoq"; `label` is the human period, e.g. "Q3 2024".
+interface ComparePeriod {
+  key: string;
+  label: string;
+}
 interface NormTable {
   title?: string;
   rows: LooseRow[];
+  comparePeriods?: ComparePeriod[]; // present → render one value+change column per period
+  currentLabel?: string | null; // header for the current column, e.g. "Q3 2025"
+}
+
+function normalizeComparePeriods(v: unknown): ComparePeriod[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v
+    .filter(isRecord)
+    .map((p) => ({ key: asString(p.key) ?? '', label: asString(p.label) ?? '' }))
+    .filter((p) => p.label);
+  return out.length ? out : undefined;
 }
 
 function tryParseJson(s: string): unknown | undefined {
@@ -112,7 +129,12 @@ function normalizeTables(parsed: unknown): NormTable[] {
       }));
     }
     if (Array.isArray(parsed.rows)) {
-      return [{ title: asString(parsed.title), rows: parsed.rows as LooseRow[] }];
+      return [{
+        title: asString(parsed.title),
+        rows: parsed.rows as LooseRow[],
+        comparePeriods: normalizeComparePeriods(parsed.compare_periods),
+        currentLabel: asString(parsed.current_label) ?? null,
+      }];
     }
     // Plain object → key/value pairs as a 2-column table.
     return [{ rows: Object.entries(parsed).map(([k, v]) => ({ label: k, current_display: stringifyCell(v) })) }];
@@ -132,7 +154,15 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
       {showTitle && table.title && (
         <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{table.title}</h3>
       )}
-      {financial ? <FinancialTable rows={rows} /> : <GenericTable rows={rows} />}
+      {financial ? (
+        <FinancialTable
+          rows={rows}
+          comparePeriods={table.comparePeriods}
+          currentLabel={table.currentLabel}
+        />
+      ) : (
+        <GenericTable rows={rows} />
+      )}
     </div>
   );
 }
@@ -146,38 +176,129 @@ const TH: React.CSSProperties = {
   letterSpacing: '0.04em',
 };
 
-function FinancialTable({ rows }: { rows: LooseRow[] }) {
-  const showPrior = rows.some((r) => cell(r, 'prior_display', 'prior') != null);
-  const showChange = rows.some((r) => cell(r, 'change_pct', 'change') != null);
+// Header label for a compare period's change column, e.g. "YoY %" / "QoQ %".
+function changeHeader(key: string): string {
+  if (key === 'yoy') return 'YoY %';
+  if (key === 'qoq') return 'QoQ %';
+  return `${key.toUpperCase()} %`;
+}
+// A row's comparison entry for a given period key (from the row's `comparisons`).
+function compFor(r: LooseRow, key: string): LooseRow | undefined {
+  const arr = cell(r, 'comparisons');
+  if (!Array.isArray(arr)) return undefined;
+  return (arr as unknown[]).find((c) => isRecord(c) && c.key === key) as LooseRow | undefined;
+}
+
+function FinancialTable({
+  rows,
+  comparePeriods,
+  currentLabel,
+}: {
+  rows: LooseRow[];
+  comparePeriods?: ComparePeriod[];
+  currentLabel?: string | null;
+}) {
+  const compare = comparePeriods ?? [];
+  const hasCompare = compare.length > 0;
+  // Legacy single-prior columns only when there's no per-period comparison data
+  // (older produced content / sections that don't compare) — unchanged behavior.
+  const showPrior = !hasCompare && rows.some((r) => cell(r, 'prior_display', 'prior') != null);
+  const showChange = !hasCompare && rows.some((r) => cell(r, 'change_pct', 'change') != null);
+  const currentHeader = currentLabel || 'Current';
+  const colCount =
+    2 + (hasCompare ? compare.length * 2 : (showPrior ? 1 : 0) + (showChange ? 1 : 0));
+
+  const cellPad = { padding: '9px 10px' } as const;
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
           <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
-          <th style={{ ...TH, textAlign: 'right' }}>Current</th>
-          {showPrior && <th style={{ ...TH, textAlign: 'right' }}>Prior</th>}
-          {showChange && <th style={{ ...TH, textAlign: 'right' }}>Change</th>}
+          <th style={{ ...TH, textAlign: 'right' }}>{currentHeader}</th>
+          {hasCompare
+            ? compare.flatMap((p) => [
+                <th key={`v-${p.key}`} style={{ ...TH, textAlign: 'right' }}>{p.label}</th>,
+                <th key={`c-${p.key}`} style={{ ...TH, textAlign: 'right' }}>{changeHeader(p.key)}</th>,
+              ])
+            : [
+                showPrior ? <th key="prior" style={{ ...TH, textAlign: 'right' }}>Prior</th> : null,
+                showChange ? <th key="change" style={{ ...TH, textAlign: 'right' }}>Change</th> : null,
+              ]}
         </tr>
       </thead>
       <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
-            <td style={{ padding: '9px 10px', color: DARK }}>{stringifyCell(cell(r, 'label', 'metric', 'name'))}</td>
-            <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: BRAND, fontWeight: 700 }}>
-              {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
-            </td>
-            {showPrior && (
-              <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: MONO, color: MUTED }}>
-                {stringifyCell(cell(r, 'prior_display', 'prior')) || '—'}
+        {rows.map((r, i) => {
+          // role: header | line | subtotal | total; indent: 0/1/2 (see statement_layout.py).
+          // Rows without these keys (old content) render as plain lines — unchanged.
+          const role = String(cell(r, 'role') ?? 'line');
+          const indent = Number(cell(r, 'indent') ?? 0) || 0;
+
+          // Group header — a bold brand label spanning the row, no value.
+          if (role === 'header') {
+            return (
+              <tr key={i}>
+                <td
+                  colSpan={colCount}
+                  style={{
+                    padding: '16px 10px 6px', color: BRAND, fontWeight: 800, fontSize: 11,
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                    borderBottom: '1px solid #EDEEF3',
+                  }}
+                >
+                  {stringifyCell(cell(r, 'label', 'metric', 'name'))}
+                </td>
+              </tr>
+            );
+          }
+
+          const isTotal = role === 'total' || role === 'subtotal';
+          const topBorder = isTotal ? '1px solid #D6D8E0' : undefined;
+          return (
+            <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
+              <td style={{
+                ...cellPad, paddingLeft: 10 + indent * 18, color: DARK,
+                fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
+              }}>
+                {stringifyCell(cell(r, 'label', 'metric', 'name'))}
               </td>
-            )}
-            {showChange && (
-              <td style={{ padding: '9px 10px', textAlign: 'right' }}>
-                <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} />
+              <td style={{
+                ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
+                fontWeight: 700, borderTop: topBorder,
+              }}>
+                {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
               </td>
-            )}
-          </tr>
-        ))}
+              {hasCompare
+                ? compare.flatMap((p) => {
+                    const c = compFor(r, p.key);
+                    return [
+                      <td key={`v-${p.key}`} style={{
+                        ...cellPad, textAlign: 'right', fontFamily: MONO, color: MUTED,
+                        borderTop: topBorder,
+                      }}>
+                        {stringifyCell(c ? c.prior_display : null) || '—'}
+                      </td>,
+                      <td key={`c-${p.key}`} style={{ ...cellPad, textAlign: 'right', borderTop: topBorder }}>
+                        <ChangeCell value={c ? c.change_pct : null} dir={c ? c.change_direction : null} />
+                      </td>,
+                    ];
+                  })
+                : [
+                    showPrior ? (
+                      <td key="prior" style={{
+                        ...cellPad, textAlign: 'right', fontFamily: MONO, color: MUTED, borderTop: topBorder,
+                      }}>
+                        {stringifyCell(cell(r, 'prior_display', 'prior')) || '—'}
+                      </td>
+                    ) : null,
+                    showChange ? (
+                      <td key="change" style={{ ...cellPad, textAlign: 'right', borderTop: topBorder }}>
+                        <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} />
+                      </td>
+                    ) : null,
+                  ]}
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

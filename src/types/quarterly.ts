@@ -5,6 +5,9 @@
 // be overridden; reporting_basis + voices are chosen manually.
 export type CompanyType = "bank" | "non_bank";
 export type Voice = "ceo" | "chairman" | "cfo";
+// The "What should this quarter be compared against?" question — single choice.
+// yoy = same quarter last year; qoq = the immediately prior quarter; both = both.
+export type Comparison = "yoy" | "qoq" | "both";
 // Prose style of the narrative — the "Report tone" question. Default:
 // formal_corporate.
 export type ReportTone =
@@ -142,6 +145,9 @@ export interface OutlineSection {
   part_label: string;
   requirement: 'required' | 'optional';
   included: boolean;
+  // System's data-driven suggestion: true when we have source data for the section
+  // (feeder ready) or it's a chosen voice. Drives the "Recommended" quick-select.
+  recommended: boolean;
   // Per-section lock: a required section can't be unticked. Distinct from the
   // whole-outline freeze on OutlineResponse.locked.
   locked: boolean;
@@ -149,6 +155,9 @@ export interface OutlineSection {
   mode: string;
   display_order?: number;
   feeder: OutlineFeeder;
+  // True when this section's produced data duplicates an earlier section's — the
+  // Preview hides these (keep the first, hide the rest). Computed server-side.
+  hidden_duplicate?: boolean;
 }
 
 export interface OutlineResponse {
@@ -157,6 +166,11 @@ export interface OutlineResponse {
   total_catalogue?: number;
   // Whole-outline freeze — true once the outline is locked (read-only).
   locked?: boolean;
+  // True while the ingest worker is still writing figures. Until it flips false a
+  // section's feeder is a snapshot of a moving target: "needs_input" may just mean
+  // "not extracted yet". The page polls on this and freezes edits while it's true.
+  ingest_running?: boolean;
+  ingest_run_id?: string | null;
   sections: OutlineSection[];
 }
 
@@ -198,6 +212,9 @@ export interface ProducedSection {
   feeder_status: FeederStatus;
   // Carried through so needs_input sections can show what they require.
   message?: string;
+  // False when re-producing yields nothing fresh (Template/External, or content
+  // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
+  regeneratable?: boolean;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.
@@ -409,6 +426,32 @@ export interface AssembledReportResponse {
   cover?: CoverSelectionPayload | null;
   brand?: BrandColors | null; // some backends put brand at top level
   sections: AssembledSection[];
+  // Approval/lock status — exact backend field name unconfirmed (no OpenAPI
+  // entry yet), so every likely shape is read defensively (see
+  // readApprovalStatus in AssembledReportPage.tsx). Once approved, the report
+  // is read-only and Export becomes available.
+  status?: string;
+  approved?: boolean;
+  is_approved?: boolean;
+  is_locked?: boolean;
+  locked?: boolean;
+  approved_at?: string | null;
+  approvedAt?: string | null;
+  locked_at?: string | null;
+}
+
+// POST .../quarterly/{reportId}/approve response — approve & lock the
+// assembled report. Shape unconfirmed; mirrors the same defensive fields as
+// AssembledReportResponse above.
+export interface ApproveReportResponse {
+  status?: string;
+  approved?: boolean;
+  is_approved?: boolean;
+  is_locked?: boolean;
+  locked?: boolean;
+  approved_at?: string | null;
+  approvedAt?: string | null;
+  locked_at?: string | null;
 }
 
 // PATCH .../sections/{code}/content — inline edits.

@@ -26,7 +26,7 @@ interface AuthContextValue {
   login(email: string, password: string): Promise<AuthUser>;
   // Forced rotation after first-login. Updates the stored user on success so
   // the must_change_password gate clears immediately.
-  changePassword(oldPassword: string, newPassword: string): Promise<void>;
+  changePassword(newPassword: string): Promise<void>;
   // Re-fetch /auth/me and replace the cached user. Useful right after a
   // password change to flush must_change_password back to false.
   refreshUser(): Promise<void>;
@@ -110,9 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const changePassword = useCallback(
-    async (oldPassword: string, newPassword: string) => {
+    async (newPassword: string) => {
       await authApi.changePassword({
-        old_password: oldPassword,
         new_password: newPassword,
       });
       // Optimistically clear the gate before the /me round-trip so the next

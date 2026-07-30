@@ -152,7 +152,26 @@ function TableEditor({
       const next = clone(prev);
       const tables = editableTables(next);
       const row = tables[ti]?.rows[ri];
-      if (row) row[key] = value;
+      if (row) {
+        row[key] = value;
+        // Change % + direction are derived, never hand-typed: recompute them whenever a
+        // comparison row's current/prior display is edited. Guard on an existing change_pct
+        // key so a non-comparison table never gains change columns.
+        if ((key === 'current_display' || key === 'prior_display') && 'change_pct' in row) {
+          const cur = parseDisplayValue(row.current_display);
+          const prior = parseDisplayValue(row.prior_display);
+          if (cur != null && prior != null && prior !== 0) {
+            const pct = Math.round(((cur - prior) / prior) * 1000) / 10; // 1 dp, matches backend
+            // Direction from the % SIGN (matches backend _change_direction) — not cur>prior,
+            // which disagrees when the prior is negative.
+            row.change_pct = pct;
+            row.change_direction = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+          } else {
+            row.change_pct = null;
+            row.change_direction = null;
+          }
+        }
+      }
       return next;
     });
   };
@@ -181,23 +200,31 @@ function TableEditor({
               <tbody>
                 {t.rows.map((r, ri) => (
                   <tr key={ri}>
-                    {cols.map((c) => (
-                      <td key={c} style={{ padding: '3px 4px' }}>
-                        <input
-                          value={cellStr(r[c])}
-                          disabled={saving}
-                          onChange={(e) => setCell(ti, ri, c, e.target.value)}
-                          style={{
-                            width: '100%', minWidth: 90, padding: '6px 8px', borderRadius: 6,
-                            border: '1px solid #E4E6F1', fontSize: 12.5, color: DARK,
-                            fontFamily: /current|prior|value|change|amount|figure/i.test(c) ? MONO : 'inherit',
-                            outline: 'none', background: '#fff', boxSizing: 'border-box',
-                          }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = ACCENT)}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = '#E4E6F1')}
-                        />
-                      </td>
-                    ))}
+                    {cols.map((c) => {
+                      const readOnly = READONLY_COLS.has(c);
+                      return (
+                        <td key={c} style={{ padding: '3px 4px' }}>
+                          <input
+                            value={cellStr(r[c])}
+                            disabled={saving}
+                            readOnly={readOnly}
+                            tabIndex={readOnly ? -1 : undefined}
+                            title={readOnly ? 'Computed automatically from the current & prior values' : undefined}
+                            onChange={readOnly ? undefined : (e) => setCell(ti, ri, c, e.target.value)}
+                            style={{
+                              width: '100%', minWidth: 90, padding: '6px 8px', borderRadius: 6,
+                              border: '1px solid #E4E6F1', fontSize: 12.5,
+                              color: readOnly ? MUTED : DARK,
+                              fontFamily: /current|prior|value|change|amount|figure/i.test(c) ? MONO : 'inherit',
+                              outline: 'none', background: readOnly ? '#F4F5FA' : '#fff', boxSizing: 'border-box',
+                              cursor: readOnly ? 'not-allowed' : 'text',
+                            }}
+                            onFocus={readOnly ? undefined : (e) => (e.currentTarget.style.borderColor = ACCENT)}
+                            onBlur={readOnly ? undefined : (e) => (e.currentTarget.style.borderColor = '#E4E6F1')}
+                          />
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -285,6 +312,31 @@ function editableTables(parsed: unknown): { title?: string; rows: Row[] }[] {
 
 // Editable columns = the primitive-valued keys across the rows (objects/arrays
 // are skipped so we don't try to text-edit nested structures).
+// Layout metadata (statement_layout.py) — kept on the row and preserved through
+// edits (the draft is deep-cloned), but not shown as editable columns.
+const HIDDEN_COLS = new Set(['role', 'indent']);
+
+// Derived columns — shown but NOT hand-editable. Change % + direction are recomputed
+// from the current/prior values whenever those are edited (see setCell).
+const READONLY_COLS = new Set(['change_pct', 'change_direction']);
+
+// Reverse of the backend _fmt_value_exact3: turn a formatted display string like
+// "$14.773B", "$-318.000M", "SAR 3.038B", or "188.000K" back into a number, so the
+// change % can be recomputed when a figure is hand-edited. null when blank/unparseable.
+function parseDisplayValue(raw: unknown): number | null {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  s = s.replace(/(SAR|USD|GBP|EUR|SR)/gi, '').replace(/[$£€,\s]/g, '');
+  const m = s.match(/^(-?\d*\.?\d+)([bmk])?$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  if (Number.isNaN(n)) return null;
+  const suf = (m[2] || '').toLowerCase();
+  const mult = suf === 'b' ? 1e9 : suf === 'm' ? 1e6 : suf === 'k' ? 1e3 : 1;
+  return n * mult;
+}
+
 function columnsOf(rows: Row[]): string[] {
   const cols = new Set<string>();
   rows.forEach((r) => {
@@ -292,5 +344,6 @@ function columnsOf(rows: Row[]): string[] {
       if (v == null || typeof v !== 'object') cols.add(k);
     });
   });
+  HIDDEN_COLS.forEach((h) => cols.delete(h));
   return Array.from(cols);
 }

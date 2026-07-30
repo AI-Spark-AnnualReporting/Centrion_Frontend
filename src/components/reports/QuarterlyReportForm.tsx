@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea } from '@/lib/api';
-import type { CompanyType, Voice, ReportTone } from '@/types/quarterly';
+import type { QuarterlyReportArea, ComparisonAvailability } from '@/lib/api';
+import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
 // Quarter options for the reporting-period selector.
@@ -71,14 +71,22 @@ function humaniseMetric(slug: string): string {
     .join(' ');
 }
 
-// Accepted upload types for quarterly financial documents.
-const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx', '.xlsx', '.csv'] as const;
+// Two upload lanes: narrative documents (PDF/DOCX → vision + chunks) and the
+// dedicated financial-data lane (Excel/CSV → lean, exact figure extraction).
+const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const MAX_DOCUMENTS = 5;
+const ACCEPTED_FIN_EXT = ['.xlsx', '.csv'] as const;
+const ACCEPTED_FIN_ATTR = ACCEPTED_FIN_EXT.join(',');
+const MAX_DOCUMENTS = 5;   // combined cap across both lanes
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ACCEPTED_UPLOAD_EXT.some((ext) => lower.endsWith(ext));
+}
+
+function hasFinExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ACCEPTED_FIN_EXT.some((ext) => lower.endsWith(ext));
 }
 
 function formatBytes(bytes: number): string {
@@ -105,8 +113,9 @@ const ADD_NEW_SENTINEL = '__add_new__';
 
 // ─── Confirm-context Q/A (embedded on this form) ──────────────────────────────
 const CTX_COMPANY_TYPES: { label: string; value: CompanyType }[] = [
-  { label: 'Bank', value: 'bank' },
-  { label: 'Non-bank', value: 'non_bank' },
+  // Display labels only — values stay bank/non_bank so all backend logic is unchanged.
+  { label: 'Financial', value: 'bank' },
+  { label: 'Non-financial', value: 'non_bank' },
 ];
 
 // Report tone — the prose style of the narrative. Default: formal_corporate.
@@ -126,28 +135,40 @@ const CTX_VOICES: { label: string; value: Voice; locked?: boolean }[] = [
   { label: 'CFO statement', value: 'cfo' },
 ];
 
+// The comparison basis — single choice. Default: year-on-year.
+const CTX_COMPARISONS: { label: string; value: Comparison; desc: string }[] = [
+  { label: 'Year on year', value: 'yoy', desc: 'vs the same quarter last year' },
+  { label: 'Previous quarter', value: 'qoq', desc: 'vs the immediately prior quarter' },
+  { label: 'Both', value: 'both', desc: 'vs prior year and prior quarter' },
+];
+
 // Capsule pill — indigo border + light fill when selected; locked pills (CEO)
 // render dashed/muted and are non-interactive.
 function CtxPill({
   label,
   selected,
   locked,
+  disabled,
   title,
   onClick,
 }: {
   label: string;
   selected: boolean;
   locked?: boolean;
+  // Unavailable option (e.g. no prior-period data to compare against): greyed,
+  // not-allowed, non-interactive — distinct from `locked`'s dashed "always-on" look.
+  disabled?: boolean;
   title?: string;
   onClick?: () => void;
 }) {
+  const off = locked || disabled;
   return (
     <button
       type="button"
-      disabled={locked}
+      disabled={off}
       title={title}
       aria-pressed={selected}
-      onClick={locked ? undefined : onClick}
+      onClick={off ? undefined : onClick}
       style={{
         padding: '9px 16px',
         borderRadius: 999,
@@ -155,21 +176,24 @@ function CtxPill({
         fontWeight: 600,
         whiteSpace: 'nowrap',
         transition: 'border-color .15s, background .15s, color .15s',
-        cursor: locked ? 'default' : 'pointer',
-        background: locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
-        color: locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
-        border: locked
+        cursor: disabled ? 'not-allowed' : locked ? 'default' : 'pointer',
+        opacity: disabled ? 0.65 : 1,
+        background: disabled ? '#F5F5F7' : locked ? '#F3F3FD' : selected ? '#EEEEFF' : '#fff',
+        color: disabled ? '#A9ADBD' : locked ? '#8A8AC8' : selected ? '#2B2B8F' : '#3A3F5C',
+        border: disabled
+          ? '1.5px solid #E8E8EE'
+          : locked
           ? '1.5px dashed #4040C8'
           : `1.5px solid ${selected ? '#4040C8' : '#E4E6F1'}`,
       }}
       onMouseEnter={(e) => {
-        if (!locked && !selected) {
+        if (!off && !selected) {
           e.currentTarget.style.borderColor = '#C4C7F0';
           e.currentTarget.style.background = '#FAFAFF';
         }
       }}
       onMouseLeave={(e) => {
-        if (!locked && !selected) {
+        if (!off && !selected) {
           e.currentTarget.style.borderColor = '#E4E6F1';
           e.currentTarget.style.background = '#fff';
         }
@@ -313,7 +337,10 @@ export default function QuarterlyReportForm({
   const [isAddingNewPeriod, setIsAddingNewPeriod] = useState<boolean>(
     prefillYear == null && existingReports.length === 0,
   );
-  const [quarter, setQuarter] = useState<Quarter>(prefillQuarter ?? 'Q1');
+  // Starts UNSELECTED so the user must explicitly pick a quarter — the comparison
+  // options stay disabled until both year and quarter are chosen (we can't know
+  // which prior periods to check for data until the target period is known).
+  const [quarter, setQuarter] = useState<Quarter | null>(prefillQuarter ?? null);
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
   // Language the generated report is written in. UI stays English/LTR — this
@@ -345,6 +372,18 @@ export default function QuarterlyReportForm({
   // No default — the user picks a tone (or leaves it unset; backend defaults).
   const [reportTone, setReportTone] = useState<ReportTone | null>(null);
   const [voices, setVoices] = useState<Voice[]>(['ceo']);
+  // Comparison basis — single choice ("Confirm context" Q4). Default: YoY.
+  const [comparison, setComparison] = useState<Comparison>('yoy');
+  // Comparison-data gate. When a comparison + period are set we check the backend
+  // for prior-period figures: Generate is disabled while 'checking'; 'missing'
+  // pops the no-data dialog and keeps Generate disabled. New-report branch only.
+  const [comparisonCheck, setComparisonCheck] =
+    useState<'idle' | 'checking' | 'ok' | 'missing'>('idle');
+  const [comparisonMissing, setComparisonMissing] = useState<ComparisonAvailability | null>(null);
+  // Per-basis prior-data availability for the chosen year+quarter (null until both
+  // are set). Drives which comparison pills are enabled. { qoq, yoy, both } where
+  // both = qoq && yoy. From the backend `comparison-availability` specs[].present.
+  const [compAvail, setCompAvail] = useState<Record<Comparison, boolean> | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -379,6 +418,19 @@ export default function QuarterlyReportForm({
   const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Dedicated Excel/CSV lane — exact figures via the lean spreadsheet flow. No
+  // language check (numbers, not prose). Currency + scale are auto-detected server
+  // side (sheet units → prior-period magnitude cross-check → LLM), so no inputs.
+  const [financialFiles, setFinancialFiles] = useState<File[]>([]);
+  const [isDraggingFin, setIsDraggingFin] = useState(false);
+  const financialInputRef = useRef<HTMLInputElement>(null);
+
+  // System vs Custom metrics. system (default) = map the sheet to our standard
+  // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
+  // The Financial Data (Excel/CSV) field only shows in custom mode.
+  const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
+  const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
+
   // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
   // checked the moment they're added and re-checked when the language toggles.
   const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
@@ -395,6 +447,53 @@ export default function QuarterlyReportForm({
 
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
+
+  // The pills are pre-disabled for unavailable bases (see compAvail), so a click
+  // only ever lands on a valid choice — just record it.
+  const selectComparison = (v: Comparison) => setComparison(v);
+
+  // Per-basis prior-data availability. Runs once BOTH year and quarter are set
+  // (new-report branch only): a single 'both' call returns present flags for qoq
+  // AND yoy, from which we derive which comparison pills are enabled. Fails open
+  // (allow all) so a transient check error never blocks the user — the backend
+  // still only renders a comparison where data actually exists.
+  useEffect(() => {
+    if (isUploadMode || isOpenMode || !companyId || customYear == null || quarter == null) {
+      setCompAvail(null);
+      setComparisonCheck('idle');
+      return;
+    }
+    let cancelled = false;
+    setComparisonCheck('checking');
+    quarterlyReportsApi
+      // custom reports match the prior period by label → check prior CUSTOM data.
+      .checkComparisonAvailability(companyId, { year: customYear, quarter, comparison: 'both', metrics_mode: metricsMode })
+      .then((res) => {
+        if (cancelled) return;
+        const present = (k: string) => res.specs.some((s) => s.key === k && s.present);
+        const qoq = present('qoq');
+        const yoy = present('yoy');
+        setCompAvail({ qoq, yoy, both: qoq && yoy });
+        setComparisonCheck('ok');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCompAvail({ qoq: true, yoy: true, both: true });
+        setComparisonCheck('ok');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, customYear, quarter, isUploadMode, isOpenMode, metricsMode]);
+
+  // Keep the selection valid: if the chosen basis isn't available, fall back to an
+  // available one (prefer YoY, then QoQ). When none are available the report is
+  // generated current-period-only (the payload omits `comparison`).
+  useEffect(() => {
+    if (!compAvail || compAvail[comparison]) return;
+    const next: Comparison | null = compAvail.yoy ? 'yoy' : compAvail.qoq ? 'qoq' : null;
+    if (next && next !== comparison) setComparison(next);
+  }, [compAvail, comparison]);
 
   // Fetch the report-area cards once on mount. The list is company-agnostic.
   // The picker is hidden — every area is always selected and sent in the
@@ -639,6 +738,55 @@ export default function QuarterlyReportForm({
     }
   };
 
+  // ── Financial-data lane (Excel/CSV) — no language check; combined cap ──
+  const acceptFinancialFiles = (incoming: FileList | File[]) => {
+    const accepted: File[] = [];
+    let rejected = false;
+    Array.from(incoming).forEach((f) => {
+      if (hasFinExtension(f.name)) accepted.push(f);
+      else rejected = true;
+    });
+    if (rejected) {
+      setGenError(`Financial data must be a spreadsheet (${ACCEPTED_FIN_EXT.join(', ')}).`);
+    } else {
+      setGenError(null);
+    }
+    if (accepted.length === 0) return;
+    setFinancialFiles((prev) => {
+      const seen = new Set(prev.map(fileKey));
+      const merged = [...prev];
+      accepted.forEach((f) => {
+        const id = fileKey(f);
+        if (!seen.has(id)) { seen.add(id); merged.push(f); }
+      });
+      const capRemaining = Math.max(0, MAX_DOCUMENTS - files.length);
+      if (merged.length > capRemaining) {
+        setShowFileCapWarning(true);
+        return merged.slice(0, capRemaining);
+      }
+      return merged;
+    });
+  };
+
+  const handleFinInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) acceptFinancialFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  const handleFinDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFin(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      acceptFinancialFiles(e.dataTransfer.files);
+    }
+  };
+
+  const removeFinancialFile = (index: number) => {
+    setFinancialFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const openFinPicker = () => financialInputRef.current?.click();
+
   const removeFile = (index: number) => {
     const removed = files[index];
     setFiles((prev) => prev.filter((_, i) => i !== index));
@@ -662,11 +810,19 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
+  // A new report is satisfied by EITHER lane — a narrative document or a
+  // financial spreadsheet (or both).
+  const hasAnyUpload = files.length > 0 || financialFiles.length > 0;
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
   // neither gates. Report areas are always all-selected behind the scenes.
   const contextComplete = companyType != null;
+
+  // Comparison gate blocks the new-report branch only WHILE the availability
+  // check is in flight. Missing prior data does NOT block generation — it just
+  // pops a heads-up and the report skips the comparison where data is absent.
+  const comparisonBlocked = comparisonCheck === 'checking';
 
   const canGenerate =
     !!companyId &&
@@ -675,8 +831,10 @@ export default function QuarterlyReportForm({
       (isUploadMode && hasFiles) ||
       (!selectedReportId &&
         customYear != null &&
-        hasFiles &&
+        quarter != null &&
+        hasAnyUpload &&
         !langBlocked &&
+        !comparisonBlocked &&
         contextComplete));
 
   const disabledReason = isOpenMode
@@ -687,15 +845,19 @@ export default function QuarterlyReportForm({
         : undefined
       : customYear == null
         ? 'Select a reporting year to continue'
-        : !hasFiles
-            ? 'Upload at least one source document to continue'
+        : quarter == null
+          ? 'Select a reporting quarter to continue'
+          : !hasAnyUpload
+            ? 'Upload a document or a financial spreadsheet to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
                 : companyType == null
                   ? 'Select the company type to continue'
-                  : undefined;
+                  : comparisonCheck === 'checking'
+                    ? 'Checking comparison data…'
+                    : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -756,7 +918,7 @@ export default function QuarterlyReportForm({
 
     // Branch C — new report. company_type is required (guaranteed by
     // `canGenerate`, re-checked here to narrow the nullable state type).
-    if (customYear == null || companyType == null) return;
+    if (customYear == null || quarter == null || companyType == null) return;
     const requestId = ++genRequestIdRef.current;
     setGenError(null);
     setIsSubmittingGenerate(true);
@@ -774,6 +936,13 @@ export default function QuarterlyReportForm({
         company_type: companyType,
         voices,
         report_tone: reportTone ?? undefined,
+        // Only send a basis we actually have prior data for; otherwise omit it so
+        // the report is generated current-period-only (no empty comparison column).
+        comparison: compAvail && compAvail[comparison] ? comparison : undefined,
+        // Dedicated Excel/CSV lane → lean extraction; currency/scale auto-detected.
+        financial_files: financialFiles.length > 0 ? financialFiles : undefined,
+        // custom = extract the sheet's lines as-is, section-assigned (no metric map).
+        metrics_mode: metricsMode,
       })
       .then((handle) => {
         if (requestId !== genRequestIdRef.current) return;
@@ -1056,9 +1225,14 @@ export default function QuarterlyReportForm({
               <label className="fl-label">Quarter</label>
               <select
                 className="inp sel"
-                value={quarter}
-                onChange={(e) => setQuarter(e.target.value as Quarter)}
+                value={quarter ?? ''}
+                onChange={(e) =>
+                  setQuarter(e.target.value ? (e.target.value as Quarter) : null)
+                }
               >
+                <option value="" disabled>
+                  Select quarter…
+                </option>
                 {QUARTERS.map((q) => (
                   <option key={q} value={q}>
                     {q}
@@ -1079,12 +1253,83 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
+        {/* Metrics mode — System (map to our standard metrics) vs Custom (use the
+            sheet's own lines as-is). New reports only; controls whether the
+            Financial Data (Excel/CSV) field is shown. */}
+        {!isOpenMode && !isUploadMode && (
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Metrics
+              <button
+                type="button"
+                aria-label="What are System and Custom metrics?"
+                title="What are System and Custom metrics?"
+                onClick={() => setMetricsHelpOpen((v) => !v)}
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
+                  background: metricsHelpOpen ? '#4040C8' : 'transparent',
+                  color: metricsHelpOpen ? '#fff' : '#9BA3C4',
+                  fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                }}
+              >
+                ?
+              </button>
+            </label>
+
+            {metricsHelpOpen && (
+              <div
+                role="note"
+                style={{
+                  marginTop: 6, marginBottom: 4, padding: '10px 12px', borderRadius: 8,
+                  border: '1px solid #E1E4F0', background: '#F7F8FC',
+                  fontSize: 11, color: '#5A6080', lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: '#1A1D2E' }}>System metrics</strong> — we map your data to
+                our standard set of metrics and lay it out in the standard report template.
+                <br />
+                <strong style={{ color: '#1A1D2E' }}>Custom metrics</strong> — we take the figures
+                from your Excel/CSV exactly as they are, place each line in the right section, and
+                print them as-is (no mapping to our metrics).
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>
+              {(['system', 'custom'] as const).map((m) => (
+                <label
+                  key={m}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+                    fontSize: 12, fontWeight: 600,
+                    color: metricsMode === m ? '#1A1D2E' : '#5A6080',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="metrics_mode"
+                    value={m}
+                    checked={metricsMode === m}
+                    onChange={() => {
+                      setMetricsMode(m);
+                      // Leaving custom → the sheet field hides; drop any staged sheets
+                      // so a hidden field can't submit files the user can't see.
+                      if (m === 'system') setFinancialFiles([]);
+                    }}
+                    style={{ accentColor: '#4040C8', width: 14, height: 14 }}
+                  />
+                  {m === 'system' ? 'System metrics' : 'Custom metrics'}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Upload — shown for new reports and upload-to-existing mode */}
         {!isOpenMode && (
           <div style={{ marginBottom: 18 }}>
             <label className="fl-label">
               Source Documents{' '}
-              {!isOpenMode && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}{' '}
               <span
                 style={{
                   fontWeight: 400,
@@ -1092,11 +1337,9 @@ export default function QuarterlyReportForm({
                   color: '#9BA3C4',
                 }}
               >
-                {isUploadMode
-                  ? existingCoverageLoading
-                    ? '(loading…)'
-                    : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`
-                  : `(PDF, DOCX, XLSX, CSV — up to ${MAX_DOCUMENTS})`}
+                {isUploadMode && existingCoverageLoading
+                  ? '(loading…)'
+                  : `(PDF, DOCX — narrative & prose)`}
               </span>
             </label>
 
@@ -1287,6 +1530,97 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
+        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures).
+            New reports: shown only in Custom-metrics mode (System hides it, per the
+            boss). Upload-to-existing keeps showing it (unchanged behaviour). */}
+        {!isOpenMode && (isUploadMode || metricsMode === 'custom') && (
+          <div style={{ marginBottom: 18 }}>
+            <label className="fl-label">
+              Financial Data (Excel / CSV){' '}
+              <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
+                — recommended for accuracy
+              </span>
+            </label>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
+              Upload the statements as a spreadsheet for exact figures (no OCR). Currency and
+              scale are detected automatically.
+            </div>
+
+            <input
+              ref={financialInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_FIN_ATTR}
+              onChange={handleFinInputChange}
+              style={{ display: 'none' }}
+            />
+
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={openFinPicker}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFinPicker(); }
+              }}
+              onDragOver={(e) => { e.preventDefault(); if (!isDraggingFin) setIsDraggingFin(true); }}
+              onDragLeave={() => setIsDraggingFin(false)}
+              onDrop={handleFinDrop}
+              className="upload-z"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                padding: '16px 20px', cursor: 'pointer',
+                borderColor: isDraggingFin ? '#2E9B57' : undefined,
+                background: isDraggingFin ? 'rgba(46,155,87,.06)' : undefined,
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M10 3v10M6 7l4-4 4 4" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span style={{ fontSize: 12, color: '#5A6080' }}>
+                Click to upload or drag &amp; drop an Excel or CSV of the financial statements
+              </span>
+            </div>
+
+            {financialFiles.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
+                {financialFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}:${file.size}:${index}`}
+                    style={{
+                      position: 'relative', display: 'flex', flexDirection: 'column', gap: 6,
+                      padding: '10px 10px 8px', borderRadius: 8,
+                      border: '1px solid #2E9B57', background: 'rgba(46,155,87,.05)',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, paddingRight: 16 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {file.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(file.size)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFinancialFile(index)}
+                      aria-label="Remove file"
+                      title="Remove file"
+                      style={{
+                        position: 'absolute', top: 6, right: 6, width: 16, height: 16,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'transparent', border: 0, padding: 0, cursor: 'pointer', color: '#9BA3C4',
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Wrong-language banner (upload-time check) */}
         {languageWarning && (
           <div
@@ -1382,6 +1716,54 @@ export default function QuarterlyReportForm({
                 />
               ))}
             </CtxCard>
+
+            {/* Card 4 — comparison basis (single-select; default YoY). Disabled
+                until year+quarter are chosen, then each basis is enabled only if we
+                have prior-period data for it (checked against qr_figures). */}
+            {(() => {
+              const periodChosen = customYear != null && quarter != null;
+              const checking = comparisonCheck === 'checking';
+              const unavailTitle: Record<Comparison, string> = {
+                yoy: 'No same-quarter-last-year data to compare against',
+                qoq: 'No previous-quarter data to compare against',
+                both: 'Needs both prior-year and prior-quarter data',
+              };
+              return (
+                <CtxCard
+                  n={4}
+                  title="What should this quarter be compared against?"
+                  helper={
+                    !periodChosen
+                      ? 'Select the reporting year and quarter first.'
+                      : checking
+                        ? 'Checking which comparisons we have data for…'
+                        : 'Only comparisons we have prior-period data for are enabled.'
+                  }
+                >
+                  {CTX_COMPARISONS.map((c) => {
+                    const avail = compAvail?.[c.value] ?? false;
+                    const disabled = !periodChosen || checking || !avail;
+                    const title = !periodChosen
+                      ? 'Select the reporting year and quarter first'
+                      : checking
+                        ? 'Checking available data…'
+                        : !avail
+                          ? unavailTitle[c.value]
+                          : c.desc;
+                    return (
+                      <CtxPill
+                        key={c.value}
+                        label={c.label}
+                        title={title}
+                        selected={comparison === c.value && avail}
+                        disabled={disabled}
+                        onClick={() => selectComparison(c.value)}
+                      />
+                    );
+                  })}
+                </CtxCard>
+              );
+            })()}
           </div>
         )}
 
@@ -1767,6 +2149,105 @@ export default function QuarterlyReportForm({
                   }}
                 >
                   Correct &amp; re-upload
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison "no data" dialog — the chosen comparison period(s) have no
+          figures in the DB. Placeholder handling for now (dismiss + Generate
+          stays disabled until the user picks a comparison/period that has data). */}
+      {comparisonMissing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="No data to compare against"
+          onClick={() => setComparisonMissing(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                No data to compare against
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                We don't have data for{' '}
+                <strong>
+                  {comparisonMissing.specs
+                    .filter((s) => !s.present)
+                    .map((s) => s.label)
+                    .join(' and ')}
+                </strong>{' '}
+                to compare this quarter against. Pick a different comparison or reporting period to
+                continue.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
+                <button
+                  type="button"
+                  onClick={() => setComparisonMissing(null)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Got it
                 </button>
               </div>
             </div>

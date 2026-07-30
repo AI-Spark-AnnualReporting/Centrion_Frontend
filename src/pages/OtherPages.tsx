@@ -1,5 +1,4 @@
 const pages = {
-  CompliancePage: { title: 'Compliance', desc: 'Regulatory compliance monitoring', content: 'SAMA, CMA, Tadawul regulatory tracking' },
   CommsPage: { title: 'Comms Hub', desc: 'Stakeholder communication management', content: 'Messages and communications' },
 };
 
@@ -17,5 +16,4 @@ function PlaceholderPage({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-export function CompliancePage() { return <PlaceholderPage {...pages.CompliancePage} />; }
 export function CommsPage() { return <PlaceholderPage {...pages.CommsPage} />; }

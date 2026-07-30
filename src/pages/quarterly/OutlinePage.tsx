@@ -19,7 +19,28 @@ type Preset = 'required' | 'recommended' | 'everything';
 type SaveState = 'idle' | 'saving' | 'saved';
 
 // ─── Feeder badge — the per-section "where the content comes from" signal ─────
-function FeederBadge({ feeder }: { feeder: OutlineSection['feeder'] }) {
+function FeederBadge({
+  feeder,
+  ingesting,
+}: {
+  feeder: OutlineSection['feeder'];
+  // Ingest still running: a "needs_input" verdict is not final yet — the worker
+  // may not have written this section's figures. Show "Preparing" instead of
+  // telling the user to go find a document that the system is already extracting.
+  ingesting?: boolean;
+}) {
+  // 'ready'/'template'/'external' are stable mid-ingest (ready never un-readies,
+  // and the other two don't depend on figures), so only needs_input is deferred.
+  if (ingesting && feeder.status === 'needs_input') {
+    return (
+      <span
+        className="badge"
+        style={{ background: 'rgba(64,64,200,.10)', color: ACCENT }}
+      >
+        Preparing…
+      </span>
+    );
+  }
   switch (feeder.status) {
     case 'ready':
       return (
@@ -133,6 +154,7 @@ function SectionRow({
   section,
   number,
   locked,
+  ingesting,
   isRequired,
   dragging,
   dragOver,
@@ -142,6 +164,9 @@ function SectionRow({
   section: OutlineSection;
   number: number;
   locked: boolean; // whole-outline frozen
+  // Ingest in flight — include-defaults are computed from a half-written figure
+  // set, so ticking is frozen until it lands (same treatment as `locked`).
+  ingesting?: boolean;
   isRequired: boolean;
   dragging?: boolean;
   dragOver?: boolean;
@@ -185,7 +210,7 @@ function SectionRow({
 
       <CheckBox
         checked={section.included}
-        disabled={locked || isRequired}
+        disabled={locked || isRequired || ingesting}
         onToggle={onToggle}
         label={
           section.included
@@ -226,7 +251,7 @@ function SectionRow({
 
       {/* Badges */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <FeederBadge feeder={section.feeder} />
+        <FeederBadge feeder={section.feeder} ingesting={ingesting} />
         {isRequired && <span className="badge b-gy">REQUIRED</span>}
         {isRequired && <span className="badge b-gy">LOCKED</span>}
       </div>
@@ -246,6 +271,8 @@ export default function OutlinePage() {
   const [optionals, setOptionals] = useState<OutlineSection[]>([]);
   const [totalCatalogue, setTotalCatalogue] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
+  // Ingest worker still writing figures — badges are provisional until it clears.
+  const [ingesting, setIngesting] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -254,7 +281,7 @@ export default function OutlinePage() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [submitting, setSubmitting] = useState(false);
 
-  // Snapshot of the backend's default `included` flags (for the Recommended preset).
+  // Snapshot of the backend's per-section `recommended` flags (for the Recommended preset).
   const defaultIncludedRef = useRef<Record<string, boolean>>({});
   // Debounce + latest-wins guards for autosave.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -310,10 +337,35 @@ export default function OutlinePage() {
       res.locked === true ||
         (res.sections.length > 0 && res.sections.every((s) => s.locked)),
     );
+    setIngesting(res.ingest_running === true);
     defaultIncludedRef.current = Object.fromEntries(
-      opt.map((s) => [s.section_code, s.included]),
+      opt.map((s) => [s.section_code, s.recommended]),
     );
   };
+
+  // ── Poll while ingestion is in flight ────────────────────────────────────
+  // The worker writes qr_figures progressively, so section badges flip from
+  // "Preparing…" to "From <doc>" as they land. Without this the page only
+  // resolves on a manual reload — which is what made a still-running report look
+  // like a failed one. Stops as soon as the backend clears ingest_running.
+  useEffect(() => {
+    if (!ingesting || !companyId || !reportId) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      quarterlyReports
+        .getOutline(companyId, reportId)
+        .then((res) => {
+          if (!cancelled) applyResponse(res);
+        })
+        .catch(() => {
+          /* transient — the next tick retries; don't surface a fetch error here */
+        });
+    }, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [ingesting, companyId, reportId]);
 
   useEffect(() => {
     return () => {
@@ -475,32 +527,9 @@ export default function OutlinePage() {
   // Locking freezes the outline; produceAll kicks batch section production and
   // we hand off to the shared processing loader, which polls to completion then
   // redirects to Preview (so the user never presses Produce per section).
-  const goProduceOrPreview = async () => {
-    if (!companyId || !reportId) return;
-    try {
-      const handle = await quarterlyReports.produceAll(companyId, reportId);
-      if (handle?.run_id && handle?.poll_url) {
-        const processingState: ProcessingPageState = {
-          runId: handle.run_id,
-          pollUrl: handle.poll_url,
-          reportId,
-          companyId,
-          estimatedDurationSeconds: null,
-          fileName: null,
-          isExisting: false,
-          reportType: 'quarterly',
-          quarterlyNext: 'preview',
-        };
-        navigate('/reports/processing', { state: processingState });
-        return;
-      }
-    } catch {
-      // Batch produce couldn't be kicked — fall through to Preview, where each
-      // section can still be produced individually.
-    }
-    navigate(`/quarterly-report/${reportId}/preview`);
-  };
-
+  // NOTE: the old goProduceOrPreview() lived here. Its save/lock/produceAll sequence
+  // now runs inside ProcessingPage (see ProcessingPageState.bootstrap) so the user
+  // reaches the loader on click rather than after the lock completes.
   const onGenerate = async () => {
     if (!companyId || !reportId) return;
     if (isLocked) {
@@ -509,28 +538,29 @@ export default function OutlinePage() {
       navigate(`/quarterly-report/${reportId}/preview`);
       return;
     }
+    // Navigate FIRST, work second. Save + lock + produceAll take several seconds
+    // (locking alone is the slow one), and awaiting them here left the user on a
+    // dead, disabled button until the very end — the loader only flashed for a
+    // moment before Preview. ProcessingPage now performs those three calls itself
+    // from `bootstrap`, so the loader is on screen from the click onward.
     setSubmitting(true);
-    try {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      await quarterlyReports.saveOutline(
-        companyId,
-        reportId,
-        buildPayload(required, optionals),
-      );
-      await quarterlyReports.lockOutline(companyId, reportId);
-      await goProduceOrPreview();
-    } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Already locked elsewhere — sections are (being) produced; just view them.
-        // Don't re-kick production.
-        navigate(`/quarterly-report/${reportId}/preview`);
-        return;
-      }
-      setSubmitting(false);
-      setFetchError(
-        err instanceof Error ? err.message : 'Failed to lock the outline.',
-      );
-    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const processingState: ProcessingPageState = {
+      runId: '',            // resolved by ProcessingPage once produceAll returns
+      pollUrl: '',
+      reportId,
+      companyId,
+      estimatedDurationSeconds: null,
+      fileName: null,
+      isExisting: false,
+      reportType: 'quarterly',
+      quarterlyNext: 'preview',
+      bootstrap: {
+        kind: 'quarterly-produce',
+        outlinePayload: buildPayload(required, optionals),
+      },
+    };
+    navigate('/reports/processing', { state: processingState });
   };
 
   // ── Drag handlers — group-aware (required and optional both reorderable, each
@@ -732,6 +762,28 @@ export default function OutlinePage() {
             <Lock size={13} aria-hidden />
             Section set locked · drag to reorder
           </span>
+        ) : ingesting ? (
+          // Presets are gated too, not just the checkboxes: "Recommended" applies
+          // the backend's `recommended` flags, which are derived from whatever
+          // figures exist RIGHT NOW — applying them mid-ingest would tick a set
+          // computed from partial data and then silently keep it.
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              color: ACCENT,
+              background: 'rgba(64,64,200,.07)',
+              border: '1px solid rgba(64,64,200,.18)',
+              borderRadius: 20,
+              padding: '6px 14px',
+            }}
+          >
+            <Spinner size={13} pad={0} />
+            Still reading your documents · sections appear as data lands
+          </span>
         ) : (
           <>
             <span
@@ -785,6 +837,7 @@ export default function OutlinePage() {
                     section={s}
                     number={i + 1}
                     locked={isLocked}
+                    ingesting={ingesting}
                     isRequired
                     dragging={dragGroup === 'required' && dragIndex === i}
                     dragOver={dragGroup === 'required' && overIndex === i && dragIndex !== i}
@@ -823,6 +876,7 @@ export default function OutlinePage() {
                     section={s}
                     number={required.length + i + 1}
                     locked={isLocked}
+                    ingesting={ingesting}
                     isRequired={false}
                     dragging={dragGroup === 'optional' && dragIndex === i}
                     dragOver={dragGroup === 'optional' && overIndex === i && dragIndex !== i}
@@ -886,9 +940,17 @@ export default function OutlinePage() {
           )}
         </span>
 
+        {/* Locking mid-ingest would freeze a section set chosen from partial data,
+            so the action is held until the worker clears. 'View report' (locked)
+            is unaffected — that report's set is already committed. */}
         <button
           className="bp"
-          disabled={submitting}
+          disabled={submitting || (ingesting && !isLocked)}
+          title={
+            ingesting && !isLocked
+              ? 'Waiting for document extraction to finish'
+              : undefined
+          }
           style={{
             fontSize: 14,
             padding: '10px 24px',
@@ -896,12 +958,19 @@ export default function OutlinePage() {
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            opacity: submitting ? 0.6 : 1,
-            cursor: submitting ? 'not-allowed' : 'pointer',
+            opacity: submitting || (ingesting && !isLocked) ? 0.6 : 1,
+            cursor:
+              submitting || (ingesting && !isLocked) ? 'not-allowed' : 'pointer',
           }}
           onClick={onGenerate}
         >
-          {isLocked ? 'View report' : submitting ? 'Locking…' : 'Generate & Preview'}
+          {isLocked
+            ? 'View report'
+            : ingesting
+              ? 'Preparing data…'
+              : submitting
+                ? 'Locking…'
+                : 'Generate & Preview'}
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
             <path
               d="M8 4l6 6-6 6"

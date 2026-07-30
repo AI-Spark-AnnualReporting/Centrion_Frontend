@@ -25,7 +25,7 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     dot: "#0D9488",
   },
   hod: {
-    label: "Head of Department",
+    label: "HR Lead",
     description: "Curates questions & reviews answers for a department",
     badgeClass: "b-bl",
     dot: "#2563EB",

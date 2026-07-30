@@ -48,12 +48,14 @@ import type {
   CompanyType,
   Voice,
   ReportTone,
+  Comparison,
   DetectCompanyTypeResponse,
   CoverTemplatesResponse,
   ColorPalettesResponse,
   CoverSelectionPayload,
   CoverSelectionResponse,
   AssembledReportResponse,
+  ApproveReportResponse,
   SaveSectionContentPayload,
   SaveSectionContentResponse,
   SectionExtractResponse,
@@ -102,6 +104,28 @@ import type {
   SavePermissionsPayload,
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
+import type {
+  CandidatesResponse,
+  CertificateVerification,
+  CertifiedRun,
+  CertifyResponse,
+  CheckEvidence,
+  CompliancePreview,
+  ComplianceRun,
+  CreateRunPayload,
+  CreateRunResponse,
+  EntityType,
+  ListRunsQuery,
+  Market,
+  ReportType,
+  ResolveGapResponse,
+  RuleDetailGroup,
+  RunListItem,
+  RunsResponse,
+  UploadRunPayload,
+  UploadRunResponse,
+} from "@/types/compliance";
+import { normalizeVerificationCode } from "@/types/compliance";
 import type {
   AssignDepartmentsPayload,
   AssignDepartmentsResponse,
@@ -384,6 +408,23 @@ export interface GenerateQuarterlyBody {
   company_type?: CompanyType;
   voices?: Voice[];
   report_tone?: ReportTone;
+  comparison?: Comparison; // yoy | qoq | both — which prior period to compare against
+  // Dedicated Excel/CSV lane → lean, exact figure extraction (no vision).
+  financial_files?: File[];
+  financial_currency?: string; // e.g. "SAR"
+  financial_scale?: string;    // actual | thousands | millions | billions
+  // system = map the sheet to our standard metrics + template (default).
+  // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
+  metrics_mode?: "system" | "custom";
+}
+
+// Whether the company has extracted figures for the period(s) a report would
+// compare against — drives the form's Generate-button gating + "no data" popup.
+export interface ComparisonAvailability {
+  available: boolean; // all required prior periods have figures ('both' needs both)
+  comparison: Comparison;
+  target_period: string; // e.g. "Q3-2025"
+  specs: { key: string; period: string; label: string; present: boolean }[];
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -447,7 +488,6 @@ export interface LoginParams {
 }
 
 export interface ChangePasswordParams {
-  old_password: string;
   new_password: string;
 }
 
@@ -504,6 +544,22 @@ export interface CreateCompanyParams {
   name: string;
   sector: string;
   jurisdiction?: Jurisdiction; // default "KSA"
+}
+
+// Verdict from the inline Annual/ESG upload check (POST /companies/{id}/validate-report).
+export interface ReportValidation {
+  valid: boolean;
+  detected_type: string;
+  fiscal_year: string | null;
+  period: string | null;      // "FY-2025" | null
+  document_id: string | null; // banked doc the submit step will process
+  message: string;
+}
+
+export interface OnboardingIngestItem {
+  document_id: string;
+  doc_type: string;
+  period: string | null;
 }
 
 export const companies = {
@@ -563,6 +619,33 @@ export const companies = {
       form,
     );
   },
+
+  // Inline onboarding validation: LLM-check one Annual/ESG file, bank it, and return the
+  // verdict + detected fiscal year + a document_id the submit step will process.
+  validateReport: (
+    companyId: string,
+    file: File,
+    docType: string,
+  ): Promise<ReportValidation> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("doc_type", docType);
+    return postForm(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/validate-report`,
+      form,
+    );
+  },
+
+  // Onboarding submit: kick off the heavy ingest (reports + chunks + embeddings + all
+  // dashboard data) for the already-validated docs. Non-blocking — returns { status }.
+  ingestOnboarding: (
+    companyId: string,
+    items: OnboardingIngestItem[],
+  ): Promise<{ status: string }> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/ingest-onboarding`, {
+      method: "POST",
+      body: { items },
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -855,6 +938,251 @@ export const compliance = {
 };
 
 // ---------------------------------------------------------------------------
+// Compliance Validation (3-step wizard)
+// ---------------------------------------------------------------------------
+//
+// The company is derived from the report/cycle server-side and checked against
+// the JWT, so no company id is sent — a cross-company subject id returns 403.
+//
+// Note the subject pair: annual reports aren't rows in `reports`, they live
+// under a reporting cycle, so runs are keyed by (subject_type, subject_id).
+
+const COMPLIANCE_BASE = "/api/v1/compliance";
+
+// Guarantee the three list fields exist so a sparse response renders an empty
+// section instead of crashing the review screen. They are legitimately empty
+// for the whole 30–60s a run is in flight, so this is the normal case, not a
+// defensive edge. `publication_gate` is deliberately NOT defaulted — null is
+// meaningful ("not decided yet") and the screens branch on it.
+function normalizeRun(run: ComplianceRun): ComplianceRun {
+  return {
+    ...run,
+    publication_gate: run?.publication_gate ?? null,
+    frameworks: Array.isArray(run?.frameworks) ? run.frameworks : [],
+    gaps: Array.isArray(run?.gaps) ? run.gaps : [],
+    rule_detail: Array.isArray(run?.rule_detail)
+      ? run.rule_detail.map(normalizeRuleGroup)
+      : [],
+  };
+}
+
+// A rule-detail row carries its evidence FLAT — `quote`, `proof`,
+// `section_code`, `page`, `source_file` sitting next to `rule_id` — while a gap
+// nests the same information under `evidence`. Fold the flat form into
+// `evidence` here so every renderer downstream reads one shape.
+//
+// An already-nested `evidence` wins: the backend has served both forms, and a
+// row that arrives in the richer shape (with `found`/`missing`/`confidence`,
+// which the flat form has no room for) must not be flattened back down to what
+// the flat fields can express.
+function normalizeRuleGroup(group: RuleDetailGroup): RuleDetailGroup {
+  return {
+    ...group,
+    rules: (Array.isArray(group?.rules) ? group.rules : []).map((rule) => {
+      if (rule?.evidence) return rule;
+      const evidence: CheckEvidence = {};
+      if (rule?.quote) evidence.quote = rule.quote;
+      if (rule?.proof) evidence.proof = rule.proof;
+      if (rule?.section_code) evidence.section_code = rule.section_code;
+      if (rule?.page != null) evidence.page = rule.page;
+      if (rule?.source_file) evidence.source_file = rule.source_file;
+      if (rule?.evidence_source) evidence.evidence_source = rule.evidence_source;
+      // A `no_data` row legitimately carries nothing but `evidence_source`.
+      // Leave `evidence` null there rather than attaching an empty object, so
+      // the "no evidence recorded" branches stay reachable.
+      return Object.keys(evidence).length > 0 ? { ...rule, evidence } : rule;
+    }),
+  };
+}
+
+export const complianceValidation = {
+  // Reports/cycles eligible for validation. The endpoint hides the fan-out
+  // across two tables: annual comes back as subject_type "cycle", everything
+  // else as "report". Only approved subjects are returned, so an empty list is
+  // an expected state, not an error.
+  listCandidates: (companyId: string, reportType: ReportType) =>
+    request<CandidatesResponse>(`${COMPLIANCE_BASE}/candidates`, {
+      query: { company_id: companyId, report_type: reportType },
+    }).then((r) => (Array.isArray(r?.candidates) ? r.candidates : [])),
+
+  // Every run for the company, newest first — running, finished and failed.
+  // The authority on what state a run is in: a status the browser remembered
+  // goes stale as soon as the tab closes, which on a 60–90s run is most of them.
+  listRuns: (companyId: string, query: ListRunsQuery = {}): Promise<RunListItem[]> =>
+    request<RunsResponse>(`${COMPLIANCE_BASE}/runs`, {
+      query: { company_id: companyId, ...query },
+    }).then((r) => (Array.isArray(r?.runs) ? r.runs : [])),
+
+  // Every run that has been certified, newest first. Each entry carries its
+  // subject's title and period, so the gallery renders straight from this with
+  // no second lookup. `reportType` is an optional filter.
+  //
+  // The envelope isn't pinned down, so accept a bare array or any of the usual
+  // wrappers — a gallery is not worth crashing a page over.
+  listCertified: (companyId: string, reportType?: ReportType) =>
+    request<CertifiedRun[] | Record<string, unknown>>(`${COMPLIANCE_BASE}/certified`, {
+      query: { company_id: companyId, ...(reportType ? { report_type: reportType } : {}) },
+    }).then((r) => {
+      if (Array.isArray(r)) return r as CertifiedRun[];
+      const wrapped = r as Record<string, unknown> | null;
+      for (const key of ["certified", "runs", "items", "results"]) {
+        const value = wrapped?.[key];
+        if (Array.isArray(value)) return value as CertifiedRun[];
+      }
+      return [] as CertifiedRun[];
+    }),
+
+  // Runs the same rule selection the real run uses, so the preview can never
+  // disagree with what executes.
+  preview: (query: {
+    report_type: ReportType;
+    entity_type: EntityType;
+    market?: Market;
+    period_end?: string;
+  }) =>
+    request<CompliancePreview>(`${COMPLIANCE_BASE}/preview`, { query }).then(
+      (p) => ({
+        ...p,
+        frameworks: Array.isArray(p?.frameworks) ? p.frameworks : [],
+      }),
+    ),
+
+  // Asynchronous — 202 in under a second, before anything has been checked.
+  // The run itself takes 30–60s because it reads the whole report through an
+  // LLM. There are no scores in this response: keep the run_id and poll
+  // getRun() until status is "done" or "error".
+  createRun: (body: CreateRunPayload) =>
+    request<CreateRunResponse>(`${COMPLIANCE_BASE}/runs`, {
+      method: "POST",
+      body,
+    }),
+
+  // The same run, for a report we didn't generate. Multipart rather than JSON,
+  // and asynchronous in the same way: 202 first, then poll getRun().
+  //
+  // Two things differ from createRun and both bite if missed. The file field is
+  // `file`, singular — every other upload in this app posts `files`. And the
+  // period can't be looked up: an uploaded file has no record behind it, so the
+  // caller collects "FY-2025" / "Q3-2025" from the user and sends it verbatim.
+  //
+  // Slower than a picker run — the file has to be read before it can be judged
+  // — but only the wait changes, not the shape of the result.
+  createUploadRun: (body: UploadRunPayload) => {
+    const fd = new FormData();
+    fd.append("file", body.file);
+    fd.append("company_id", body.company_id);
+    fd.append("report_type", body.report_type);
+    fd.append("period", body.period);
+    fd.append("entity_type", body.entity_type);
+    if (body.market) fd.append("market", body.market);
+    // Repeated field, like every other list this API takes. Omitted entirely
+    // means "no filter" — which is why the caller blocks submit when the user
+    // has switched every framework off, rather than sending an empty list.
+    (body.enabled_frameworks ?? []).forEach((r) => fd.append("enabled_frameworks", r));
+    if (body.content_language) fd.append("content_language", body.content_language);
+    return postForm<UploadRunResponse>(`${COMPLIANCE_BASE}/runs/upload`, fd);
+  },
+
+  // The poll target, and the read for both result screens. Returns the same
+  // shape at every stage — while running, the scores are null and the lists are
+  // empty. Scores are recomputed from stored results on each read, so this is
+  // always current after a resolve.
+  getRun: (runId: string) =>
+    request<ComplianceRun>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}`,
+    ).then(normalizeRun),
+
+  // `reason` is required and cannot be blank — the API 400s otherwise.
+  resolveGap: (resultId: string, reason: string) =>
+    request<ResolveGapResponse>(
+      `${COMPLIANCE_BASE}/results/${encodeURIComponent(resultId)}/resolve`,
+      { method: "POST", body: { reason } },
+    ),
+
+  // Throws ApiError with a 409 and a CertifyBlockedBody `detail` when the run
+  // is still running (`detail.status === "running"`) or HARD checks are still
+  // failing; the gate is re-checked server-side at this point.
+  certify: (runId: string) =>
+    request<CertifyResponse>(
+      `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certify`,
+      { method: "POST" },
+    ),
+
+  // The certificate as a PDF. Authed and binary, so `request()` is no use here
+  // (it parses the body as JSON or text) and a plain <a href> is no use either
+  // — the browser wouldn't attach the Bearer token.
+  //
+  // Serves any FINISHED run, certified or not: 409 while it's still running or
+  // if it errored, 403 for another company's run, 404 for an unknown id. Those
+  // bodies are JSON `{ detail }`, so parse them on failure and hand the caller
+  // an ApiError it can read the server's own wording off.
+  certificatePdf: async (
+    runId: string,
+  ): Promise<{ blob: Blob; filename: string | null }> => {
+    const url = `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certificate.pdf`;
+    const full = `${API_BASE_URL}${url}`;
+    const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(full, { headers });
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) {
+      const parsed: unknown = await res.json().catch(() => null);
+      throw new ApiError(res.status, res.statusText, parsed, full);
+    }
+
+    return { blob: await res.blob(), filename: attachmentFilename(res) };
+  },
+};
+
+// Read the server's own filename out of `Content-Disposition`. Returns null
+// rather than a guess when it can't — and it often can't: the header is not a
+// CORS-safelisted response header, so unless the API sends
+// `Access-Control-Expose-Headers: Content-Disposition` this reads as absent in
+// the browser even though it's on the wire. Callers own the fallback name,
+// since only they know what the file is of.
+function attachmentFilename(res: Response): string | null {
+  const header = res.headers.get("Content-Disposition");
+  if (!header) return null;
+  // RFC 5987 `filename*=UTF-8''…` wins when present — it's the one that can
+  // carry non-ASCII, which matters for Arabic report titles.
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      /* malformed percent-encoding — fall through to the plain form */
+    }
+  }
+  return header.match(/filename="([^"]+)"/i)?.[1] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Public certificate verification
+// ---------------------------------------------------------------------------
+//
+// Unauthenticated on purpose: the whole point is that someone holding a printed
+// certificate — an auditor, a regulator, an investor — can check it without an
+// account. Not under COMPLIANCE_BASE; it lives on its own public path.
+
+export const publicVerification = {
+  // 200 with the run's public facts, or 404. The 404 is the SAME for a
+  // malformed code, an unknown code and an unfinished run, so that the endpoint
+  // can't be used to probe which runs exist — callers must render one
+  // not-found state and must not try to tell them apart.
+  //
+  // `auth: false` matters twice: it sends no token (correct for a public
+  // endpoint, and the visitor may have none), and it keeps a 401 from bouncing
+  // an anonymous visitor to /login.
+  verify: (code: string) =>
+    request<CertificateVerification>(
+      `/api/v1/public/verify/${encodeURIComponent(normalizeVerificationCode(code))}`,
+      { auth: false },
+    ),
+};
+
+// ---------------------------------------------------------------------------
 // Reports
 // ---------------------------------------------------------------------------
 
@@ -961,6 +1289,14 @@ export const reports = {
       body.voices.forEach((v) => fd.append("voices", v));
     }
     if (body.report_tone) fd.append("report_tone", body.report_tone);
+    if (body.comparison) fd.append("comparison", body.comparison);
+    // Dedicated Excel/CSV lane → lean, exact figure extraction.
+    if (body.financial_files && body.financial_files.length > 0) {
+      body.financial_files.forEach((f) => fd.append("financial_files", f));
+    }
+    if (body.financial_currency) fd.append("financial_currency", body.financial_currency);
+    if (body.financial_scale) fd.append("financial_scale", body.financial_scale);
+    if (body.metrics_mode) fd.append("metrics_mode", body.metrics_mode);
     return postPipeline(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/generate`,
       fd,
@@ -1112,6 +1448,20 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/detect-company-type`,
     ),
 
+  // Form-time comparison-data check (no reportId yet). Given the chosen period +
+  // comparison basis, reports whether the prior period(s) have figures to compare
+  // against — the form disables Generate while this is in flight and pops the
+  // "no data" dialog when a required period is missing.
+  checkComparisonAvailability: (
+    companyId: string,
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
+  ) =>
+    request<ComparisonAvailability>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
+        `?year=${params.year}&quarter=${encodeURIComponent(params.quarter)}&comparison=${params.comparison}` +
+        (params.metrics_mode ? `&metrics_mode=${params.metrics_mode}` : ''),
+    ),
+
   // Report-scoped PATCH, keyed by an existing report_id — for a LATER edit
   // screen. NOT used during creation: at creation the confirm-context answers
   // ride in the single generate call (see GenerateQuarterlyBody).
@@ -1213,6 +1563,18 @@ export const quarterlyReports = {
     request<AssembledReportResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/assemble`,
       { signal },
+    ),
+
+  // Approve & lock the assembled report — after this the report is read-only
+  // (no edits, regeneration, outline changes, or cover changes) and Export
+  // becomes available. No OpenAPI entry exists yet for this path; it mirrors
+  // every other quarterly action's `.../quarterly/{reportId}/...` convention
+  // rather than the generic (non-quarterly-scoped) reports.approve — confirm
+  // with backend and adjust if it turns out to be the latter.
+  approveReport: (companyId: string, reportId: string) =>
+    request<ApproveReportResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST" },
     ),
 
   // Inline-edit a section's content (prose text, or JSON-stringified table content).
@@ -3565,6 +3927,8 @@ export const api = {
   agents,
   esg,
   compliance,
+  complianceValidation,
+  publicVerification,
   reports,
   chat,
   meetings,

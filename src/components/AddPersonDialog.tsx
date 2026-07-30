@@ -82,7 +82,9 @@ export default function AddPersonDialog({
         temp_password: tempPassword,
         position_type: positionType,
         bio: bio.trim() || undefined,
-        role: 'department_user',
+        // External meeting guests (consultants, investors, board members) are
+        // view-only participants — provision them as IR, never department_user.
+        role: 'ir',
       });
       const member: TeamMember =
         typeof res === 'object' && res !== null && 'id' in res
@@ -191,7 +193,7 @@ export default function AddPersonDialog({
           </div>
           <div>
             <span className="fl-label">
-              Role / Title <span style={{ color: '#E5484D' }}>*</span>
+              Role <span style={{ color: '#E5484D' }}>*</span>
             </span>
             <select
               className="inp sel"

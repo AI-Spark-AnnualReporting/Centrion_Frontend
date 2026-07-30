@@ -1369,9 +1369,10 @@ function SectorCriticalGaps({ coverage, reportId }: SectorCriticalGapsProps) {
 // low-coverage reports stand out without needing a tooltip.
 interface CoverageByReportChartProps {
   reports: ReportListItem[];
+  title?: string;
 }
 
-function CoverageByReportChart({ reports }: CoverageByReportChartProps) {
+export function CoverageByReportChart({ reports, title = 'Coverage by Report' }: CoverageByReportChartProps) {
   // Filter to reports that actually carry a coverage block — fresh / in-flight
   // reports don't have one yet and shouldn't render as 0% bars.
   const points = reports
@@ -1397,7 +1398,7 @@ function CoverageByReportChart({ reports }: CoverageByReportChartProps) {
     return (
       <div className="card">
         <div className="ch">
-          <div className="ct">Coverage by Report</div>
+          <div className="ct">{title}</div>
         </div>
         <div
           style={{
@@ -1444,7 +1445,7 @@ function CoverageByReportChart({ reports }: CoverageByReportChartProps) {
   return (
     <div className="card">
       <div className="ch">
-        <div className="ct">Coverage by Report</div>
+        <div className="ct">{title}</div>
         <span
           style={{
             fontSize: 11,
