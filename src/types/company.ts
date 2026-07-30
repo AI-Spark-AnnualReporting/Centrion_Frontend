@@ -1,3 +1,5 @@
+import type { BrandColors } from "@/types/brand";
+
 export interface Sector {
   id: string;
   code: string;
@@ -74,6 +76,12 @@ export interface Company {
   report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
   esg_frameworks?: string[] | null;
+  // Branding captured on the onboarding Brand step. brand_colors is the company
+  // default for report headings/covers — a report's own picker choice wins over it.
+  // The logo is NOT here: GET /companies/me strips logo_base64 to keep the
+  // payload small. Use companies.getMyCompanyLogo() when you need to render it.
+  brand_identity?: string | null;
+  brand_colors?: BrandColors | null;
   // Onboarding deep-ingest state — drives the dashboard card (fetch) + the setup screen.
   report_extraction_status?: string | null; // 'processing' | 'done' | 'failed'
   onboarding_progress?: { stage?: string; detail?: string; percent?: number } | null;
@@ -104,3 +112,14 @@ export type CompanyEditableFields = Pick<
   | "has_sukuk"
   | "reporting_sector"
 >;
+
+// The branding an admin can change via PATCH /companies/me, from the Brand
+// Identity page. Separate from Company because logo_base64 is WRITE-ONLY here:
+// PATCH accepts it, GET /companies/me strips it (read it back from
+// companies.getMyCompanyLogo()), so putting it on Company would misdescribe
+// every GET response. Passing null for any of the three clears that column.
+export type CompanyBrandUpdate = {
+  brand_identity?: string | null;
+  brand_colors?: BrandColors | null;
+  logo_base64?: string | null;
+};

@@ -1,4 +1,4 @@
-// 5-step horizontal progress indicator for the onboarding wizard.
+// 6-step horizontal progress indicator for the onboarding wizard.
 // done = green check, current = indigo number, future = grey number.
 
 const ACCENT = '#4040C8';
@@ -7,7 +7,7 @@ const MUTED_BG = '#F1F2F6';
 const MUTED_BORDER = '#E5E7EF';
 const MUTED_TEXT = '#9BA3C4';
 
-const STEPS = ['Company Intel', 'Review Details', 'Departments', 'Upload Reports', 'Dashboard'];
+const STEPS = ['Company Intel', 'Review Details', 'Brand', 'Departments', 'Upload Reports', 'Dashboard'];
 
 function Circle({ state, n }: { state: 'done' | 'active' | 'future'; n: number }) {
   const fill = state === 'done' ? SUCCESS : state === 'active' ? ACCENT : MUTED_BG;

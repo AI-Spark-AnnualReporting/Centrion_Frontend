@@ -580,6 +580,64 @@ body {
 }
 .ob-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .ob-review-grid .fl { margin-bottom: 0; }
+
+/* Brand step — logo, brand identity, brand colors */
+.ob-brand-section { margin-top: 20px; }
+.ob-brand-section:first-of-type { margin-top: 12px; }
+.ob-brand-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+}
+.ob-brand-title { font-size: 13.5px; font-weight: 700; color: #1A1D2E; }
+.ob-brand-optional {
+  font-size: 10px; font-weight: 700; color: #6B7280;
+  background: #F1F2F6; padding: 2px 7px; border-radius: 5px;
+  text-transform: uppercase; letter-spacing: .3px;
+}
+.ob-brand-hint {
+  font-size: 11.5px; color: #6B7280; line-height: 1.5;
+  margin: 0 0 10px; max-width: 62ch;
+}
+.ob-char-count { margin-left: auto; font-size: 11px; font-weight: 600; color: #9BA3C4; }
+.ob-char-count.over { color: #E5484D; }
+.ob-logo-preview {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; border: 1px solid #E8EAF3; border-radius: 12px; background: #FAFBFE;
+}
+.ob-logo-thumb {
+  width: 52px; height: 52px; flex-shrink: 0;
+  border: 1px solid #E8EAF3; border-radius: 10px; background: #fff;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+/* contain, not cover — a logo must never be cropped by its own preview */
+.ob-logo-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.ob-logo-name {
+  font-size: 13px; font-weight: 700; color: #1A1D2E;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ob-logo-meta { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; }
+.ob-logo-remove {
+  flex-shrink: 0; width: 30px; height: 30px;
+  border: 1.5px solid #E8EAF3; border-radius: 8px; background: #fff;
+  color: #6B7280; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.ob-logo-remove:hover { border-color: #F4B5B7; background: #FEF2F2; color: #DC2626; }
+.brand-pill:hover { border-color: #C7CBF0; }
+/* Compact variant of .ob-drop — same height as .ob-logo-preview so the field
+   doesn't change size when a file is picked. The full-size .ob-drop is left
+   alone: CompanyIntelStep (step 1) still uses it. */
+/* 78px matches .ob-logo-preview exactly (12 + 52 thumb + 12 + 2 border), so the
+   box does not resize the moment a file is picked. box-sizing is border-box
+   globally (see the reset above), so this is the real rendered height. */
+.ob-drop.ob-drop-compact {
+  display: flex; align-items: center; gap: 14px;
+  min-height: 78px;
+  padding: 12px 14px; text-align: left; border-radius: 12px;
+}
+.ob-drop-prompt { font-size: 13px; font-weight: 700; color: #3A3F5C; }
+.ob-drop-hint { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; min-height: 15px; }
+.ob-browse-inline { margin-top: 0; flex-shrink: 0; }
+.ob-browse-inline:disabled { opacity: .55; cursor: not-allowed; }
 .inp-error, .inp-error:focus { border-color: #E5484D !important; }
 .fl-err { font-size: 11px; color: #E5484D; font-weight: 600; margin-top: 5px; }
 .ob-yesno-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; margin-top: 14px; }

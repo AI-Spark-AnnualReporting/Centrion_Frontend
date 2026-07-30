@@ -14,9 +14,11 @@ import type {
   OnboardingPayload,
   OnboardingResponse,
 } from "@/types/auth";
+import type { DetectedBrandColors } from "@/types/brand";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
+  CompanyBrandUpdate,
   CreateCompanyRequest,
   CreateCompanyResponse,
   Sector,
@@ -576,6 +578,31 @@ export const auth = {
       body: payload,
     }),
 
+  // Brand step: read the uploaded brand language guideline (PDF/DOCX) to plain
+  // text. Stateless — the text rides along in the onboarding payload and is
+  // saved to companies.brand_identity at submit, not here.
+  extractBrandLanguage: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<{ text: string; chars: number }>(
+      "/api/v1/auth/onboarding/extract-brand-language",
+      form,
+    );
+  },
+
+  // Read the brand colors out of an uploaded logo, so the user doesn't have to
+  // find their own hex codes. Takes the same data URI stored in
+  // companies.logo_base64. Stateless — the caller applies the result to the
+  // picker and only persists it on save.
+  //
+  // primary is null when the logo carries no color at all (white/black only),
+  // which means "change nothing" rather than "no answer".
+  detectLogoColors: (logoBase64: string) =>
+    request<DetectedBrandColors>("/api/v1/auth/onboarding/detect-logo-colors", {
+      method: "POST",
+      body: { logo_base64: logoBase64 },
+    }),
+
   // Default departments the admin can opt into during onboarding.
   onboardingDepartmentOptions: () =>
     request<{ departments: DepartmentOption[] }>(
@@ -622,7 +649,16 @@ export const companies = {
   // Company Details card. PATCH accepts a partial of the editable fields.
   getMyCompany: () => request<Company>("/api/v1/companies/me"),
 
-  updateMyCompany: (body: Partial<Company>) =>
+  // The logo lives behind its own endpoint because it's ~1.4 MB of inline
+  // base64 and getMyCompany() runs on nearly every page — fetch it only where
+  // the logo is actually rendered.
+  getMyCompanyLogo: () =>
+    request<{ logo_base64: string | null }>("/api/v1/companies/me/logo"),
+
+  // CompanyBrandUpdate widens this beyond Company because logo_base64 is
+  // write-only — accepted here, stripped from GET /companies/me. Note the
+  // response IS the full row, logo included (~1.4 MB), unlike the GET.
+  updateMyCompany: (body: Partial<Company> & CompanyBrandUpdate) =>
     request<Company>("/api/v1/companies/me", { method: "PATCH", body }),
 
   getDigitalTwin: <T = unknown>(companyId: string, period?: string) =>
@@ -666,6 +702,15 @@ export const companies = {
       form,
     );
   },
+
+  // Re-run tone/theme/highlights extraction over the documents ALREADY in the Document
+  // Bank — no re-upload. What the dashboard's "What we learned from your reports" card
+  // triggers when it has nothing to show. Non-blocking; poll report_extraction_status.
+  // Returns { status: 'processing' | 'skipped' } — 'skipped' means no documents to read.
+  refreshReportStyle: (companyId: string): Promise<{ status: string }> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/refresh-report-style`, {
+      method: "POST",
+    }),
 
   // Inline onboarding validation: LLM-check one Annual/ESG file, bank it, and return the
   // verdict + detected fiscal year + a document_id the submit step will process.
@@ -1428,11 +1473,20 @@ export const quarterlyReports = {
   // ── Outline (step 6) ──
   // The report's section catalogue. saveOutline persists include+order (PUT);
   // lockOutline freezes it (POST). Backend returns 409 on edits after lock.
-  getOutline: (companyId: string, reportId: string, signal?: AbortSignal) =>
-    request<OutlineResponse>(
+  getOutline: (companyId: string, reportId: string, signal?: AbortSignal): Promise<OutlineResponse> =>
+    request<Record<string, unknown>>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline`,
       { signal },
-    ),
+    ).then((raw) => ({
+      ...(raw as unknown as OutlineResponse),
+      // Confirmed live: the real field is `outline_locked` — `locked` was never
+      // actually present on this response, so every "is this outline already
+      // locked, don't re-produce" check (Outline page, Processing bootstrap)
+      // could only ever fire if every OPTIONAL section also happened to be
+      // individually locked (they never are — only required sections lock).
+      // Read both names defensively; this is the one place that needs it.
+      locked: Boolean(raw.locked ?? raw.outline_locked),
+    })),
 
   saveOutline: (
     companyId: string,
@@ -1547,6 +1601,11 @@ export const quarterlyReports = {
     request<ColorPalettesResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/color-palettes`,
     ),
+
+  // Same palettes, company-unscoped — global reference data, auth only. Used by
+  // the onboarding Brand step, which runs before there's a report to scope to.
+  getColorPalettesGlobal: () =>
+    request<ColorPalettesResponse>("/api/v1/reports/quarterly/color-palettes"),
 
   // Persist the chosen cover design + brand colors; re-renders the cover +
   // report accents. Colors apply to accents/headings only (body stays dark).
