@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import {
   communications,
   ApiError,
@@ -45,10 +46,14 @@ export function ShareReportModal({
   onShared?: (payload: ShareReportResponse) => void;
 }) {
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [members, setMembers] = useState<CommunicationMember[]>([]);
+  // The backend rejects assigning a review to yourself (422) — drop yourself
+  // from the picker up front instead of letting the user hit that error.
+  const assignableMembers = members.filter((m) => m.user_id !== user?.user_id);
 
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [comment, setComment] = useState('');
@@ -192,7 +197,7 @@ export function ShareReportModal({
                 style={{ marginBottom: 20 }}
               >
                 <option value="">Choose a person…</option>
-                {members.map((m) => (
+                {assignableMembers.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.full_name} · {m.display_role}
                   </option>
