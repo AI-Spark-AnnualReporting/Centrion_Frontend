@@ -9,6 +9,7 @@ import type {
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
+import ParticipantsPicker from '@/components/ParticipantsPicker';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -124,6 +125,7 @@ interface ModalState {
   linkOrLocation: string;
 }
 
+
 function toIsoDate(d: Date): string {
   const y = d.getFullYear();
   const m = (d.getMonth() + 1).toString().padStart(2, '0');
@@ -163,10 +165,14 @@ function MeetingDetailModal({
   meeting,
   onClose,
   onUpdated,
+  companyId,
+  companyName,
 }: {
   meeting: Meeting;
   onClose: () => void;
   onUpdated: (m: Meeting) => void;
+  companyId: string | null;
+  companyName: string;
 }) {
   const { toast } = useToast();
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
@@ -354,23 +360,15 @@ function MeetingDetailModal({
                 </div>
               </div>
               <div>
-                <span className="fl-label">Participants</span>
-                <input
-                  className="inp"
-                  value={form.participants.join(', ')}
-                  onChange={(e) =>
-                    update(
-                      'participants',
-                      e.target.value
-                        .split(',')
-                        .map((p) => p.trim())
-                        .filter(Boolean),
-                    )
-                  }
-                  placeholder="Comma-separated email addresses"
+                <ParticipantsPicker
+                  value={form.participants}
+                  onChange={(emails) => update('participants', emails)}
+                  companyId={companyId}
+                  companyName={companyName}
                 />
-                {/* Only addresses can be invited. Saying so here beats letting
-                    the organiser find out from the post-save toast. */}
+                {/* Only addresses can be invited. Legacy meetings can still
+                    carry bare names, so say so rather than letting the
+                    organiser find out from the post-save toast. */}
                 {unreachable.length > 0 && (
                   <div style={{ fontSize: 11, color: '#B45309', marginTop: 5 }}>
                     No email address for {unreachable.join(', ')} — they won&apos;t be notified.
@@ -744,6 +742,8 @@ export default function MeetingsPage() {
       {activeMeeting && (
         <MeetingDetailModal
           meeting={activeMeeting}
+          companyId={companyId}
+          companyName={companyName}
           onClose={() => setActiveMeeting(null)}
           onUpdated={(updated) => {
             setData((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
