@@ -68,10 +68,11 @@ const MAX_CONSECUTIVE_FAILURES = 5;
 // run's real home is the resume shelf and the run history; the dock is a
 // "just happened" surface, not a log.
 const GRACE_MS = 2 * 60 * 1000;
-// Toasts in this app never auto-dismiss (TOAST_REMOVE_DELAY is ~16 minutes) and
-// only one is shown at a time. Left alone, a completion notice would sit in the
-// corner until it was clicked. This one clears itself — but only after it has
-// actually been on screen for that long. See `dismissWhenSeen`.
+// Toasts default to Radix's 5s countdown. That's too short for news the user
+// may not be looking at — a run that finished while the tab was hidden would be
+// announced to nobody. This notice opts out of the countdown (duration:
+// Infinity) and clears itself only after it has been *visibly* on screen this
+// long. See `dismissWhenSeen`.
 const TOAST_DISMISS_MS = 10_000;
 
 export interface WatchedRun {
@@ -228,6 +229,8 @@ export function ComplianceRunsProvider({ children }: { children: ReactNode }) {
           ? `${label} stopped before it could be scored.`
           : `${label} has been checked — the results are ready.`,
       variant: failed ? 'destructive' : undefined,
+      // dismissWhenSeen owns the lifetime of this one, not the 5s countdown.
+      duration: Infinity,
       action: (
         <ToastAction
           altText={failed ? 'See what happened' : 'View the validation results'}

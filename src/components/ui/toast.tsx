@@ -14,7 +14,9 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      // Top-right on every breakpoint. Bottom-right (the shadcn default) put
+      // toasts on top of the chat launcher and the compliance run dock.
+      "fixed right-0 top-0 z-[100] flex max-h-screen w-full flex-col gap-2 p-4 md:max-w-[400px]",
       className,
     )}
     {...props}
@@ -23,18 +25,34 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full",
+  // Sizing / radius / shadow follow the app's cards and modals rather than the
+  // shadcn defaults (which are a third bigger than anything else on screen).
+  // The 3px left edge is the brand accent, red on a failure.
+  "group pointer-events-auto relative flex w-full items-start justify-between gap-3 overflow-hidden rounded-[12px] border border-l-[3px] bg-white p-[14px] pr-9 shadow-[0_10px_30px_rgba(20,24,60,.14)] transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full",
   {
     variants: {
       variant: {
-        default: "border bg-background text-foreground",
-        destructive: "destructive group border-destructive bg-destructive text-destructive-foreground",
+        default: "border-[#E2E4F0] border-l-[#4040C8] text-[#1A1D2E]",
+        success: "success group border-[#BBE5C5] border-l-[#16A34A] text-[#1A1D2E]",
+        destructive: "destructive group border-[#F5C2C7] border-l-[#E5484D] text-[#1A1D2E]",
       },
     },
     defaultVariants: {
       variant: "default",
     },
   },
+);
+
+// The countdown Radix is already running. `animationDuration` is set inline
+// from the toast's own duration, so the bar and the dismissal stay in step, and
+// `group-hover:paused` mirrors Radix pausing its timer while hovered.
+const ToastTimer = ({ durationMs }: { durationMs: number }) => (
+  <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#ECEEF8]">
+    <div
+      className="h-full w-full origin-left animate-toast-timer bg-[#4040C8] group-hover:[animation-play-state:paused] group-[.success]:bg-[#16A34A] group-[.destructive]:bg-[#E5484D]"
+      style={{ animationDuration: `${durationMs}ms` }}
+    />
+  </div>
 );
 
 const Toast = React.forwardRef<
@@ -52,7 +70,7 @@ const ToastAction = React.forwardRef<
   <ToastPrimitives.Action
     ref={ref}
     className={cn(
-      "inline-flex h-8 shrink-0 items-center justify-center rounded-md border bg-transparent px-3 text-sm font-medium ring-offset-background transition-colors group-[.destructive]:border-muted/40 hover:bg-secondary group-[.destructive]:hover:border-destructive/30 group-[.destructive]:hover:bg-destructive group-[.destructive]:hover:text-destructive-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 group-[.destructive]:focus:ring-destructive disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex h-[26px] shrink-0 items-center justify-center self-center rounded-[8px] border border-[#4040C8]/20 bg-[#4040C8]/[.08] px-[10px] text-[11px] font-bold text-[#4040C8] transition-colors hover:bg-[#4040C8]/[.14] group-[.success]:border-[#16A34A]/25 group-[.success]:bg-[#16A34A]/[.08] group-[.success]:text-[#15803D] group-[.success]:hover:bg-[#16A34A]/[.14] group-[.destructive]:border-[#E5484D]/25 group-[.destructive]:bg-[#E5484D]/[.08] group-[.destructive]:text-[#B33A3E] group-[.destructive]:hover:bg-[#E5484D]/[.14] focus:outline-none focus:ring-2 focus:ring-[#4040C8]/40 disabled:pointer-events-none disabled:opacity-50",
       className,
     )}
     {...props}
@@ -67,13 +85,15 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 group-[.destructive]:text-red-300 hover:text-foreground group-[.destructive]:hover:text-red-50 focus:opacity-100 focus:outline-none focus:ring-2 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
+      // Always visible: a toast that dismisses itself still needs an obvious way
+      // out, and hover-to-reveal doesn't exist on touch.
+      "absolute right-2 top-2 rounded-md p-1 text-[#9BA3C4] transition-colors hover:text-[#1A1D2E] focus:outline-none focus:ring-2 focus:ring-[#4040C8]/40",
       className,
     )}
     toast-close=""
     {...props}
   >
-    <X className="h-4 w-4" />
+    <X className="h-[13px] w-[13px]" />
   </ToastPrimitives.Close>
 ));
 ToastClose.displayName = ToastPrimitives.Close.displayName;
@@ -82,7 +102,7 @@ const ToastTitle = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Title>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Title>
 >(({ className, ...props }, ref) => (
-  <ToastPrimitives.Title ref={ref} className={cn("text-sm font-semibold", className)} {...props} />
+  <ToastPrimitives.Title ref={ref} className={cn("text-[12px] font-bold leading-[1.35] tracking-[-.1px]", className)} {...props} />
 ));
 ToastTitle.displayName = ToastPrimitives.Title.displayName;
 
@@ -90,7 +110,7 @@ const ToastDescription = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Description>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Description>
 >(({ className, ...props }, ref) => (
-  <ToastPrimitives.Description ref={ref} className={cn("text-sm opacity-90", className)} {...props} />
+  <ToastPrimitives.Description ref={ref} className={cn("mt-[3px] text-[11px] leading-[1.5] text-[#5A6080]", className)} {...props} />
 ));
 ToastDescription.displayName = ToastPrimitives.Description.displayName;
 
@@ -100,6 +120,7 @@ type ToastActionElement = React.ReactElement<typeof ToastAction>;
 
 export {
   type ToastProps,
+  ToastTimer,
   type ToastActionElement,
   ToastProvider,
   ToastViewport,
