@@ -54,6 +54,18 @@ export function StepTwoForm({
     setFile(f);
   };
 
+  // One document only — extraction is a single LLM call, so a second file would
+  // double the cost for no benefit. A multi-file drop is rejected rather than
+  // silently reduced to the first: we can't know which one was meant.
+  const pickDropped = (list: FileList | null) => {
+    if (list && list.length > 1) {
+      setFile(null);
+      setFileError('One document at a time — please drop a single file.');
+      return;
+    }
+    pickFile(list?.[0] ?? null);
+  };
+
   const handleCreate = () => {
     if (loading) return;
     onSubmit({ companyName, jurisdiction, website: website.trim(), file });
@@ -123,7 +135,7 @@ export function StepTwoForm({
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); pickFile(e.dataTransfer.files?.[0] ?? null); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); pickDropped(e.dataTransfer.files); }}
             className="upload-z"
             style={{ display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '14px 16px', cursor: 'pointer', borderColor: dragOver ? '#4040C8' : undefined, background: dragOver ? 'rgba(64,64,200,.06)' : undefined }}
           >
@@ -131,7 +143,7 @@ export function StepTwoForm({
               <path d="M10 3v10M6 7l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
               <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            <span style={{ fontSize: 12, color: '#5A6080' }}>Click to upload or drag &amp; drop — PDF, DOCX</span>
+            <span style={{ fontSize: 12, color: '#5A6080' }}>Click to upload or drag &amp; drop — one PDF or DOCX</span>
           </div>
         )}
         <input ref={inputRef} type="file" accept=".pdf,.docx" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />

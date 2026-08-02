@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
-import type { QuarterlyReportArea, ComparisonAvailability } from '@/lib/api';
+import type {
+  QuarterlyReportArea,
+  ComparisonAvailability,
+  QuarterlySystemMetricsResponse,
+} from '@/lib/api';
 import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 
@@ -106,6 +110,12 @@ function yearPickerOptions(): number[] {
 // Normalise API period strings like "Q1-2026" → "Q1 2026" for display.
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
+}
+
+// "a" → "a"; "a","b" → "a and b"; "a","b","c" → "a, b and c".
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 // Sentinel value for the "+ Add new…" option in the reporting-year select.
@@ -231,12 +241,16 @@ function CtxCard({
   title,
   helper,
   detected,
+  note,
   children,
 }: {
   n: number;
   title: string;
   helper?: string;
   detected?: boolean;
+  // Optional block rendered under the options, at the same indent — used by the
+  // comparison card for the cross-metrics caution.
+  note?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -280,6 +294,7 @@ function CtxCard({
         {detected && <DetectedBadge />}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginLeft: 34 }}>{children}</div>
+      {note && <div style={{ marginLeft: 34, marginTop: 12 }}>{note}</div>}
     </div>
   );
 }
@@ -384,6 +399,11 @@ export default function QuarterlyReportForm({
   // are set). Drives which comparison pills are enabled. { qoq, yoy, both } where
   // both = qoq && yoy. From the backend `comparison-availability` specs[].present.
   const [compAvail, setCompAvail] = useState<Record<Comparison, boolean> | null>(null);
+  // The raw specs behind compAvail, kept so the card can distinguish "no prior
+  // data at all" from "prior data exists but in the other metrics lane", plus
+  // the mode the backend actually answered for (the radio may have moved since).
+  const [compSpecs, setCompSpecs] = useState<ComparisonAvailability['specs'] | null>(null);
+  const [compCheckedMode, setCompCheckedMode] = useState<'system' | 'custom' | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -430,6 +450,44 @@ export default function QuarterlyReportForm({
   // The Financial Data (Excel/CSV) field only shows in custom mode.
   const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
   const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
+  // The standard metric catalogue behind the "System metrics" hover list. null
+  // until the mount fetch lands (or if it fails) — the hover affordance is
+  // hidden in that case rather than opening an empty panel.
+  const [systemMetrics, setSystemMetrics] =
+    useState<QuarterlySystemMetricsResponse | null>(null);
+  // Hover panel: `pinned` survives mouseleave so click/keyboard users can keep
+  // it open. The timers give the pointer time to travel into the panel — without
+  // the close delay the list closes before it can be scrolled.
+  const [metricsListOpen, setMetricsListOpen] = useState(false);
+  const [metricsListPinned, setMetricsListPinned] = useState(false);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const metricsBlockRef = useRef<HTMLDivElement>(null);
+
+  // Short open delay so the list doesn't flash when the pointer merely crosses
+  // the radio; the close delay lets the pointer travel into the panel to scroll.
+  const openMetricsList = () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(() => setMetricsListOpen(true), 120);
+  };
+
+  const closeMetricsList = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    // A pinned list stays put until Escape, an outside click, or the pill again.
+    if (metricsListPinned) return;
+    closeTimerRef.current = setTimeout(() => setMetricsListOpen(false), 180);
+  };
+
+  // Shut the list immediately, ignoring the pin and any pending timers — for
+  // when the trigger itself is about to disappear.
+  const resetMetricsList = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    setMetricsListOpen(false);
+    setMetricsListPinned(false);
+  };
 
   // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
   // checked the moment they're added and re-checked when the language toggles.
@@ -460,6 +518,8 @@ export default function QuarterlyReportForm({
   useEffect(() => {
     if (isUploadMode || isOpenMode || !companyId || customYear == null || quarter == null) {
       setCompAvail(null);
+      setCompSpecs(null);
+      setCompCheckedMode(null);
       setComparisonCheck('idle');
       return;
     }
@@ -474,11 +534,17 @@ export default function QuarterlyReportForm({
         const qoq = present('qoq');
         const yoy = present('yoy');
         setCompAvail({ qoq, yoy, both: qoq && yoy });
+        setCompSpecs(res.specs);
+        setCompCheckedMode(res.metrics_mode ?? metricsMode);
         setComparisonCheck('ok');
       })
       .catch(() => {
         if (cancelled) return;
         setCompAvail({ qoq: true, yoy: true, both: true });
+        // Failing open means we know nothing about WHY — show no note at all
+        // rather than a stale one from the previous period/mode.
+        setCompSpecs(null);
+        setCompCheckedMode(null);
         setComparisonCheck('ok');
       });
     return () => {
@@ -510,6 +576,18 @@ export default function QuarterlyReportForm({
       })
       .catch(() => {
         // Areas failed to load — send none and let the backend default to all.
+      });
+
+    // The standard metric catalogue for the "System metrics" hover list. Fetched
+    // here rather than lazily on first hover so the panel never pops in blank —
+    // it's ~280 short rows, and the list is reference data like the areas above.
+    reportsApi
+      .getQuarterlySystemMetrics()
+      .then((res) => {
+        if (!cancelled) setSystemMetrics(res);
+      })
+      .catch(() => {
+        // Catalogue unavailable — the hover affordance stays hidden.
       });
     return () => {
       cancelled = true;
@@ -565,6 +643,43 @@ export default function QuarterlyReportForm({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [metricsModal]);
+
+  // Escape closes the System-metrics hover list and the "?" help card, and drops
+  // the pin so a later hover behaves normally.
+  useEffect(() => {
+    if (!metricsListOpen && !metricsHelpOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMetricsListOpen(false);
+      setMetricsListPinned(false);
+      setMetricsHelpOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [metricsListOpen, metricsHelpOpen]);
+
+  // Clicking outside the Metrics block dismisses the "?" help card and any
+  // pinned metric list.
+  useEffect(() => {
+    if (!metricsHelpOpen && !metricsListPinned) return;
+    const onDown = (e: MouseEvent) => {
+      if (metricsBlockRef.current?.contains(e.target as Node)) return;
+      setMetricsHelpOpen(false);
+      setMetricsListPinned(false);
+      setMetricsListOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [metricsHelpOpen, metricsListPinned]);
+
+  // Drop any in-flight hover timers if the form unmounts mid-hover.
+  useEffect(
+    () => () => {
+      if (openTimerRef.current) clearTimeout(openTimerRef.current);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    },
+    [],
+  );
 
   // Close the period_not_found modal on Escape.
   useEffect(() => {
@@ -1257,70 +1372,218 @@ export default function QuarterlyReportForm({
             sheet's own lines as-is). New reports only; controls whether the
             Financial Data (Excel/CSV) field is shown. */}
         {!isOpenMode && !isUploadMode && (
-          <div style={{ marginBottom: 18, position: 'relative' }}>
+          <div ref={metricsBlockRef} style={{ marginBottom: 18, position: 'relative' }}>
             <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Metrics
-              <button
-                type="button"
-                aria-label="What are System and Custom metrics?"
-                title="What are System and Custom metrics?"
-                onClick={() => setMetricsHelpOpen((v) => !v)}
-                style={{
-                  width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
-                  background: metricsHelpOpen ? '#4040C8' : 'transparent',
-                  color: metricsHelpOpen ? '#fff' : '#9BA3C4',
-                  fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                }}
-              >
-                ?
-              </button>
-            </label>
-
-            {metricsHelpOpen && (
-              <div
-                role="note"
-                style={{
-                  marginTop: 6, marginBottom: 4, padding: '10px 12px', borderRadius: 8,
-                  border: '1px solid #E1E4F0', background: '#F7F8FC',
-                  fontSize: 11, color: '#5A6080', lineHeight: 1.5,
-                }}
-              >
-                <strong style={{ color: '#1A1D2E' }}>System metrics</strong> — we map your data to
-                our standard set of metrics and lay it out in the standard report template.
-                <br />
-                <strong style={{ color: '#1A1D2E' }}>Custom metrics</strong> — we take the figures
-                from your Excel/CSV exactly as they are, place each line in the right section, and
-                print them as-is (no mapping to our metrics).
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>
-              {(['system', 'custom'] as const).map((m) => (
-                <label
-                  key={m}
+              {/* Anchor for the help card so it tracks the "?" rather than a
+                  guessed offset from the label's left edge. */}
+              <span style={{ position: 'relative', display: 'inline-flex' }}>
+                <button
+                  type="button"
+                  aria-label="What are System and Custom metrics?"
+                  aria-expanded={metricsHelpOpen}
+                  onClick={() => setMetricsHelpOpen((v) => !v)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
-                    fontSize: 12, fontWeight: 600,
-                    color: metricsMode === m ? '#1A1D2E' : '#5A6080',
+                    width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
+                    background: metricsHelpOpen ? '#4040C8' : 'transparent',
+                    color: metricsHelpOpen ? '#fff' : '#9BA3C4',
+                    fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                   }}
                 >
-                  <input
-                    type="radio"
-                    name="metrics_mode"
-                    value={m}
-                    checked={metricsMode === m}
-                    onChange={() => {
-                      setMetricsMode(m);
-                      // Leaving custom → the sheet field hides; drop any staged sheets
-                      // so a hidden field can't submit files the user can't see.
-                      if (m === 'system') setFinancialFiles([]);
+                  ?
+                </button>
+
+                {metricsHelpOpen && (
+                  <div
+                    role="note"
+                    style={{
+                      position: 'absolute', top: 'calc(100% + 9px)', left: -10, zIndex: 40,
+                      width: 290, padding: '12px 14px', borderRadius: 12,
+                      border: '1px solid #ECEEF8', background: '#fff',
+                      boxShadow: '0 12px 32px rgba(20,22,40,.16)',
+                      // The parent .fl-label is uppercase + letter-spaced; reset
+                      // so the help copy reads as normal prose.
+                      textTransform: 'none', letterSpacing: 'normal',
+                      fontSize: 11.5, fontWeight: 400, color: '#5A6080', lineHeight: 1.55,
+                      cursor: 'default',
                     }}
-                    style={{ accentColor: '#4040C8', width: 14, height: 14 }}
-                  />
-                  {m === 'system' ? 'System metrics' : 'Custom metrics'}
-                </label>
-              ))}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute', top: -5, left: 14, width: 9, height: 9,
+                        background: '#fff', borderLeft: '1px solid #ECEEF8',
+                        borderTop: '1px solid #ECEEF8', transform: 'rotate(45deg)',
+                      }}
+                    />
+                    <div style={{ marginBottom: 8 }}>
+                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
+                      {' — we map your data to our standard set of metrics and lay it out in the '}
+                      standard report template.
+                    </div>
+                    <div>
+                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
+                      {' — we take the figures from your Excel/CSV exactly as they are, place each '}
+                      line in the right section, and print them as-is.
+                    </div>
+                  </div>
+                )}
+              </span>
+            </label>
+
+            <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
+              {(['system', 'custom'] as const).map((m) => {
+                const radio = (
+                  <label
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+                      fontSize: 12, fontWeight: 600,
+                      color: metricsMode === m ? '#1A1D2E' : '#5A6080',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="metrics_mode"
+                      value={m}
+                      checked={metricsMode === m}
+                      onChange={() => {
+                        setMetricsMode(m);
+                        // Leaving custom → the sheet field hides; drop any staged sheets
+                        // so a hidden field can't submit files the user can't see.
+                        if (m === 'system') setFinancialFiles([]);
+                        // The catalogue pill unmounts in custom mode — reset it so a
+                        // hover in flight (or a pinned panel) can't spring back open
+                        // on the way back to system.
+                        else resetMetricsList();
+                      }}
+                      style={{ accentColor: '#4040C8', width: 14, height: 14 }}
+                    />
+                    {m === 'system' ? 'System metrics' : 'Custom metrics'}
+                  </label>
+                );
+
+                // The catalogue only describes system mode, so the pill is hidden
+                // once custom is picked — and until the fetch lands.
+                if (m !== 'system' || !systemMetrics || metricsMode !== 'system') {
+                  return <div key={m}>{radio}</div>;
+                }
+
+                return (
+                  <div
+                    key={m}
+                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8 }}
+                    onMouseEnter={openMetricsList}
+                    onMouseLeave={closeMetricsList}
+                  >
+                    {radio}
+                    {/* Outside the <label> on purpose — inside it, clicking to
+                        open the list would also select the radio. */}
+                    <button
+                      type="button"
+                      aria-haspopup="true"
+                      aria-expanded={metricsListOpen}
+                      onFocus={openMetricsList}
+                      onClick={() => {
+                        // Pin keeps it open for click/keyboard users; clicking
+                        // again unpins and closes.
+                        const nextPinned = !metricsListPinned;
+                        setMetricsListPinned(nextPinned);
+                        setMetricsListOpen(nextPinned);
+                      }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '3px 9px', borderRadius: 999, cursor: 'pointer',
+                        fontSize: 10.5, fontWeight: 700, lineHeight: 1.4,
+                        border: `1px solid ${metricsListOpen ? '#C4C7F0' : '#E4E6F1'}`,
+                        background: metricsListOpen ? '#EEEEFF' : '#F7F8FC',
+                        color: metricsListOpen ? '#2B2B8F' : '#5A6080',
+                        transition: 'background .15s, border-color .15s, color .15s',
+                      }}
+                    >
+                      {systemMetrics.total} metrics
+                      <svg
+                        width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true"
+                        style={{
+                          transform: metricsListOpen ? 'rotate(180deg)' : 'none',
+                          transition: 'transform .15s',
+                        }}
+                      >
+                        <path d="M1.5 3l2.5 2.5L6.5 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    </button>
+
+                    {metricsListOpen && (
+                      <div
+                        role="group"
+                        aria-label="System metrics catalogue"
+                        // Cancels the pending close so the pointer can travel in
+                        // and scroll — without this the list can't be read.
+                        onMouseEnter={openMetricsList}
+                        onMouseLeave={closeMetricsList}
+                        style={{
+                          position: 'absolute', top: 'calc(100% + 9px)', left: 0, zIndex: 40,
+                          width: 320, borderRadius: 12, background: '#fff',
+                          border: '1px solid #ECEEF8',
+                          boxShadow: '0 12px 32px rgba(20,22,40,.16)',
+                          overflow: 'hidden', cursor: 'default',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                            gap: 8, padding: '10px 14px', borderBottom: '1px solid #ECEEF8',
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>
+                            System metrics
+                          </span>
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: '#9BA3C4' }}>
+                            {systemMetrics.total} total
+                          </span>
+                        </div>
+
+                        <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                          {systemMetrics.groups.map((group) => (
+                            <div key={group.code ?? group.title}>
+                              <div
+                                style={{
+                                  position: 'sticky', top: 0, zIndex: 1,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                  gap: 8, padding: '7px 14px', background: '#F7F8FC',
+                                  borderBottom: '1px solid #ECEEF8',
+                                  fontSize: 9.5, fontWeight: 800, letterSpacing: '.5px',
+                                  textTransform: 'uppercase', color: '#5A6080',
+                                }}
+                              >
+                                <span>{group.title}</span>
+                                <span style={{ color: '#9BA3C4' }}>{group.count}</span>
+                              </div>
+                              {group.metrics.map((metric) => (
+                                <div
+                                  key={metric.key}
+                                  style={{
+                                    padding: '5px 14px', fontSize: 11.5, color: '#3A3F5C',
+                                    lineHeight: 1.45,
+                                  }}
+                                >
+                                  {metric.label}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: 7, fontSize: 11, color: '#9BA3C4', lineHeight: 1.5 }}>
+              {metricsMode === 'system'
+                ? `We map your data to our standard${systemMetrics ? ` ${systemMetrics.total}` : ''} metrics and lay it out in the standard report template.`
+                : 'We take the figures from your Excel/CSV exactly as they are, place each line in the right section, and print them as-is.'}
             </div>
           </div>
         )}
@@ -1728,6 +1991,29 @@ export default function QuarterlyReportForm({
                 qoq: 'No previous-quarter data to compare against',
                 both: 'Needs both prior-year and prior-quarter data',
               };
+
+              // System and custom figures only ever compare against themselves,
+              // so a prior period holding the OTHER type is unusable — but that
+              // is worth explaining, unlike a period with no data at all.
+              const crossSpecs = (compSpecs ?? []).filter(
+                (s) => !s.present && s.other_mode_present,
+              );
+              const crossKeys = new Set(crossSpecs.map((s) => s.key));
+              // 'both' needs qoq AND yoy, so it's cross-blocked when either is.
+              const isCrossBasis = (v: Comparison) =>
+                v === 'both' ? crossKeys.size > 0 : crossKeys.has(v);
+              const thisModeName =
+                compCheckedMode === 'custom' ? 'Custom metrics' : 'System metrics';
+              const otherModeName =
+                compCheckedMode === 'custom' ? 'System metrics' : 'Custom metrics';
+              const crossPeriods = joinList(crossSpecs.map((s) => s.label));
+              const crossBases = joinList(
+                CTX_COMPARISONS.filter(
+                  (c) => !(compAvail?.[c.value] ?? false) && isCrossBasis(c.value),
+                ).map((c) => c.label),
+              );
+              const showCrossNote = periodChosen && !checking && crossSpecs.length > 0;
+
               return (
                 <CtxCard
                   n={4}
@@ -1739,6 +2025,47 @@ export default function QuarterlyReportForm({
                         ? 'Checking which comparisons we have data for…'
                         : 'Only comparisons we have prior-period data for are enabled.'
                   }
+                  note={
+                    showCrossNote ? (
+                      <div
+                        role="note"
+                        style={{
+                          display: 'flex',
+                          gap: 10,
+                          padding: '11px 13px',
+                          borderRadius: 12,
+                          border: '1px solid rgba(245,158,11,.35)',
+                          background: 'rgba(245,158,11,.08)',
+                          fontSize: 11.5,
+                          lineHeight: 1.55,
+                          color: '#8A6520',
+                        }}
+                      >
+                        <svg
+                          width="16" height="16" viewBox="0 0 20 20" fill="none"
+                          aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}
+                        >
+                          <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                          <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                        </svg>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#B45309', marginBottom: 3 }}>
+                            {crossPeriods} {crossSpecs.length === 1 ? 'has' : 'have'} data, but{' '}
+                            {crossSpecs.length === 1 ? "it's" : "they're"}{' '}
+                            {otherModeName.toLowerCase()} — this report uses{' '}
+                            {thisModeName.toLowerCase()}.
+                          </div>
+                          Comparisons only work within the same metrics type, so{' '}
+                          <strong style={{ fontWeight: 700 }}>{crossBases}</strong>{' '}
+                          {crossBases.includes(' and ') ? 'are' : 'is'} unavailable — comparing
+                          across types would just produce an empty column. Switch to{' '}
+                          {otherModeName} above to compare against{' '}
+                          {crossSpecs.length === 1 ? 'it' : 'them'}, or generate this quarter on
+                          its own.
+                        </div>
+                      </div>
+                    ) : null
+                  }
                 >
                   {CTX_COMPARISONS.map((c) => {
                     const avail = compAvail?.[c.value] ?? false;
@@ -1748,7 +2075,11 @@ export default function QuarterlyReportForm({
                       : checking
                         ? 'Checking available data…'
                         : !avail
-                          ? unavailTitle[c.value]
+                          ? isCrossBasis(c.value)
+                            // Agree with the note below rather than claiming
+                            // there's no data when there is, in the other lane.
+                            ? `That period's data is ${otherModeName.toLowerCase()}, not ${thisModeName.toLowerCase()}`
+                            : unavailTitle[c.value]
                           : c.desc;
                     return (
                       <CtxPill

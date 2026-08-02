@@ -448,8 +448,21 @@ export interface GenerateQuarterlyBody {
 export interface ComparisonAvailability {
   available: boolean; // all required prior periods have figures ('both' needs both)
   comparison: Comparison;
+  // The mode the answer was computed for — read this rather than the live radio,
+  // which may have moved on since the request went out.
+  metrics_mode?: 'system' | 'custom';
   target_period: string; // e.g. "Q3-2025"
-  specs: { key: string; period: string; label: string; present: boolean }[];
+  specs: {
+    key: string;
+    period: string;
+    label: string;
+    present: boolean;
+    // The prior period HAS figures, just in the lane this report won't read
+    // (system data for a custom report, or vice versa). System and custom only
+    // ever compare against themselves, so this is "unavailable, but for a
+    // reason worth explaining" rather than "no data at all".
+    other_mode_present?: boolean;
+  }[];
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -464,6 +477,27 @@ export interface QuarterlyReportArea {
 
 export interface QuarterlyReportAreasResponse {
   areas: QuarterlyReportArea[];
+}
+
+// The full system metric catalogue, grouped by statement — backs the "System
+// metrics" hover list. Group titles and their order come from the API; render
+// them as returned rather than rebuilding the grouping client-side. `code` is
+// null for the sector/operational KPI group (metrics with no statement).
+export interface QuarterlySystemMetric {
+  key: string;
+  label: string;
+}
+
+export interface QuarterlySystemMetricGroup {
+  code: string | null;
+  title: string;
+  count: number;
+  metrics: QuarterlySystemMetric[];
+}
+
+export interface QuarterlySystemMetricsResponse {
+  total: number;
+  groups: QuarterlySystemMetricGroup[];
 }
 
 // One single-select questionnaire item on the Generate Quarterly Report screen.
@@ -1363,6 +1397,13 @@ export const reports = {
   getQuarterlyReportAreas: () =>
     request<QuarterlyReportAreasResponse>(
       `/api/v1/reports/quarterly/report-areas`,
+    ),
+
+  // Every active system metric, grouped by statement. Broader than
+  // getQuarterlyReportAreas, which only covers metrics tagged with a report area.
+  getQuarterlySystemMetrics: () =>
+    request<QuarterlySystemMetricsResponse>(
+      `/api/v1/reports/quarterly/system-metrics`,
     ),
 
   // Source of truth for the on-form questionnaire (single-select). Company-
