@@ -39,6 +39,15 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { company_id: 'co-1', company_name: 'Acme' } }),
 }));
 
+// Annual is hidden from the live screen for now (see earnings-flags.ts), but the
+// code path behind it is unchanged and we intend to bring it back — so this
+// suite keeps exercising it rather than letting that coverage rot. That the
+// option really is hidden by default is asserted in
+// src/test/earnings-report-type-hidden.test.tsx, which does NOT override this.
+vi.mock('@/components/earnings/earnings-flags', () => ({
+  HIDDEN_EARNINGS_VARIANTS: [],
+}));
+
 vi.mock('@/lib/api', async () => {
   // Spread the real module so normalizeEarningsSourceItem stays the actual
   // implementation under test — only earnings/documents are mocked out.
