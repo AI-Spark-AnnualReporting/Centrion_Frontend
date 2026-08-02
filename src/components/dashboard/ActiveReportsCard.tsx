@@ -33,6 +33,9 @@ const TYPE_LABEL: Record<string, string> = {
   annual: 'Annual Report',
   quarterly: 'Quarterly Report',
   esg: 'ESG / Sustainability',
+  // The board flow emits `board_report`; `board_pack` is the older value and is
+  // kept so existing rows keep their label.
+  board_report: "Board of Directors' Report",
   board_pack: 'Board Pack',
   ir_briefing: 'IR Briefing',
 };
@@ -44,7 +47,7 @@ function typeLabel(t?: string | null): string {
 
 function initials(t?: string | null): string {
   const k = (t ?? '').toLowerCase();
-  const map: Record<string, string> = { annual: 'AR', quarterly: 'QR', esg: 'SR', board_pack: 'BP', ir_briefing: 'IR' };
+  const map: Record<string, string> = { annual: 'AR', quarterly: 'QR', esg: 'SR', board_report: 'BR', board_pack: 'BP', ir_briefing: 'IR' };
   return map[k] ?? (t || 'R').slice(0, 2).toUpperCase();
 }
 

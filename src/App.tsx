@@ -47,6 +47,8 @@ const AdminDepartmentsPage = lazy(
 // sidebar + topbar stay (same shell as the Admin Console). Code-split.
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
+const BoardSetupPage = lazy(() => import("./pages/annual-report/BoardSetupPage"));
+const BoardReportPage = lazy(() => import("./pages/annual-report/BoardReportPage"));
 
 // IR Calendar — admin + IR. Code-split; renders inside AppLayout.
 const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
@@ -189,6 +191,10 @@ const App = () => (
               path="/annual-report/cycles/:cycleId"
               element={<CycleDetailPage />}
             />
+            {/* Board of Directors' Report: pick a year on the setup screen, then
+                build it — issuer profile → sources → resolved sections → report. */}
+            <Route path="/board-report" element={<BoardSetupPage />} />
+            <Route path="/board-report/:reportId" element={<BoardReportPage />} />
             <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>

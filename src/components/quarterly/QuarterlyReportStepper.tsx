@@ -1,15 +1,11 @@
 interface QuarterlyReportStepperProps {
   activeStep: number; // 1-based
-  reportId: string;
+  reportId?: string;
+  /** Override the labels — the Annual Board Report builder has its own four. */
+  steps?: string[];
 }
 
-const STEPS = [
-  { label: 'Period' },
-  { label: 'Extraction' },
-  { label: 'Outline' },
-  { label: 'Preview' },
-  { label: 'Report' },
-];
+const QUARTERLY_STEPS = ['Period', 'Extraction', 'Outline', 'Preview', 'Report'];
 
 const ACCENT = '#4040C8';
 const ACCENT_LIGHT = '#E8E8F8';
@@ -66,8 +62,9 @@ function StepCircle({
   );
 }
 
-export function QuarterlyReportStepper({ activeStep }: QuarterlyReportStepperProps) {
+export function QuarterlyReportStepper({ activeStep, steps }: QuarterlyReportStepperProps) {
   const activeIndex = activeStep - 1; // convert to 0-based
+  const STEPS = (steps ?? QUARTERLY_STEPS).map((label) => ({ label }));
 
   return (
     <div

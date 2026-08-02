@@ -25,6 +25,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin-console/users': 'Users & Roles',
   '/admin-console/departments': 'Departments',
   '/annual-report': 'Annual Report',
+  '/board-report': 'Board Report',
   '/annual-report/cycles/new': 'New Cycle',
   '/earnings/setup': 'Earnings Report',
 };

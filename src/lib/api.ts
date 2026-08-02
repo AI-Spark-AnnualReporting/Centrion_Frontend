@@ -89,6 +89,23 @@ import type {
   EarningsReportsListResponse,
 } from "@/types/earnings";
 import type {
+  BoardAssembleResponse,
+  BoardCompletion,
+  BoardExportFormat,
+  BoardIssuerProfile,
+  BoardOutlineResponse,
+  BoardOutlineSavePayload,
+  BoardProduceSectionResponse,
+  BoardProfileResponse,
+  BoardReportListResponse,
+  BoardReportSummary,
+  BoardRunHandle,
+  BoardSection,
+  BoardSectionsResponse,
+  BoardSourcesResponse,
+  CreateBoardReportPayload,
+} from "@/types/board";
+import type {
   CreateMeetingBody,
   MeetingListResponse,
   MeetingResponse,
@@ -2563,6 +2580,164 @@ export const earnings = {
     const a = document.createElement("a");
     a.href = url;
     a.download = serverName || `${(filename || "earnings-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Board of Directors' Report — /api/v1/board.
+//
+// Unlike quarterly/earnings, the 46-section registry and the profile→section
+// resolution live server-side: the client PATCHes a profile and renders whatever
+// outline comes back. Two endpoints are async (202 + poll_url): document upload
+// and batch produce. Everything is company-scoped — another company's report is
+// a 404, never a 403.
+// ---------------------------------------------------------------------------
+
+const BOARD_BASE = "/api/v1/board/reports";
+const boardPath = (reportId: string, suffix = "") =>
+  `${BOARD_BASE}/${encodeURIComponent(reportId)}${suffix}`;
+
+export const boardReports = {
+  // 409 when an unfinished report already exists for that company + year; the
+  // body carries `existing_report_id` so the caller can offer "continue".
+  createReport: (body: CreateBoardReportPayload) =>
+    request<BoardReportSummary>(BOARD_BASE, { method: "POST", body }),
+
+  listReports: (companyId: string) =>
+    request<BoardReportListResponse>(BOARD_BASE, { query: { company_id: companyId } }),
+
+  getProfile: (reportId: string, signal?: AbortSignal) =>
+    request<BoardProfileResponse>(boardPath(reportId, "/profile"), { signal }),
+
+  // Re-resolves and re-saves the WHOLE outline server-side — refetch the outline
+  // (and the sources, whose slots derive from issuer_type) after every call.
+  patchProfile: (reportId: string, body: BoardIssuerProfile) =>
+    request<BoardProfileResponse>(boardPath(reportId, "/profile"), { method: "PATCH", body }),
+
+  getSources: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSourcesResponse>(boardPath(reportId, "/sources"), { signal }),
+
+  // One call, one run, every staged file extracted concurrently. `files` and
+  // `slots` are repeated fields matched BY POSITION — the nth file is filed
+  // under the nth slot, so they must be appended in lockstep.
+  //
+  // Only one job may run per report, so uploading slot-by-slot would 409 on the
+  // second call. The UI stages the picks and submits them together.
+  //
+  // 202 → poll the returned poll_url. Deliberately NOT routed through
+  // postPipeline(): that normalises a 409 into a handle, which would hide the
+  // `existing_run_id` the caller wants to surface.
+  uploadSources: (reportId: string, staged: { slot: string; file: File }[]) => {
+    const fd = new FormData();
+    staged.forEach(({ slot, file }) => {
+      fd.append("files", file);
+      fd.append("slots", slot);
+    });
+    return request<BoardRunHandle>(boardPath(reportId, "/sources/upload"), {
+      method: "POST",
+      form: fd,
+    });
+  },
+
+  // Clears the slot tag only — the document stays in the company's document
+  // bank, so "replace" is delete-then-upload and nothing is destroyed.
+  deleteSourceDocument: (reportId: string, documentId: string) =>
+    request<unknown>(
+      boardPath(reportId, `/sources/${encodeURIComponent(documentId)}`),
+      { method: "DELETE" },
+    ),
+
+  // Returns all 46 sections including the non-applicable ones, so the UI can
+  // grey them rather than have them vanish. Built and saved lazily on first call.
+  getOutline: (reportId: string, signal?: AbortSignal) =>
+    request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { signal }),
+
+  // Array order IS display order. Mandatory sections are force-included
+  // silently; including a dropped/na section is a 422 and nothing is saved.
+  saveOutline: (reportId: string, body: BoardOutlineSavePayload) =>
+    request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { method: "PUT", body }),
+
+  // Synchronous, and cached — `cached: true` means nothing it depends on changed
+  // and no LLM call was made. 422 when the section has no producer yet.
+  produceSection: (reportId: string, sectionCode: string, regenerate = false) =>
+    request<BoardProduceSectionResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/produce`),
+      { method: "POST", query: { regenerate } },
+    ),
+
+  // 202 → poll; `output_summary` carries {produced, skipped, failed, total}.
+  produceAll: (reportId: string) =>
+    request<BoardRunHandle>(boardPath(reportId, "/produce"), { method: "POST" }),
+
+  getSections: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSectionsResponse>(boardPath(reportId, "/sections"), { signal }),
+
+  // A human edit is authoritative: the section becomes produced/updated and the
+  // cache key is cleared, so the next produce sees changed input rather than
+  // serving the cache over the edit.
+  patchSectionContent: (reportId: string, sectionCode: string, content: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/content`),
+      { method: "PATCH", body: { content } },
+    ),
+
+  getCompletion: (reportId: string, signal?: AbortSignal) =>
+    request<BoardCompletion>(boardPath(reportId, "/completion"), { signal }),
+
+  // Confirms a carried-forward section is still accurate — the check that stops
+  // last year's board list going out as this year's. 409 if it wasn't carried
+  // forward, i.e. there was nothing to confirm.
+  confirmSection: (reportId: string, sectionCode: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/confirm`),
+      { method: "POST" },
+    ),
+
+  // 409 while completion.can_approve is false — and the error body IS the
+  // completion payload, so the caller can list exactly what is missing.
+  approve: (reportId: string) =>
+    request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
+
+  // The same dict the exporter renders, so the preview and the PDF can't drift.
+  getAssemble: (reportId: string, signal?: AbortSignal) =>
+    request<BoardAssembleResponse>(boardPath(reportId, "/assemble"), { signal }),
+
+  // Binary response → bypass request<T>() (which parses JSON) and use
+  // fetchWithAuth + blob, mirroring earnings.downloadEarningsExport. Unlike
+  // earnings, `format` is a query param rather than a JSON body.
+  downloadExport: async (
+    reportId: string,
+    format: BoardExportFormat,
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `${boardPath(reportId, "/export")}?format=${encodeURIComponent(format)}`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    const serverName = match ? decodeURIComponent(match[1].trim()) : null;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = serverName || `${(filename || "board-report").replace(/[^\w.-]+/g, "_")}.${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();

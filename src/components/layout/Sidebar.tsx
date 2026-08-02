@@ -12,6 +12,10 @@ const REPORT_CHILDREN: { key: string; label: string; path?: string; external?: b
   // Annual: admins manage cycles in-app at /annual-report; PMs/departments
   // still go to the external workspace app (routed by role in goAnnual()).
   { key: 'annual', label: 'Annual', path: '/annual-report', external: true },
+  // The board-report builder. Its own top-level path rather than a child of
+  // /annual-report, so opening it doesn't also light up "Annual" (that item
+  // matches on prefix, and must keep matching /annual-report/cycles/...).
+  { key: 'board', label: 'Board Report', path: '/board-report' },
 ];
 
 // Sub-sections shown when the "Reports Validator" item is expanded — the two
