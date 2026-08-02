@@ -480,6 +480,15 @@ export default function QuarterlyReportForm({
     closeTimerRef.current = setTimeout(() => setMetricsListOpen(false), 180);
   };
 
+  // Shut the list immediately, ignoring the pin and any pending timers — for
+  // when the trigger itself is about to disappear.
+  const resetMetricsList = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    setMetricsListOpen(false);
+    setMetricsListPinned(false);
+  };
+
   // Upload-time per-file language check, keyed by `${name}:${size}`. Files are
   // checked the moment they're added and re-checked when the language toggles.
   const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
@@ -1443,6 +1452,10 @@ export default function QuarterlyReportForm({
                         // Leaving custom → the sheet field hides; drop any staged sheets
                         // so a hidden field can't submit files the user can't see.
                         if (m === 'system') setFinancialFiles([]);
+                        // The catalogue pill unmounts in custom mode — reset it so a
+                        // hover in flight (or a pinned panel) can't spring back open
+                        // on the way back to system.
+                        else resetMetricsList();
                       }}
                       style={{ accentColor: '#4040C8', width: 14, height: 14 }}
                     />
@@ -1450,9 +1463,9 @@ export default function QuarterlyReportForm({
                   </label>
                 );
 
-                // Custom mode has no catalogue to show, and neither does System
-                // until the fetch lands — plain radio in both cases.
-                if (m !== 'system' || !systemMetrics) {
+                // The catalogue only describes system mode, so the pill is hidden
+                // once custom is picked — and until the fetch lands.
+                if (m !== 'system' || !systemMetrics || metricsMode !== 'system') {
                   return <div key={m}>{radio}</div>;
                 }
 

@@ -132,4 +132,32 @@ describe("System metrics hover list", () => {
       screen.getByText(/exactly as they are, place each line in the right section/i),
     ).toBeInTheDocument();
   });
+
+  it("hides the catalogue pill in Custom mode and brings it back on System", async () => {
+    renderForm();
+    await screen.findByText("5 metrics");
+
+    // The catalogue describes system mode only — it has nothing to say about a
+    // report built from the sheet's own lines.
+    fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
+    expect(screen.queryByText("5 metrics")).toBeNull();
+
+    fireEvent.click(screen.getByRole("radio", { name: /system metrics/i }));
+    expect(screen.getByText("5 metrics")).toBeInTheDocument();
+  });
+
+  it("does not reopen a pinned list after a round trip through Custom", async () => {
+    renderForm();
+
+    // Pin it open, then switch away — the pill unmounts with the panel.
+    fireEvent.click(await screen.findByText("5 metrics"));
+    expect(screen.getByRole("group", { name: /system metrics catalogue/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /system metrics/i }));
+
+    // Pill is back, but the panel must not spring open on its own.
+    expect(screen.getByText("5 metrics")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /system metrics catalogue/i })).toBeNull();
+  });
 });
