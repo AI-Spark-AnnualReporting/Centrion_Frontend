@@ -22,7 +22,22 @@ export default function BrandUploadBox({
   onPick: (f: File | null) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // One file only, for both fields this box serves: a logo is a single image,
+  // and the brand guideline is read by one extraction call. A multi-file drop is
+  // rejected rather than silently reduced to the first — we can't know which one
+  // was meant. (The file input is already single-select, and the drop target
+  // only renders while the field is empty, so nothing staged is lost here.)
+  const pickDropped = (list: FileList | null) => {
+    if (list && list.length > 1) {
+      setDropError('One file at a time — please drop a single file.');
+      return;
+    }
+    setDropError(null);
+    onPick(list?.[0] ?? null);
+  };
 
   return (
     <>
@@ -50,7 +65,7 @@ export default function BrandUploadBox({
           onDrop={(e) => {
             e.preventDefault();
             setDragOver(false);
-            onPick(e.dataTransfer.files?.[0] ?? null);
+            pickDropped(e.dataTransfer.files);
           }}
         >
           <div style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }} aria-hidden>{icon}</div>
@@ -68,7 +83,7 @@ export default function BrandUploadBox({
             disabled={busy}
             onClick={() => inputRef.current?.click()}
           >
-            Browse files
+            Browse file
           </button>
         </div>
       )}
@@ -79,11 +94,12 @@ export default function BrandUploadBox({
         accept={accept}
         style={{ display: 'none' }}
         onChange={(e) => {
+          setDropError(null);
           onPick(e.target.files?.[0] ?? null);
           e.target.value = ''; // re-picking the same file must still fire onChange
         }}
       />
-      {error && <div className="fl-err">{error}</div>}
+      {(error || dropError) && <div className="fl-err">{error || dropError}</div>}
     </>
   );
 }

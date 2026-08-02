@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import CompanyIntelStep from "@/pages/onboarding/CompanyIntelStep";
 import StepTwoForm from "@/components/registration/StepTwoForm";
+import BrandUploadBox from "@/components/brand/BrandUploadBox";
 
 const pdf = (name: string) =>
   new File(["x"], name, { type: "application/pdf" });
@@ -19,7 +20,9 @@ function dropFiles(zone: Element, files: File[]) {
   });
 }
 
+// The two flows word it for what they take: a profile "document" vs a brand "file".
 const TOO_MANY = /one document at a time/i;
+const TOO_MANY_FILES = /one file at a time/i;
 
 describe("onboarding Company Intel step", () => {
   const renderStep = () =>
@@ -56,6 +59,61 @@ describe("onboarding Company Intel step", () => {
 
     // The LLM call is the whole cost — it must not fire on a rejected drop.
     expect(onAnalyse).not.toHaveBeenCalled();
+  });
+});
+
+// BrandUploadBox is shared by BOTH brand fields (logo + guideline) and by BOTH
+// screens that show them (onboarding Brand step, Brand Identity page), so
+// testing the component covers all four call sites.
+describe("brand upload box", () => {
+  const renderBox = (onPick = vi.fn()) => {
+    render(
+      <BrandUploadBox
+        icon="🖼️"
+        prompt="Drag your logo here"
+        hint="PNG or JPG · up to 1 MB"
+        accept=".png,.jpg"
+        removeLabel="Remove logo"
+        onPick={onPick}
+      />,
+    );
+    return onPick;
+  };
+
+  it("rejects a multi-file drop without picking anything", () => {
+    const onPick = renderBox();
+    dropFiles(document.querySelector(".ob-drop")!, [pdf("a.png"), pdf("b.png")]);
+
+    expect(screen.getByText(TOO_MANY_FILES)).toBeInTheDocument();
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it("accepts a single dropped file and clears the message", () => {
+    const onPick = renderBox();
+    const zone = document.querySelector(".ob-drop")!;
+
+    dropFiles(zone, [pdf("a.png"), pdf("b.png")]);
+    expect(screen.getByText(TOO_MANY_FILES)).toBeInTheDocument();
+
+    const only = pdf("only.png");
+    dropFiles(zone, [only]);
+    expect(onPick).toHaveBeenCalledWith(only);
+    expect(screen.queryByText(TOO_MANY_FILES)).toBeNull();
+  });
+
+  it("still shows the parent's own error", () => {
+    render(
+      <BrandUploadBox
+        icon="🖼️"
+        prompt="Drag your logo here"
+        hint="PNG or JPG · up to 1 MB"
+        accept=".png,.jpg"
+        removeLabel="Remove logo"
+        error="That image is too large."
+        onPick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("That image is too large.")).toBeInTheDocument();
   });
 });
 
