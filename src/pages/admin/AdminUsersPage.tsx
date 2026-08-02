@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { admin, adminConsole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER } from './admin-flags';
 import {
   ASSIGNABLE_ROLES,
   CAPABILITY_GROUPS,
@@ -1002,6 +1003,7 @@ function UsersView(props: {
                       <tr>
                         <td colSpan={8} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                            {SHOW_CHANGE_ROLE && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
                                 Change role
@@ -1027,6 +1029,7 @@ function UsersView(props: {
                                 </span>
                               )}
                             </div>
+                            )}
 
                             {/* Change department — for department_user and hod. They
                                 must always belong to a department, so there's no
@@ -1068,7 +1071,7 @@ function UsersView(props: {
                               </div>
                             )}
 
-                            {u.status !== 'suspended' ? (
+                            {SHOW_SUSPEND_USER && (u.status !== 'suspended' ? (
                               <button
                                 className="btn bs bsm"
                                 disabled={isSelf || rowBusy === u.user_id}
@@ -1090,7 +1093,7 @@ function UsersView(props: {
                               >
                                 Reactivate user
                               </button>
-                            )}
+                            ))}
 
                             {/* Until they activate. `has_temp_password` alone
                                 isn't enough: an invite created before the
@@ -1111,6 +1114,20 @@ function UsersView(props: {
                                 Copy invite link
                               </button>
                             )}
+
+                            {/* With role + suspend hidden, an active admin/PM with no temp
+                                password has nothing left here — say so rather than opening
+                                a blank strip. */}
+                            {!SHOW_CHANGE_ROLE &&
+                              !SHOW_SUSPEND_USER &&
+                              u.role !== 'department_user' &&
+                              u.role !== 'hod' &&
+                              u.status !== 'invited' &&
+                              !u.has_temp_password && (
+                                <span style={{ fontSize: 11, color: '#9BA3C4' }}>
+                                  No actions available for this user.
+                                </span>
+                              )}
                           </div>
                         </td>
                       </tr>
