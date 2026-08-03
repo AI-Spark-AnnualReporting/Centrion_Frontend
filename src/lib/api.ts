@@ -764,13 +764,17 @@ export const companies = {
 
   // Onboarding submit: kick off the heavy ingest (reports + chunks + embeddings + all
   // dashboard data) for the already-validated docs. Non-blocking — returns { status }.
+  // `force` re-runs an ingest that already finished — the standalone Upload Reports
+  // page needs it, since the backend otherwise no-ops once report_extraction_status
+  // is 'done'. An in-flight run still wins regardless.
   ingestOnboarding: (
     companyId: string,
     items: OnboardingIngestItem[],
+    force = false,
   ): Promise<{ status: string }> =>
     request(`/api/v1/companies/${encodeURIComponent(companyId)}/ingest-onboarding`, {
       method: "POST",
-      body: { items },
+      body: force ? { items, force: true } : { items },
     }),
 };
 

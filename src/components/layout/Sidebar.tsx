@@ -72,6 +72,9 @@ const NAV_ITEMS: {
       { key: 'docs', label: 'Document Bank', path: '/docs', icon: 'file', badge: null },
       { key: 'questions', label: 'Questions Bank', path: '/questions', icon: 'question', badge: null },
       { key: 'profile', label: 'Profile', path: '/profile', icon: 'user', badge: null },
+      // The onboarding upload step, reachable after the fact. Admin-only for the
+      // same reason as Brand Identity below — the route is gated to match.
+      { key: 'uploadReports', label: 'Upload Reports', path: '/upload-reports', icon: 'file', badge: null, adminOnly: true },
       // Admin-only to match PATCH /companies/me — ProtectedRoute bounces every
       // other role to /dashboard, so showing it to them would be a dead link.
       { key: 'brand', label: 'Brand Identity', path: '/brand-identity', icon: 'brand', badge: null, adminOnly: true },

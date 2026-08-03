@@ -20,6 +20,7 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import BrandIdentityPage from "./pages/BrandIdentityPage";
+import UploadReportsPage from "./pages/UploadReportsPage";
 import MeetingsPage from "./pages/MeetingsPage";
 import { CommsPage } from "./pages/OtherPages";
 import { CompliancePage } from "./pages/OtherPages";
@@ -168,6 +169,10 @@ const App = () => (
               sidebar item is gated to match so it's never a dead link. */}
           <Route element={<ProtectedRoute requiredRole="admin" />}>
             <Route path="/brand-identity" element={<BrandIdentityPage />} />
+            {/* The onboarding upload step, reachable after the fact — onboarding
+                can be skipped, which otherwise leaves the account with no
+                documents and no way to run the ingest. Admin-only to match. */}
+            <Route path="/upload-reports" element={<UploadReportsPage />} />
           </Route>
           {/* Admin Console — admin-only, rendered inside the main shell so the
               sidebar's expandable Admin section drives navigation. */}
