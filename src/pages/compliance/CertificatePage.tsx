@@ -137,14 +137,14 @@ function fallbackFilename(run: ComplianceRun, period: string | undefined): strin
 // server's own wording — it knows why it said no.
 function downloadErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    const body = err.body as { detail?: unknown } | undefined;
-    const detail = body?.detail;
-    if (typeof detail === 'string' && detail.trim()) return detail;
     if (err.status === 403) return "You don't have access to this validation run.";
     if (err.status === 404) return 'This validation run no longer exists.';
     if (err.status === 409) {
       return "This validation hasn't finished, so there is nothing to certify yet.";
     }
+    // For anything else, ApiError.message already carries the backend's
+    // `detail` (or a generic message for 429/5xx infra failures).
+    return err.message || 'Could not download the certificate. Please try again.';
   }
   return 'Could not download the certificate. Please try again.';
 }

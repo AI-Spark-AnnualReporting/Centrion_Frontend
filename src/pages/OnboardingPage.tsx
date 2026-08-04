@@ -10,7 +10,7 @@ import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
-import { companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
+import { ApiError, companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 
 const LogoMark = () => (
@@ -252,10 +252,13 @@ export default function OnboardingPage() {
         setStep('review');
       })
       .catch((err) => {
-        const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
+        // ApiError.message already carries the backend's `detail` (or a
+        // generic message for 429/5xx infra failures) — read it rather than
+        // re-parsing `err.body.detail` directly, which would bypass that
+        // sanitization.
         setAnalyseError(
-          typeof detail === 'string'
-            ? detail
+          err instanceof ApiError && err.message
+            ? err.message
             : "We couldn't read that document. Try another, or fill the details in manually.",
         );
         setStep('intel');

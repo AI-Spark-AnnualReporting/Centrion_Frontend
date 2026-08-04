@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
-import { auth, quarterlyReports } from '@/lib/api';
+import { ApiError, auth, quarterlyReports } from '@/lib/api';
 import type {
   BrandColors,
   ColorPalette,
@@ -109,11 +109,14 @@ export default function BrandStep({
       .extractBrandLanguage(f)
       .then((res) => onGuidelineChange({ name: f.name, text: res.text, chars: res.chars }))
       .catch((err) => {
-        const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
-        // A rejected file must leave any already-accepted document alone.
+        // ApiError.message already carries the backend's `detail` (or a
+        // generic message for 429/5xx infra failures) — read it rather than
+        // re-parsing `err.body.detail` directly, which would bypass that
+        // sanitization. A rejected file must leave any already-accepted
+        // document alone.
         setDocError(
-          typeof detail === 'string'
-            ? detail
+          err instanceof ApiError && err.message
+            ? err.message
             : 'We couldn’t read that document. Try another file.',
         );
       })

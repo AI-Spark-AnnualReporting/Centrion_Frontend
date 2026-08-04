@@ -976,6 +976,10 @@ export default function QuarterlyReportForm({
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
+      // 429/5xx come from infra/upstream provider failures, not deliberate
+      // FastAPI responses — ApiError.message is already the sanitized
+      // generic string there, so skip re-parsing the raw body.
+      if (err.status === 429 || err.status >= 500) return err.message;
       const body = err.body as
         | { detail?: string | { error?: string } | Array<{ msg?: string }> }
         | null;
@@ -985,6 +989,7 @@ export default function QuarterlyReportForm({
       if (detail && typeof detail === 'object' && 'error' in detail && detail.error) {
         return detail.error;
       }
+      return err.message;
     }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
