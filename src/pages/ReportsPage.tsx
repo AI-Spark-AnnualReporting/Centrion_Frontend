@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
@@ -434,12 +434,10 @@ export default function ReportsPage() {
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
+  // ApiError.message already carries the backend's `detail` (or a generic
+  // message for 429/5xx infra failures) — read it rather than re-parsing
+  // `err.body.detail` directly, which would bypass that sanitization.
   const extractApiError = (err: unknown): string => {
-    if (err instanceof ApiError) {
-      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
-      if (typeof body?.detail === 'string') return body.detail;
-      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
-    }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
   };

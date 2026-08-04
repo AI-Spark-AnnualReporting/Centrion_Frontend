@@ -27,9 +27,34 @@ describe("ApiError.message", () => {
 
   it("falls back to the status line when there is nothing usable", () => {
     for (const body of [null, "gateway timeout", {}, { detail: "" }, { detail: [{}] }]) {
-      expect(new ApiError(500, "Internal Server Error", body, "/x").message).toBe(
-        "API 500 Internal Server Error — /x",
+      expect(new ApiError(404, "Not Found", body, "/x").message).toBe(
+        "API 404 Not Found — /x",
       );
     }
+  });
+
+  it("hides raw detail behind a generic message for 429/5xx infra failures", () => {
+    const rateLimited = new ApiError(
+      429,
+      "Too Many Requests",
+      {
+        detail:
+          "RateLimitError: Error code: 429 - {'error': {'message': 'You have no credits remaining...', 'type': 'insufficient_quota', 'code': 'credit_balance_exhausted'}}",
+      },
+      "/x",
+    );
+    expect(rateLimited.message).toBe(
+      "The system is temporarily unavailable. Please try again in a few minutes.",
+    );
+
+    const serverError = new ApiError(500, "Internal Server Error", { detail: "Traceback (most recent call last)..." }, "/x");
+    expect(serverError.message).toBe(
+      "The system is temporarily unavailable. Please try again in a few minutes.",
+    );
+
+    // Status/url/body are still preserved for debugging even though the
+    // message is generic.
+    expect(rateLimited.status).toBe(429);
+    expect(rateLimited.url).toBe("/x");
   });
 });

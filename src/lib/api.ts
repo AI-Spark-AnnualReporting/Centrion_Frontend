@@ -231,6 +231,15 @@ function detailOf(body: unknown): string | null {
   return null;
 }
 
+// 429/5xx responses come from infra or an upstream provider (rate limits,
+// exhausted API credits, crashes) rather than deliberate FastAPI
+// HTTPExceptions, so `detail` there is often a raw exception string never
+// meant for an end user — e.g. a leaked
+// `RateLimitError: ... insufficient_quota ...` blob. Those always get this
+// generic line instead, regardless of what's in `detail`.
+const SERVICE_UNAVAILABLE_MESSAGE =
+  "The system is temporarily unavailable. Please try again in a few minutes.";
+
 export class ApiError<TBody = unknown> extends Error {
   constructor(
     public status: number,
@@ -238,11 +247,18 @@ export class ApiError<TBody = unknown> extends Error {
     public body: TBody,
     public url: string,
   ) {
-    // Prefer the backend's own words. Callers all over the app surface
-    // `err.message` straight into the UI, and "API 409 Conflict — http://…"
-    // tells the user nothing while "Email already registered" tells them
-    // exactly what to fix. Status and url stay on the instance for debugging.
-    super(detailOf(body) ?? `API ${status} ${statusText} — ${url}`);
+    // Prefer the backend's own words for deliberate business-logic rejections
+    // (403/404/409/422 etc. — "Email already registered" tells the user
+    // exactly what to fix). Callers all over the app surface `err.message`
+    // straight into the UI, and "API 409 Conflict — http://…" tells the user
+    // nothing while "Email already registered" tells them exactly what to
+    // fix. Status and url stay on the instance for debugging either way.
+    const isInfraFailure = status === 429 || status >= 500;
+    super(
+      isInfraFailure
+        ? SERVICE_UNAVAILABLE_MESSAGE
+        : (detailOf(body) ?? `API ${status} ${statusText} — ${url}`),
+    );
     this.name = "ApiError";
   }
 }

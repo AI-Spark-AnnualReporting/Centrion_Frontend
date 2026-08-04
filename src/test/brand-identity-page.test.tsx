@@ -35,6 +35,19 @@ vi.mock("@/lib/api", () => ({
     detectLogoColors: (uri: string) => detectLogoColors(uri),
   },
   quarterlyReports: { getColorPalettesGlobal: () => getColorPalettesGlobal() },
+  ApiError: class ApiError extends Error {
+    status: number;
+    body: unknown;
+    url: string;
+    constructor(status: number, statusText: string, body: unknown, url: string) {
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      super(typeof detail === "string" && detail ? detail : `API ${status} ${statusText} — ${url}`);
+      this.status = status;
+      this.body = body;
+      this.url = url;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 const { default: BrandIdentityPage } = await import("@/pages/BrandIdentityPage");

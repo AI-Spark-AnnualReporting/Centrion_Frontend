@@ -19,14 +19,11 @@ import { INK, MUTED, FAINT, BRAND } from '@/components/earnings/tokens';
 
 const POLL_INTERVAL_MS = 3000;
 
-// Pull a readable message out of an ApiError body (FastAPI `detail`).
+// ApiError.message already carries the backend's `detail` (or a generic
+// message for 429/5xx infra failures) — read it rather than re-parsing
+// `err.body.detail` directly, which would bypass that sanitization.
 function apiErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    const detail = (err.body as { detail?: unknown } | null)?.detail;
-    if (typeof detail === 'string' && detail) return detail;
-    return err.message || fallback;
-  }
-  return err instanceof Error ? err.message : fallback;
+  return err instanceof Error ? err.message || fallback : fallback;
 }
 
 // Read an approve 409 blocker list defensively from the ApiError body.

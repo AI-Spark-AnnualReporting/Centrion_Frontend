@@ -22,13 +22,11 @@ import { AttachedReportCard } from './AttachedReportCard';
    review-thread payload, which we hand straight to the caller so the thread
    modal can paint without a second request. */
 
-// Pull the user-facing string out of a FastAPI {"detail": "…"} body — the
-// backend writes these to be shown as-is.
+// ApiError.message already carries the backend's `detail` (or a generic
+// message for 429/5xx infra failures) — read it rather than re-parsing
+// `err.body.detail` directly, which would bypass that sanitization.
 function detailMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    const detail = (err.body as { detail?: unknown } | null)?.detail;
-    if (typeof detail === 'string' && detail) return detail;
-  }
+  if (err instanceof ApiError) return err.message || fallback;
   return fallback;
 }
 

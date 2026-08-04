@@ -3,7 +3,7 @@ import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
 import { Spinner } from '@/components/shared/Spinner';
-import { auth, companies, quarterlyReports } from '@/lib/api';
+import { ApiError, auth, companies, quarterlyReports } from '@/lib/api';
 import type { BrandColors, ColorPalette } from '@/types/brand';
 import {
   DOC_ACCEPT,
@@ -144,10 +144,13 @@ export default function BrandIdentityPage() {
       .extractBrandLanguage(f)
       .then((res) => setIdentity(res.text))
       .catch((err) => {
-        const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
+        // ApiError.message already carries the backend's `detail` (or a
+        // generic message for 429/5xx infra failures) — read it rather than
+        // re-parsing `err.body.detail` directly, which would bypass that
+        // sanitization.
         setDocError(
-          typeof detail === 'string'
-            ? detail
+          err instanceof ApiError && err.message
+            ? err.message
             : 'We couldn’t read that document. Try another file.',
         );
       })
