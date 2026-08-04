@@ -109,6 +109,12 @@ import type {
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
+  SparkOverview,
+  SparkReportRow,
+  SparkUserRow,
+} from "@/types/spark";
+import { normalizeTrends } from "@/types/spark";
+import type {
   CandidatesResponse,
   CertificateVerification,
   CertifiedRun,
@@ -3512,6 +3518,41 @@ export const adminConsole = {
     request<unknown>(`/api/v1/admin/departments/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+};
+
+// ---------------------------------------------------------------------------
+// Spark console — platform-owner (cross-tenant) reads. Unlike `admin` /
+// `adminConsole` above, these are NOT scoped to the caller's company: they span
+// every tenant, and the backend authorises them on the `spark_admin` role.
+// Read-only by design; anything that mutates a tenant goes through that
+// tenant's own admin endpoints.
+// ---------------------------------------------------------------------------
+
+export const spark = {
+  // Cards + the Companies tab in one call — each company carries its own user
+  // and report counts, so the tab needs nothing further.
+  overview: () => request<SparkOverview>("/api/v1/spark/overview"),
+
+  // Flat lists; the page groups them by company_id. Tolerates a bare array or a
+  // `{ users: [...] }` / `{ reports: [...] }` envelope, same as the admin lists.
+  listUsers: () =>
+    request<SparkUserRow[] | { users: SparkUserRow[] }>(
+      "/api/v1/spark/users",
+    ).then((raw) => unwrap<SparkUserRow[]>(raw, "users") ?? []),
+
+  listReports: () =>
+    request<SparkReportRow[] | { reports: SparkReportRow[] }>(
+      "/api/v1/spark/reports",
+    ).then((raw) => unwrap<SparkReportRow[]>(raw, "reports") ?? []),
+
+  // Report counts by type over time, for the comparison chart. `year` buckets
+  // by month (zero-filled); omitting it buckets by year. `month` is supported
+  // server-side but deliberately unused here — it collapses the response to a
+  // single bucket. 422 if month is sent without a year.
+  reportTrends: (params: { year?: number; company_id?: string } = {}) =>
+    request<unknown>("/api/v1/spark/report-trends", { query: params }).then(
+      normalizeTrends,
+    ),
 };
 
 // ---------------------------------------------------------------------------

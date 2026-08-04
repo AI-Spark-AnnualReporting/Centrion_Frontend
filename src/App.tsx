@@ -44,6 +44,13 @@ const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
 );
 
+// Spark console — the platform-owner (cross-tenant) view. Code-split; only
+// ever loaded for the `spark_admin` role.
+const SparkDashboardPage = lazy(
+  () => import("./pages/spark/SparkDashboardPage"),
+);
+const SparkSectionPage = lazy(() => import("./pages/spark/SparkSectionPage"));
+
 // Annual Report (Cycles) — admin-only. Rendered inside AppLayout so the main
 // sidebar + topbar stay (same shell as the Admin Console). Code-split.
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
@@ -183,6 +190,16 @@ const App = () => (
               path="/admin-console/departments"
               element={<AdminDepartmentsPage />}
             />
+          </Route>
+          {/* Spark console — the only cross-tenant page in the app, so it is
+              gated on the platform-owner role alone. ProtectedRoute also pins
+              that role here: every other page reads a company off the JWT,
+              which Spark doesn't have. */}
+          <Route element={<ProtectedRoute requiredRole="spark_admin" />}>
+            <Route path="/spark" element={<SparkDashboardPage />} />
+            {/* One page for all three lists — it differs only by columns. An
+                unknown section redirects itself back to the overview. */}
+            <Route path="/spark/:section" element={<SparkSectionPage />} />
           </Route>
           {/* Annual Report (Cycles) — admin + IR, inside the main shell so the
               sidebar + topbar stay. Admins manage cycles; IR is read-only

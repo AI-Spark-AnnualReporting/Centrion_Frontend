@@ -86,6 +86,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: me.email,
       full_name: me.full_name,
       role: (me.role as AuthUser["role"]) ?? "department_user",
+      // Same reason as onboarding_completed below — this object replaces the
+      // stored one wholesale, so a field left out here is a field erased.
+      display_role: me.display_role ?? null,
       company_id: me.company_id,
       company_name: me.company_name,
       must_change_password: me.must_change_password ?? false,

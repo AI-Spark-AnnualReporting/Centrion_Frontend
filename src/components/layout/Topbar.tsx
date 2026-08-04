@@ -15,6 +15,9 @@ export function Topbar({ pageName }: TopbarProps) {
     navigate('/login', { replace: true });
   };
 
+  // Backend-resolved label, falling back to the raw role for a session stored
+  // before the backend sent `display_role`.
+  const roleLabel = user?.display_role || user?.role;
   const displayName = user?.full_name ?? 'Ahmad Al-Rashid';
   const initials = (user?.full_name ?? 'AR')
     .split(' ')
@@ -39,7 +42,7 @@ export function Topbar({ pageName }: TopbarProps) {
         <div className="tb-av">{initials}</div>
         <div>
           <span className="tb-uname">{displayName}</span>
-          <span className="tb-urole">{user?.role ? `${user.role} · ${user.email}` : 'ESG Manager · SAMA Licensed'}</span>
+          <span className="tb-urole">{roleLabel ? `${roleLabel} · ${user?.email}` : 'ESG Manager · SAMA Licensed'}</span>
         </div>
         <button
           type="button"

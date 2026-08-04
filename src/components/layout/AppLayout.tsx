@@ -5,6 +5,7 @@ import { Topbar } from './Topbar';
 import { FloatingChatbot } from '../shared/FloatingChatbot';
 import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
 import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
+import { useAuth } from '@/context/AuthContext';
 
 const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
@@ -27,6 +28,10 @@ const PAGE_NAMES: Record<string, string> = {
   '/annual-report': 'Annual Report',
   '/annual-report/cycles/new': 'New Cycle',
   '/earnings/setup': 'Earnings Report',
+  '/spark': 'Spark Admin',
+  '/spark/companies': 'Companies',
+  '/spark/reports': 'Reports',
+  '/spark/users': 'Users',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -61,12 +66,16 @@ const PAGE_NAME_PREFIXES: [string, string][] = [
 
 export function AppLayout() {
   const location = useLocation();
+  const { user } = useAuth();
   const pageName =
     PAGE_NAMES[location.pathname] ??
     PAGE_NAME_PREFIXES.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ??
     'Command Center';
 
-  const chatbotShown = location.pathname !== '/dashboard';
+  // The copilot answers questions about the caller's company, so it has
+  // nothing to work with for a user who has none (`spark_admin`) — same reason
+  // the notification bell hides itself.
+  const chatbotShown = location.pathname !== '/dashboard' && !!user?.company_id;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched
