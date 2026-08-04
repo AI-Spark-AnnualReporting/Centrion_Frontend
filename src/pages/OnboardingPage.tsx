@@ -535,6 +535,11 @@ export default function OnboardingPage() {
                 setUploadedFiles(files);
                 setStep('processing');
               }}
+              onSkip={() => {
+                sessionStorage.removeItem('centriyon:freshUpload');
+                setUploadedFiles([]);
+                setStep('processing');
+              }}
             />
           )}
         </div>

@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/annual-report/:path*", "destination": "https://ai-annual-reporting-frontend.vercel.app/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

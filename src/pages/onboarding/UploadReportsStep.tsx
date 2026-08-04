@@ -21,11 +21,13 @@ interface RowDef {
   title: string;
   desc: string;
   docType: ReportDocType;
-  required?: boolean;
+  // Surfaced as a chip on the row. Nothing is mandatory — the annual report is the
+  // one that actually builds the dashboard, so it's called out, not enforced.
+  recommended?: boolean;
 }
 
 const ROWS: RowDef[] = [
-  { icon: '📊', title: 'Annual Report', desc: 'Most recent full-year report · PDF, DOCX up to 50 MB', docType: 'annual', required: true },
+  { icon: '📊', title: 'Annual Report', desc: 'Most recent full-year report · PDF, DOCX up to 50 MB', docType: 'annual', recommended: true },
   { icon: '🌱', title: 'Sustainability / ESG Report', desc: 'GRI, TCFD or integrated report · PDF up to 50 MB', docType: 'esg' },
   { icon: '📈', title: 'Financial Statements', desc: 'Audited financials, P&L, balance sheet · PDF up to 50 MB', docType: 'financial' },
   { icon: '📋', title: 'Other Documents', desc: 'Board packs, governance docs, MD&A · any format', docType: 'other' },
@@ -119,7 +121,7 @@ function UploadRow({
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E' }}>{row.title}</span>
-          {row.required && <span className="ob-req">Required</span>}
+          {row.recommended && <span className="ob-req">Recommended</span>}
         </div>
         <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {file ? file.name : row.desc}
@@ -150,8 +152,14 @@ function UploadRow({
 // validated docs up (→ heavy ingest + the live setup screen); "Skip" passes nothing.
 export default function UploadReportsStep({
   onProcess,
+  // Omitted by the standalone Upload Reports page — there's nothing to skip past
+  // there, the user chose to open it.
+  onSkip,
+  submitLabel,
 }: {
   onProcess: (files: UploadedReportFile[]) => void;
+  onSkip?: () => void;
+  submitLabel?: string;
 }) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
@@ -182,21 +190,13 @@ export default function UploadReportsStep({
       .catch(() => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: 'Upload failed — please try again.' } })));
   };
 
-  // A slot counts as usable when the classifier accepted it, or when the user
-  // overrode a rejection. The backend banks the file either way, so both carry a
-  // document_id.
-  const slotUsable = (title: string) => {
-    const st = states[title];
-    return st?.status === 'ok' || (st?.status === 'invalid' && !!overridden[title]);
-  };
-
-  const annualRow = ROWS.find((r) => r.required)!;
   const anyValidating = Object.values(states).some((s) => s?.status === 'validating');
+  // A rejected file still blocks — "Use it anyway" is the way past a classifier
+  // false negative. Nothing else is required.
   const blockingInvalid = ROWS.some(
     (r) => states[r.title]?.status === 'invalid' && !overridden[r.title],
   );
-  const hasAnnual = slotUsable(annualRow.title);
-  const canProcess = !!companyId && !anyValidating && !blockingInvalid && hasAnnual;
+  const canProcess = !!companyId && !anyValidating && !blockingInvalid;
 
   const collected: UploadedReportFile[] = ROWS
     .map((r) => {
@@ -219,8 +219,8 @@ export default function UploadReportsStep({
     <>
       <h2>Upload Your Reports</h2>
       <p>
-        Your annual report is required — it&rsquo;s what we build your dashboard from. The rest are
-        optional, and you can add more later anytime.
+        The more you upload, the smarter your workspace becomes — your annual report is the one we
+        build the dashboard from. Add more later anytime.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
@@ -244,12 +244,14 @@ export default function UploadReportsStep({
         disabled={!canProcess}
         onClick={() => canProcess && onProcess(collected)}
       >
-        {anyValidating
-          ? 'Checking your documents…'
-          : !hasAnnual
-            ? 'Upload your annual report to continue'
-            : 'Process Reports & Build Dashboard →'}
+        {anyValidating ? 'Checking your documents…' : submitLabel ?? 'Process Reports & Build Dashboard →'}
       </button>
+
+      {onSkip && (
+        <button type="button" className="ob-skip" onClick={onSkip}>
+          Skip for now — upload from your dashboard later
+        </button>
+      )}
     </>
   );
 }

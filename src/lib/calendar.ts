@@ -1,7 +1,6 @@
-// Shared calendar/date helpers + constants. Extracted so the Disclosure Timeline
-// card (dashboard) and the IR Calendar page format and place dates identically.
-// Bodies mirror the originals in MeetingsPage.tsx, which are left untouched to
-// avoid regressing the Meetings screen.
+// Shared calendar/date helpers + constants. The single source of truth for the
+// Disclosure Timeline card (dashboard) and the Board & Meetings page, so both
+// format and place dates identically.
 
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const SHORT_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
