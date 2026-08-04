@@ -268,7 +268,8 @@ export default function AssembledReportPage() {
   const bodySections = sections.filter((s) => !isCoverSection(s));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+    // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
       {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} />}
 
       {/* Toolbar */}

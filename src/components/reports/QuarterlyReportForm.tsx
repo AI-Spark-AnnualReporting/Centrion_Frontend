@@ -998,9 +998,12 @@ export default function QuarterlyReportForm({
   const triggerGenerate = () => {
     if (!canGenerate || !companyId) return;
 
-    // Branch A — open existing report: navigate straight to the outline.
+    // Branch A — open existing report. Goes to the extraction review, not straight
+    // to the outline, so there is ONE way into the flow: if figures are still
+    // awaiting confirmation the user sees them, and if not the screen is a
+    // read-only record of what was extracted and they continue on.
     if (isOpenMode && selectedReportId) {
-      navigate(`/quarterly-report/${selectedReportId}/outline`);
+      navigate(`/quarterly-report/${selectedReportId}/extraction`);
       return;
     }
 

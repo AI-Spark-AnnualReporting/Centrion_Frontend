@@ -1705,6 +1705,32 @@ export const quarterlyReports = {
     );
   },
 
+  // ── Extraction review (step 2) ──
+  // The figures the mapper matched exactly (already stored) plus the ones it
+  // wasn't confident enough about, which the user confirms one by one. Nothing in
+  // `pending` is in the report yet.
+  getExtractionReview: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { signal },
+    ),
+
+  // Apply the yes/no answers. Anything not accepted — rejected OR left unanswered
+  // — is dropped, so a figure only ever lands in the report with a human's yes.
+  submitExtractionReview: (
+    companyId: string,
+    reportId: string,
+    decisions: import("@/types/quarterly").ExtractionReviewDecision[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { method: "POST", body: { decisions } },
+    ),
+
   addDriver: (
     companyId: string,
     reportId: string,

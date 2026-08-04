@@ -68,7 +68,8 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100% - 48px)',
+        // See OutlinePage: the 48px double-counted the stepper rendered inside.
+        height: '100%',
         background: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
