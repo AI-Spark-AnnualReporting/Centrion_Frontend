@@ -11,8 +11,8 @@ import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/dis
  * few recently-filed reports plus upcoming disclosure deadlines and board meetings,
  * assembled entirely from data the app already serves (see lib/disclosure.ts). For
  * a newly-registered company with no activity yet, the derived "next report due"
- * milestones carry a CTA into the relevant report flow. "Full calendar →" opens the
- * full IR Calendar page.
+ * milestones carry a CTA into the relevant report flow. "Full calendar →" opens
+ * Board & Meetings, which renders these same events alongside real meetings.
  */
 
 const ACCENT = '#4040C8';
@@ -66,7 +66,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
         </div>
         <button
           type="button"
-          onClick={() => navigate('/ir-calendar')}
+          onClick={() => navigate('/meetings')}
           style={{ fontSize: 12, fontWeight: 700, color: ACCENT, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
         >
           Full calendar →

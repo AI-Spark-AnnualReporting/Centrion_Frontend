@@ -16,7 +16,6 @@ const PAGE_NAMES: Record<string, string> = {
   '/meetings': 'Board & Meetings',
   '/comms': 'Communication Hub',
   '/stakeholders': 'Leadership',
-  '/ir-calendar': 'IR Calendar',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',

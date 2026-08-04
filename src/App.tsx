@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
@@ -48,9 +48,6 @@ const AdminDepartmentsPage = lazy(
 // sidebar + topbar stay (same shell as the Admin Console). Code-split.
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
-
-// IR Calendar — admin + IR. Code-split; renders inside AppLayout.
-const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
 
 // Compliance Validation — 3-step wizard (Set up → Review → Gate). Code-split;
 // the run id in the URL makes Review and Gate deep-linkable.
@@ -154,6 +151,10 @@ const App = () => (
           />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
+          {/* The IR Calendar was merged into Board & Meetings — its disclosure
+              deadlines now render on that page's grid. Kept as a redirect so
+              old bookmarks and links don't 404. */}
+          <Route path="/ir-calendar" element={<Navigate to="/meetings" replace />} />
           <Route path="/comms" element={<CommunicationHubPage />} />
           {/* Notification deep-link — opens the thread-view modal on the hub. */}
           <Route
@@ -194,7 +195,6 @@ const App = () => (
               path="/annual-report/cycles/:cycleId"
               element={<CycleDetailPage />}
             />
-            <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>
       </Route>
