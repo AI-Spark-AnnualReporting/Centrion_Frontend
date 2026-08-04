@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import {
   communications,
   earnings,
+  quarterlyReports,
   ApiError,
   type CommunicationMember,
   type ReviewComment,
+  type ReviewSection,
   type ReviewViewResponse,
 } from '@/lib/api';
 import type { EarningsProducedSection } from '@/types/earnings';
+import type { AssembledSection, BrandColors } from '@/types/quarterly';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
+import { SectionContent } from '@/components/quarterly/SectionContent';
+import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
+import { isCoverSection } from '@/components/quarterly/sectionState';
 import { initials, relativeTime } from './helpers';
 
 /* Reviewer screen — the "Open as reviewer" destination.
@@ -22,11 +29,13 @@ import { initials, relativeTime } from './helpers';
    Approve is rendered DISABLED, not hidden, when can_act && !can_approve.
 
    Section bodies: the review payload carries metadata only (id/order/title),
-   where `id` is the earnings `section_code` verbatim ("s01_cover"). The content
-   comes from earnings.getEarningsSections() and is paired on that code. The
-   review list is the source of truth — it returns only the ticked sections
-   (e.g. 11 of 19), so iterating it drops the extras for free. Any section
-   without a content match still renders its heading and Add comment. */
+   where `id` is the `section_code` verbatim ("s01_cover"). The content comes
+   from the report's own endpoint — quarterly reports from
+   quarterlyReports.getAssembled(), everything else from
+   earnings.getEarningsSections() — and is paired on that code. The review list
+   is the source of truth — it returns only the ticked sections (e.g. 11 of 19),
+   so iterating it drops the extras for free. Any section without a content
+   match still renders its heading and Add comment. */
 
 // FastAPI {"detail": "…"} strings are written to be shown to the user as-is.
 function detailMessage(err: unknown, fallback: string): string {
@@ -39,6 +48,47 @@ function detailMessage(err: unknown, fallback: string): string {
 
 // Report-level comments come back under the JSON key "null".
 const REPORT_LEVEL_KEY = 'null';
+
+// Anchors for the in-document sections, so the comments rail can jump to one.
+const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`;
+
+// Quarterly reports assemble from their own endpoint; every other type reads
+// through the earnings sections endpoint.
+const QUARTERLY = 'quarterly';
+
+// Document presentation, matched to AssembledReportPage so the reviewer reads
+// exactly what the creator approved — same page width, numbering, and accents.
+const DOC_WIDTH = 820;
+const MONO = "'DM Mono', 'Courier New', monospace";
+const BRAND = 'var(--brand-primary, #4040C8)';
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+// /assemble returns a leaner section than the earnings one — and may hand back
+// table content already parsed, which SectionRenderer (it calls .trim()) can't
+// take. Normalise to a string and fill the earnings-only fields with the
+// read-only defaults the renderer expects.
+export function assembledToProduced(s: AssembledSection): EarningsProducedSection {
+  const raw = s.content as unknown;
+  return {
+    section_code: s.section_code,
+    title: s.title,
+    display_order: s.display_order ?? 0,
+    source_type: s.source_type ?? null,
+    mode: s.mode,
+    status: 'produced',
+    content: raw == null ? null : typeof raw === 'string' ? raw : JSON.stringify(raw),
+    included: true,
+    feeder_status: 'ready',
+    feeder_message: null,
+    source_label: null,
+    source_ref: null,
+    confidence: null,
+    flag: null,
+    grounding_flag: null,
+    grounding_acknowledged: false,
+    edited: false,
+  };
+}
 
 const ICON_SHARE = (
   <svg width="17" height="17" viewBox="0 0 18 18" fill="none">
@@ -64,9 +114,34 @@ const RAIL_LABEL: React.CSSProperties = {
   marginBottom: 10,
 };
 
-function CommentRow({ comment, showSection }: { comment: ReviewComment; showSection?: boolean }) {
+// `onJump` makes the whole row a target that scrolls the document to the
+// section this comment is on. Omitted for report-level comments (no section to
+// scroll to) and for the rows already rendered inside their own section.
+function CommentRow({
+  comment,
+  showSection,
+  onJump,
+}: {
+  comment: ReviewComment;
+  showSection?: boolean;
+  onJump?: () => void;
+}) {
   return (
-    <div style={{ display: 'flex', gap: 9, padding: '9px 0', borderTop: '1px solid #F4F5FB' }}>
+    <div
+      style={{ display: 'flex', gap: 9, padding: '9px 0', borderTop: '1px solid #F4F5FB', cursor: onJump ? 'pointer' : undefined }}
+      {...(onJump && {
+        role: 'button',
+        tabIndex: 0,
+        title: `Go to ${comment.section_title ?? 'this section'}`,
+        onClick: onJump,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onJump();
+          }
+        },
+      })}
+    >
       <span
         style={{
           width: 26,
@@ -120,6 +195,9 @@ export function ReviewerView({
   onChanged?: () => void;
 }) {
   const { toast } = useToast();
+  // getAssembled is company-scoped in its path; the earnings endpoint isn't.
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +215,16 @@ export function ReviewerView({
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, EarningsProducedSection>>({});
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
+  // Quarterly only: the cover page's real values + brand accents, so the review
+  // renders the same document AssembledReportPage does. Null until loaded — the
+  // cover is skipped rather than drawn with "Your Company" placeholders.
+  const [cover, setCover] = useState<{
+    companyName: string | null;
+    period: string | null;
+    title: string | null;
+    preparedOn: string | null;
+  } | null>(null);
+  const [brand, setBrand] = useState<BrandColors | null>(null);
 
   // Approve / request-changes note panels.
   const [panel, setPanel] = useState<'approve' | 'send_back' | null>(null);
@@ -170,15 +258,42 @@ export function ReviewerView({
       .catch(() => {});
   }, []);
 
-  // Pull the report body once we know the report id. Company-scoped on the
-  // backend, so a non-owner reviewer can read it. Non-earnings report types
-  // simply won't resolve here — the headings still render without a body.
+  // Pull the report body once we know the report id and type. Both endpoints
+  // are company-scoped on the backend, so a non-owner reviewer can read them.
+  // A type neither branch resolves still renders its headings without a body.
   const reportId = data?.report?.id;
+  const reportType = data?.report?.report_type;
+  // Read off `data` here, not inside the effect, so re-fetching the review (a
+  // posted comment reloads it) doesn't re-pull the whole document body.
+  const userCompanyName = user?.company_name ?? null;
   useEffect(() => {
-    if (!reportId) return;
+    if (!reportId || !reportType) return;
     let cancelled = false;
-    earnings
-      .getEarningsSections(reportId)
+    const load =
+      reportType === QUARTERLY && companyId
+        ? quarterlyReports.getAssembled(companyId, reportId).then((res) => {
+            if (!cancelled) {
+              // /assemble often omits `header` entirely. AssembledReportPage
+              // covers the company name from the JWT (see its `companyName`) —
+              // do the same, or the cover reads "Your Company". Nothing else
+              // gets a fallback there, so nothing else gets one here: the point
+              // is to show the cover the creator approved, not a better one.
+              const h = res.header ?? null;
+              setCover({
+                companyName: h?.company_name ?? userCompanyName,
+                period: h?.period_label ?? null,
+                title: h?.title ?? null,
+                preparedOn: h?.prepared_on ?? null,
+              });
+              setBrand(res.brand ?? res.cover?.brand ?? null);
+            }
+            return {
+              sections: res.sections.map(assembledToProduced),
+              cover_template_key: res.cover?.cover_template_key ?? null,
+            };
+          })
+        : earnings.getEarningsSections(reportId);
+    load
       .then((res) => {
         if (cancelled) return;
         const byCode: Record<string, EarningsProducedSection> = {};
@@ -190,7 +305,24 @@ export function ReviewerView({
     return () => {
       cancelled = true;
     };
-  }, [reportId]);
+  }, [reportId, reportType, companyId, userCompanyName]);
+
+  // Earnings brand accents. Quarterly gets its brand from /assemble above;
+  // earnings keeps it behind the cover-template endpoint, which is the same
+  // source EarningsPreviewPage reads and works on locked reports.
+  useEffect(() => {
+    if (!reportId || !reportType || reportType === QUARTERLY) return;
+    let cancelled = false;
+    earnings
+      .getEarningsCoverSelection(reportId)
+      .then((res) => {
+        if (!cancelled && res?.brand) setBrand(res.brand);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId, reportType]);
 
   const bySection = data?.comments_by_section ?? {};
   const reportLevel = data?.comments_by_section?.[REPORT_LEVEL_KEY] ?? [];
@@ -199,6 +331,13 @@ export function ReviewerView({
   const openComposer = (sectionId: string | null) => {
     setComposerFor(sectionId);
     setCommentBody('');
+  };
+
+  // Rail comment → its section in the document. A comment can outlive the
+  // section it was left on (the report was regenerated with a different
+  // outline), so a missing anchor is a no-op rather than a crash.
+  const jumpToSection = (sectionId: string) => {
+    document.getElementById(sectionDomId(sectionId))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const postComment = async (sectionId: string | null, sectionTitle: string | null) => {
@@ -276,7 +415,22 @@ export function ReviewerView({
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null;
   const canAct = data?.can_act ?? false;
   const canApprove = data?.can_approve ?? false;
-  const sections = data?.sections ?? [];
+  // The review payload's section list is earnings-only on the backend — it comes
+  // back empty for a quarterly report even when the report is fully assembled,
+  // which rendered the whole screen as "no generated sections yet". Fall back to
+  // the sections we already fetched for the bodies. Comments key off
+  // section_code either way, so posting and grouping are unaffected.
+  const allSections: ReviewSection[] = data?.sections?.length
+    ? data.sections
+    : Object.values(bodies)
+        .sort((a, b) => a.display_order - b.display_order)
+        .map((s, i) => ({ id: s.section_code, order: i + 1, title: s.title, type: s.mode }));
+  // Quarterly renders as the assembled document: cover as its own page, so it
+  // drops out of the numbered body list exactly as AssembledReportPage does.
+  const isQuarterly = reportType === QUARTERLY;
+  const sections = isQuarterly
+    ? allSections.filter((s) => !isCoverSection({ section_code: s.id }))
+    : allSections;
   // Once the report is approved (or otherwise finished) the review is over —
   // reassign / request-changes no longer make sense even though the backend
   // still reports can_act. Gate the reviewer actions on the review being open.
@@ -437,34 +591,71 @@ export function ReviewerView({
                 </div>
               )}
 
-              {sections.map((s) => {
+              {/* Quarterly cover — page 1, same renderer and width the assembled
+                  report uses. Skipped until the real header values load. */}
+              {isQuarterly && cover && (
+                <div
+                  style={{
+                    marginBottom: 20,
+                    ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
+                    ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+                  }}
+                >
+                  <CoverRenderer
+                    companyName={cover.companyName}
+                    period={cover.period}
+                    title={cover.title}
+                    preparedOn={cover.preparedOn}
+                    brand={brand}
+                    templateKey={coverTemplateKey}
+                    maxWidth={DOC_WIDTH}
+                  />
+                </div>
+              )}
+
+              {/* The document itself. Quarterly assembles onto one page; the
+                  earnings preview keeps a card per section — each matches its
+                  own assembled screen. The brand vars drive report-content
+                  accents (headings, table headers, figures) in both. */}
+              <div
+                className={isQuarterly && sections.length > 0 ? 'card' : undefined}
+                style={{
+                  ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
+                  ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+                  ...(isQuarterly && sections.length > 0
+                    ? { padding: '32px 40px', maxWidth: DOC_WIDTH, margin: '0 auto' }
+                    : {}),
+                }}
+              >
+              {sections.map((s, i) => {
                 const comments = bySection[s.id] ?? [];
                 const open = composerFor === s.id;
                 // section.id is the earnings section_code verbatim.
                 const body = bodies[s.id];
                 return (
-                  <div key={s.id} style={{ marginBottom: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 10 }}>
+                  <div key={s.id} id={sectionDomId(s.id)} style={{ marginBottom: isQuarterly ? 34 : 16, scrollMarginTop: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isQuarterly ? 10 : 11, marginBottom: isQuarterly ? 14 : 10 }}>
                       <span
                         style={{
-                          minWidth: 24,
-                          height: 24,
-                          padding: '0 7px',
-                          borderRadius: 7,
                           flexShrink: 0,
-                          background: '#E6E7F5',
-                          color: '#5A6080',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 11.5,
-                          fontWeight: 800,
-                          fontVariantNumeric: 'tabular-nums',
+                          fontWeight: isQuarterly ? 700 : 800,
+                          ...(isQuarterly
+                            ? { fontFamily: MONO, fontSize: 12, color: BRAND }
+                            : // EarningsPreviewPage: faint "01", tabular figures.
+                              { fontSize: 11, color: '#9BA3C4', fontVariantNumeric: 'tabular-nums' }),
                         }}
                       >
-                        {s.order}
+                        {pad2(i + 1)}
                       </span>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 800, color: '#1A1D2E' }}>
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          fontWeight: 800,
+                          color: BRAND,
+                          ...(isQuarterly ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
+                        }}
+                      >
                         {s.title}
                       </span>
                       {comments.length > 0 && (
@@ -510,10 +701,17 @@ export function ReviewerView({
                       </button>
                     </div>
 
-                    {/* Section body — paired on section_code. */}
-                    <div className="card" style={{ padding: '18px 22px' }}>
+                    {/* Section body — paired on section_code. Quarterly reads
+                        through the quarterly renderer (same tables and prose the
+                        assembled report draws) and sits directly on the document
+                        page rather than in its own card. */}
+                    <div className={isQuarterly ? undefined : 'card'} style={isQuarterly ? undefined : { padding: '18px 22px' }}>
                       {body ? (
-                        <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
+                        isQuarterly ? (
+                          <SectionContent section={body} />
+                        ) : (
+                          <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
+                        )
                       ) : (
                         <div style={{ fontSize: 12.5, color: '#9BA3C4', fontStyle: 'italic' }}>
                           This section hasn't been generated yet.
@@ -550,9 +748,10 @@ export function ReviewerView({
                   </div>
                 );
               })}
+              </div>
 
               {/* Report-level comments (section_id: null) */}
-              <div className="card" style={{ padding: '16px 20px' }}>
+              <div className="card" style={{ padding: '16px 20px', maxWidth: isQuarterly ? DOC_WIDTH : undefined, margin: isQuarterly ? '16px auto 0' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: '#1A1D2E' }}>
                     On the report as a whole
@@ -715,7 +914,15 @@ export function ReviewerView({
                     No comments yet. Click “Add comment” on a section.
                   </div>
                 ) : (
-                  allComments.map((c) => <CommentRow key={c.id} comment={c} showSection />)
+                  allComments.map((c) => (
+                    <CommentRow
+                      key={c.id}
+                      comment={c}
+                      showSection
+                      // Report-level comments have no section to scroll to.
+                      onJump={c.section_id ? () => jumpToSection(c.section_id!) : undefined}
+                    />
+                  ))
                 )}
               </div>
 

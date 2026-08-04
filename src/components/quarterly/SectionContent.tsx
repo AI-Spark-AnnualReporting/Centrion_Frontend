@@ -16,7 +16,10 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
-export function SectionContent({ section }: { section: ProducedSection }) {
+//
+// Typed on the two fields it actually reads, so the reviewer view can pass the
+// same section it holds for the earnings renderer without a cast.
+export function SectionContent({ section }: { section: Pick<ProducedSection, 'mode' | 'content'> }) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
   // rather than a JSON string. Normalise to a string so `.trim()`/JSON.parse work.

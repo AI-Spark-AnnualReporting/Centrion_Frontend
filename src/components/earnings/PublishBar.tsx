@@ -1,14 +1,7 @@
 import { useState } from 'react';
 import type { EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
-import { INK, MUTED, FAINT, ACCENT, DANGER } from './tokens';
-
-// "2026-07-30T09:16:44Z" → "Jul 30, 2026" (mirrors EarningsReportCard's date format).
-function formatApprovedDate(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
+import { ReportStatusCard } from '@/components/shared/ReportStatusCard';
+import { INK, MUTED, FAINT, DANGER } from './tokens';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
@@ -74,30 +67,7 @@ export function PublishBar({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Status */}
-      <div className="card" style={{ padding: '14px 16px' }}>
-        <SectionHeader>Report status</SectionHeader>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: '50%',
-              background: locked ? '#10B981' : ACCENT,
-              flexShrink: 0,
-            }}
-          />
-          <span style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>
-            {locked ? 'Approved' : 'Draft'}
-          </span>
-          <span style={{ fontSize: 12, color: MUTED, marginLeft: 2 }}>
-            {locked
-              ? formatApprovedDate(approvedAt ?? null)
-                ? `· approved ${formatApprovedDate(approvedAt ?? null)}`
-                : '· final & locked'
-              : '· editing in progress'}
-          </span>
-        </div>
-      </div>
+      <ReportStatusCard approved={locked} approvedAt={approvedAt} />
 
       {/* Optional report details (rendered only when the page supplies them) */}
       {details && details.length > 0 && (

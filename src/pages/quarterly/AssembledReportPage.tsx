@@ -9,6 +9,8 @@ import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker'
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
+import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
 import type {
   ProducedSection,
@@ -70,14 +72,6 @@ function readApprovalStatus(res: unknown): { approved: boolean; approvedAt: stri
     asStr(pick(res, 'approvedAt')) ??
     asStr(pick(res, 'locked_at'));
   return { approved: !!approved, approvedAt };
-}
-
-// "2026-04-26T07:47:38..." → "Apr 26, 2026" for the Approved & Locked badge.
-function formatApprovedDate(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 // The assemble endpoint returns produced sections only. Map to a ProducedSection
@@ -286,7 +280,7 @@ export default function AssembledReportPage() {
             <>
               <span className="badge b-gn" style={{ fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Approved &amp; Locked{approvedAt ? ` · ${formatApprovedDate(approvedAt)}` : ''}
+                Approved &amp; Locked{approvedAt ? ` · ${formatApprovedDate(approvedAt) ?? ''}` : ''}
               </span>
               <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
             </>
@@ -332,7 +326,10 @@ export default function AssembledReportPage() {
             <button className="bs" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => setRetryKey((k) => k + 1)}>Retry</button>
           </div>
         ) : (
-          <div style={{ maxWidth: DOC_WIDTH, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          // Document centred, with the Communication Hub rail alongside it — the
+          // same review & approval panel the earnings preview mounts.
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 18 }}>
+            <div style={{ flex: `0 1 ${DOC_WIDTH}px`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Cover — page 1 */}
             <CoverRenderer
               companyName={companyName}
@@ -386,6 +383,17 @@ export default function AssembledReportPage() {
                 );
               })}
             </div>
+          </div>
+
+            {/* Rail — status card then review & approval, the same order and
+                cards the earnings preview stacks. The panel's Draft/In-review
+                radios stay hidden: this status card owns that. */}
+            {reportId && (
+              <div style={{ width: 290, flexShrink: 0, position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <ReportStatusCard approved={approved} approvedAt={approvedAt} />
+                <ReportHubPanel reportId={reportId} showStatus={false} readOnly={approved} />
+              </div>
+            )}
           </div>
         )}
       </div>
