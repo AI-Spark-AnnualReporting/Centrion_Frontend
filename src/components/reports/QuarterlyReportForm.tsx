@@ -75,13 +75,14 @@ function humaniseMetric(slug: string): string {
     .join(' ');
 }
 
-// Two upload lanes: narrative documents (PDF/DOCX → vision + chunks) and the
-// dedicated financial-data lane (Excel/CSV → lean, exact figure extraction).
+// Two upload lanes with no overlap: narrative documents (PDF/DOCX) supply the
+// prose and NO figures, and the financial-data lane (Excel/CSV/Word) supplies
+// every number, read as exact cells with no OCR in the path.
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const ACCEPTED_FIN_EXT = ['.xlsx', '.csv'] as const;
+const ACCEPTED_FIN_EXT = ['.xlsx', '.csv', '.docx'] as const;
 const ACCEPTED_FIN_ATTR = ACCEPTED_FIN_EXT.join(',');
-const MAX_DOCUMENTS = 5;   // combined cap across both lanes
+const MAX_DOCUMENTS = 10;  // combined cap across both lanes (backend: MAX_QUARTERLY_DOCUMENTS)
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -438,16 +439,17 @@ export default function QuarterlyReportForm({
   const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Dedicated Excel/CSV lane — exact figures via the lean spreadsheet flow. No
-  // language check (numbers, not prose). Currency + scale are auto-detected server
-  // side (sheet units → prior-period magnitude cross-check → LLM), so no inputs.
+  // Dedicated financial-data lane (Excel/CSV/Word) — exact figures via the lean
+  // spreadsheet flow. No language check (numbers, not prose). Currency + scale are
+  // auto-detected server side (sheet units → prior-period magnitude cross-check →
+  // LLM), so no inputs.
   const [financialFiles, setFinancialFiles] = useState<File[]>([]);
   const [isDraggingFin, setIsDraggingFin] = useState(false);
   const financialInputRef = useRef<HTMLInputElement>(null);
 
   // System vs Custom metrics. system (default) = map the sheet to our standard
   // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
-  // The Financial Data (Excel/CSV) field only shows in custom mode.
+  // Both modes take their figures from the Financial Data field.
   const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
   const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
   // The standard metric catalogue behind the "System metrics" hover list. null
@@ -800,7 +802,13 @@ export default function QuarterlyReportForm({
   const openFilePicker = () => fileInputRef.current?.click();
 
   const acceptFiles = (incoming: FileList | File[]) => {
-    const capLimit = MAX_DOCUMENTS;
+    // On a NEW report, hold back a slot for the financial-data lane: filling the
+    // cap with narrative documents would otherwise leave the required financials
+    // field unfillable and Generate permanently disabled. Upload-to-existing sends
+    // only this lane, so it keeps the whole cap.
+    const capLimit = isUploadMode
+      ? MAX_DOCUMENTS
+      : MAX_DOCUMENTS - Math.max(financialFiles.length, 1);
     const accepted: File[] = [];
     let rejected = false;
     Array.from(incoming).forEach((f) => {
@@ -862,7 +870,7 @@ export default function QuarterlyReportForm({
       else rejected = true;
     });
     if (rejected) {
-      setGenError(`Financial data must be a spreadsheet (${ACCEPTED_FIN_EXT.join(', ')}).`);
+      setGenError(`Financial data must be a CSV, Excel or Word file (${ACCEPTED_FIN_EXT.join(', ')}).`);
     } else {
       setGenError(null);
     }
@@ -925,9 +933,10 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  // A new report is satisfied by EITHER lane — a narrative document or a
-  // financial spreadsheet (or both).
-  const hasAnyUpload = files.length > 0 || financialFiles.length > 0;
+  // The financial-data lane is the report's only figure source, so a new report
+  // can't be built without it. The narrative lane stays optional — a report with
+  // figures and no prose is degraded; one with prose and no figures is empty.
+  const hasFinancialFiles = financialFiles.length > 0;
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
@@ -947,7 +956,7 @@ export default function QuarterlyReportForm({
       (!selectedReportId &&
         customYear != null &&
         quarter != null &&
-        hasAnyUpload &&
+        hasFinancialFiles &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
@@ -962,8 +971,8 @@ export default function QuarterlyReportForm({
         ? 'Select a reporting year to continue'
         : quarter == null
           ? 'Select a reporting quarter to continue'
-          : !hasAnyUpload
-            ? 'Upload a document or a financial spreadsheet to continue'
+          : !hasFinancialFiles
+            ? 'Upload the financial statements (Excel, CSV or Word) to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
@@ -1610,7 +1619,7 @@ export default function QuarterlyReportForm({
               >
                 {isUploadMode && existingCoverageLoading
                   ? '(loading…)'
-                  : `(PDF, DOCX — narrative & prose)`}
+                  : `(PDF, DOCX — narrative & prose only, no figures read from here)`}
               </span>
             </label>
 
@@ -1666,8 +1675,8 @@ export default function QuarterlyReportForm({
                 />
               </svg>
               <span style={{ fontSize: 12, color: '#5A6080' }}>
-                Click to upload or drag &amp; drop financial statements, prior-year
-                report, management notes
+                Click to upload or drag &amp; drop the MD&amp;A, prior-year report,
+                management notes
               </span>
             </div>
 
@@ -1801,20 +1810,19 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures).
-            New reports: shown only in Custom-metrics mode (System hides it, per the
-            boss). Upload-to-existing keeps showing it (unchanged behaviour). */}
-        {!isOpenMode && (isUploadMode || metricsMode === 'custom') && (
+        {/* Financial Data — the report's ONLY source of figures, in both metrics
+            modes. Nothing is read out of the narrative documents above. */}
+        {!isOpenMode && (
           <div style={{ marginBottom: 18 }}>
             <label className="fl-label">
-              Financial Data (Excel / CSV){' '}
+              Financial Data (Excel / CSV / Word){' '}
               <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
-                — recommended for accuracy
+                — required
               </span>
             </label>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
-              Upload the statements as a spreadsheet for exact figures (no OCR). Currency and
-              scale are detected automatically.
+              Every figure in the report comes from here, read as exact cells with no OCR.
+              Currency and scale are detected automatically.
             </div>
 
             <input
@@ -1849,7 +1857,7 @@ export default function QuarterlyReportForm({
                 <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <span style={{ fontSize: 12, color: '#5A6080' }}>
-                Click to upload or drag &amp; drop an Excel or CSV of the financial statements
+                Click to upload or drag &amp; drop the financial statements as Excel, CSV or Word
               </span>
             </div>
 
