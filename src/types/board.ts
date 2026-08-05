@@ -160,23 +160,39 @@ export interface BoardOutlineSavePayload {
 
 // ─── produced sections ────────────────────────────────────────────────────────
 
-/** Where a section's content came from — a reviewer has to be able to trace it. */
+/** Which document a section's content was read from. */
 export interface BoardCitation {
-  document?: string | null;
-  document_name?: string | null;
-  page?: number | string | null;
+  /** The source slot the document was filed under. */
+  slot?: string | null;
+  /** The file it came from. */
+  source_ref?: string | null;
 }
+
+/**
+ * Citations arrive keyed by slot — `{ "Governance register": { source_ref } }`.
+ * Typed to allow a plain list too, because the shape isn't pinned down and a
+ * wrong guess here white-screens the whole report. Read it through
+ * `boardCitations()`, never directly.
+ */
+export type BoardCitations = Record<string, unknown> | BoardCitation[] | null;
 
 export interface BoardSectionFeeder {
   /** Set when the content was reused from a prior year, e.g. "FY-2024". */
   carried_forward_from?: string | null;
   /** Says exactly what is missing (needs_input) or why it is empty. */
   message?: string | null;
-  /** Document + page for extracted content. */
-  citations?: BoardCitation[] | null;
-  /** e.g. "Read 3 row(s) from a table on page 164". */
+  /** The documents this section was read from — keyed by slot. */
+  citations?: BoardCitations;
+  /**
+   * e.g. "Read 3 row(s) from a table on page 164". Not shown — it describes the
+   * extractor's work rather than the report, and reads as noise next to the
+   * content. The source chips carry the part a reviewer needs.
+   */
   extraction_note?: string | null;
+  /** A human edited this section by hand. */
   edited?: boolean;
+  /** A reviewer had the model rewrite it. */
+  refined?: boolean;
 }
 
 export interface BoardSection {
@@ -273,3 +289,12 @@ export interface BoardAssembleResponse {
 }
 
 export type BoardExportFormat = "pdf" | "docx";
+
+// ─── refine ───────────────────────────────────────────────────────────────────
+
+/** Free-text rewrite instruction. The server caps it; the UI enforces it too. */
+export const BOARD_REFINE_MAX = 2000;
+
+export interface BoardRefinePayload {
+  instruction: string;
+}

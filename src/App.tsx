@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom";
+import { Fragment, lazy, Suspense } from "react";
+import { BrowserRouter, Outlet, Route, Routes, useParams } from "react-router-dom";
 import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
@@ -48,7 +48,25 @@ const AdminDepartmentsPage = lazy(
 const CyclesListPage = lazy(() => import("./pages/annual-report/CyclesListPage"));
 const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage"));
 const BoardSetupPage = lazy(() => import("./pages/annual-report/BoardSetupPage"));
+const BoardSourcesPage = lazy(() => import("./pages/annual-report/BoardSourcesPage"));
+const BoardSectionsPage = lazy(() => import("./pages/annual-report/BoardSectionsPage"));
+const BoardPreviewPage = lazy(() => import("./pages/annual-report/BoardPreviewPage"));
 const BoardReportPage = lazy(() => import("./pages/annual-report/BoardReportPage"));
+
+/**
+ * Remounts a board step when the report in the URL changes.
+ *
+ * React reuses the same element across a `:reportId` change — same component,
+ * same position in the tree — so the page keeps every piece of local state it
+ * had for the previous report: staged files, fetched sections, error banners,
+ * and the id of a pipeline run it is still polling. That last one is the one
+ * that bites: a run belonging to one report reports its failure on top of
+ * another. The key makes a different report a different component instance.
+ */
+function PerReport({ children }: { children: React.ReactNode }) {
+  const { reportId } = useParams();
+  return <Fragment key={reportId}>{children}</Fragment>;
+}
 
 // IR Calendar — admin + IR. Code-split; renders inside AppLayout.
 const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
@@ -194,7 +212,38 @@ const App = () => (
             {/* Board of Directors' Report: pick a year on the setup screen, then
                 build it — issuer profile → sources → resolved sections → report. */}
             <Route path="/board-report" element={<BoardSetupPage />} />
-            <Route path="/board-report/:reportId" element={<BoardReportPage />} />
+            <Route
+              path="/board-report/:reportId/sources"
+              element={
+                <PerReport>
+                  <BoardSourcesPage />
+                </PerReport>
+              }
+            />
+            <Route
+              path="/board-report/:reportId/sections"
+              element={
+                <PerReport>
+                  <BoardSectionsPage />
+                </PerReport>
+              }
+            />
+            <Route
+              path="/board-report/:reportId/preview"
+              element={
+                <PerReport>
+                  <BoardPreviewPage />
+                </PerReport>
+              }
+            />
+            <Route
+              path="/board-report/:reportId/report"
+              element={
+                <PerReport>
+                  <BoardReportPage />
+                </PerReport>
+              }
+            />
             <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>

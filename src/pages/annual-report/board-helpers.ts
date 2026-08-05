@@ -11,6 +11,8 @@ import { ApiError } from '@/lib/api';
 import type { AgentRun } from '@/types/report';
 import type {
   BoardAssembledSection,
+  BoardCitation,
+  BoardSectionFeeder,
   BoardCompletion,
   BoardIssuerProfile,
   BoardOutlineSection,
@@ -74,9 +76,6 @@ export function profileFromCompany(
 }
 
 // ─── where to drop the operator on open ───────────────────────────────────────
-
-export const BOARD_STEPS = ['Profile', 'Sources', 'Sections', 'Report'] as const;
-export const BOARD_LAST_STEP = BOARD_STEPS.length;
 
 /**
  * Which step a report should open on. Reopening a half-built report must not
@@ -152,8 +151,12 @@ export function toBoardProduced(
     title: s.title,
     display_order: s.display_order ?? 0,
     source_type: 'source_type' in s ? (s.source_type ?? '') : '',
-    // /assemble sends `mode`; /sections doesn't, so the caller derives one.
-    mode: ('mode' in s ? s.mode : undefined) ?? mode ?? inferBoardMode(content),
+    // /assemble sends `mode`; /sections sends `content_type`, which is
+    // authoritative — narrative/generated is prose, everything else is JSON.
+    mode:
+      mode ??
+      ('mode' in s ? s.mode : undefined) ??
+      boardContentMode('content_type' in s ? s.content_type : undefined, content),
     status: 'done',
     content,
     feeder_status: 'ready',
@@ -161,21 +164,89 @@ export function toBoardProduced(
 }
 
 /**
- * `GET /sections` carries no `mode`, but the renderers branch on it. Sniff the
- * content: table payloads are JSON objects carrying `rows`/`tables`; everything
- * else is prose.
+ * How to render a section's content. `content_type` is authoritative — narrative
+ * and generated sections hold a plain string; everything else holds JSON as a
+ * string. Falls back to sniffing the payload when the field is absent.
+ *
+ * Returns the `mode` the shared renderers read: 'table' takes the table path,
+ * anything else is prose.
  */
-export function inferBoardMode(content: string | null): 'table' | 'prose' {
-  if (!content) return 'prose';
+export function boardContentMode(contentType?: string | null, content?: string | null): 'table' | 'generate' {
+  const t = (contentType ?? '').toLowerCase();
+  if (t === 'narrative' || t === 'generated') return 'generate';
+  if (t) return 'table';
+  // No content_type — fall back to the shape.
+  if (!content) return 'generate';
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.rows) || Array.isArray(parsed.tables)) return 'table';
+    if (parsed && typeof parsed === 'object' && (Array.isArray(parsed.rows) || Array.isArray(parsed.tables))) {
+      return 'table';
     }
   } catch {
     /* plain prose */
   }
-  return 'prose';
+  return 'generate';
+}
+
+/**
+ * The three sections written in the company's own voice. They are never
+ * AI-refined: the chairman's statement is the chairman's, not the model's. The
+ * server resolves them uploaded document → last year's report → needs_input.
+ */
+export const BOARD_COMPANY_VOICE = ['BR02', 'BR03', 'BR04'];
+
+/**
+ * Whether the Refine control applies. Narrative content is now lifted verbatim
+ * from the source document, so refining is how a reviewer turns extracted text
+ * into prose — but only where there is text to rewrite, and never in the
+ * company's own voice.
+ */
+export function canRefineSection(s: Pick<BoardSection, 'section_code' | 'content_type' | 'status' | 'content'>): boolean {
+  return (
+    s.content_type === 'narrative' &&
+    !BOARD_COMPANY_VOICE.includes(s.section_code) &&
+    s.status === 'produced' &&
+    (s.content ?? '').trim().length > 0
+  );
+}
+
+/**
+ * The documents a section was read from, whatever shape the server sent.
+ *
+ * `citations` comes back keyed by slot — `{ "Governance register": {...} }` —
+ * but a plain list is tolerated too. This is read on every rendered section, so
+ * a wrong assumption here takes the whole report down with it; treat anything
+ * unrecognised as "no citations" rather than throwing.
+ */
+export function boardCitations(feeder: BoardSectionFeeder | null | undefined): BoardCitation[] {
+  const raw = feeder?.citations;
+  if (!raw) return [];
+
+  const one = (slot: string | null, v: unknown): BoardCitation | null => {
+    if (typeof v === 'string') return { slot, source_ref: v };
+    if (!isRec(v)) return slot ? { slot, source_ref: null } : null;
+    const ref =
+      typeof v.source_ref === 'string'
+        ? v.source_ref
+        : typeof v.file_name === 'string'
+          ? v.file_name
+          : null;
+    const s = typeof v.slot === 'string' ? v.slot : slot;
+    return ref || s ? { slot: s, source_ref: ref } : null;
+  };
+
+  const list = Array.isArray(raw)
+    ? raw.map((v) => one(null, v))
+    : Object.entries(raw).map(([slot, v]) => one(slot, v));
+  return list.filter((c): c is BoardCitation => c !== null);
+}
+
+/**
+ * Sections a reviewer has touched by hand. Producing again clears the content
+ * hash and rewrites them, so this drives the confirmation before a produce-all.
+ */
+export function touchedByHand(sections: Pick<BoardSection, 'title' | 'feeder'>[]): string[] {
+  return sections.filter((s) => s.feeder?.edited || s.feeder?.refined).map((s) => s.title);
 }
 
 // ─── async runs ───────────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
 import { asStringArray } from '@/components/quarterly/sectionState';
 
@@ -17,7 +19,14 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
-export function SectionContent({ section }: { section: ProducedSection }) {
+export function SectionContent({
+  section,
+  markdown = false,
+}: {
+  section: ProducedSection;
+  /** Render prose as Markdown — see MarkdownProse. */
+  markdown?: boolean;
+}) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
   // rather than a JSON string. Normalise to a string so `.trim()`/JSON.parse work.
@@ -46,11 +55,11 @@ export function SectionContent({ section }: { section: ProducedSection }) {
       return <NoData />;
     }
     // Not valid JSON — treat the string as prose.
-    return <Prose text={content} />;
+    return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
   }
 
   // generate / template / anything else → prose.
-  return <Prose text={content} />;
+  return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
 }
 
 // Honest empty state — shown when a section produced no usable content.
@@ -61,6 +70,18 @@ function NoData() {
 }
 
 // ─── prose ────────────────────────────────────────────────────────────────────
+// Board narrative content is lifted verbatim out of the source document, which
+// means it arrives as Markdown — headings, bullets, GFM tables. Rendered as
+// plain text it reads as "## Heading" and "| a | b |". Off by default so the
+// quarterly and earnings payloads, which are plain prose, are untouched.
+function MarkdownProse({ text }: { text: string }) {
+  return (
+    <div className="md-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 function Prose({ text }: { text: string }) {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const blocks = paragraphs.length ? paragraphs : [text];

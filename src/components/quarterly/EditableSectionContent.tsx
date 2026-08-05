@@ -17,6 +17,7 @@ export function EditableSectionContent({
   editing,
   saving,
   error,
+  markdown = false,
   onSave,
   onCancel,
 }: {
@@ -24,10 +25,14 @@ export function EditableSectionContent({
   editing: boolean;
   saving: boolean;
   error: string | null;
+  /** Render the read-only view as Markdown — see SectionContent. */
+  markdown?: boolean;
   onSave: (content: string) => void;
   onCancel: () => void;
 }) {
-  if (!editing) return <SectionContent section={section} />;
+  // The editor always works on the raw source, Markdown and all — that is what
+  // gets saved, so it is what the reviewer must see while editing.
+  if (!editing) return <SectionContent section={section} markdown={markdown} />;
 
   const isTable = section.mode === 'table' || section.mode === 'kpi';
   const parsed = isTable ? tryParse(section.content) : undefined;
@@ -123,7 +128,33 @@ function ProseEditor({
           resize: 'none', outline: 'none', boxSizing: 'border-box', background: '#fff',
         }}
       />
-      <EditHint saving={saving} error={error} hint="Blur or ⌘+Enter to save · Esc to cancel" />
+      {/* Clicking away still saves, but nobody should have to know that.
+          preventDefault on mousedown keeps the textarea focused, so the button
+          click is the only save — without it, blur would fire one too. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <button
+          className="btn bp"
+          disabled={saving || !draft.trim()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onSave(draft.trim())}
+          style={{ fontSize: 12.5, padding: '8px 18px' }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          className="btn bs"
+          disabled={saving}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            cancelledRef.current = true;
+          }}
+          onClick={onCancel}
+          style={{ fontSize: 12.5, padding: '8px 16px' }}
+        >
+          Cancel
+        </button>
+      </div>
+      <EditHint saving={saving} error={error} hint="⌘+Enter to save · Esc to cancel" />
     </div>
   );
 }

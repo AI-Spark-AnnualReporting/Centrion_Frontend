@@ -210,6 +210,19 @@ export function Notice({ tone, children }: { tone: 'green' | 'amber' | 'red'; ch
   );
 }
 
+/**
+ * Shown on every step once the report is approved. The header carries a badge
+ * too, but a badge doesn't explain why a screenful of controls has gone dead.
+ */
+export function LockedNotice() {
+  return (
+    <Notice tone="green">
+      This report is approved and locked — everything below is read-only, and it can be exported
+      from the Report step.
+    </Notice>
+  );
+}
+
 // ─── issuer profile fields ────────────────────────────────────────────────────
 
 /**

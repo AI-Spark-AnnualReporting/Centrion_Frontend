@@ -1117,3 +1117,60 @@ body {
   .print-doc .card { border: none; box-shadow: none; border-radius: 0; padding: 0; }
   .print-doc section, .print-doc table { break-inside: avoid; }
 }
+
+/* ═══════════════════════════════════════════
+   MARKDOWN PROSE — rendered report sections
+   Board narrative content is lifted verbatim out of the source document, so it
+   arrives as Markdown. Styled to match the plain-prose renderer next to it
+   (14px / 1.75 / #2A2E47) rather than browser defaults.
+═══════════════════════════════════════════ */
+.md-prose { font-size: 14px; line-height: 1.75; color: #2A2E47; }
+.md-prose > :first-child { margin-top: 0; }
+.md-prose > :last-child { margin-bottom: 0; }
+.md-prose p { margin: 0 0 14px; }
+.md-prose h1, .md-prose h2, .md-prose h3, .md-prose h4 {
+  margin: 22px 0 10px; font-weight: 800; line-height: 1.3;
+  color: var(--brand-primary, #4040C8);
+}
+.md-prose h1 { font-size: 17px; }
+.md-prose h2 { font-size: 15px; }
+.md-prose h3, .md-prose h4 { font-size: 13.5px; }
+.md-prose ul, .md-prose ol { margin: 0 0 14px; padding-left: 22px; }
+.md-prose ul { list-style: disc outside; }
+.md-prose ol { list-style: decimal outside; }
+.md-prose li { margin-bottom: 5px; }
+.md-prose strong { font-weight: 700; color: #1A1D2E; }
+.md-prose a { color: #4040C8; text-decoration: underline; }
+.md-prose blockquote {
+  margin: 0 0 14px; padding: 2px 0 2px 14px;
+  border-left: 3px solid #E2E4F0; color: #5A6080;
+}
+.md-prose hr { border: none; border-top: 1px solid #ECEEF8; margin: 20px 0; }
+.md-prose code {
+  font-family: 'DM Mono', monospace; font-size: 12.5px;
+  background: #F4F5FB; padding: 1px 5px; border-radius: 4px;
+}
+.md-prose pre { overflow-x: auto; background: #F4F5FB; padding: 12px 14px; border-radius: 8px; margin: 0 0 14px; }
+.md-prose pre code { background: none; padding: 0; }
+/* Tables scroll rather than pushing the document wider. */
+.md-prose table {
+  width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 12.5px;
+  display: block; overflow-x: auto;
+}
+.md-prose thead th {
+  text-align: left; padding: 8px 10px; white-space: nowrap;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--brand-primary, #4040C8);
+  border-bottom: 1.5px solid #E2E4F0;
+}
+.md-prose tbody td { padding: 8px 10px; border-bottom: 1px solid #F1F2F8; vertical-align: top; }
+.md-prose tbody tr:last-child td { border-bottom: none; }
+
+/* Disabled buttons must look disabled — `.btn` had no :disabled rule, so a
+   locked report's controls stayed indistinguishable from live ones. */
+.btn:disabled, .btn[disabled] {
+  opacity: .5; cursor: not-allowed; box-shadow: none;
+}
+.btn:disabled:hover, .btn[disabled]:hover { transform: none; }
+.bp:disabled:hover, .bp[disabled]:hover { background: #4040C8; box-shadow: none; }
+.bs:disabled:hover, .bs[disabled]:hover { background: #fff; border-color: #E2E4F0; color: #5A6080; }

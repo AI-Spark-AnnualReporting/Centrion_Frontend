@@ -3,8 +3,12 @@
 // Financial year plus the issuer profile that resolves the report's sections,
 // then Create. The profile is seeded from the company record (reporting_sector,
 // sector, is_shariah, has_sukuk) so the operator confirms rather than re-answers
-// what onboarding already captured — and it can still be changed on the
-// builder's first step afterwards, which re-resolves the outline.
+// what onboarding already captured.
+//
+// This is the only place the profile is set: the build steps that follow
+// (Sources → Sections → Report) each have their own route and none of them
+// edits it. PATCH /profile therefore has no caller today — a wrong issuer type
+// means starting a new report for that year.
 //
 // Below the form, every board report this company has.
 
@@ -126,10 +130,7 @@ export default function BoardSetupPage() {
         fiscal_year: fiscalYear,
         issuer_profile: profile,
       });
-      // The profile was just answered here, so open the builder on Sources
-      // rather than making the operator confirm it a second time. Reopening the
-      // report later from a tile lands wherever its own state says.
-      navigate(`/board-report/${res.report_id}`, { state: { startAtStep: 2 } });
+      navigate(`/board-report/${res.report_id}/sources`);
     } catch (err: unknown) {
       // 409 = one already exists for this year. Offer it rather than making the
       // operator hunt for it in the grid below.
@@ -219,7 +220,7 @@ export default function BoardSetupPage() {
               <button
                 type="button"
                 className="btn bs bsm"
-                onClick={() => navigate(`/board-report/${conflict.reportId}`)}
+                onClick={() => navigate(`/board-report/${conflict.reportId}/sources`)}
               >
                 Continue existing report
               </button>
@@ -273,7 +274,7 @@ export default function BoardSetupPage() {
               <BoardReportCard
                 key={r.report_id}
                 report={r}
-                onOpen={(rep) => navigate(`/board-report/${rep.report_id}`)}
+                onOpen={(rep) => navigate(`/board-report/${rep.report_id}/sources`)}
               />
             ))}
           </div>

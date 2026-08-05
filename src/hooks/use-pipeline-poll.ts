@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { agentRuns } from "@/lib/api";
+import { agentRuns, ApiError } from "@/lib/api";
 import type { AgentNode, AgentRun } from "@/types/report";
 
 const POLL_INTERVAL_MS = 3000;
@@ -88,9 +88,24 @@ export function usePipelinePoll(
           return { phase: "running", run, nodes: nextNodes, elapsedMs };
         });
       } catch (err) {
-        // Transient network error on the run endpoint — swallow and try again
-        // on the next tick. Nodes failures are handled above and never land here.
         if ((err as Error)?.name === "AbortError") return;
+        // A run that isn't there any more is never coming back — the server
+        // sweeps unfinished runs on restart. Retrying it for the full 30
+        // minutes leaves a loading screen up over nothing. The grace window is
+        // for the race right after a 202, where the row may not be readable yet.
+        if (err instanceof ApiError && err.status === 404 && elapsedMs > 10_000) {
+          stopped = true;
+          window.clearInterval(intervalId);
+          setState((prev) => ({
+            phase: "timeout",
+            run: prev.run as AgentRun | null,
+            nodes: prev.nodes,
+            elapsedMs,
+          }));
+          return;
+        }
+        // Anything else is transient — try again on the next tick. Nodes
+        // failures are handled above and never land here.
       }
     };
 

@@ -2631,12 +2631,21 @@ export const boardReports = {
   // 202 → poll the returned poll_url. Deliberately NOT routed through
   // postPipeline(): that normalises a 409 into a handle, which would hide the
   // `existing_run_id` the caller wants to surface.
-  uploadSources: (reportId: string, staged: { slot: string; file: File }[]) => {
+  //
+  // `sectionCode` is set only by the per-section upload on the Review step,
+  // where one document is supplied for one named section. The Sources screen
+  // uploads across many slots at once and sends none.
+  uploadSources: (
+    reportId: string,
+    staged: { slot: string; file: File }[],
+    sectionCode?: string,
+  ) => {
     const fd = new FormData();
     staged.forEach(({ slot, file }) => {
       fd.append("files", file);
       fd.append("slots", slot);
     });
+    if (sectionCode) fd.append("section_code", sectionCode);
     return request<BoardRunHandle>(boardPath(reportId, "/sources/upload"), {
       method: "POST",
       form: fd,
@@ -2683,6 +2692,17 @@ export const boardReports = {
     request<BoardSection>(
       boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/content`),
       { method: "PATCH", body: { content } },
+    ),
+
+  // Have the model rewrite a narrative section to a free-text instruction.
+  // Narrative content is now lifted verbatim from the source document, so this
+  // is how a reviewer turns extracted text into prose. Returns the rewritten
+  // section. 422 not refinable · 409 no content yet · 502 the model returned
+  // nothing (keep the existing text and offer a retry).
+  refineSection: (reportId: string, sectionCode: string, instruction: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/refine`),
+      { method: "POST", body: { instruction } },
     ),
 
   getCompletion: (reportId: string, signal?: AbortSignal) =>

@@ -8,7 +8,9 @@ import { ApiError } from '@/lib/api';
 import type { BoardOutlineSection, BoardSourcesResponse } from '@/types/board';
 import {
   boardProduceSummary,
-  inferBoardMode,
+  boardCitations,
+  boardContentMode,
+  canRefineSection,
   initialStep,
   isBoardCoverSection,
   outlinePayload,
@@ -17,6 +19,7 @@ import {
   readDuplicateSlots,
   readCompletionFromError,
   readExistingRunId,
+  touchedByHand,
 } from '@/pages/annual-report/board-helpers';
 
 const outlineSection = (over: Partial<BoardOutlineSection>): BoardOutlineSection => ({
@@ -157,11 +160,100 @@ describe('content shape helpers', () => {
     expect(isBoardCoverSection({ section_code: 'BR07', content: JSON.stringify({ rows: [] }) })).toBe(false);
   });
 
-  it('infers a mode for GET /sections, which sends none', () => {
-    expect(inferBoardMode(JSON.stringify({ rows: [] }))).toBe('table');
-    expect(inferBoardMode(JSON.stringify({ tables: [] }))).toBe('table');
-    expect(inferBoardMode('The year was one of disciplined growth.')).toBe('prose');
-    expect(inferBoardMode(null)).toBe('prose');
+  it('renders by content_type, which is authoritative', () => {
+    // Narrative content is lifted verbatim from the source document — a string,
+    // even when the source happens to look like JSON.
+    expect(boardContentMode('narrative', '{"rows":[]}')).toBe('generate');
+    expect(boardContentMode('generated', 'Revenue grew 11%.')).toBe('generate');
+    expect(boardContentMode('table', '{"rows":[]}')).toBe('table');
+    expect(boardContentMode('governance_grid', '{"columns":[],"rows":[]}')).toBe('table');
+  });
+
+  it('falls back to the payload shape when content_type is absent', () => {
+    expect(boardContentMode(null, JSON.stringify({ rows: [] }))).toBe('table');
+    expect(boardContentMode(undefined, JSON.stringify({ tables: [] }))).toBe('table');
+    expect(boardContentMode('', 'The year was one of disciplined growth.')).toBe('generate');
+    expect(boardContentMode(null, null)).toBe('generate');
+  });
+});
+
+describe('canRefineSection', () => {
+  const base = {
+    section_code: 'BR24',
+    content_type: 'narrative',
+    status: 'produced' as const,
+    content: 'Extracted text.',
+  };
+
+  it('applies to produced narrative sections that have text', () => {
+    expect(canRefineSection(base)).toBe(true);
+  });
+
+  it('never applies to the three written in the company voice', () => {
+    for (const code of ['BR02', 'BR03', 'BR04']) {
+      expect(canRefineSection({ ...base, section_code: code })).toBe(false);
+    }
+  });
+
+  it('does not apply to tables, unproduced sections, or empty content', () => {
+    expect(canRefineSection({ ...base, content_type: 'table' })).toBe(false);
+    expect(canRefineSection({ ...base, status: 'needs_input' })).toBe(false);
+    expect(canRefineSection({ ...base, content: '   ' })).toBe(false);
+    expect(canRefineSection({ ...base, content: null })).toBe(false);
+  });
+});
+
+describe('boardCitations', () => {
+  // This one white-screened the report: citations come back keyed by slot, and
+  // calling .filter on an object throws during render, taking the page with it.
+  it('reads the slot-keyed map the server actually sends', () => {
+    expect(
+      boardCitations({
+        citations: {
+          'Governance register': { source_ref: '05_Governance_Register.docx' },
+          'Board member profiles / CVs': { source_ref: '03_Board_Member_Profiles.docx' },
+        },
+      }),
+    ).toEqual([
+      { slot: 'Governance register', source_ref: '05_Governance_Register.docx' },
+      { slot: 'Board member profiles / CVs', source_ref: '03_Board_Member_Profiles.docx' },
+    ]);
+  });
+
+  it('also reads a plain list, and a bare filename per slot', () => {
+    expect(boardCitations({ citations: [{ slot: 'Risk report', source_ref: 'risk.pdf' }] })).toEqual([
+      { slot: 'Risk report', source_ref: 'risk.pdf' },
+    ]);
+    expect(boardCitations({ citations: { 'Auditor’s report': 'auditor.docx' } })).toEqual([
+      { slot: 'Auditor’s report', source_ref: 'auditor.docx' },
+    ]);
+  });
+
+  it('returns nothing rather than throwing on anything unrecognised', () => {
+    expect(boardCitations(null)).toEqual([]);
+    expect(boardCitations(undefined)).toEqual([]);
+    expect(boardCitations({ citations: null })).toEqual([]);
+    expect(boardCitations({ citations: {} })).toEqual([]);
+    expect(boardCitations({ citations: [] })).toEqual([]);
+    expect(boardCitations({ citations: [null, 42] as never })).toEqual([]);
+  });
+});
+
+describe('touchedByHand', () => {
+  it('names the sections a produce-all would overwrite', () => {
+    expect(
+      touchedByHand([
+        { title: 'Risk management', feeder: { edited: true } },
+        { title: 'Strategy', feeder: { refined: true } },
+        { title: 'Net income', feeder: { citations: [] } },
+        { title: 'Dividends', feeder: null },
+      ]),
+    ).toEqual(['Risk management', 'Strategy']);
+  });
+
+  it('is empty when nobody has touched anything', () => {
+    expect(touchedByHand([{ title: 'Net income', feeder: null }])).toEqual([]);
+    expect(touchedByHand([])).toEqual([]);
   });
 });
 
