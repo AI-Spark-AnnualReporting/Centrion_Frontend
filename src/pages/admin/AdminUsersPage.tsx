@@ -8,6 +8,7 @@ import {
   CAPABILITY_GROUPS,
   ROLE_DISPLAY,
   ROLE_ORDER,
+  roleLabel,
   type BackendRole,
 } from '@/constants/roles';
 import type {
@@ -150,9 +151,9 @@ function InviteModal({
       const dept = departments.find((d) => d.id === departmentId);
       if (dept?.has_hod) {
         const ok = window.confirm(
-          `${dept.department_name} already has an HR Lead` +
+          `${dept.department_name} already has a ${dept.department_code} Lead` +
             (dept.hod_name ? ` (${dept.hod_name})` : '') +
-            `. Creating this user will replace them as the HR Lead. Continue?`,
+            `. Creating this user will replace them as the ${dept.department_code} Lead. Continue?`,
         );
         if (!ok) return;
       }
@@ -272,7 +273,7 @@ function InviteModal({
                 departmentId &&
                 departments.find((d) => d.id === departmentId)?.has_hod && (
                   <div style={{ marginTop: 6, fontSize: 10.5, color: '#B45309', fontWeight: 600 }}>
-                    ⚠ This department already has an HR Lead
+                    ⚠ This department already has a {departments.find((d) => d.id === departmentId)?.department_code} Lead
                     {departments.find((d) => d.id === departmentId)?.hod_name
                       ? ` (${departments.find((d) => d.id === departmentId)?.hod_name})`
                       : ''}
@@ -941,7 +942,7 @@ function UsersView(props: {
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${meta.badgeClass}`}>● {meta.label}</span>
+                        <span className={`badge ${meta.badgeClass}`}>● {roleLabel(u.role, u.department_code)}</span>
                       </td>
                       <td>
                         {u.department_name ? (

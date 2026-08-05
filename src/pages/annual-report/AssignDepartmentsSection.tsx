@@ -18,9 +18,9 @@ const initials = (name?: string | null) =>
     .join('') || '?';
 
 // Draft-only section: admin picks the departments that participate. Each department's
-// questions route to that department's HR Lead (role key `hod`), set in the admin console.
-// A department with no HR Lead is blocked. Nothing persists until the page's Submit (assign only;
-// the cycle stays draft and only goes active when the PM kicks off).
+// questions route to that department's lead (role key `hod`), set in the admin console.
+// A department with no lead assigned is blocked. Nothing persists until the page's Submit
+// (assign only; the cycle stays draft and only goes active when the PM kicks off).
 export default function AssignDepartmentsSection({
   allDepartments,
   assigned,
@@ -77,7 +77,7 @@ export default function AssignDepartmentsSection({
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Assign Departments</div>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
-              Select which departments participate in this cycle. Each one's questions go to its HR Lead.
+              Select which departments participate in this cycle. Each one's questions go to its department lead.
             </div>
           </div>
         </div>
@@ -101,8 +101,8 @@ export default function AssignDepartmentsSection({
         >
           <span aria-hidden>ℹ️</span>
           <span>
-            After kickoff, each department's AI-generated questions go to its HR Lead, who reviews
-            them and assigns a team member to answer.
+            After kickoff, each department's AI-generated questions go to its department lead, who
+            reviews them and assigns a team member to answer.
           </span>
         </div>
 
@@ -214,10 +214,10 @@ export default function AssignDepartmentsSection({
                       {row.department_name}
                     </div>
                     {hasHod ? (
-                      <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 2 }}>HR Lead</div>
+                      <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 2 }}>{row.department_code} Lead</div>
                     ) : (
                       <div style={{ fontSize: 10.5, color: '#B45309', marginTop: 2, fontWeight: 600 }}>
-                        No HR Lead assigned — set one in the admin console before adding this department.
+                        No {row.department_code} Lead assigned — set one in the admin console before adding this department.
                       </div>
                     )}
                   </div>
@@ -263,7 +263,7 @@ export default function AssignDepartmentsSection({
                         }}
                         title={hodName ?? undefined}
                       >
-                        {hodName || 'HR Lead'}
+                        {hodName || `${row.department_code} Lead`}
                       </span>
                     </div>
                   ) : (
@@ -271,7 +271,7 @@ export default function AssignDepartmentsSection({
                       className="badge b-am"
                       style={{ width: 210, justifyContent: 'center', flexShrink: 0 }}
                     >
-                      ⚠ No HR Lead assigned
+                      ⚠ No {row.department_code} Lead assigned
                     </span>
                   )}
                   <button

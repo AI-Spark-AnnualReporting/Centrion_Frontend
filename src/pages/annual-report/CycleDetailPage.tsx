@@ -412,7 +412,7 @@ export default function CycleDetailPage() {
                 type="button"
                 onClick={handleSubmitCycle}
                 disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Add at least one department, and each must have an HR Lead assigned' : undefined}
+                title={!canSubmit ? 'Add at least one department, and each must have a department lead assigned' : undefined}
               >
                 {submitting ? 'Submitting…' : '✓ Submit'}
               </button>
