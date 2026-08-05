@@ -270,7 +270,7 @@ export default function AssembledReportPage() {
   return (
     // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-      {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} />}
+      {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} locked={approved} />}
 
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 28px 14px', flexShrink: 0, flexWrap: 'wrap' }}>

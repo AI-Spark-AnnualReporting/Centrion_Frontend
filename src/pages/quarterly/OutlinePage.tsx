@@ -945,7 +945,7 @@ export default function OutlinePage() {
         <button
           className="btn bs"
           style={{ fontSize: 13, padding: '10px 18px' }}
-          onClick={() => navigate('/reports/quarterly')}
+          onClick={() => navigate(`/quarterly-report/${reportId}/extraction`)}
         >
           ← Back
         </button>

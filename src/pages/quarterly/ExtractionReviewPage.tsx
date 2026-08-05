@@ -500,7 +500,7 @@ export default function ExtractionReviewPage() {
             ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
             : `${answered} of ${pending.length} answered · ${accepted} will be added`}
         </span>
-        <button className="bp" onClick={onContinue} disabled={submitting}>
+        <button className="btn bp" onClick={onContinue} disabled={submitting}>
           {submitting ? 'Saving…' : 'Continue to outline →'}
         </button>
       </div>
@@ -543,7 +543,7 @@ export default function ExtractionReviewPage() {
               <button className="btn bs" onClick={() => setConfirmOpen(false)}>
                 Keep checking
               </button>
-              <button className="bp" onClick={() => void submit()}>
+              <button className="btn bp" onClick={() => void submit()}>
                 Continue anyway
               </button>
             </div>
