@@ -25,7 +25,10 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     dot: "#0D9488",
   },
   hod: {
-    label: "HR Lead",
+    // Generic fallback — HOD is assigned per-department (CS Lead, HR Lead,
+    // Finance Lead, ...), not tied to one department. Use roleLabel() below
+    // wherever a specific user's department is known.
+    label: "Department Lead",
     description: "Curates questions & reviews answers for a department",
     badgeClass: "b-bl",
     dot: "#2563EB",
@@ -64,6 +67,16 @@ export const ASSIGNABLE_ROLES: BackendRole[] = [
 
 export function roleMeta(role: string | null | undefined): RoleMeta {
   return (role && ROLE_DISPLAY[role as BackendRole]) || ROLE_DISPLAY.ir;
+}
+
+// A HOD's on-screen title is department-specific — "CS Lead" for the CS
+// department's head, "HR Lead" for HR's, etc. — rather than one fixed label,
+// since the same role is assigned per-department. Every other role's label is
+// unaffected by department. Falls back to the generic label when no
+// department code is known (e.g. a role-type summary not tied to one user).
+export function roleLabel(role: BackendRole, departmentCode?: string | null): string {
+  if (role === "hod" && departmentCode) return `${departmentCode} Lead`;
+  return ROLE_DISPLAY[role].label;
 }
 
 // Capability matrix scaffold. The labels/sections are static frontend metadata;
