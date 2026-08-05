@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { admin, adminConsole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER } from './admin-flags';
@@ -224,17 +225,22 @@ function InviteModal({
           </div>
           <div className="fl">
             <label className="fl-label">Role</label>
-            <select
-              className="inp sel"
-              value={role}
-              onChange={(e) => setRole(e.target.value as BackendRole)}
-            >
-              {ASSIGNABLE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
-                </option>
-              ))}
-            </select>
+            {/* A native <select>'s open list is an OS-level popup that ignores
+                the modal's bounds entirely — it visibly spilled out past the
+                card. Radix's Select renders its own positioned, scrollable
+                popover instead, so it stays inside the viewport. */}
+            <Select value={role} onValueChange={(v) => setRole(v as BackendRole)}>
+              <SelectTrigger className="inp" style={{ height: 40 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Department — required for department_user and hod. */}
@@ -255,18 +261,21 @@ function InviteModal({
                   No departments available. Create a department first.
                 </div>
               ) : (
-                <select
-                  className="inp sel"
-                  value={departmentId ?? ''}
-                  onChange={(e) => setDepartmentId(e.target.value || null)}
+                <Select
+                  value={departmentId ?? undefined}
+                  onValueChange={(v) => setDepartmentId(v)}
                 >
-                  <option value="">Select a department</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.department_name} ({d.department_code})
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="inp" style={{ height: 40 }}>
+                    <SelectValue placeholder="Select a department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.department_name} ({d.department_code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               {role === 'hod' &&
                 departmentId &&
