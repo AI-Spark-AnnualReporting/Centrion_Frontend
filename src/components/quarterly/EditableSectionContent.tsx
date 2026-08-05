@@ -28,12 +28,13 @@ export function EditableSectionContent({
 }) {
   if (!editing) return <SectionContent section={section} />;
 
-  const isTable = section.mode === 'table' || section.mode === 'kpi';
-  const parsed = isTable ? tryParse(section.content) : undefined;
+  // Detect a tabular shape from the content itself (not just `mode`) — hybrid
+  // sections (table + analysis JSON) report mode 'generate', not 'table'/'kpi'.
+  const parsed = tryParse(section.content);
 
   // Table with a recognizable structure → cell grid; otherwise (prose, or
   // unparseable table) → a plain textarea on the raw content string.
-  if (isTable && parsed !== undefined && editableTables(parsed).length > 0) {
+  if (parsed !== undefined && editableTables(parsed).length > 0) {
     return (
       <TableEditor
         initial={parsed}

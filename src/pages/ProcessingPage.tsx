@@ -125,9 +125,10 @@ export interface ProcessingPageState {
   reportType?: string;
   // Display-only label for the quarterly hero, e.g. "Q1 2025".
   period?: string;
-  // Where a completed quarterly run hands off. Extraction → "outline" (default);
+  // Where a completed quarterly run hands off. Extraction → "extraction" (default),
+  // the review screen where the user confirms which figures are which metric;
   // section-production (produceAll, kicked from the Outline) → "preview".
-  quarterlyNext?: "outline" | "preview";
+  quarterlyNext?: "extraction" | "outline" | "preview";
   // Set when the caller navigated BEFORE a run existed, so the user reaches the
   // loader on the click instead of watching a dead button. Locking an outline takes
   // a few seconds and produceAll can only be kicked after it, so the Outline page
@@ -219,7 +220,9 @@ export default function ProcessingPage() {
   // tick (its effect depends on onDone identity).
   const handleQuarterlyLoaderDone = useCallback(() => {
     if (readyReportId) {
-      const next = state?.quarterlyNext ?? "outline";
+      // Extraction now lands on the review screen, not the outline: the user has to
+      // confirm the uncertain metric mappings before those figures exist at all.
+      const next = state?.quarterlyNext ?? "extraction";
       navigate(`/quarterly-report/${readyReportId}/${next}`, { replace: true });
     }
   }, [readyReportId, navigate, state?.quarterlyNext]);
@@ -391,7 +394,7 @@ export default function ProcessingPage() {
       : {
           title: "Processing your report",
           subtitle: "Reading your documents and extracting the figures.",
-          doneSubtitle: "Taking you to the outline…",
+          doneSubtitle: "Taking you to the figures we found…",
           milestones: QUARTERLY_MILESTONES,
           tips: QUARTERLY_TIPS,
         };
