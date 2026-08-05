@@ -126,6 +126,59 @@ export interface GapsResponse {
   gaps: GapItem[];
 }
 
+// ─── Extraction review (step 2) ─────────────────────────────────────────────
+// Extraction reports what a document SAYS; a separate mapping pass decides which
+// of our metrics each line IS, with a 0-100 confidence. Exact matches and anything
+// at 90+ are already stored. The uncertain middle band is listed in `pending` for a
+// yes/no — nothing there reaches the report until the user confirms it.
+export interface ExtractionReviewFigure {
+  id: string;
+  metric_key: string | null;
+  // What WE call it.
+  metric_label: string | null;
+  // What the DOCUMENT called it. The pair is the whole question being asked.
+  source_label: string | null;
+  statement: string | null;
+  period: string | null;
+  value: number | null;
+  value_display: string | null;
+  unit: string | null;
+  // 0-100 mapping confidence. Always 100 for a confirmed row (it is already in
+  // the report). NOT the same as extraction confidence — this is "is this the
+  // right metric", not "did we read the number correctly".
+  confidence: number | null;
+  source: string | null;
+  source_page: number | null;
+}
+
+export interface ExtractionReviewResponse {
+  report_id: string;
+  company_id: string;
+  run_id: string | null;
+  awaiting_review: boolean;
+  confirmed: ExtractionReviewFigure[];
+  pending: ExtractionReviewFigure[];
+  summary: {
+    confirmed_count: number;
+    pending_count: number;
+    // Lines we read but could not place. Shown so "we read 120 and used 40" is
+    // visible rather than silent.
+    discarded_count: number;
+  };
+}
+
+export interface ExtractionReviewDecision {
+  id: string;
+  accept: boolean;
+}
+
+export interface ExtractionReviewResult {
+  report_id: string;
+  accepted: number;
+  rejected: number;
+  next: string;
+}
+
 // ─── Outline (step 6) ───────────────────────────────────────────────────────
 // The report's section catalogue: mandatory sections locked at the top, optional
 // ones the user ticks + drag-reorders. Each section carries a "feeder" telling
