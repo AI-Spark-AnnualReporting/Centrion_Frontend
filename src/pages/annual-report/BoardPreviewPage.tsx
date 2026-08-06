@@ -10,7 +10,7 @@
 // prose. That's what Refine is for.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, boardReports } from '@/lib/api';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
@@ -18,6 +18,7 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import type { BoardOutlineSection, BoardSection } from '@/types/board';
 import {
   BOARD_COMPANY_VOICE,
+  boardContentMode,
   canRefineSection,
   errorMessage,
   isBoardCoverSection,
@@ -27,6 +28,7 @@ import {
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
+import { useFitFrame } from './useFitFrame';
 import { BoardRefinePanel } from './BoardRefinePanel';
 import {
   ACCENT,
@@ -42,19 +44,36 @@ import {
   RED,
 } from './board-ui';
 
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Not produced', color: '#C9CDE4' },
-  drafting: { label: 'Drafting…', color: ACCENT },
-  produced: { label: 'Ready', color: GREEN },
-  needs_input: { label: 'Needs input', color: AMBER },
-  empty: { label: 'Nothing to report', color: '#C9CDE4' },
-  locked: { label: 'Locked', color: GREEN },
+// Same palette and pill shapes as the quarterly Preview, so the two review
+// screens read as one product.
+const ACCENT_LIGHT = 'rgba(64,64,200,.07)';
+const ACCENT_RING = 'rgba(64,64,200,.35)';
+const GREEN_LIGHT = '#D1FAE5';
+const AMBER_LIGHT = '#FEF3C7';
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
+  pending: { label: 'Not produced', color: '#9BA3C4', bg: '#F2F3FA' },
+  drafting: { label: 'Composing…', color: ACCENT, bg: '#EEEEFF' },
+  produced: { label: 'Produced', color: GREEN, bg: GREEN_LIGHT },
+  needs_input: { label: 'Needs input', color: AMBER, bg: AMBER_LIGHT },
+  empty: { label: 'No data', color: '#9BA3C4', bg: '#F2F3FA' },
+  locked: { label: 'Locked', color: GREEN, bg: GREEN_LIGHT },
 };
 
 export default function BoardPreviewPage() {
   const { reportId = '' } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
   const { locked, period, error: reportError } = useBoardReport(reportId);
+
+  // Handed over by the Sections step when its produce run reported a spreadsheet
+  // sheet it could not turn into a table. Dismissible: it describes one run, not
+  // a standing state, and it would otherwise come back on every reload.
+  const handover = useLocation().state as { sheetWarning?: unknown } | null;
+  const [sheetWarning, setSheetWarning] = useState<string | null>(
+    typeof handover?.sheetWarning === 'string' ? handover.sheetWarning : null,
+  );
 
   const [sections, setSections] = useState<BoardSection[]>([]);
   const [outline, setOutline] = useState<BoardOutlineSection[]>([]);
@@ -209,7 +228,13 @@ export default function BoardPreviewPage() {
     [reportId],
   );
 
-  const uploadPoll = usePipelinePoll(upload?.run_id ?? null, upload?.poll_url ?? null);
+  // No node timeline on this panel, so don't fetch one. Short cadence because
+  // the whole wait is short: at 3s, up to three of those seconds are spent
+  // after the run has already finished.
+  const uploadPoll = usePipelinePoll(upload?.run_id ?? null, upload?.poll_url ?? null, {
+    nodes: false,
+    intervalMs: 1500,
+  });
   useEffect(() => {
     if (!upload) return;
     const phase = uploadPoll.state.phase;
@@ -267,6 +292,30 @@ export default function BoardPreviewPage() {
   );
   const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
   const active = visible.find((s) => s.section_code === activeCode) ?? visible[0] ?? null;
+
+  // Prose opens straight in its editor — that is what this step is for, and a
+  // textarea of Markdown reads much like the rendered text anyway. A table does
+  // NOT: a grid of inputs is far harder to read than the table itself, so it
+  // stays rendered until the pencil is clicked. Cancel returns to the rendered
+  // view in both cases; an unwritten section keeps its Upload / Write choice.
+  useEffect(() => {
+    setEditing(
+      !!active &&
+        !locked &&
+        active.status === 'produced' &&
+        boardContentMode(active.content_type, active.content) === 'generate',
+    );
+  }, [active, locked]);
+
+  // Both columns scroll inside themselves and the footer stays put, as on the
+  // quarterly Preview.
+  const { frameRef, tailRef, height: frameHeight } = useFitFrame([
+    loading,
+    visible.length,
+    sheetWarning,
+    error,
+    reportError,
+  ]);
   // "Filled" means it has content, or the server has said there is none to have.
   const unfilled = visible.filter(
     (s) => !(s.status === 'produced' || s.status === 'locked' || s.status === 'empty'),
@@ -284,6 +333,29 @@ export default function BoardPreviewPage() {
     >
       {locked && <LockedNotice />}
       {(error || reportError) && <Notice tone="red">{error ?? reportError}</Notice>}
+      {sheetWarning && (
+        <Notice tone="amber">
+          {sheetWarning}{' '}
+          <button
+            type="button"
+            onClick={() => setSheetWarning(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              marginLeft: 6,
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              fontWeight: 700,
+              color: 'inherit',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+            }}
+          >
+            Dismiss
+          </button>
+        </Notice>
+      )}
 
       {loading ? (
         <div className="card">
@@ -297,48 +369,70 @@ export default function BoardPreviewPage() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '250px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
+        <div
+          ref={frameRef}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '280px minmax(0, 1fr)',
+            gap: 16,
+            height: frameHeight ?? undefined,
+            alignItems: 'stretch',
+          }}
+        >
           <SectionRail
             sections={visible}
             activeCode={active?.section_code ?? null}
             readyCount={readyCount}
             onSelect={(code) => {
               setActiveCode(code);
-              setEditing(false);
               setSectionError(null);
             }}
           />
 
-          {active && (
-            <SectionPanel
-              key={active.section_code}
-              section={active}
-              meta={byCode.get(active.section_code)}
-              locked={locked}
-              editing={editing}
-              saving={saving}
-              saved={saved}
-              busy={busy}
-              error={sectionError}
-              history={history[active.section_code] ?? []}
-              onEdit={setEditing}
-              onSave={handleSave}
-              onRefine={handleRefine}
-              onConfirm={handleConfirm}
-              onUploadFile={handleUploadFile}
-              working={
-                upload?.code === active.section_code
-                  ? `Reading ${upload.fileName}`
-                  : writing === active.section_code
-                    ? 'Writing this section from your document'
-                    : null
-              }
-            />
-          )}
+          {/* Scrolls on its own, so the rail and the footer never move. */}
+          <div style={{ minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+            {active && (
+              <SectionPanel
+                key={active.section_code}
+                section={active}
+                index={visible.findIndex((s) => s.section_code === active.section_code)}
+                meta={byCode.get(active.section_code)}
+                locked={locked}
+                editing={editing}
+                saving={saving}
+                saved={saved}
+                busy={busy}
+                error={sectionError}
+                history={history[active.section_code] ?? []}
+                onEdit={setEditing}
+                onSave={handleSave}
+                onRefine={handleRefine}
+                onConfirm={handleConfirm}
+                onUploadFile={handleUploadFile}
+                working={
+                  upload?.code === active.section_code
+                    ? `Reading ${upload.fileName}`
+                    : writing === active.section_code
+                      ? 'Writing this section from your document'
+                      : null
+                }
+              />
+            )}
+          </div>
         </div>
       )}
 
-      <div className="card" style={{ padding: '2px 20px 18px', marginTop: 16 }}>
+      {/* Sits below the frame, so it never scrolls away. */}
+      <div
+        ref={tailRef}
+        style={{
+          background: '#fff',
+          border: `1px solid ${BORDER_SOFT}`,
+          borderRadius: 12,
+          padding: '0 20px 14px',
+          marginTop: 12,
+        }}
+      >
         <StepActions
           back={() => navigate(`/board-report/${reportId}/sections`)}
           backLabel="Sections"
@@ -408,79 +502,172 @@ function SectionRail({
   readyCount: number;
   onSelect: (code: string) => void;
 }) {
+  const allReady = readyCount === sections.length;
   return (
-    <div className="card" style={{ padding: 0, position: 'sticky', top: 12 }}>
+    <div
+      className="card"
+      style={{
+        padding: '14px 10px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
+      }}
+    >
       <div
         style={{
-          padding: '12px 14px',
-          borderBottom: `1px solid ${BORDER_SOFT}`,
-          fontSize: 10.5,
-          fontWeight: 800,
-          letterSpacing: '.6px',
-          textTransform: 'uppercase',
-          color: FAINT,
           display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
+          marginBottom: 10,
+          padding: '0 6px',
+          flexShrink: 0,
         }}
       >
-        <span>Sections · {sections.length}</span>
-        <span style={{ color: ACCENT }}>{readyCount} ready</span>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.06em',
+            color: MUTED,
+            textTransform: 'uppercase',
+          }}
+        >
+          Sections
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            fontFamily: MONO,
+            color: allReady ? GREEN : ACCENT,
+            background: allReady ? GREEN_LIGHT : ACCENT_LIGHT,
+            padding: '2px 8px',
+            borderRadius: 10,
+          }}
+        >
+          {readyCount}/{sections.length}
+        </span>
       </div>
-      <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 620, overflowY: 'auto' }}>
-        {sections.map((s) => {
-          const activeRow = s.section_code === activeCode;
-          const meta = STATUS_META[s.status] ?? { label: s.status, color: '#C9CDE4' };
-          const needsYou =
-            s.status === 'needs_input' || (s.provenance === 'carried_forward' && !s.confirmed);
-          return (
-            <button
-              key={s.section_code}
-              type="button"
-              onClick={() => onSelect(s.section_code)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                textAlign: 'left',
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: 'none',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                background: activeRow ? 'rgba(64,64,200,.08)' : 'transparent',
-              }}
-            >
-              <span
-                aria-hidden
-                style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color, flexShrink: 0 }}
-              />
-              <span
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: activeRow ? 700 : 500,
-                  color: activeRow ? ACCENT : INK,
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {s.title}
-              </span>
-              {needsYou && (
-                <span
-                  aria-label="Needs your attention"
-                  style={{ fontSize: 11, fontWeight: 800, color: AMBER, flexShrink: 0 }}
-                >
-                  !
-                </span>
-              )}
-            </button>
-          );
-        })}
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+        {sections.map((s, i) => (
+          <RailItem
+            key={s.section_code}
+            section={s}
+            index={i}
+            isCurrent={s.section_code === activeCode}
+            onClick={() => onSelect(s.section_code)}
+          />
+        ))}
       </div>
+    </div>
+  );
+}
+
+// One rail row: a numbered circle that becomes a tick once the section is
+// written, and an amber dot while it still wants a human.
+function RailItem({
+  section: s,
+  index,
+  isCurrent,
+  onClick,
+}: {
+  section: BoardSection;
+  index: number;
+  isCurrent: boolean;
+  onClick: () => void;
+}) {
+  const ready = s.status === 'produced' || s.status === 'locked' || s.status === 'empty';
+  const drafting = s.status === 'drafting';
+  const needs =
+    s.status === 'needs_input' ||
+    s.status === 'pending' ||
+    (s.provenance === 'carried_forward' && !s.confirmed);
+
+  const dotBg = ready ? GREEN_LIGHT : needs ? AMBER_LIGHT : drafting ? ACCENT : '#F1F2F6';
+  const dotColor = ready ? GREEN : needs ? AMBER : drafting ? '#fff' : MUTED;
+  const dotBorder = ready ? '#A7F3D0' : needs ? '#FDE68A' : drafting ? ACCENT : '#E5E7EF';
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 10px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: isCurrent ? ACCENT_LIGHT : 'transparent',
+        border: isCurrent ? `1.5px solid ${ACCENT_RING}` : '1.5px solid transparent',
+        transition: 'background 0.15s, border-color 0.15s',
+        marginBottom: 2,
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 10,
+          fontWeight: 700,
+          background: dotBg,
+          color: dotColor,
+          border: `1px solid ${dotBorder}`,
+        }}
+      >
+        {ready ? (
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+            <path
+              d="M2.5 6.2L5 8.7l4.5-5"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : drafting ? (
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ animation: 'spin 0.8s linear infinite' }}
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.35" />
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        ) : (
+          String(index + 1)
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: isCurrent ? 700 : 500,
+            color: isCurrent ? INK : '#374151',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {s.title}
+        </div>
+      </div>
+
+      {needs && (
+        <span
+          title="Needs your input"
+          style={{ width: 6, height: 6, borderRadius: '50%', background: AMBER, flexShrink: 0 }}
+        />
+      )}
     </div>
   );
 }
@@ -489,6 +676,7 @@ function SectionRail({
 
 function SectionPanel({
   section: s,
+  index,
   meta,
   locked,
   editing,
@@ -505,6 +693,7 @@ function SectionPanel({
   working,
 }: {
   section: BoardSection;
+  index: number;
   meta?: BoardOutlineSection;
   locked: boolean;
   editing: boolean;
@@ -527,37 +716,87 @@ function SectionPanel({
   const readOnly = locked || s.status === 'locked';
   const companyVoice = BOARD_COMPANY_VOICE.includes(s.section_code);
   const refinable = !readOnly && canRefineSection(s);
-  const statusMeta = STATUS_META[s.status] ?? { label: s.status, color: FAINT };
+  const statusMeta = STATUS_META[s.status] ?? { label: s.status, color: FAINT, bg: '#F2F3FA' };
   const refining = busy === 'refine';
   // The source slot this section is fed by — where an uploaded file gets filed.
   const slot = meta?.source_document || null;
 
   return (
-    <div className="card" style={{ padding: '22px 26px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+    <div className="card" style={{ padding: '24px 28px' }}>
+      {/* Header row, same order as the quarterly Preview: number · title ·
+          badges · status. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            fontFamily: MONO,
+            fontSize: 11,
+            fontWeight: 700,
+            color: '#fff',
+            background: ACCENT,
+            padding: '3px 7px',
+            borderRadius: 6,
+          }}
+        >
+          {pad2(index + 1)}
+        </span>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: INK, flex: 1, minWidth: 0 }}>
+          {s.title}
+        </h2>
         {meta?.requirement === 'M' && (
           <span className="badge b-gn" title="Mandatory">
             M
           </span>
         )}
-        <span style={{ fontSize: 11, fontWeight: 700, color: statusMeta.color }}>{statusMeta.label}</span>
         {feeder?.edited && <span className="badge b-bl">Edited</span>}
         {feeder?.refined && <span className="badge b-pp">Refined with AI</span>}
         {saved && <span style={{ fontSize: 11.5, fontWeight: 700, color: GREEN }}>Saved</span>}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: '0 0 12px', fontSize: 18, fontWeight: 800, color: INK, flex: 1, minWidth: 0 }}>
-          {s.title}
-        </h2>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 11px',
+            borderRadius: 20,
+            fontSize: 11,
+            fontWeight: 700,
+            color: statusMeta.color,
+            background: statusMeta.bg,
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color }} />
+          {statusMeta.label}
+        </span>
         {!readOnly && produced && !editing && (
           <button
-            className="btn bs bsm"
+            type="button"
             disabled={!!busy}
             onClick={() => onEdit(true)}
-            style={{ flexShrink: 0 }}
+            title="Edit this section"
+            aria-label="Edit this section"
+            style={{
+              flexShrink: 0,
+              width: 28,
+              height: 28,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 8,
+              border: `1px solid ${BORDER_SOFT}`,
+              background: '#fff',
+              color: MUTED,
+              cursor: busy ? 'not-allowed' : 'pointer',
+              padding: 0,
+            }}
           >
-            ✎ Edit
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+              <path
+                d="M13.5 3.5l3 3L7 16H4v-3l9.5-9.5z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         )}
       </div>
@@ -655,98 +894,193 @@ function SectionPanel({
           Nothing to report this year.
         </p>
       ) : (
-        // Unwritten, whether the server is waiting on a document (needs_input)
-        // or simply hasn't written it (pending). Either way there are exactly
-        // two ways forward, and re-producing isn't one of them: nothing it
-        // depends on has changed, and some sections have no producer at all.
-        <div
-          style={{
-            padding: '13px 15px',
-            borderRadius: 9,
-            background: s.status === 'needs_input' ? 'rgba(245,158,11,.08)' : '#FAFBFE',
-            border: `1px solid ${s.status === 'needs_input' ? 'rgba(245,158,11,.3)' : BORDER_SOFT}`,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12.5,
-              color: s.status === 'needs_input' ? AMBER : MUTED,
-              marginBottom: readOnly ? 0 : 10,
-            }}
-          >
-            {working
-              ? 'Working on this section…'
-              : (feeder?.message ??
-                'Not written yet — upload the document it reads from, or write it here.')}
-          </div>
-
-          {working ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: INK, fontWeight: 600 }}>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                style={{ animation: 'spin 0.8s linear infinite', color: ACCENT, flexShrink: 0 }}
-              >
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-              {working} — this section will fill in when it lands.
-            </div>
-          ) : (
-            !readOnly &&
-            !editing && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {/* Files the section's own slot, so there is no trip back to
-                    Sources to work out which document it needed. */}
-                <label
-                  className="btn bp bsm"
-                  style={{ cursor: slot ? 'pointer' : 'not-allowed', marginBottom: 0, opacity: slot ? 1 : 0.55 }}
-                  title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
-                >
-                  Upload the document
-                  <input
-                    type="file"
-                    disabled={!slot}
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f && slot) onUploadFile(s.section_code, slot, f);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-                <button className="btn bs bsm" onClick={() => onEdit(true)}>
-                  Write it manually
-                </button>
-              </div>
-            )
-          )}
-
-          {editing && (
-            <div style={{ marginTop: 12 }}>
-              <EditableSectionContent
-                section={toBoardProduced({ ...s, content: s.content ?? '' })}
-                editing
-                saving={saving}
-                error={error}
-                onSave={(content) => onSave(s.section_code, content)}
-                onCancel={() => onEdit(false)}
-              />
-            </div>
-          )}
-        </div>
+        <NeedsInput
+          section={s}
+          slot={slot}
+          readOnly={readOnly}
+          saving={saving}
+          error={error}
+          working={working}
+          onSave={onSave}
+          onUploadFile={onUploadFile}
+        />
       )}
 
       {error && !editing && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
 
-      {refinable && !editing && (
+      {/* Stays available while the editor is open — sections are now always
+          open for editing, so hiding Refine behind "not editing" would hide it
+          permanently. Refining replaces the draft, which is the point. */}
+      {refinable && (
         <BoardRefinePanel
           refining={refining}
           history={history}
           onRefine={(instruction) => onRefine(s.section_code, instruction)}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── a section with nothing in it yet ─────────────────────────────────────────
+//
+// One panel, not a choice of two: say what is missing, give a field to type it
+// into, offer a document to fill that field from, and one Save. Matches the
+// quarterly Preview's needs-input panel.
+
+function NeedsInput({
+  section: s,
+  slot,
+  readOnly,
+  saving,
+  error,
+  working,
+  onSave,
+  onUploadFile,
+}: {
+  section: BoardSection;
+  slot: string | null;
+  readOnly: boolean;
+  saving: boolean;
+  error: string | null;
+  working: string | null;
+  onSave: (code: string, content: string) => void;
+  onUploadFile: (code: string, slot: string, file: File) => void;
+}) {
+  // Local to the panel, which is remounted per section — no draft can leak from
+  // one section to the next.
+  const [draft, setDraft] = useState('');
+  const need = s.feeder?.message?.trim() || 'the content for this section';
+
+  if (working) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '24px 4px',
+          fontSize: 13,
+          fontWeight: 600,
+          color: ACCENT,
+        }}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
+        >
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+        {working} — this section fills in when it lands.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          background: AMBER_LIGHT,
+          border: '1px solid #FDE68A',
+          borderRadius: 10,
+          padding: '12px 14px',
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: AMBER, marginBottom: 3 }}>
+          This section needs your input
+        </div>
+        <div style={{ fontSize: 13, color: '#92610A' }}>Needs: {need}</div>
+      </div>
+
+      {readOnly ? null : (
+        <>
+          <label
+            style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}
+          >
+            Section content
+          </label>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Type or paste the section content…"
+            rows={6}
+            disabled={saving}
+            style={{
+              width: '100%',
+              padding: '12px 14px',
+              borderRadius: 8,
+              border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: INK,
+              background: saving ? '#F8F9FC' : '#fff',
+              resize: 'vertical',
+              outline: 'none',
+              fontFamily: 'inherit',
+              boxSizing: 'border-box',
+            }}
+          />
+
+          {/* Files the section's own slot, so there is no trip back to Sources
+              to work out which document it was waiting on. */}
+          <label
+            style={{
+              marginTop: 12,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '9px 14px',
+              borderRadius: 8,
+              border: '1.5px dashed #C9CDE4',
+              background: '#fff',
+              cursor: slot ? 'pointer' : 'not-allowed',
+              opacity: slot ? 1 : 0.55,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: '#5A6080',
+            }}
+            title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
+          >
+            <input
+              type="file"
+              disabled={!slot}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f && slot) onUploadFile(s.section_code, slot, f);
+                e.target.value = '';
+              }}
+            />
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+              <path d="M10 4v8M6 8l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+              <path
+                d="M4 14v1a2 2 0 002 2h8a2 2 0 002-2v-1"
+                stroke="#9BA3C4"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+            Attach a supporting document
+          </label>
+
+          {error && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+            <button
+              className="btn bp"
+              disabled={saving || !draft.trim()}
+              onClick={() => onSave(s.section_code, draft.trim())}
+              style={{ fontSize: 13, padding: '10px 22px' }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

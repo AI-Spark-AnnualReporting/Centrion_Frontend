@@ -97,6 +97,7 @@ import type {
   BoardOutlineSavePayload,
   BoardProduceSectionResponse,
   BoardProfileResponse,
+  BoardReportDetail,
   BoardReportListResponse,
   BoardReportSummary,
   BoardRunHandle,
@@ -2609,6 +2610,10 @@ export const boardReports = {
 
   listReports: (companyId: string) =>
     request<BoardReportListResponse>(BOARD_BASE, { query: { company_id: companyId } }),
+
+  // One report by id. `locked` comes precomputed — don't re-derive it from status.
+  getReport: (reportId: string, signal?: AbortSignal) =>
+    request<BoardReportDetail>(boardPath(reportId), { signal }),
 
   getProfile: (reportId: string, signal?: AbortSignal) =>
     request<BoardProfileResponse>(boardPath(reportId, "/profile"), { signal }),

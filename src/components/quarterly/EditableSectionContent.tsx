@@ -132,9 +132,11 @@ function ProseEditor({
           preventDefault on mousedown keeps the textarea focused, so the button
           click is the only save — without it, blur would fire one too. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        {/* Unchanged text is not a save: it would PATCH the same string back and
+            mark the section hand-edited, which then makes produce skip it. */}
         <button
           className="btn bp"
-          disabled={saving || !draft.trim()}
+          disabled={saving || !draft.trim() || draft.trim() === value.trim()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onSave(draft.trim())}
           style={{ fontSize: 12.5, padding: '8px 18px' }}

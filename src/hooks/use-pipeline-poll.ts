@@ -19,9 +19,21 @@ export interface UsePipelinePollResult {
   restart: () => void;
 }
 
+export interface UsePipelinePollOptions {
+  /**
+   * Fetch the per-agent node rows alongside the run. Only pages that draw a
+   * timeline need them — everyone else is paying for a second request every
+   * tick and throwing the answer away.
+   */
+  nodes?: boolean;
+  /** Poll cadence. Shorter suits short runs, where the tail wait is the cost. */
+  intervalMs?: number;
+}
+
 export function usePipelinePoll(
   runId: string | null,
   pollUrl: string | null,
+  { nodes = true, intervalMs = POLL_INTERVAL_MS }: UsePipelinePollOptions = {},
 ): UsePipelinePollResult {
   const [state, setState] = useState<PipelinePollState>({
     phase: pollUrl ? "running" : "idle",
@@ -67,7 +79,7 @@ export function usePipelinePoll(
         // for phase transitions, the timeline can stay stale for one tick.
         const [run, nodesResult] = await Promise.all([
           agentRuns.getByPollUrl(pollUrl, controller.signal),
-          runId
+          nodes && runId
             ? agentRuns.getNodes(runId, controller.signal).catch(() => null)
             : Promise.resolve(null),
         ]);
@@ -109,7 +121,7 @@ export function usePipelinePoll(
       }
     };
 
-    const intervalId = window.setInterval(tick, POLL_INTERVAL_MS);
+    const intervalId = window.setInterval(tick, intervalMs);
     tick();
 
     return () => {
@@ -117,7 +129,7 @@ export function usePipelinePoll(
       controller.abort();
       window.clearInterval(intervalId);
     };
-  }, [runId, pollUrl, restartCount]);
+  }, [runId, pollUrl, restartCount, nodes, intervalMs]);
 
   const restart = useCallback(() => {
     setRestartCount((c) => c + 1);

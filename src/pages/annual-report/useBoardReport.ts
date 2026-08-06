@@ -2,9 +2,8 @@
 // of its own data: is this report locked, and what period is it for.
 
 import { useEffect, useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
 import { boardReports } from '@/lib/api';
-import type { BoardReportSummary } from '@/types/board';
+import type { BoardReportDetail } from '@/types/board';
 import { errorMessage, isBoardLocked } from './board-helpers';
 
 export const BOARD_STEPS: { label: string; path: (reportId: string) => string }[] = [
@@ -14,26 +13,18 @@ export const BOARD_STEPS: { label: string; path: (reportId: string) => string }[
   { label: 'Report', path: (id) => `/board-report/${id}/report` },
 ];
 
-/**
- * The report's own row — period and status. There is no GET for a single board
- * report, so this reads the company's list and picks this one out.
- */
+/** The report's own row — period, status and whether it is locked. */
 export function useBoardReport(reportId: string) {
-  const { user } = useAuth();
-  const companyId = user?.company_id ?? null;
-  const [summary, setSummary] = useState<BoardReportSummary | null>(null);
+  const [summary, setSummary] = useState<BoardReportDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!companyId || !reportId) return;
+    if (!reportId) return;
     let cancelled = false;
     boardReports
-      .listReports(companyId)
+      .getReport(reportId)
       .then((res) => {
-        if (cancelled) return;
-        const found = res.reports?.find((r) => r.report_id === reportId) ?? null;
-        setSummary(found);
-        if (!found) setError('That board report does not exist, or belongs to another company.');
+        if (!cancelled) setSummary(res);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(errorMessage(err, 'Could not load this board report.'));
@@ -41,12 +32,14 @@ export function useBoardReport(reportId: string) {
     return () => {
       cancelled = true;
     };
-  }, [companyId, reportId]);
+  }, [reportId]);
 
   return {
     summary,
     error,
-    locked: isBoardLocked(summary?.status),
+    // The server precomputes this; `isBoardLocked` is only the fallback for a
+    // response that predates the field.
+    locked: summary?.locked ?? isBoardLocked(summary?.status),
     period: summary?.period ?? '',
   };
 }

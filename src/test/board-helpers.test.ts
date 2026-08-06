@@ -8,18 +8,19 @@ import { ApiError } from '@/lib/api';
 import type { BoardOutlineSection, BoardSourcesResponse } from '@/types/board';
 import {
   boardProduceSummary,
+  boardSheetWarning,
   boardCitations,
   boardContentMode,
   canRefineSection,
   initialStep,
   isBoardCoverSection,
+  numberBoardHeadings,
   outlinePayload,
   profileFromCompany,
   readBoardConflict,
   readDuplicateSlots,
   readCompletionFromError,
   readExistingRunId,
-  touchedByHand,
 } from '@/pages/annual-report/board-helpers';
 
 const outlineSection = (over: Partial<BoardOutlineSection>): BoardOutlineSection => ({
@@ -239,21 +240,26 @@ describe('boardCitations', () => {
   });
 });
 
-describe('touchedByHand', () => {
-  it('names the sections a produce-all would overwrite', () => {
-    expect(
-      touchedByHand([
-        { title: 'Risk management', feeder: { edited: true } },
-        { title: 'Strategy', feeder: { refined: true } },
-        { title: 'Net income', feeder: { citations: [] } },
-        { title: 'Dividends', feeder: null },
-      ]),
-    ).toEqual(['Risk management', 'Strategy']);
+describe('numberBoardHeadings', () => {
+  it('numbers every heading in one sequence, from the section number', () => {
+    const md = ['## Board composition', 'Twelve directors served.', '### Attendance', '## Fees'].join('\n');
+    expect(numberBoardHeadings(md, 3).split('\n')).toEqual([
+      '## 3.1 Board composition',
+      'Twelve directors served.',
+      '### 3.2 Attendance',
+      '## 3.3 Fees',
+    ]);
   });
 
-  it('is empty when nobody has touched anything', () => {
-    expect(touchedByHand([{ title: 'Net income', feeder: null }])).toEqual([]);
-    expect(touchedByHand([])).toEqual([]);
+  it('leaves the content alone when there is no number to count from', () => {
+    expect(numberBoardHeadings('## Board composition', null)).toBe('## Board composition');
+    expect(numberBoardHeadings('## Board composition', undefined)).toBe('## Board composition');
+    expect(numberBoardHeadings(null, 3)).toBe('');
+  });
+
+  it('does not touch a line that only looks like a heading', () => {
+    // No space after the hashes, and a mid-line hash — neither is a heading.
+    expect(numberBoardHeadings('#NotAHeading\ncost #4 rose', 2)).toBe('#NotAHeading\ncost #4 rose');
   });
 });
 
@@ -276,6 +282,33 @@ describe('boardProduceSummary', () => {
   it('defaults the optional counters', () => {
     expect(boardProduceSummary(run({ produced: 5, total: 10 })))
       .toEqual({ produced: 5, total: 10, skipped: 0, failed: 0 });
+  });
+});
+
+describe('boardSheetWarning', () => {
+  const run = (output_summary: unknown) =>
+    ({ output_summary } as unknown as Parameters<typeof boardSheetWarning>[0]);
+
+  it('prefers the server’s own wording', () => {
+    expect(
+      boardSheetWarning(
+        run({ unrendered_sheets: ['HR_Saudization'], warning: '1 sheet appears as raw text.' }),
+      ),
+    ).toBe('1 sheet appears as raw text.');
+  });
+
+  it('builds one from the sheet list when no wording was sent', () => {
+    expect(boardSheetWarning(run({ unrendered_sheets: ['HR_Saudization', 'Fines'] }))).toBe(
+      '2 spreadsheet sheets produced no table and appear as raw text: HR_Saudization, Fines.',
+    );
+  });
+
+  it('is silent when nothing went wrong, and never throws', () => {
+    expect(boardSheetWarning(run({ produced: 5, total: 10 }))).toBeNull();
+    expect(boardSheetWarning(run({ unrendered_sheets: [] }))).toBeNull();
+    expect(boardSheetWarning(run({ unrendered_sheets: 'HR' }))).toBeNull();
+    expect(boardSheetWarning(run({ warning: '   ' }))).toBeNull();
+    expect(boardSheetWarning(null)).toBeNull();
   });
 });
 

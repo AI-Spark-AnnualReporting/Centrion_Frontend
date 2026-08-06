@@ -55,6 +55,14 @@ export interface BoardReportSummary {
   issuer_profile: BoardIssuerProfile;
 }
 
+/**
+ * `GET /reports/{id}`. Same row as the list entry, plus `locked` precomputed —
+ * use that rather than inferring it from `status`.
+ */
+export interface BoardReportDetail extends BoardReportSummary {
+  locked?: boolean;
+}
+
 export interface CreateBoardReportPayload {
   company_id: string;
   fiscal_year: number;
@@ -272,6 +280,12 @@ export interface BoardAssembledSection {
   section_code: string;
   title: string;
   display_order: number;
+  /**
+   * The section's number in the finished document. Headings inside `content`
+   * are numbered from it — `3.1`, `3.2` — by `numberBoardHeadings`, so the
+   * preview matches the export. Not present in the content string itself.
+   */
+  number?: number;
   /** `table` → content is JSON; `prose` → content is text. */
   mode: "table" | "prose" | (string & {});
   source_type: string;

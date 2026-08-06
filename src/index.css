@@ -362,6 +362,8 @@ body {
 .content {
   flex: 1; overflow-y: auto; padding: 20px 22px var(--fab-clearance);
 }
+/* Pages with no launcher over them need no clearance under them. */
+.content.no-fab { padding-bottom: 20px; }
 .content::-webkit-scrollbar { width: 5px; }
 .content::-webkit-scrollbar-thumb { background: #E2E4F0; border-radius: 3px; }
 
@@ -1114,6 +1116,9 @@ body {
   .print-doc {
     position: absolute; left: 0; top: 0; width: 100%; max-width: none;
   }
+  /* The board report scrolls inside its own frame on screen; printing must not
+     inherit that, or only the first screenful comes out. */
+  .doc-scroll { height: auto !important; max-height: none !important; overflow: visible !important; }
   .print-doc .card { border: none; box-shadow: none; border-radius: 0; padding: 0; }
   .print-doc section, .print-doc table { break-inside: avoid; }
 }

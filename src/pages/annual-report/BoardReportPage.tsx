@@ -8,13 +8,13 @@
 // /assemble still supplies the cover and brand — it's what the exporter renders,
 // so the preview and the PDF can't drift.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { boardReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
-import { SectionContent } from '@/components/quarterly/SectionContent';
+import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import type {
@@ -27,12 +27,14 @@ import {
   errorMessage,
   isBoardCoverSection,
   isBoardExcluded,
+  numberBoardHeadings,
   readCompletionFromError,
   toBoardProduced,
 } from './board-helpers';
-import { BoardStepShell, StepActions } from './board-shell';
+import { BoardStepShell } from './board-shell';
 import { useBoardReport } from './useBoardReport';
-import { ACCENT, AMBER, BORDER_SOFT, FAINT, GREEN, INK, MUTED, Notice, RED } from './board-ui';
+import { useFitFrame } from './useFitFrame';
+import { ACCENT, AMBER, BORDER_SOFT, FAINT, GREEN, INK, MUTED, Notice } from './board-ui';
 
 const BRAND = 'var(--brand-primary, #4040C8)';
 const DOC_WIDTH = 820;
@@ -51,7 +53,7 @@ export default function BoardReportPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
-  const { summary, locked, period, error: reportError } = useBoardReport(reportId);
+  const { locked, period, error: reportError } = useBoardReport(reportId);
 
   const [sections, setSections] = useState<BoardSection[]>([]);
   const [outline, setOutline] = useState<BoardOutlineSection[]>([]);
@@ -60,6 +62,13 @@ export default function BoardReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+
+  // Inline edit, as on the quarterly assembled report: the pencil is the only
+  // way in, and it disappears once the report is approved.
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [savedCode, setSavedCode] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [approveOpen, setApproveOpen] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -98,6 +107,44 @@ export default function BoardReportPage() {
     };
   }, [reportId, load]);
 
+  const handleSave = useCallback(
+    async (code: string, content: string) => {
+      setSavingCode(code);
+      setEditError(null);
+      try {
+        const res = await boardReports.patchSectionContent(reportId, code, content);
+        setSections((prev) =>
+          prev.map((s) =>
+            s.section_code === code
+              ? {
+                  ...s,
+                  content: res?.content ?? content,
+                  status: 'produced',
+                  provenance: 'updated',
+                  feeder: { ...(res?.feeder ?? {}), edited: true },
+                }
+              : s,
+          ),
+        );
+        setEditingCode(null);
+        setSavedCode(code);
+        // An edit can clear a blocker, so the readiness strip has to keep up.
+        boardReports.getCompletion(reportId).then(setCompletion).catch(() => {});
+      } catch (err: unknown) {
+        setEditError(errorMessage(err, 'Could not save. Please try again.'));
+      } finally {
+        setSavingCode(null);
+      }
+    },
+    [reportId],
+  );
+
+  useEffect(() => {
+    if (!savedCode) return;
+    const t = setTimeout(() => setSavedCode(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedCode]);
+
   const handleApprove = useCallback(async () => {
     setApproving(true);
     setApproveError(null);
@@ -105,6 +152,9 @@ export default function BoardReportPage() {
       await boardReports.approve(reportId);
       setApprovedNow(true);
       setApproveOpen(false);
+      // Editing is gated behind the pencil; drop any open editor so the
+      // read-only view takes over cleanly.
+      setEditingCode(null);
       boardReports.getCompletion(reportId).then(setCompletion).catch(() => {});
     } catch (err: unknown) {
       // The 409 body IS the completion payload, so the dialog can list exactly
@@ -120,6 +170,26 @@ export default function BoardReportPage() {
       setApproving(false);
     }
   }, [reportId]);
+
+  const { frameRef, tailRef, height: frameHeight } = useFitFrame([
+    loading,
+    sections.length,
+    completion?.ready,
+    error,
+    reportError,
+  ]);
+
+  // The exporter's own numbering, keyed by section. Headings inside a section
+  // are numbered from it, so the document on screen reads like the PDF.
+  const numberByCode = useMemo(
+    () =>
+      new Map(
+        (assembled?.sections ?? [])
+          .filter((s) => typeof s.number === 'number')
+          .map((s) => [s.section_code, s.number as number]),
+      ),
+    [assembled],
+  );
 
   const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
   const titleByCode = useMemo(
@@ -153,6 +223,81 @@ export default function BoardReportPage() {
           ['--brand-secondary' as string]: brand?.secondary ?? ACCENT,
         }}
       >
+        {/* No bar — just the controls, floating at the right and following you
+            down a long document. The group has no background of its own, so
+            only the buttons and the readiness pill sit over the page. */}
+        <div
+          className="print-hide"
+          style={{
+            position: 'sticky',
+            top: 4,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 10,
+            flexWrap: 'wrap',
+            marginBottom: 14,
+          }}
+        >
+          {completion && (
+            // Its own pill, because it is legible over whatever scrolls beneath.
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '7px 13px',
+                borderRadius: 999,
+                background: '#fff',
+                border: `1px solid ${completion.can_approve ? 'rgba(34,197,94,.3)' : 'rgba(245,158,11,.35)'}`,
+                boxShadow: '0 2px 10px rgba(26,29,46,.06)',
+                fontSize: 12,
+                fontWeight: 700,
+                color: completion.can_approve ? '#16803C' : AMBER,
+              }}
+            >
+              {completion.ready} of {completion.total} sections ready
+              <BlockerChips completion={completion} />
+            </span>
+          )}
+
+          {/* Only an approved report exports: the file is the deliverable, and a
+              PDF of a half-written draft is the one thing that must not be able
+              to leave the building. */}
+          <span title={isLocked ? undefined : 'Approve & Lock to enable export.'}>
+            <DownloadMenu
+              companyId={companyId}
+              reportId={reportId}
+              label="Export"
+              disabled={!isLocked || sections.length === 0}
+              onDownload={(fmt) =>
+                boardReports.downloadExport(reportId, fmt, `board-report-${period || 'draft'}`)
+              }
+            />
+          </span>
+          {!isLocked && (
+            <button
+              className="btn bp"
+              // Gated on the server's own readiness flag; the pill beside it
+              // says what is outstanding and each chip jumps to it.
+              disabled={!completion?.can_approve}
+              title={
+                completion?.can_approve
+                  ? undefined
+                  : 'Every section must be ready — see what is outstanding beside this.'
+              }
+              onClick={() => {
+                setApproveError(null);
+                setApproveOpen(true);
+              }}
+              style={{ padding: '9px 20px', fontSize: 12.5, fontWeight: 700 }}
+            >
+              Approve &amp; Lock
+            </button>
+          )}
+        </div>
+
         {(error || reportError) && <Notice tone="red">{error ?? reportError}</Notice>}
 
         {loading ? (
@@ -174,35 +319,22 @@ export default function BoardReportPage() {
             </button>
           </div>
         ) : (
-          <>
-            {completion && (
-              <div
-                className="print-hide"
-                style={{
-                  maxWidth: DOC_WIDTH,
-                  margin: '0 auto 16px',
-                  padding: '11px 14px',
-                  borderRadius: 10,
-                  background: completion.can_approve ? 'rgba(34,197,94,.08)' : 'rgba(245,158,11,.08)',
-                  border: `1px solid ${completion.can_approve ? 'rgba(34,197,94,.25)' : 'rgba(245,158,11,.3)'}`,
-                  fontSize: 12,
-                  color: completion.can_approve ? '#16803C' : AMBER,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <b>
-                  {completion.ready} of {completion.total} sections ready
-                </b>
-                <BlockerChips completion={completion} />
-              </div>
-            )}
-
+          /* The document scrolls in its own frame, so the controls above it and
+             the Review button below stay put however long the report runs. */
+          <div
+            ref={frameRef}
+            className="doc-scroll"
+            style={{ height: frameHeight ?? undefined, overflowY: 'auto', paddingRight: 6 }}
+          >
             <div
               className="print-doc"
-              style={{ maxWidth: DOC_WIDTH, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}
+              style={{
+                maxWidth: DOC_WIDTH,
+                margin: '0 auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 20,
+              }}
             >
               <CoverRenderer
                 companyName={str('company_name') ?? user?.company_name ?? null}
@@ -219,66 +351,39 @@ export default function BoardReportPage() {
                   <ReportSection
                     key={s.section_code}
                     section={s}
+                    number={numberByCode.get(s.section_code) ?? null}
                     meta={byCode.get(s.section_code)}
                     locked={isLocked}
+                    editing={editingCode === s.section_code}
+                    saving={savingCode === s.section_code}
+                    saved={savedCode === s.section_code}
+                    error={editingCode === s.section_code ? editError : null}
+                    onEdit={() => {
+                      setEditError(null);
+                      setEditingCode(s.section_code);
+                    }}
+                    onSave={(content) => handleSave(s.section_code, content)}
+                    onCancel={() => {
+                      setEditError(null);
+                      setEditingCode(null);
+                    }}
                   />
                 ))}
               </div>
             </div>
-          </>
+          </div>
         )}
 
-        <div className="card" style={{ padding: '2px 20px 18px', marginTop: 16 }}>
-          <StepActions
-            back={() => navigate(`/board-report/${reportId}/preview`)}
-            backLabel="Review"
-            hint={
-              !isLocked && (
-                <span style={{ fontSize: 11.5, color: FAINT }}>
-                  Approve &amp; Lock to enable export.
-                </span>
-              )
-            }
+        {/* Back navigation belongs at the end of the document, on its own — the
+            top bar is for what you do with the finished report. */}
+        <div ref={tailRef} className="print-hide" style={{ marginTop: 18 }}>
+          <button
+            className="btn bs"
+            onClick={() => navigate(`/board-report/${reportId}/preview`)}
+            style={{ padding: '10px 18px', fontSize: 13 }}
           >
-            {/* Only an approved report exports: the file is the deliverable, and
-                a PDF of a half-written draft is the one thing that must not be
-                able to leave the building. Print stays, for reviewing on paper. */}
-            <DownloadMenu
-              companyId={companyId}
-              reportId={reportId}
-              label="Export"
-              disabled={!isLocked || sections.length === 0}
-              onDownload={(fmt) =>
-                boardReports.downloadExport(reportId, fmt, `board-report-${period || 'draft'}`)
-              }
-            />
-            {!isLocked && (
-              <button
-                className="btn bp"
-                // Gated on the server's own readiness flag; the strip above says
-                // what is outstanding and each chip jumps to it.
-                disabled={!completion?.can_approve}
-                title={
-                  completion?.can_approve
-                    ? undefined
-                    : 'Every section must be ready — see what is outstanding above.'
-                }
-                onClick={() => {
-                  setApproveError(null);
-                  setApproveOpen(true);
-                }}
-                style={{
-                  padding: '11px 24px',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  opacity: completion?.can_approve ? 1 : 0.55,
-                  cursor: completion?.can_approve ? 'pointer' : 'not-allowed',
-                }}
-              >
-                Approve &amp; Lock
-              </button>
-            )}
-          </StepActions>
+            ← Review
+          </button>
         </div>
 
         {approveOpen && (
@@ -383,18 +488,36 @@ function BlockerList({
 
 // ─── one section of the finished document ─────────────────────────────────────
 //
-// The assembled document, and nothing else. No control of any kind lives here:
-// every way of changing a section — edit, refine, upload, confirm — is on the
-// Review step, and Review won't let you leave until every section is filled.
+// Read-only until the pencil is clicked, exactly as on the quarterly assembled
+// report. Refining, uploading and confirming still belong to the Review step —
+// this is only the last-minute correction you spot while reading the finished
+// document. The pencil disappears once the report is approved.
 
 function ReportSection({
   section: s,
+  number,
   meta,
   locked,
+  editing,
+  saving,
+  saved,
+  error,
+  onEdit,
+  onSave,
+  onCancel,
 }: {
   section: BoardSection;
+  /** Its number in the finished document, from `/assemble`. */
+  number: number | null;
   meta?: BoardOutlineSection;
   locked: boolean;
+  editing: boolean;
+  saving: boolean;
+  saved: boolean;
+  error: string | null;
+  onEdit: () => void;
+  onSave: (content: string) => void;
+  onCancel: () => void;
 }) {
   const feeder = s.feeder ?? null;
   const produced = s.status === 'produced' || s.status === 'locked';
@@ -424,10 +547,59 @@ function ReportSection({
         )}
         {feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
         {feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
+        {saved && (
+          <span
+            className="print-hide"
+            style={{ fontSize: 12, fontWeight: 700, color: GREEN, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M2.5 6.2L5 8.7l4.5-5"
+                stroke={GREEN}
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Saved
+          </span>
+        )}
         {!produced && (
           <span className="print-hide" style={{ fontSize: 11, fontWeight: 700, color: statusMeta.color }}>
             {statusMeta.label}
           </span>
+        )}
+        {!locked && produced && !editing && (
+          <button
+            type="button"
+            className="print-hide"
+            onClick={onEdit}
+            aria-label={`Edit ${s.title}`}
+            title="Edit section"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              border: '1px solid #E4E6F1',
+              background: '#fff',
+              color: MUTED,
+              cursor: 'pointer',
+              flexShrink: 0,
+              padding: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3L11 2.5z"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         )}
       </div>
 
@@ -454,7 +626,19 @@ function ReportSection({
       )}
 
       {produced ? (
-        <SectionContent section={toBoardProduced(s)} markdown />
+        // Numbered for reading, raw for editing — the numbers are display-only
+        // and must never reach `PATCH .../content`.
+        <EditableSectionContent
+          section={toBoardProduced(
+            editing ? s : { ...s, content: numberBoardHeadings(s.content, number) },
+          )}
+          editing={editing}
+          saving={saving}
+          error={error}
+          markdown
+          onSave={onSave}
+          onCancel={onCancel}
+        />
       ) : s.status === 'empty' ? (
         <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: 'italic' }}>
           Nothing to report this year.

@@ -67,7 +67,10 @@ export function AppLayout() {
     PAGE_NAME_PREFIXES.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ??
     'Command Center';
 
-  const chatbotShown = location.pathname !== '/dashboard';
+  // The board report builder fills the viewport and scrolls inside itself, so a
+  // launcher floating over its footer controls is in the way, not to hand.
+  const boardBuilder = location.pathname.startsWith('/board-report');
+  const chatbotShown = location.pathname !== '/dashboard' && !boardBuilder;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched
@@ -78,7 +81,9 @@ export function AppLayout() {
         <Sidebar />
         <div className="main">
           <Topbar pageName={pageName} />
-          <div className="content">
+          {/* `no-fab` drops the bottom padding that exists only to clear the
+              launcher — dead space on a page that doesn't scroll. */}
+          <div className={boardBuilder ? 'content no-fab' : 'content'}>
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

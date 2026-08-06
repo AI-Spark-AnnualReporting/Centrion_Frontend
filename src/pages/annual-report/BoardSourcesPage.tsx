@@ -16,6 +16,7 @@ import type { BoardSourceSlot, BoardSourcesResponse } from '@/types/board';
 import { errorMessage, readDuplicateSlots, readExistingRunId } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
+import { useFitFrame } from './useFitFrame';
 import {
   ACCENT,
   AMBER,
@@ -49,11 +50,14 @@ export default function BoardSourcesPage() {
 
   const [sources, setSources] = useState<BoardSourcesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [staged, setStaged] = useState<Record<string, File>>({});
+  // A slot can hold several documents — one register split across two files is
+  // ordinary. `slots` is positional, so the same slot name simply repeats.
+  const [staged, setStaged] = useState<Record<string, File[]>>({});
   // Slots the server rejected as holding the same document.
   const [dupeSlots, setDupeSlots] = useState<string[]>([]);
   const [run, setRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [generated, setGenerated] = useState(false);
+  const { frameRef, tailRef, height: frameHeight } = useFitFrame([sources, locked, generated, error]);
 
   const refetch = useCallback(async () => {
     setSources(await boardReports.getSources(reportId));
@@ -82,7 +86,10 @@ export default function BoardSourcesPage() {
 
   // Refetching on every tick is what makes extraction_status move without a
   // reload; the hook has no completion callback, so this effect does the work.
-  const poll = usePipelinePoll(run?.run_id ?? null, run?.poll_url ?? null);
+  const poll = usePipelinePoll(run?.run_id ?? null, run?.poll_url ?? null, {
+    nodes: false,
+    intervalMs: 1500,
+  });
   useEffect(() => {
     if (!run) return;
     if (poll.state.phase === 'running' || poll.state.phase === 'idle') {
@@ -116,19 +123,33 @@ export default function BoardSourcesPage() {
     reportId,
   ]);
 
-  const stageFile = useCallback((slot: string, file: File | null) => {
+  /** Add files to a slot, keeping whatever is already staged there. */
+  const stageFiles = useCallback((slot: string, files: File[]) => {
+    if (!files.length) return;
+    setError(null);
+    setDupeSlots([]);
+    setStaged((prev) => ({ ...prev, [slot]: [...(prev[slot] ?? []), ...files] }));
+  }, []);
+
+  /** Drop one staged file, and the slot's entry with the last of them. */
+  const unstageFile = useCallback((slot: string, index: number) => {
     setError(null);
     setDupeSlots([]);
     setStaged((prev) => {
+      const rest = (prev[slot] ?? []).filter((_, i) => i !== index);
       const next = { ...prev };
-      if (file) next[slot] = file;
+      if (rest.length) next[slot] = rest;
       else delete next[slot];
       return next;
     });
   }, []);
 
   const process = useCallback(async () => {
-    const batch = Object.entries(staged).map(([slot, file]) => ({ slot, file }));
+    // One pair per file: `files` and `slots` are matched positionally, so a slot
+    // holding two documents simply appears twice.
+    const batch = Object.entries(staged).flatMap(([slot, files]) =>
+      files.map((file) => ({ slot, file })),
+    );
     if (!batch.length) return;
     setError(null);
     setDupeSlots([]);
@@ -184,13 +205,13 @@ export default function BoardSourcesPage() {
     );
   }
 
-  const stagedCount = Object.keys(staged).length;
+  const stagedCount = Object.values(staged).reduce((n, files) => n + files.length, 0);
   // Slots the server marked required — a mandatory section depends on each, so
   // producing without them yields sections that can only say what is missing.
   // A file waiting to be sent counts: the gate is "have you got it", not "has
   // the server read it yet".
   const missingRequired = (sources?.slots ?? []).filter(
-    (s) => s.required && s.status !== 'received' && !s.documents.length && !staged[s.slot],
+    (s) => s.required && s.status !== 'received' && !s.documents.length && !staged[s.slot]?.length,
   );
   const readOnly = locked || generated;
   // Nothing moves — not processing, not continuing — while a required document
@@ -227,8 +248,20 @@ export default function BoardSourcesPage() {
         {!sources ? (
           <Spinner pad={40} />
         ) : (
-          <div style={{ border: `1px solid ${BORDER}`, borderRadius: 12, overflow: 'hidden' }}>
-            <div className="uhead">
+          // The list scrolls inside itself: its own header and the actions row
+          // below stay where they are however many slots there are.
+          <div
+            ref={frameRef}
+            style={{
+              border: `1px solid ${BORDER}`,
+              borderRadius: 12,
+              overflow: 'hidden',
+              height: frameHeight ?? undefined,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div className="uhead" style={{ flexShrink: 0 }}>
               <span className="uhead-title">
                 Documents
                 <span className="uhead-count">
@@ -248,53 +281,52 @@ export default function BoardSourcesPage() {
               </span>
             </div>
 
-            {sources.slots.map((slot) => (
-              <SlotRow
-                key={slot.slot}
-                slot={slot}
-                stagedFile={staged[slot.slot] ?? null}
-                duplicate={dupeSlots.includes(slot.slot)}
-                disabled={readOnly}
-                onStage={stageFile}
-                onRemove={removeDocument}
-              />
-            ))}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              {sources.slots.map((slot) => (
+                <SlotRow
+                  key={slot.slot}
+                  slot={slot}
+                  stagedFiles={staged[slot.slot] ?? []}
+                  duplicate={dupeSlots.includes(slot.slot)}
+                  disabled={readOnly}
+                  onStage={stageFiles}
+                  onUnstage={unstageFile}
+                  onRemove={removeDocument}
+                />
+              ))}
+            </div>
           </div>
         )}
 
-        <StepActions
-          back={() => navigate('/board-report')}
-          backLabel="Board reports"
-          hint={
-            <span style={{ fontSize: 11.5, color: blocked ? AMBER : FAINT }}>
-              {blocked
-                ? `${missingRequired.length} required document${missingRequired.length === 1 ? '' : 's'} still needed`
-                : stagedCount > 0
-                  ? `${stagedCount} attached, not yet processed`
-                  : 'All required documents are in.'}
-            </span>
-          }
-        >
-          <button
-            className="btn bp"
-            onClick={stagedCount > 0 ? process : () => navigate(`/board-report/${reportId}/sections`)}
-            disabled={blocked}
-            title={
-              blocked ? `Still needed: ${missingRequired.map((s) => s.slot).join(', ')}` : undefined
+        <div ref={tailRef}>
+          <StepActions
+            back={() => navigate('/board-report')}
+            backLabel="Board reports"
+            hint={
+              <span style={{ fontSize: 11.5, color: blocked ? AMBER : FAINT }}>
+                {blocked
+                  ? `${missingRequired.length} required document${missingRequired.length === 1 ? '' : 's'} still needed`
+                  : stagedCount > 0
+                    ? `${stagedCount} attached, not yet processed`
+                    : 'All required documents are in.'}
+              </span>
             }
-            style={{
-              padding: '11px 24px',
-              fontSize: 13,
-              fontWeight: 700,
-              opacity: blocked ? 0.55 : 1,
-              cursor: blocked ? 'not-allowed' : 'pointer',
-            }}
           >
-            {stagedCount > 0
-              ? `Process ${stagedCount} document${stagedCount === 1 ? '' : 's'}`
-              : 'Continue'}
-          </button>
-        </StepActions>
+            <button
+              className="btn bp"
+              onClick={stagedCount > 0 ? process : () => navigate(`/board-report/${reportId}/sections`)}
+              disabled={blocked}
+              title={
+                blocked ? `Still needed: ${missingRequired.map((s) => s.slot).join(', ')}` : undefined
+              }
+              style={{ padding: '11px 24px', fontSize: 13, fontWeight: 700 }}
+            >
+              {stagedCount > 0
+                ? `Process ${stagedCount} document${stagedCount === 1 ? '' : 's'}`
+                : 'Continue'}
+            </button>
+          </StepActions>
+        </div>
       </SetupCard>
     </BoardStepShell>
   );
@@ -302,17 +334,19 @@ export default function BoardSourcesPage() {
 
 function SlotRow({
   slot,
-  stagedFile,
+  stagedFiles,
   duplicate,
   disabled,
   onStage,
+  onUnstage,
   onRemove,
 }: {
   slot: BoardSourceSlot;
-  stagedFile: File | null;
+  stagedFiles: File[];
   duplicate: boolean;
   disabled: boolean;
-  onStage: (slot: string, file: File | null) => void;
+  onStage: (slot: string, files: File[]) => void;
+  onUnstage: (slot: string, index: number) => void;
   onRemove: (documentId: string) => void;
 }) {
   // Section titles, not codes — "BR04, BR19, BR30" told nobody what this
@@ -344,37 +378,62 @@ function SlotRow({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {stagedFile ? (
-            <>
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: ACCENT }}>{stagedFile.name}</span>
-              <button className="btn bs bsm" disabled={disabled} onClick={() => onStage(slot.slot, null)}>
-                Clear
-              </button>
-            </>
-          ) : (
-            <label
-              className="btn bs bsm"
-              style={{
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                marginBottom: 0,
-                opacity: disabled ? 0.55 : 1,
+          {/* Always offered, however many are already attached — a register split
+              across two files is ordinary, and the old row had no way to say so. */}
+          <label
+            className="btn bs bsm"
+            style={{
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              marginBottom: 0,
+              opacity: disabled ? 0.55 : 1,
+            }}
+          >
+            {stagedFiles.length
+              ? 'Add another file'
+              : slot.documents.length
+                ? 'Add file'
+                : 'Attach file'}
+            <input
+              type="file"
+              multiple
+              disabled={disabled}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                onStage(slot.slot, Array.from(e.target.files ?? []));
+                e.target.value = '';
               }}
-            >
-              {slot.documents.length ? 'Replace file' : 'Attach file'}
-              <input
-                type="file"
-                disabled={disabled}
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) onStage(slot.slot, f);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-          )}
+            />
+          </label>
         </div>
       </div>
+
+      {/* Waiting to be sent — one row each, each removable on its own. */}
+      {stagedFiles.length > 0 && (
+        <div style={{ marginTop: 9, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {stagedFiles.map((f, i) => (
+            <div
+              key={`${f.name}-${i}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '7px 10px',
+                borderRadius: 8,
+                background: 'rgba(64,64,200,.05)',
+                border: `1px solid rgba(64,64,200,.2)`,
+              }}
+            >
+              <span style={{ fontSize: 11.5, color: ACCENT, fontWeight: 700, flex: 1, minWidth: 0 }}>
+                {f.name}
+              </span>
+              <span style={{ fontSize: 10.5, fontFamily: MONO, color: FAINT }}>not yet sent</span>
+              <button className="btn bs bsm" disabled={disabled} onClick={() => onUnstage(slot.slot, i)}>
+                Clear
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {slot.documents.length > 0 && (
         <div style={{ marginTop: 9, display: 'flex', flexDirection: 'column', gap: 6 }}>

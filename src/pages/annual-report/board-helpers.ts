@@ -8,6 +8,7 @@
 // data: seeding a profile, choosing a step, and serialising the outline.
 
 import { ApiError } from '@/lib/api';
+import { asStringArray } from '@/components/quarterly/sectionState';
 import type { AgentRun } from '@/types/report';
 import type {
   BoardAssembledSection,
@@ -242,11 +243,28 @@ export function boardCitations(feeder: BoardSectionFeeder | null | undefined): B
 }
 
 /**
- * Sections a reviewer has touched by hand. Producing again clears the content
- * hash and rewrites them, so this drives the confirmation before a produce-all.
+ * Number the headings inside a section's Markdown — `3.1`, `3.2`, `3.3` — from
+ * the section's own number in the document.
+ *
+ * The numbers are not in the stored content, and must not be: this runs on the
+ * way to the screen only, never on the way to `PATCH .../content`. Saving a
+ * numbered copy back would double the numbers on the next render and freeze
+ * them against a later reorder.
+ *
+ * Counts every heading level in one sequence, matching the exporter.
  */
-export function touchedByHand(sections: Pick<BoardSection, 'title' | 'feeder'>[]): string[] {
-  return sections.filter((s) => s.feeder?.edited || s.feeder?.refined).map((s) => s.title);
+export function numberBoardHeadings(content: string | null, sectionNumber?: number | null): string {
+  if (!content || sectionNumber == null) return content ?? '';
+  let n = 0;
+  return content
+    .split('\n')
+    .map((line) => {
+      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (!heading) return line;
+      n += 1;
+      return `${heading[1]} ${sectionNumber}.${n} ${heading[2]}`;
+    })
+    .join('\n');
 }
 
 // ─── async runs ───────────────────────────────────────────────────────────────
@@ -267,6 +285,23 @@ export function boardProduceSummary(run: AgentRun | null): BoardProduceSummary |
   const produced = num(s.produced);
   if (total == null || produced == null) return null;
   return { produced, total, skipped: num(s.skipped) ?? 0, failed: num(s.failed) ?? 0 };
+}
+
+/**
+ * The "this spreadsheet sheet produced no table" warning off a produce run.
+ *
+ * Worth surfacing because it is the one failure a reviewer cannot spot by
+ * reading: the section is populated, so it looks fine — the sheet just landed as
+ * raw text instead of a table. The server sends a ready-made `warning`; the
+ * sheet list is the fallback if that ever stops being sent.
+ */
+export function boardSheetWarning(run: AgentRun | null): string | null {
+  const s = run?.output_summary as unknown;
+  if (!isRec(s)) return null;
+  if (typeof s.warning === 'string' && s.warning.trim()) return s.warning.trim();
+  const sheets = asStringArray(s.unrendered_sheets) ?? [];
+  if (!sheets.length) return null;
+  return `${sheets.length} spreadsheet sheet${sheets.length === 1 ? '' : 's'} produced no table and appear as raw text: ${sheets.join(', ')}.`;
 }
 
 // ─── error bodies ─────────────────────────────────────────────────────────────

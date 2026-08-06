@@ -12,20 +12,20 @@ import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
-import type { BoardCounts, BoardOutlineSection, BoardRequirement, BoardResolution } from '@/types/board';
+import type { BoardCounts, BoardOutlineSection, BoardRequirement } from '@/types/board';
 import {
   boardProduceSummary,
+  boardSheetWarning,
   errorMessage,
   isBoardExcluded,
   outlinePayload,
   readExistingRunId,
-  touchedByHand,
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
+import { useFitFrame } from './useFitFrame';
 import {
   ACCENT,
-  AMBER,
   BORDER,
   FAINT,
   GREEN,
@@ -52,13 +52,6 @@ const BOARD_TIPS = [
 const REQ_LABEL: Record<BoardRequirement, string> = { M: 'Mandatory', O: 'Optional', C: 'Conditional' };
 const REQ_CLASS: Record<BoardRequirement, string> = { M: 'b-gn', O: 'b-gy', C: 'b-pp' };
 
-// Only the exclusions get a badge. An included section is already marked by its
-// ticked checkbox, and "Variant" named a server-side detail no one acts on.
-const RESOLUTION_META: Partial<Record<BoardResolution, { label: string; cls: string }>> = {
-  dropped: { label: 'Dropped', cls: 'b-rd' },
-  na: { label: 'N/A', cls: 'b-gy' },
-};
-
 export default function BoardSectionsPage() {
   const { reportId = '' } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
@@ -68,13 +61,16 @@ export default function BoardSectionsPage() {
   const [counts, setCounts] = useState<BoardCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showExcluded, setShowExcluded] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [run, setRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
-  // Producing clears each section's content hash, so it rewrites anything a
-  // reviewer edited or refined. Name those sections before it happens.
-  const [overwrites, setOverwrites] = useState<string[] | null>(null);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const { frameRef, tailRef, height: frameHeight } = useFitFrame([
+    loading,
+    outline.length,
+    locked,
+    error,
+  ]);
 
   const saveTimerRef = useRef<number | null>(null);
   const saveSeqRef = useRef(0);
@@ -158,7 +154,6 @@ export default function BoardSectionsPage() {
   );
 
   const startProduce = useCallback(async () => {
-    setOverwrites(null);
     setError(null);
     try {
       const handle = await boardReports.produceAll(reportId);
@@ -173,22 +168,14 @@ export default function BoardSectionsPage() {
     }
   }, [reportId]);
 
-  // Ask first if producing would throw away someone's work.
-  const generate = useCallback(async () => {
-    const touched = touchedByHand(
-      await boardReports
-        .getSections(reportId)
-        .then((r) => r.sections ?? [])
-        .catch(() => []),
-    );
-    if (touched.length > 0) {
-      setOverwrites(touched);
-      return;
-    }
-    await startProduce();
-  }, [reportId, startProduce]);
+  // Confirm before a full regenerate — it is minutes of work, not because it
+  // is destructive: the server preserves edited and refined sections itself.
+  const generate = useCallback(() => setConfirmRegenerate(true), []);
 
-  const poll = usePipelinePoll(run?.run_id ?? null, run?.poll_url ?? null);
+  // Progress here comes from the run's own `output_summary`, not from node rows.
+  // Cadence stays at the default — a produce-all runs for minutes, so a shorter
+  // one would only add requests.
+  const poll = usePipelinePoll(run?.run_id ?? null, run?.poll_url ?? null, { nodes: false });
   useEffect(() => {
     if (!run) return;
     // Per-section status moves live as the run works through them.
@@ -202,8 +189,15 @@ export default function BoardSectionsPage() {
           ? 'Still generating — refresh in a moment to see the result.'
           : (poll.state.run?.error_message ?? 'Generation failed. Try again.'),
     );
-    if (poll.state.phase === 'completed') navigate(`/board-report/${reportId}/preview`);
-  }, [poll.state.phase, poll.state.elapsedMs, poll.state.run?.error_message, run, refetch, navigate, reportId]);
+    if (poll.state.phase === 'completed') {
+      // The run's warning has to travel with the navigation — this screen is
+      // gone the moment it lands, and the warning belongs where the sections
+      // are read anyway.
+      navigate(`/board-report/${reportId}/preview`, {
+        state: { sheetWarning: boardSheetWarning(poll.state.run) },
+      });
+    }
+  }, [poll.state.phase, poll.state.elapsedMs, poll.state.run, run, refetch, navigate, reportId]);
 
   if (run) {
     const s = boardProduceSummary(poll.state.run);
@@ -251,10 +245,25 @@ export default function BoardSectionsPage() {
         {loading ? (
           <Spinner pad={40} />
         ) : (
-          <div style={{ border: `1px solid ${BORDER}`, borderRadius: 12, overflow: 'hidden' }}>
-            <div className="uhead">
+          // The list scrolls inside itself; its header and the actions row below
+          // stay put.
+          <div
+            ref={frameRef}
+            style={{
+              border: `1px solid ${BORDER}`,
+              borderRadius: 12,
+              overflow: 'hidden',
+              height: frameHeight ?? undefined,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div className="uhead" style={{ flexShrink: 0 }}>
               <span className="uhead-title">
-                Sections<span className="uhead-count">{counts?.included ?? outline.length}</span>
+                Sections
+                <span className="uhead-count">
+                  {counts?.included ?? outline.filter((s) => !isBoardExcluded(s)).length}
+                </span>
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {saveState !== 'idle' && (
@@ -264,20 +273,21 @@ export default function BoardSectionsPage() {
                     {saveState === 'saving' ? 'Saving…' : 'Saved'}
                   </span>
                 )}
-                <button className="btn bs bsm" onClick={() => setShowExcluded((v) => !v)}>
-                  {showExcluded ? 'Hide non-applicable' : 'Show non-applicable'}
-                </button>
               </div>
             </div>
 
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {/* Mapped over the full outline, not a filtered copy — `i` is the
+                index reorder() saves against. */}
             {outline.map((s, i) => {
-              const excluded = isBoardExcluded(s);
-              if (excluded && !showExcluded) return null;
+              // Sections this issuer can't have are not shown at all. They are
+              // not choices, and the server drops them from the report anyway.
+              if (isBoardExcluded(s)) return null;
               // Mandatory sections are force-included server-side, so the box is
               // shown ticked and disabled rather than letting a click visibly
               // revert on the next fetch.
               const mandatory = s.requirement === 'M';
-              const draggable = !excluded && !readOnly;
+              const draggable = !readOnly;
 
               return (
                 <div
@@ -305,37 +315,24 @@ export default function BoardSectionsPage() {
                     padding: '11px 18px',
                     borderBottom: '1px solid #F4F5FB',
                     borderTop: dragOver === i ? `2px solid ${ACCENT}` : '2px solid transparent',
-                    opacity: excluded ? 0.55 : 1,
-                    background: excluded ? '#FAFBFE' : undefined,
                     cursor: draggable ? 'grab' : 'default',
                   }}
                 >
                   <div style={{ width: 18, flexShrink: 0, paddingTop: 2 }}>
-                    {!excluded && (
-                      <input
-                        type="checkbox"
-                        checked={s.included}
-                        disabled={mandatory || readOnly}
-                        onChange={() => toggle(s.section_code)}
-                        title={mandatory ? 'Mandatory — always included' : undefined}
-                        style={{
-                          accentColor: ACCENT,
-                          cursor: mandatory || readOnly ? 'not-allowed' : 'pointer',
-                        }}
-                      />
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={s.included}
+                      disabled={mandatory || readOnly}
+                      onChange={() => toggle(s.section_code)}
+                      title={mandatory ? 'Mandatory — always included' : undefined}
+                      style={{
+                        accentColor: ACCENT,
+                        cursor: mandatory || readOnly ? 'not-allowed' : 'pointer',
+                      }}
+                    />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 700,
-                        color: INK,
-                        textDecoration: excluded ? 'line-through' : undefined,
-                      }}
-                    >
-                      {s.title}
-                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{s.title}</div>
                     <div
                       style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}
                     >
@@ -354,90 +351,70 @@ export default function BoardSectionsPage() {
                       </div>
                     )}
                   </div>
-                  {/* Only the exclusions are labelled. "In"/"Variant" restated
-                      what the checkbox already says. */}
-                  {RESOLUTION_META[s.resolution] && (
-                    <span
-                      className={`badge ${RESOLUTION_META[s.resolution].cls}`}
-                      style={{ flexShrink: 0, marginTop: 2 }}
-                    >
-                      {RESOLUTION_META[s.resolution].label}
-                    </span>
-                  )}
                 </div>
               );
             })}
+            </div>
           </div>
         )}
 
-        {overwrites && (
-          <OverwriteDialog
-            titles={overwrites}
-            onCancel={() => setOverwrites(null)}
-            onConfirm={startProduce}
+        {confirmRegenerate && (
+          <RegenerateDialog
+            onCancel={() => setConfirmRegenerate(false)}
+            onConfirm={() => {
+              setConfirmRegenerate(false);
+              void startProduce();
+            }}
           />
         )}
 
-        <StepActions
-          back={() => navigate(`/board-report/${reportId}/sources`)}
-          backLabel="Sources"
-          hint={
-            counts && (
-              <span style={{ fontSize: 11.5, color: FAINT }}>
-                {counts.included} sections · {counts.mandatory} mandatory · {counts.dropped} dropped ·{' '}
-                {counts.na} N/A
-              </span>
-            )
-          }
-        >
-          {/* Once generated, Continue means "go read it" — regenerating is a
-              separate, explicit choice, not what stepping back and forward does. */}
-          {anyProduced && !locked && (
-            <button
-              className="btn bs"
-              onClick={generate}
-              title="Re-run every section from your source documents"
-              style={{ padding: '10px 18px', fontSize: 13 }}
-            >
-              Regenerate all
-            </button>
-          )}
-          <button
-            className="btn bp"
-            onClick={
-              anyProduced ? () => navigate(`/board-report/${reportId}/preview`) : generate
+        <div ref={tailRef}>
+          <StepActions
+            back={() => navigate(`/board-report/${reportId}/sources`)}
+            backLabel="Sources"
+            hint={
+              counts && (
+                <span style={{ fontSize: 11.5, color: FAINT }}>
+                  {counts.included} sections · {counts.mandatory} mandatory
+                </span>
+              )
             }
-            disabled={locked && !anyProduced}
-            style={{
-              padding: '11px 24px',
-              fontSize: 13,
-              fontWeight: 700,
-              opacity: locked && !anyProduced ? 0.55 : 1,
-            }}
           >
-            {anyProduced ? 'Review sections →' : 'Generate report'}
-          </button>
-        </StepActions>
+            {/* Once generated, Continue means "go read it" — regenerating is a
+                separate, explicit choice, not what stepping back and forward does. */}
+            {anyProduced && !locked && (
+              <button
+                className="btn bs"
+                onClick={generate}
+                title="Re-run every section from your source documents"
+                style={{ padding: '10px 18px', fontSize: 13 }}
+              >
+                Regenerate all
+              </button>
+            )}
+            <button
+              className="btn bp"
+              onClick={anyProduced ? () => navigate(`/board-report/${reportId}/preview`) : generate}
+              disabled={locked && !anyProduced}
+              style={{ padding: '11px 24px', fontSize: 13, fontWeight: 700 }}
+            >
+              {anyProduced ? 'Review sections →' : 'Generate report'}
+            </button>
+          </StepActions>
+        </div>
       </SetupCard>
     </BoardStepShell>
   );
 }
 
-// Producing rewrites every included section, so anything a reviewer edited by
-// hand or refined is replaced. Say which ones, by name, before it happens.
-function OverwriteDialog({
-  titles,
-  onConfirm,
-  onCancel,
-}: {
-  titles: string[];
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
+// A regenerate rewrites every included section and takes minutes, so it asks
+// first — but it is not destructive: the server skips anything a reviewer
+// edited or refined, and returns those codes as `skipped_edited`.
+function RegenerateDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
     <ApproveConfirmDialog
-      title={`Replace ${titles.length} edited section${titles.length === 1 ? '' : 's'}?`}
-      confirmLabel="Produce anyway"
+      title="Regenerate every section?"
+      confirmLabel="Regenerate"
       onConfirm={onConfirm}
       onClose={onCancel}
     >
@@ -446,14 +423,15 @@ function OverwriteDialog({
           marginTop: 14,
           padding: '12px 14px',
           borderRadius: 10,
-          background: 'rgba(245,158,11,.08)',
-          border: '1px solid rgba(245,158,11,.3)',
+          background: 'rgba(34,197,94,.08)',
+          border: '1px solid rgba(34,197,94,.25)',
+          fontSize: 11.5,
+          color: MUTED,
+          lineHeight: 1.6,
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 800, color: AMBER, marginBottom: 6 }}>
-          These were edited by hand or refined — producing again writes over them:
-        </div>
-        <div style={{ fontSize: 11.5, color: MUTED, lineHeight: 1.6 }}>{titles.join(' · ')}</div>
+        <b style={{ color: '#16803C' }}>Your own work is kept.</b> Sections you edited by hand or
+        refined with AI are left exactly as they are — only the rest are rewritten.
       </div>
     </ApproveConfirmDialog>
   );
