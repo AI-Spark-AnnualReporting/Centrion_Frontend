@@ -129,8 +129,8 @@ export interface GapsResponse {
 // ─── Extraction review (step 2) ─────────────────────────────────────────────
 // Extraction reports what a document SAYS; a separate mapping pass decides which
 // of our metrics each line IS, with a 0-100 confidence. Exact matches and anything
-// at 90+ are already stored. The uncertain middle band is listed in `pending` for a
-// yes/no — nothing there reaches the report until the user confirms it.
+// at 95+ are already stored. The uncertain middle band (50-94) is listed in
+// `pending` — nothing there reaches the report until the user answers.
 export interface ExtractionReviewFigure {
   id: string;
   metric_key: string | null;

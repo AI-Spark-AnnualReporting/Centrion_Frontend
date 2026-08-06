@@ -622,7 +622,15 @@ export default function ExtractionReviewPage() {
             ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
             : `${answered} of ${pending.length} answered · ${accepted} will be added`}
         </span>
-        <button className="btn bp" onClick={onContinue} disabled={submitting}>
+        {/* .btn's base size (7px 14px / 12px) is the utility size — every primary
+            page action in the app overrides it to this. Without the override the
+            page's main CTA renders the same size as the Back button beside it. */}
+        <button
+          className="btn bp"
+          onClick={onContinue}
+          disabled={submitting}
+          style={{ padding: '11px 24px', fontSize: 13 }}
+        >
           {submitting ? 'Saving…' : 'Continue to outline →'}
         </button>
       </div>
