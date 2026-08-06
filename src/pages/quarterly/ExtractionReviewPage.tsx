@@ -18,13 +18,31 @@ import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportSt
 import type {
   ExtractionReviewFigure,
   ExtractionReviewResponse,
+  ExtractionReviewDecision,
+  MetricUnitType,
 } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const MUTED = '#6B7280';
 const DARK = '#1F2340';
 
-type Answer = 'yes' | 'no';
+type Answer = 'yes' | 'no' | 'ignore';
+
+// What the user fills in on a "no" row before it can be submitted.
+interface Draft {
+  sectionGroup: string;
+  sectionCode: string;
+  unitType: MetricUnitType;
+}
+
+// The row's own unit already tells us what kind of quantity this is, so the field
+// is a confirmation rather than a question.
+function unitTypeFromUnit(unit: string | null): MetricUnitType {
+  const u = (unit ?? '').toLowerCase();
+  if (u.includes('percent')) return 'percent';
+  if (u === 'count' || u === 'volume') return 'count';
+  return 'currency';
+}
 
 // Display order + titles for the statement groups. Anything the backend sends that
 // isn't listed still gets a group, titled from the raw value.
@@ -112,10 +130,14 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
   );
 }
 
-// Yes / No segmented control. Deliberately starts UNSET: an unanswered row is
-// excluded, so a default of "yes" would quietly re-create the problem this screen
-// exists to solve.
-function YesNo({
+// Yes / No / Ignore. Deliberately starts UNSET: an unanswered row is excluded, so
+// a default of "yes" would quietly re-create the problem this screen exists to
+// solve.
+//
+// No is the ACCENT colour, not a destructive red. It is now the constructive
+// answer — it adds the company's own line to their metrics. Ignore is the one that
+// throws a figure away, and it takes the neutral grey.
+function YesNoIgnore({
   value,
   onChange,
   label,
@@ -124,7 +146,7 @@ function YesNo({
   onChange: (a: Answer) => void;
   label: string;
 }) {
-  const btn = (a: Answer, text: string, activeBg: string, activeFg: string) => {
+  const btn = (a: Answer, text: string, activeBg: string) => {
     const active = value === a;
     return (
       <button
@@ -134,13 +156,13 @@ function YesNo({
         aria-label={`${text} — ${label}`}
         onClick={() => onChange(a)}
         style={{
-          padding: '5px 16px',
+          padding: '5px 14px',
           fontSize: 12,
           fontWeight: 700,
           fontFamily: 'inherit',
           border: `1px solid ${active ? activeBg : '#D9DCEC'}`,
           background: active ? activeBg : '#fff',
-          color: active ? activeFg : '#6B7280',
+          color: active ? '#fff' : '#6B7280',
           cursor: 'pointer',
           transition: 'background .12s, border-color .12s, color .12s',
         }}
@@ -155,8 +177,9 @@ function YesNo({
       aria-label={label}
       style={{ display: 'inline-flex', borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}
     >
-      {btn('yes', 'Yes', '#10B981', '#fff')}
-      {btn('no', 'No', '#EF4444', '#fff')}
+      {btn('yes', 'Yes', '#10B981')}
+      {btn('no', 'No', ACCENT)}
+      {btn('ignore', 'Ignore', '#6B7280')}
     </div>
   );
 }
@@ -187,6 +210,7 @@ export default function ExtractionReviewPage() {
 
   const [data, setData] = useState<ExtractionReviewResponse | null>(null);
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -219,6 +243,24 @@ export default function ExtractionReviewPage() {
 
   const pending = useMemo(() => data?.pending ?? [], [data]);
   const groups = useMemo(() => groupByStatement(pending), [pending]);
+  const sectionGroups = useMemo(() => data?.metric_sections ?? [], [data]);
+
+  // Which suggested metrics are already taken, and by what. Two rows accepted as
+  // the same metric silently collapse to one on the server, so telling the user
+  // up front saves a wasted answer — and usually means the second row is their own
+  // line rather than a duplicate of the first.
+  const claimedBy = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of data?.confirmed ?? []) {
+      if (f.metric_key) m.set(f.metric_key, f.source_label ?? f.metric_label ?? f.metric_key);
+    }
+    for (const f of pending) {
+      if (f.metric_key && answers[f.id] === 'yes') {
+        m.set(f.metric_key, f.source_label ?? f.metric_key);
+      }
+    }
+    return m;
+  }, [data, pending, answers]);
 
   // A sheet carrying two currency columns yields the same metric twice, once per
   // currency, and the report prints both. Detect it here rather than comparing
@@ -252,7 +294,12 @@ export default function ExtractionReviewPage() {
     };
   }, [data]);
   const answered = pending.filter((f) => answers[f.id]).length;
-  const accepted = pending.filter((f) => answers[f.id] === 'yes').length;
+  // Both Yes and No put a figure in the report — No just puts it there under the
+  // company's own name.
+  const accepted = pending.filter(
+    (f) => answers[f.id] === 'yes' || answers[f.id] === 'no',
+  ).length;
+  const newMetrics = pending.filter((f) => answers[f.id] === 'no').length;
   const unanswered = pending.length - answered;
 
   const goOutline = () => navigate(`/quarterly-report/${reportId}/outline`);
@@ -265,9 +312,22 @@ export default function ExtractionReviewPage() {
       await quarterlyReports.submitExtractionReview(
         companyId,
         reportId,
-        // Unanswered rows are sent as an explicit no, so the server's record of what
-        // was rejected matches what the user actually saw.
-        pending.map((f) => ({ id: f.id, accept: answers[f.id] === 'yes' })),
+        // Unanswered rows are sent as an explicit ignore, so the server's record of
+        // what was dropped matches what the user actually saw.
+        pending.map((f): ExtractionReviewDecision => {
+          const a = answers[f.id];
+          if (a === 'yes') return { id: f.id, action: 'accept' };
+          if (a === 'no') {
+            const d = drafts[f.id];
+            return {
+              id: f.id,
+              action: 'create',
+              section_code: d?.sectionCode,
+              unit_type: d?.unitType ?? unitTypeFromUnit(f.unit),
+            };
+          }
+          return { id: f.id, action: 'ignore' };
+        }),
       );
       goOutline();
     } catch (err: unknown) {
@@ -276,9 +336,24 @@ export default function ExtractionReviewPage() {
     }
   };
 
+  // A "no" with no section can't be created — the server would 422, and there is
+  // nowhere to put the figure.
+  const incompleteCreates = pending.filter(
+    (f) => answers[f.id] === 'no' && !drafts[f.id]?.sectionCode,
+  );
+
   const onContinue = () => {
+    setError(null);
     if (pending.length === 0) {
       goOutline();
+      return;
+    }
+    if (incompleteCreates.length > 0) {
+      setError(
+        `Pick a section for ${incompleteCreates.length} figure` +
+          `${incompleteCreates.length === 1 ? '' : 's'} you answered No to — ` +
+          'that is where the new line goes in your report.',
+      );
       return;
     }
     if (unanswered > 0) {
@@ -358,8 +433,9 @@ export default function ExtractionReviewPage() {
           </h1>
           <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 620 }}>
             We read the figures out of your documents, then matched them to our standard
-            metrics. The ones we're sure about are saved already. Please confirm the rest —
-            only figures you say Yes to go into the report.
+            metrics. The ones we're sure about are saved already. Tell us about the rest —
+            if a line is your own, we'll add it to your metrics and recognise it from
+            next quarter on.
           </p>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -524,13 +600,16 @@ export default function ExtractionReviewPage() {
                   >
                     Yes to all
                   </button>
+                  {/* "No to all" would open N section pickers in an unsubmittable
+                      state. With a 50-94 band these lists are long, so the bulk
+                      action people actually want is to clear the noise. */}
                   <button
                     type="button"
                     className="btn bs"
                     style={{ fontSize: 11, padding: '4px 10px' }}
-                    onClick={() => setAll(group.code, 'no')}
+                    onClick={() => setAll(group.code, 'ignore')}
                   >
-                    No to all
+                    Ignore all
                   </button>
                 </span>
               </div>
@@ -538,15 +617,22 @@ export default function ExtractionReviewPage() {
                 {group.rows.map((f) => (
                   <div
                     key={f.id}
+                    data-testid={`row-${f.id}`}
+                    style={{
+                      borderTop: '1px solid #F1F2F8',
+                      // Dimming follows "ignore" now — a "no" row is the one that
+                      // needs the most attention, not the least.
+                      background: answers[f.id] === 'ignore' ? '#FCFCFD' : '#fff',
+                      opacity: answers[f.id] === 'ignore' ? 0.6 : 1,
+                      transition: 'background .12s, opacity .12s',
+                    }}
+                  >
+                  <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 14,
                       padding: '12px 18px',
-                      borderTop: '1px solid #F1F2F8',
-                      background: answers[f.id] === 'no' ? '#FCFCFD' : '#fff',
-                      opacity: answers[f.id] === 'no' ? 0.6 : 1,
-                      transition: 'background .12s, opacity .12s',
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -571,12 +657,127 @@ export default function ExtractionReviewPage() {
                         {f.source_page != null && <span>page {f.source_page}</span>}
                         <ConfidencePill value={f.confidence} />
                       </div>
+                      {/* The metric is already spoken for. Saying yes here would
+                          drop one of the two on the server, so the answer is almost
+                          always "no, this is our own line". */}
+                      {f.metric_key && claimedBy.has(f.metric_key) && answers[f.id] !== 'yes' && (
+                        <div style={{ marginTop: 5, fontSize: 11, color: '#B45309' }}>
+                          {f.metric_label ?? f.metric_key} is already matched to “
+                          {claimedBy.get(f.metric_key)}”
+                        </div>
+                      )}
                     </div>
-                    <YesNo
+                    <YesNoIgnore
                       value={answers[f.id]}
-                      onChange={(a) => setAnswers((prev) => ({ ...prev, [f.id]: a }))}
+                      onChange={(a) => {
+                        setAnswers((prev) => ({ ...prev, [f.id]: a }));
+                        if (a === 'no') {
+                          setDrafts((prev) =>
+                            prev[f.id]
+                              ? prev
+                              : {
+                                  ...prev,
+                                  [f.id]: {
+                                    sectionGroup: '',
+                                    sectionCode: '',
+                                    unitType: unitTypeFromUnit(f.unit),
+                                  },
+                                },
+                          );
+                        }
+                      }}
                       label={`${f.source_label ?? 'figure'} is ${f.metric_label ?? f.metric_key}`}
                     />
+                  </div>
+
+                  {/* Below the row, not inside it — the flex line has no room and
+                      would wrap badly. No confirmation step first: at 50+ confidence
+                      these are real figures, so "no" goes straight to the details. */}
+                  {answers[f.id] === 'no' && (
+                    <div
+                      style={{
+                        padding: '0 18px 14px 18px',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'flex-end',
+                        gap: 10,
+                      }}
+                    >
+                      <div style={{ flex: '1 1 100%', fontSize: 11.5, color: MUTED }}>
+                        We'll add <strong style={{ color: DARK }}>“{f.source_label}”</strong> to
+                        your metrics exactly as written, so next quarter we recognise it
+                        automatically. Where does it belong?
+                      </div>
+                      <div style={{ flex: '1 1 180px' }}>
+                        <label className="fl-label" htmlFor={`grp-${f.id}`}>Part of the report</label>
+                        <select
+                          id={`grp-${f.id}`}
+                          className="inp sel"
+                          value={drafts[f.id]?.sectionGroup ?? ''}
+                          onChange={(e) =>
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [f.id]: {
+                                ...(prev[f.id] ?? { unitType: unitTypeFromUnit(f.unit) }),
+                                sectionGroup: e.target.value,
+                                // Clear the section, or a stale pick from the previous
+                                // group stays selected and invisible.
+                                sectionCode: '',
+                              } as Draft,
+                            }))
+                          }
+                        >
+                          <option value="">Select…</option>
+                          {sectionGroups.map((g) => (
+                            <option key={g.group} value={g.group}>{g.group}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ flex: '1 1 200px' }}>
+                        <label className="fl-label" htmlFor={`sec-${f.id}`}>Section</label>
+                        <select
+                          id={`sec-${f.id}`}
+                          className="inp sel"
+                          disabled={!drafts[f.id]?.sectionGroup}
+                          value={drafts[f.id]?.sectionCode ?? ''}
+                          onChange={(e) => {
+                            setError(null);   // they just fixed what was blocking
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [f.id]: { ...(prev[f.id] as Draft), sectionCode: e.target.value },
+                            }));
+                          }}
+                        >
+                          <option value="">Select…</option>
+                          {(sectionGroups.find((g) => g.group === drafts[f.id]?.sectionGroup)
+                            ?.sections ?? []).map((s) => (
+                            <option key={s.section_code} value={s.section_code}>{s.title}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ flex: '0 1 140px' }}>
+                        <label className="fl-label" htmlFor={`unit-${f.id}`}>This figure is</label>
+                        <select
+                          id={`unit-${f.id}`}
+                          className="inp sel"
+                          value={drafts[f.id]?.unitType ?? unitTypeFromUnit(f.unit)}
+                          onChange={(e) =>
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [f.id]: {
+                                ...(prev[f.id] as Draft),
+                                unitType: e.target.value as MetricUnitType,
+                              },
+                            }))
+                          }
+                        >
+                          <option value="currency">Money</option>
+                          <option value="percent">A percentage</option>
+                          <option value="count">A count</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                   </div>
                 ))}
               </div>
@@ -588,8 +789,10 @@ export default function ExtractionReviewPage() {
           <p style={{ fontSize: 11.5, color: MUTED, margin: '0 2px', lineHeight: 1.5 }}>
             Saying <strong>Yes</strong> files that figure under the system metric — a line your
             document calls “COGS-S” will appear in the report as “Cost of Goods Sold”. Its original
-            name is kept on record. Saying <strong>No</strong>, or leaving a row unanswered, leaves
-            the figure out of the report entirely.
+            name is kept on record. Saying <strong>No</strong> keeps your own name for it: we add
+            it to your metrics exactly as written, put it in the section you pick, and match it
+            automatically next quarter. <strong>Ignore</strong>, or leaving a row unanswered,
+            leaves the figure out of the report entirely.
             {summary && summary.discarded_count > 0 && (
               <>
                 {' '}We also read {summary.discarded_count} other line
@@ -617,10 +820,21 @@ export default function ExtractionReviewPage() {
         <button className="btn bs" onClick={() => navigate('/reports/quarterly')}>
           ← Back
         </button>
-        <span style={{ fontSize: 12, color: MUTED }}>
-          {pending.length === 0
-            ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
-            : `${answered} of ${pending.length} answered · ${accepted} will be added`}
+        {/* Doubles as the validation line. The error block at the top only renders
+            when the page failed to load at all, so without this a blocked Continue
+            would look like a dead button. */}
+        <span
+          aria-live="polite"
+          style={{ fontSize: 12, color: error ? '#B45309' : MUTED, textAlign: 'center' }}
+        >
+          {error
+            ? error
+            : pending.length === 0
+              ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
+              : `${answered} of ${pending.length} answered · ${accepted} will be added` +
+                (newMetrics > 0
+                  ? ` · ${newMetrics} new metric${newMetrics === 1 ? '' : 's'}`
+                  : '')}
         </span>
         {/* .btn's base size (7px 14px / 12px) is the utility size — every primary
             page action in the app overrides it to this. Without the override the

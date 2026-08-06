@@ -165,16 +165,37 @@ export interface ExtractionReviewResponse {
     // visible rather than silent.
     discarded_count: number;
   };
+  // Where a figure can be placed when the user says "no, that's our own line".
+  // Sent with the figures so the screen needs no second request.
+  metric_sections?: MetricSectionGroup[];
 }
+
+export interface MetricSectionGroup {
+  group: string;
+  sections: { section_code: string; title: string }[];
+}
+
+export type MetricUnitType = 'currency' | 'percent' | 'count';
+
+// accept — map it to the metric we suggested.
+// create — no, it's the company's own line: add it to their catalogue under the
+//          document's own wording and put the figure in this report.
+// ignore — drop the figure.
+export type ExtractionReviewAction = 'accept' | 'create' | 'ignore';
 
 export interface ExtractionReviewDecision {
   id: string;
-  accept: boolean;
+  action: ExtractionReviewAction;
+  // Required for `create` only.
+  section_code?: string;
+  unit_type?: MetricUnitType;
 }
 
 export interface ExtractionReviewResult {
   report_id: string;
   accepted: number;
+  created: number;
+  ignored: number;
   rejected: number;
   next: string;
 }

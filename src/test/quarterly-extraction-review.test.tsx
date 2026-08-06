@@ -64,6 +64,16 @@ const RESPONSE: ExtractionReviewResponse = {
     },
   ],
   summary: { confirmed_count: 1, pending_count: 2, discarded_count: 7 },
+  metric_sections: [
+    {
+      group: "Primary Statements",
+      sections: [
+        { section_code: "income_statement", title: "Income Statement" },
+        { section_code: "financial_position", title: "Financial Position" },
+      ],
+    },
+    { group: "Notes", sections: [{ section_code: "taxation_zakat", title: "Taxation & Zakat" }] },
+  ],
 };
 
 beforeEach(() => {
@@ -117,18 +127,18 @@ describe("quarterly extraction review", () => {
     expect(screen.getByText(/0 of 2 answered/)).toBeInTheDocument();
   });
 
-  it("sends accept only for the rows answered Yes", async () => {
+  it("sends accept for Yes and ignore for Ignore", async () => {
     await renderPage();
     answer("Profit for the period", "Yes");
-    answer("Turnover", "No");
+    answer("Turnover", "Ignore");
 
     fireEvent.click(screen.getByRole("button", { name: /Continue to outline/i }));
 
     await waitFor(() => expect(submitExtractionReview).toHaveBeenCalled());
     const decisions = submitExtractionReview.mock.calls.at(-1)![2];
     expect(decisions).toEqual([
-      { id: "p1", accept: true },
-      { id: "p2", accept: false },
+      { id: "p1", action: "accept" },
+      { id: "p2", action: "ignore" },
     ]);
   });
 
@@ -146,8 +156,8 @@ describe("quarterly extraction review", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue anyway/i }));
     await waitFor(() => expect(submitExtractionReview).toHaveBeenCalled());
     expect(submitExtractionReview.mock.calls.at(-1)![2]).toEqual([
-      { id: "p1", accept: true },
-      { id: "p2", accept: false },
+      { id: "p1", action: "accept" },
+      { id: "p2", action: "ignore" },
     ]);
   });
 
@@ -265,6 +275,100 @@ describe("quarterly extraction review", () => {
       // Answering "No" cannot remove a confirmed row — saying otherwise would
       // send the user down a dead end.
       expect(note).toHaveTextContent(/regenerate/i);
+    });
+  });
+
+  // Saying No is how a company's own line name gets into the catalogue, so that it
+  // is recognised automatically next quarter instead of being asked about forever.
+  describe("adding your own metric", () => {
+    it("asks where the line belongs, with no intervening prompt", async () => {
+      await renderPage();
+      expect(screen.queryByLabelText(/Part of the report/i)).toBeNull();
+
+      answer("Turnover", "No");
+
+      // Straight to the detail — no "do you want to add a metric?" step.
+      expect(await screen.findByLabelText(/Part of the report/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/^Section$/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/This figure is/i)).toBeInTheDocument();
+    });
+
+    it("filters the sections by the part of the report chosen", async () => {
+      await renderPage();
+      answer("Turnover", "No");
+
+      const group = await screen.findByLabelText(/Part of the report/i);
+      const section = screen.getByLabelText(/^Section$/i) as HTMLSelectElement;
+      // Nothing to pick from until a group is chosen.
+      expect(section).toBeDisabled();
+
+      fireEvent.change(group, { target: { value: "Notes" } });
+      expect(section).not.toBeDisabled();
+      const titles = [...section.options].map((o) => o.textContent);
+      expect(titles).toContain("Taxation & Zakat");
+      expect(titles).not.toContain("Income Statement");
+    });
+
+    it("pre-fills the kind of figure from the unit we already read", async () => {
+      await renderPage();
+      answer("Turnover", "No");
+      const unit = (await screen.findByLabelText(/This figure is/i)) as HTMLSelectElement;
+      expect(unit.value).toBe("currency");   // the row's unit is SAR_million
+    });
+
+    it("will not continue while a No has no section", async () => {
+      await renderPage();
+      answer("Profit for the period", "Yes");
+      answer("Turnover", "No");
+
+      fireEvent.click(screen.getByRole("button", { name: /Continue to outline/i }));
+
+      expect(submitExtractionReview).not.toHaveBeenCalled();
+      expect(await screen.findByText(/Pick a section/i)).toBeInTheDocument();
+    });
+
+    it("submits the section and unit so the metric can be created", async () => {
+      await renderPage();
+      answer("Profit for the period", "Yes");
+      answer("Turnover", "No");
+
+      fireEvent.change(await screen.findByLabelText(/Part of the report/i), {
+        target: { value: "Primary Statements" },
+      });
+      fireEvent.change(screen.getByLabelText(/^Section$/i), {
+        target: { value: "income_statement" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Continue to outline/i }));
+
+      await waitFor(() => expect(submitExtractionReview).toHaveBeenCalled());
+      expect(submitExtractionReview.mock.calls.at(-1)![2]).toEqual([
+        { id: "p1", action: "accept" },
+        {
+          id: "p2",
+          action: "create",
+          section_code: "income_statement",
+          unit_type: "currency",
+        },
+      ]);
+    });
+
+    it("says when the suggested metric is already taken", async () => {
+      // total_assets is already confirmed, so a second row proposing it would
+      // silently lose one figure on the server.
+      const dup = structuredClone(RESPONSE);
+      dup.pending[0] = {
+        ...dup.pending[0],
+        id: "p-dup",
+        metric_key: "total_assets",
+        metric_label: "Total Assets",
+        source_label: "Assets, total",
+      };
+      getExtractionReview.mockResolvedValue(dup);
+      await renderPage();
+
+      expect(await screen.findByText(/already matched to/i)).toHaveTextContent(
+        /Total assets/i,
+      );
     });
   });
 });
