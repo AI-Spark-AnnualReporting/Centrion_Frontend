@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
+import {
+  reports as reportsApi,
+  quarterlyReports as quarterlyReportsApi,
+  companies as companiesApi,
+  ApiError,
+} from '@/lib/api';
 import type {
   QuarterlyReportArea,
   ComparisonAvailability,
@@ -8,6 +13,14 @@ import type {
 } from '@/lib/api';
 import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
+import {
+  REPORTING_CURRENCIES,
+  FINANCIAL_SCALES,
+  DEFAULT_CURRENCY,
+  isKnownCurrency,
+  normaliseCurrencyCode,
+  type FinancialScale,
+} from '@/constants/currency';
 
 // Quarter options for the reporting-period selector.
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -300,6 +313,186 @@ function CtxCard({
   );
 }
 
+// The "?" affordance that sits inside a `.fl-label` and explains what the field
+// wants. Opens on hover and pins on click, so pointer and keyboard users get the
+// same panel. The parent owns `openId` rather than each instance owning a boolean
+// — that is what keeps two panels from being open at once.
+function LabelHelp({
+  id,
+  openId,
+  onOpenChange,
+  ariaLabel,
+  panelLabel,
+  heading,
+  children,
+  width = 290,
+}: {
+  id: string;
+  openId: string | null;
+  onOpenChange: (next: string | null) => void;
+  ariaLabel: string;
+  panelLabel: string;
+  heading?: string;
+  children: React.ReactNode;
+  width?: number;
+}) {
+  const open = openId === id;
+  const pinnedRef = useRef(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  };
+
+  // Same 120/180ms pacing as the metrics catalogue: the open delay stops a flash
+  // when the pointer merely crosses the label, the close delay lets it travel
+  // into the panel.
+  const handleEnter = () => {
+    clearTimers();
+    openTimer.current = setTimeout(() => onOpenChange(id), 120);
+  };
+
+  const handleLeave = () => {
+    clearTimers();
+    if (pinnedRef.current) return;
+    closeTimer.current = setTimeout(() => onOpenChange(null), 180);
+  };
+
+  const togglePin = () => {
+    clearTimers();
+    const next = !(pinnedRef.current && open);
+    pinnedRef.current = next;
+    onOpenChange(next ? id : null);
+  };
+
+  useEffect(() => () => clearTimers(), []);
+
+  // A panel closed by the parent (Escape, or another "?" opening) must drop its
+  // pin too, or the next hover-out would refuse to close it.
+  useEffect(() => {
+    if (!open) pinnedRef.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(null);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      onOpenChange(null);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onDown);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <span
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-flex' }}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        onFocus={handleEnter}
+        onClick={togglePin}
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          border: '1px solid #9BA3C4',
+          background: open ? '#4040C8' : 'transparent',
+          color: open ? '#fff' : '#9BA3C4',
+          fontSize: 10,
+          fontWeight: 800,
+          lineHeight: 1,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 0,
+          flexShrink: 0,
+        }}
+      >
+        ?
+      </button>
+
+      {open && (
+        <div
+          role="note"
+          aria-label={panelLabel}
+          onMouseEnter={handleEnter}
+          onMouseLeave={handleLeave}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 9px)',
+            left: -10,
+            zIndex: 40,
+            width,
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: '1px solid #ECEEF8',
+            background: '#fff',
+            boxShadow: '0 12px 32px rgba(20,22,40,.16)',
+            // The parent .fl-label is uppercase + letter-spaced; reset so the
+            // help copy reads as normal prose.
+            textTransform: 'none',
+            letterSpacing: 'normal',
+            fontSize: 11.5,
+            fontWeight: 400,
+            color: '#5A6080',
+            lineHeight: 1.55,
+            cursor: 'default',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: -5,
+              left: 14,
+              width: 9,
+              height: 9,
+              background: '#fff',
+              borderLeft: '1px solid #ECEEF8',
+              borderTop: '1px solid #ECEEF8',
+              transform: 'rotate(45deg)',
+            }}
+          />
+          {heading && (
+            <div style={{ color: '#1A1D2E', fontWeight: 700, marginBottom: 6 }}>{heading}</div>
+          )}
+          {children}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Bulleted list inside a LabelHelp panel. A real <ul> so screen readers announce
+// the item count instead of reading a run-on sentence.
+function HelpList({ items }: { items: string[] }) {
+  return (
+    <ul style={{ margin: 0, paddingLeft: 16 }}>
+      {items.map((it) => (
+        <li key={it} style={{ marginBottom: 2 }}>
+          {it}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // Minimal shape of an existing quarterly report needed by the year dropdown.
 interface QuarterlyReportOption {
   id: string;
@@ -440,18 +633,29 @@ export default function QuarterlyReportForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dedicated financial-data lane (Excel/CSV/Word) — exact figures via the lean
-  // spreadsheet flow. No language check (numbers, not prose). Currency + scale are
-  // auto-detected server side (sheet units → prior-period magnitude cross-check →
-  // LLM), so no inputs.
+  // spreadsheet flow. No language check (numbers, not prose). Currency and scale
+  // are declared here rather than auto-detected: detection resolves a single
+  // sheet-wide value, so a sheet carrying both SAR and USD columns produced every
+  // metric twice in the report.
   const [financialFiles, setFinancialFiles] = useState<File[]>([]);
   const [isDraggingFin, setIsDraggingFin] = useState(false);
   const financialInputRef = useRef<HTMLInputElement>(null);
+  // null = the user hasn't touched it, so the company default still applies.
+  // Storing the choice separately (rather than seeding state from the fetch) is
+  // what stops a late /companies/me resolve from clobbering a picked currency.
+  const [financialCurrency, setFinancialCurrency] = useState<string | null>(null);
+  const [companyCurrency, setCompanyCurrency] = useState<string | null>(null);
+  // Deliberately no default: a pre-selected scale is a guess, and a silently
+  // mis-scaled report is exactly what this field exists to prevent.
+  const [financialScale, setFinancialScale] = useState<FinancialScale | ''>('');
+  const currencyValue = financialCurrency ?? companyCurrency ?? DEFAULT_CURRENCY;
 
   // System vs Custom metrics. system (default) = map the sheet to our standard
   // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
   // Both modes take their figures from the Financial Data field.
   const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
-  const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
+  // Which "?" panel is open, by id — one slot, so opening one closes the others.
+  const [helpOpen, setHelpOpen] = useState<string | null>(null);
   // The standard metric catalogue behind the "System metrics" hover list. null
   // until the mount fetch lands (or if it fails) — the hover affordance is
   // hidden in that case rather than opening an empty panel.
@@ -591,6 +795,17 @@ export default function QuarterlyReportForm({
       .catch(() => {
         // Catalogue unavailable — the hover affordance stays hidden.
       });
+
+    // Pre-select the Currency field from the company's own reporting currency.
+    // Resolves from the JWT rather than `companyId`, so this belongs on mount.
+    companiesApi
+      .getMyCompany()
+      .then((c) => {
+        if (!cancelled) setCompanyCurrency(normaliseCurrencyCode(c.reporting_currency));
+      })
+      .catch(() => {
+        // No company currency — the field falls back to the default.
+      });
     return () => {
       cancelled = true;
     };
@@ -646,33 +861,30 @@ export default function QuarterlyReportForm({
     return () => window.removeEventListener('keydown', onKey);
   }, [metricsModal]);
 
-  // Escape closes the System-metrics hover list and the "?" help card, and drops
-  // the pin so a later hover behaves normally.
+  // Escape closes the System-metrics hover list and drops the pin so a later
+  // hover behaves normally. The "?" panels handle their own Escape.
   useEffect(() => {
-    if (!metricsListOpen && !metricsHelpOpen) return;
+    if (!metricsListOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setMetricsListOpen(false);
       setMetricsListPinned(false);
-      setMetricsHelpOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [metricsListOpen, metricsHelpOpen]);
+  }, [metricsListOpen]);
 
-  // Clicking outside the Metrics block dismisses the "?" help card and any
-  // pinned metric list.
+  // Clicking outside the Metrics block dismisses a pinned metric list.
   useEffect(() => {
-    if (!metricsHelpOpen && !metricsListPinned) return;
+    if (!metricsListPinned) return;
     const onDown = (e: MouseEvent) => {
       if (metricsBlockRef.current?.contains(e.target as Node)) return;
-      setMetricsHelpOpen(false);
       setMetricsListPinned(false);
       setMetricsListOpen(false);
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
-  }, [metricsHelpOpen, metricsListPinned]);
+  }, [metricsListPinned]);
 
   // Drop any in-flight hover timers if the form unmounts mid-hover.
   useEffect(
@@ -804,8 +1016,9 @@ export default function QuarterlyReportForm({
   const acceptFiles = (incoming: FileList | File[]) => {
     // On a NEW report, hold back a slot for the financial-data lane: filling the
     // cap with narrative documents would otherwise leave the required financials
-    // field unfillable and Generate permanently disabled. Upload-to-existing sends
-    // only this lane, so it keeps the whole cap.
+    // field unfillable and Generate permanently disabled. The reservation is
+    // bidirectional — see acceptFinancialFiles. Upload-to-existing sends only this
+    // lane, so it keeps the whole cap.
     const capLimit = isUploadMode
       ? MAX_DOCUMENTS
       : MAX_DOCUMENTS - Math.max(financialFiles.length, 1);
@@ -882,7 +1095,12 @@ export default function QuarterlyReportForm({
         const id = fileKey(f);
         if (!seen.has(id)) { seen.add(id); merged.push(f); }
       });
-      const capRemaining = Math.max(0, MAX_DOCUMENTS - files.length);
+      // Mirror of the narrative lane's reservation: both lanes are required on a
+      // new report, so neither may consume the cap so completely that the other
+      // can't be filled at all.
+      const capRemaining = isUploadMode
+        ? Math.max(0, MAX_DOCUMENTS - files.length)
+        : Math.max(0, MAX_DOCUMENTS - Math.max(files.length, 1));
       if (merged.length > capRemaining) {
         setShowFileCapWarning(true);
         return merged.slice(0, capRemaining);
@@ -933,9 +1151,9 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  // The financial-data lane is the report's only figure source, so a new report
-  // can't be built without it. The narrative lane stays optional — a report with
-  // figures and no prose is degraded; one with prose and no figures is empty.
+  // Both lanes are required on a new report. The financial lane is the only
+  // figure source; the narrative lane is the only prose source, and the report's
+  // narrative sections have nothing to write from without it.
   const hasFinancialFiles = financialFiles.length > 0;
 
   // New-report submit requires a company type (pre-selected from detection, but
@@ -956,11 +1174,15 @@ export default function QuarterlyReportForm({
       (!selectedReportId &&
         customYear != null &&
         quarter != null &&
+        hasFiles &&
         hasFinancialFiles &&
+        !!financialScale &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
 
+  // Ordered to follow the form top to bottom, so the reason points at the next
+  // thing the user will actually reach.
   const disabledReason = isOpenMode
     ? undefined
     : isUploadMode
@@ -971,17 +1193,21 @@ export default function QuarterlyReportForm({
         ? 'Select a reporting year to continue'
         : quarter == null
           ? 'Select a reporting quarter to continue'
-          : !hasFinancialFiles
-            ? 'Upload the financial statements (Excel, CSV or Word) to continue'
+          : !hasFiles
+            ? 'Upload at least one source document (MD&A, prior-year report or management notes) to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : companyType == null
-                  ? 'Select the company type to continue'
-                  : comparisonCheck === 'checking'
-                    ? 'Checking comparison data…'
-                    : undefined;
+                : !hasFinancialFiles
+                  ? 'Upload the financial statements (Excel, CSV or Word) to continue'
+                  : !financialScale
+                    ? 'Tell us what scale the financial figures are in to continue'
+                    : companyType == null
+                      ? 'Select the company type to continue'
+                      : comparisonCheck === 'checking'
+                        ? 'Checking comparison data…'
+                        : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -1022,6 +1248,10 @@ export default function QuarterlyReportForm({
       setGenError(null);
       setIsSubmittingGenerate(true);
       const targetReportId = selectedReportId;
+      // TODO: financialFiles staged in upload-to-existing mode are dropped here —
+      // AddReportDocumentsBody has no financial lane and the backend endpoint takes
+      // no financial params, so the field is live but its files go nowhere. Needs a
+      // backend change; don't "fix" it by hiding the field.
       reportsApi
         .addDocuments(companyId, targetReportId, { files })
         .then((handle) => {
@@ -1071,8 +1301,13 @@ export default function QuarterlyReportForm({
         // Only send a basis we actually have prior data for; otherwise omit it so
         // the report is generated current-period-only (no empty comparison column).
         comparison: compAvail && compAvail[comparison] ? comparison : undefined,
-        // Dedicated Excel/CSV lane → lean extraction; currency/scale auto-detected.
+        // Dedicated Excel/CSV lane → lean extraction. Currency and scale are
+        // user-declared: currency picks the column when a sheet carries more than
+        // one, scale is both the fallback for unlabelled rows and the scale every
+        // figure is reported in.
         financial_files: financialFiles.length > 0 ? financialFiles : undefined,
+        financial_currency: financialFiles.length > 0 ? currencyValue : undefined,
+        financial_scale: financialFiles.length > 0 ? financialScale || undefined : undefined,
         // custom = extract the sheet's lines as-is, section-assigned (no metric map).
         metrics_mode: metricsMode,
       })
@@ -1392,61 +1627,24 @@ export default function QuarterlyReportForm({
           <div ref={metricsBlockRef} style={{ marginBottom: 18, position: 'relative' }}>
             <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Metrics
-              {/* Anchor for the help card so it tracks the "?" rather than a
-                  guessed offset from the label's left edge. */}
-              <span style={{ position: 'relative', display: 'inline-flex' }}>
-                <button
-                  type="button"
-                  aria-label="What are System and Custom metrics?"
-                  aria-expanded={metricsHelpOpen}
-                  onClick={() => setMetricsHelpOpen((v) => !v)}
-                  style={{
-                    width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
-                    background: metricsHelpOpen ? '#4040C8' : 'transparent',
-                    color: metricsHelpOpen ? '#fff' : '#9BA3C4',
-                    fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                  }}
-                >
-                  ?
-                </button>
-
-                {metricsHelpOpen && (
-                  <div
-                    role="note"
-                    style={{
-                      position: 'absolute', top: 'calc(100% + 9px)', left: -10, zIndex: 40,
-                      width: 290, padding: '12px 14px', borderRadius: 12,
-                      border: '1px solid #ECEEF8', background: '#fff',
-                      boxShadow: '0 12px 32px rgba(20,22,40,.16)',
-                      // The parent .fl-label is uppercase + letter-spaced; reset
-                      // so the help copy reads as normal prose.
-                      textTransform: 'none', letterSpacing: 'normal',
-                      fontSize: 11.5, fontWeight: 400, color: '#5A6080', lineHeight: 1.55,
-                      cursor: 'default',
-                    }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        position: 'absolute', top: -5, left: 14, width: 9, height: 9,
-                        background: '#fff', borderLeft: '1px solid #ECEEF8',
-                        borderTop: '1px solid #ECEEF8', transform: 'rotate(45deg)',
-                      }}
-                    />
-                    <div style={{ marginBottom: 8 }}>
-                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
-                      {' — we map your data to our standard set of metrics and lay it out in the '}
-                      standard report template.
-                    </div>
-                    <div>
-                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
-                      {' — we take the figures from your Excel/CSV exactly as they are, place each '}
-                      line in the right section, and print them as-is.
-                    </div>
-                  </div>
-                )}
-              </span>
+              <LabelHelp
+                id="metrics"
+                openId={helpOpen}
+                onOpenChange={setHelpOpen}
+                ariaLabel="What are System and Custom metrics?"
+                panelLabel="System and Custom metrics"
+              >
+                <div style={{ marginBottom: 8 }}>
+                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
+                  {' — we map your data to our standard set of metrics and lay it out in the '}
+                  standard report template.
+                </div>
+                <div>
+                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
+                  {' — we take the figures from your Excel/CSV exactly as they are, place each '}
+                  line in the right section, and print them as-is.
+                </div>
+              </LabelHelp>
             </label>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
@@ -1466,13 +1664,12 @@ export default function QuarterlyReportForm({
                       checked={metricsMode === m}
                       onChange={() => {
                         setMetricsMode(m);
-                        // Leaving custom → the sheet field hides; drop any staged sheets
-                        // so a hidden field can't submit files the user can't see.
-                        if (m === 'system') setFinancialFiles([]);
-                        // The catalogue pill unmounts in custom mode — reset it so a
-                        // hover in flight (or a pinned panel) can't spring back open
+                        // The Financial Data field is shown in BOTH modes, so staged
+                        // sheets are never hidden and must not be discarded here.
+                        // The catalogue pill does unmount in custom mode — reset it so
+                        // a hover in flight (or a pinned panel) can't spring back open
                         // on the way back to system.
-                        else resetMetricsList();
+                        if (m !== 'system') resetMetricsList();
                       }}
                       style={{ accentColor: '#4040C8', width: 14, height: 14 }}
                     />
@@ -1607,21 +1804,38 @@ export default function QuarterlyReportForm({
 
         {/* Upload — shown for new reports and upload-to-existing mode */}
         {!isOpenMode && (
-          <div style={{ marginBottom: 18 }}>
-            <label className="fl-label">
-              Source Documents{' '}
-              <span
-                style={{
-                  fontWeight: 400,
-                  textTransform: 'none',
-                  color: '#9BA3C4',
-                }}
-              >
-                {isUploadMode && existingCoverageLoading
-                  ? '(loading…)'
-                  : `(PDF, DOCX — narrative & prose only, no figures read from here)`}
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Source Documents
+              <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
+                — required
               </span>
+              <LabelHelp
+                id="source"
+                openId={helpOpen}
+                onOpenChange={setHelpOpen}
+                ariaLabel="What to upload as source documents"
+                panelLabel="What to upload as source documents"
+                heading="Upload any of these"
+              >
+                <HelpList
+                  items={[
+                    'MD&A (management discussion & analysis)',
+                    'Prior-year annual report',
+                    'Management notes',
+                    'Board or chairman commentary',
+                  ]}
+                />
+                <div style={{ marginTop: 8, color: '#9BA3C4' }}>
+                  Prose only — we do not read any figures from these.
+                </div>
+              </LabelHelp>
             </label>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
+              {isUploadMode && existingCoverageLoading
+                ? '(loading…)'
+                : 'PDF, DOCX — narrative & prose only, no figures read from here. The report’s narrative sections are written from these.'}
+            </div>
 
             <input
               ref={fileInputRef}
@@ -1813,16 +2027,80 @@ export default function QuarterlyReportForm({
         {/* Financial Data — the report's ONLY source of figures, in both metrics
             modes. Nothing is read out of the narrative documents above. */}
         {!isOpenMode && (
-          <div style={{ marginBottom: 18 }}>
-            <label className="fl-label">
-              Financial Data (Excel / CSV / Word){' '}
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Financial Data (Excel / CSV / Word)
               <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
                 — required
               </span>
+              <LabelHelp
+                id="financial"
+                openId={helpOpen}
+                onOpenChange={setHelpOpen}
+                ariaLabel="What financial documents to upload"
+                panelLabel="What to upload as financial data"
+                heading="Upload the statements"
+              >
+                <HelpList
+                  items={[
+                    'Balance sheet',
+                    'Statement of income (P&L)',
+                    'Cash flow statement',
+                  ]}
+                />
+                <div style={{ marginTop: 8, color: '#9BA3C4' }}>
+                  One figure column per period, in a single currency. If your sheet has two
+                  currency columns, upload only the one you want reported.
+                </div>
+              </LabelHelp>
             </label>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
               Every figure in the report comes from here, read as exact cells with no OCR.
-              Currency and scale are detected automatically.
+              Tell us the currency and scale so we read the right column and nothing is
+              mis-scaled.
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }} htmlFor="fin-currency">
+                  Currency
+                </label>
+                <select
+                  id="fin-currency"
+                  className="inp sel"
+                  value={currencyValue}
+                  onChange={(e) => setFinancialCurrency(e.target.value)}
+                >
+                  {/* A company reporting in something off our list still gets to see
+                      its own currency rather than a silent fallback. */}
+                  {!isKnownCurrency(currencyValue) && (
+                    <option value={currencyValue}>{currencyValue}</option>
+                  )}
+                  {REPORTING_CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }} htmlFor="fin-scale">
+                  Numbers are in
+                </label>
+                <select
+                  id="fin-scale"
+                  className="inp sel"
+                  value={financialScale}
+                  onChange={(e) => setFinancialScale(e.target.value as FinancialScale | '')}
+                >
+                  <option value="">Select…</option>
+                  {FINANCIAL_SCALES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <input
@@ -2114,8 +2392,16 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Submit */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Submit. The reason is rendered, not just a title — browsers suppress
+            pointer events on a disabled button, so the tooltip never appears and
+            the user is left staring at a dead button. */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span
+            aria-live="polite"
+            style={{ fontSize: 11.5, color: '#9BA3C4', lineHeight: 1.45 }}
+          >
+            {!canGenerate ? disabledReason ?? '' : ''}
+          </span>
           <button
             type="button"
             disabled={!canGenerate}

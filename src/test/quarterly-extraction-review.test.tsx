@@ -210,4 +210,61 @@ describe("quarterly extraction review", () => {
     await renderPage();
     expect(screen.getByText(/will appear in the report as/i)).toBeInTheDocument();
   });
+
+  // The unit was on the payload all along and rendered nowhere, which is exactly
+  // how a dual-currency sheet produced two visually identical rows.
+  describe("units", () => {
+    it("shows each figure's unit", async () => {
+      await renderPage();
+      const row = rowFor("Profit for the period");
+      expect(within(row).getByText("SAR · millions")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Matched to your metrics/i }));
+      expect(screen.getAllByText("SAR · millions").length).toBeGreaterThan(1);
+    });
+
+    it("stays quiet when everything is in one currency", async () => {
+      await renderPage();
+      expect(screen.queryByRole("note", { name: /mixed units/i })).toBeNull();
+    });
+
+    it("warns when the same metric was read in two currencies", async () => {
+      const mixed = structuredClone(RESPONSE);
+      // The reported bug: one metric, one period, two currency columns.
+      mixed.pending.push({
+        ...mixed.pending[0],
+        id: "p1-usd",
+        value: 32535,
+        value_display: "$32.535B",
+        unit: "USD_million",
+      });
+      getExtractionReview.mockResolvedValue(mixed);
+      await renderPage();
+
+      const note = await screen.findByRole("note", { name: /mixed units/i });
+      expect(note).toHaveTextContent(/more than one currency/i);
+      expect(note).toHaveTextContent("SAR");
+      expect(note).toHaveTextContent("USD");
+      // Both rows are pending, so dismissing them here is a real remedy.
+      expect(note).toHaveTextContent(/answer .no./i);
+      expect(screen.getByText("USD · millions")).toBeInTheDocument();
+    });
+
+    it("tells the user to regenerate when the duplicates are already saved", async () => {
+      const mixed = structuredClone(RESPONSE);
+      mixed.confirmed.push({
+        ...mixed.confirmed[0],
+        id: "c1-usd",
+        value_display: "$240.000M",
+        unit: "USD_million",
+      });
+      getExtractionReview.mockResolvedValue(mixed);
+      await renderPage();
+
+      const note = await screen.findByRole("note", { name: /mixed units/i });
+      // Answering "No" cannot remove a confirmed row — saying otherwise would
+      // send the user down a dead end.
+      expect(note).toHaveTextContent(/regenerate/i);
+    });
+  });
 });

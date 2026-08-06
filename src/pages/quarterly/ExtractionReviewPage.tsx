@@ -42,6 +42,41 @@ function humanise(code: string | null): string {
   return STATEMENT_TITLES[code] ?? code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// The backend composes `unit` as "<CURRENCY>_<scale>" for money and a bare word
+// ("percent", "ratio", "count") for everything else. Both singular and plural
+// scale spellings reach us, since the parser and the document lane disagree.
+const UNIT_SCALE_LABELS: Record<string, string> = {
+  actual: 'actual',
+  units: 'actual',
+  ones: 'actual',
+  absolute: 'actual',
+  thousand: 'thousands',
+  thousands: 'thousands',
+  million: 'millions',
+  millions: 'millions',
+  billion: 'billions',
+  billions: 'billions',
+};
+
+// "SAR_million" → "SAR · millions". Anything unrecognised is passed through
+// rather than swallowed — an odd-looking unit is the signal that something
+// upstream went wrong, which is the whole reason this column exists.
+export function formatUnit(unit: string | null): string | null {
+  const raw = (unit ?? '').trim();
+  if (!raw) return null;
+  const [head, ...rest] = raw.split('_');
+  const scale = UNIT_SCALE_LABELS[rest.join('_').toLowerCase()];
+  if (scale) return `${head.toUpperCase()} · ${scale}`;
+  return raw.replace(/_/g, ' ');
+}
+
+// The currency half of a unit, or null for the non-monetary units (percent,
+// ratio, count, volume) which legitimately carry none.
+function currencyOf(unit: string | null): string | null {
+  const head = (unit ?? '').split('_')[0]?.trim().toUpperCase();
+  return head && /^[A-Z]{3}$/.test(head) ? head : null;
+}
+
 function groupByStatement(rows: ExtractionReviewFigure[]) {
   const byCode = new Map<string, ExtractionReviewFigure[]>();
   for (const r of rows) {
@@ -184,6 +219,38 @@ export default function ExtractionReviewPage() {
 
   const pending = useMemo(() => data?.pending ?? [], [data]);
   const groups = useMemo(() => groupByStatement(pending), [pending]);
+
+  // A sheet carrying two currency columns yields the same metric twice, once per
+  // currency, and the report prints both. Detect it here rather than comparing
+  // against the currency chosen on the setup form — that choice doesn't survive
+  // the route, and mixed units are diagnostic on their own.
+  const unitWarning = useMemo(() => {
+    const confirmedRows = data?.confirmed ?? [];
+    const rows = [...confirmedRows, ...(data?.pending ?? [])];
+    if (rows.length === 0) return null;
+
+    const currencies = [...new Set(rows.map((r) => currencyOf(r.unit)).filter(Boolean))] as string[];
+
+    const count = new Map<string, number>();
+    for (const r of rows) {
+      if (!r.metric_key) continue;
+      const key = `${r.metric_key}|${r.period ?? ''}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+    }
+    const duplicatedKeys = [...count.entries()].filter(([, n]) => n > 1).map(([k]) => k);
+    if (currencies.length < 2 && duplicatedKeys.length === 0) return null;
+
+    // Only pending rows can be dismissed here. If the duplicates are already
+    // confirmed, this screen has no remedy and the honest advice is to regenerate.
+    const confirmedKeys = new Set(
+      confirmedRows.filter((r) => r.metric_key).map((r) => `${r.metric_key}|${r.period ?? ''}`),
+    );
+    return {
+      currencies,
+      duplicateCount: duplicatedKeys.length,
+      inConfirmed: duplicatedKeys.some((k) => confirmedKeys.has(k)),
+    };
+  }, [data]);
   const answered = pending.filter((f) => answers[f.id]).length;
   const accepted = pending.filter((f) => answers[f.id] === 'yes').length;
   const unanswered = pending.length - answered;
@@ -307,6 +374,54 @@ export default function ExtractionReviewPage() {
 
       {/* Scrollable body */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 28px 20px' }}>
+        {unitWarning && (
+          <div
+            role="note"
+            aria-label="Mixed units warning"
+            style={{
+              display: 'flex',
+              gap: 10,
+              padding: '11px 13px',
+              marginBottom: 16,
+              borderRadius: 12,
+              border: '1px solid rgba(245,158,11,.35)',
+              background: 'rgba(245,158,11,.08)',
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              color: '#8A6520',
+            }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+              style={{ flexShrink: 0, marginTop: 1 }}
+            >
+              <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+            </svg>
+            <div>
+              <div style={{ fontWeight: 700, color: '#B45309', marginBottom: 3 }}>
+                {unitWarning.currencies.length > 1
+                  ? `Figures were read in more than one currency (${unitWarning.currencies.join(', ')})`
+                  : 'The same metric was read more than once'}
+              </div>
+              {unitWarning.duplicateCount > 0 && (
+                <>
+                  {unitWarning.duplicateCount} metric
+                  {unitWarning.duplicateCount === 1 ? '' : 's'} appear more than once, so the report
+                  may print each of them twice.{' '}
+                </>
+              )}
+              {unitWarning.inConfirmed
+                ? 'Some of these are already saved and cannot be removed here — regenerate the report with the right currency selected.'
+                : 'Answer “No” to the rows in the currency you do not want, or regenerate with the right currency selected.'}
+            </div>
+          </div>
+        )}
+
         {/* Matched — a record, nothing to do. Collapsed so it never buries the work. */}
         <div className="card" style={{ marginBottom: 16 }}>
           <button
@@ -345,6 +460,9 @@ export default function ExtractionReviewPage() {
                       <th style={{ padding: '10px 18px', fontWeight: 700 }}>System metric</th>
                       <th style={{ padding: '10px 18px', fontWeight: 700 }}>In your document</th>
                       <th style={{ padding: '10px 18px', fontWeight: 700, textAlign: 'right' }}>Value</th>
+                      {/* Its own column, not a suffix on the value — the point is
+                          to make an odd one out scannable down the list. */}
+                      <th style={{ padding: '10px 18px', fontWeight: 700 }}>Unit</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -363,6 +481,9 @@ export default function ExtractionReviewPage() {
                           }}
                         >
                           {f.value_display ?? f.value ?? '—'}
+                        </td>
+                        <td style={{ padding: '9px 18px', color: MUTED, whiteSpace: 'nowrap' }}>
+                          {formatUnit(f.unit) ?? '—'}
                         </td>
                       </tr>
                     ))}
@@ -446,6 +567,7 @@ export default function ExtractionReviewPage() {
                         <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                           {f.value_display ?? f.value ?? '—'}
                         </span>
+                        {formatUnit(f.unit) && <span>{formatUnit(f.unit)}</span>}
                         {f.source_page != null && <span>page {f.source_page}</span>}
                         <ConfidencePill value={f.confidence} />
                       </div>
