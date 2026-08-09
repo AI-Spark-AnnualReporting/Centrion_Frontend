@@ -62,7 +62,17 @@ function SourceTypeBadge({ section }: { section: ProducedSection }) {
 }
 
 // ─── page shell ───────────────────────────────────────────────────────────────
-function Shell({ reportId, children }: { reportId?: string; children: React.ReactNode }) {
+function Shell({
+  reportId,
+  metricsMode,
+  children,
+}: {
+  reportId?: string;
+  // Custom reports have an extra Financial Data step in the indicator. Unknown
+  // until the outline loads, which is why it's nullable rather than defaulted.
+  metricsMode?: 'system' | 'custom' | null;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
@@ -75,7 +85,9 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={4} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="preview" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -209,6 +221,8 @@ export default function PreviewPage() {
   const companyId = user?.company_id ?? null;
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -338,6 +352,7 @@ export default function PreviewPage() {
           .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);
+        setMetricsMode(res.metrics_mode ?? null);
         setCurrentIndex(0);
         setLoading(false);
 
@@ -474,14 +489,14 @@ export default function PreviewPage() {
   // ── loading / error / empty ──
   if (loading) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <Spinner pad={80} />
       </Shell>
     );
   }
   if (fetchError) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ padding: '24px 28px' }}>
           <div style={{ padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
             <span style={{ fontSize: 13, color: '#DC2626' }}>{fetchError}</span>
@@ -495,7 +510,7 @@ export default function PreviewPage() {
   }
   if (total === 0) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' }}>
           <h2 style={{ fontSize: 17, fontWeight: 800, color: DARK, margin: '0 0 8px' }}>No sections to produce</h2>
           <p style={{ fontSize: 13, color: MUTED, marginBottom: 22 }}>Lock an outline first to generate the report.</p>
@@ -508,7 +523,7 @@ export default function PreviewPage() {
   }
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode={metricsMode}>
       {/* Header */}
       <div style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: '0 0 4px', lineHeight: 1.2 }}>Report preview</h1>

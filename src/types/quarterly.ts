@@ -168,6 +168,39 @@ export interface ExtractionReviewResponse {
   // Where a figure can be placed when the user says "no, that's our own line".
   // Sent with the figures so the screen needs no second request.
   metric_sections?: MetricSectionGroup[];
+  // Present (and 'custom') on a Custom-metrics report, where this screen is a
+  // different thing entirely: nothing to confirm, because the user already chose
+  // each figure's section by choosing which file to upload to it. `sections` holds
+  // the lines to tidy; `confirmed`/`pending` are always empty.
+  metrics_mode?: 'system' | 'custom';
+  editable?: boolean;
+  sections?: CustomExtractionSection[];
+}
+
+// ─── Custom-mode extraction (rename / delete, no yes-no) ────────────────────
+export interface CustomExtractionRow {
+  id: string;
+  label: string | null;
+  value: number | null;
+  value_display: string | null;
+  unit: string | null;
+  // The tab of the workbook this line came from, when there was more than one.
+  sheet: string | null;
+}
+
+export interface CustomExtractionSection {
+  section_code: string;
+  title: string;
+  is_custom: boolean;
+  rows: CustomExtractionRow[];
+}
+
+// One edit per row: a new label, or gone. Renaming is not cosmetic — the
+// cross-quarter comparison matches custom rows by (section, label).
+export interface CustomFigureEdit {
+  id: string;
+  label?: string;
+  deleted?: boolean;
 }
 
 export interface MetricSectionGroup {
@@ -197,6 +230,55 @@ export interface ExtractionReviewResult {
   created: number;
   ignored: number;
   rejected: number;
+  next: string;
+}
+
+// ─── Financial Data (Custom mode only, the step before Extraction) ──────────
+// Custom mode takes one statement per section, so the section a figure belongs to
+// is decided by which upload field it went into — not by a model reading the label.
+
+export interface FinancialSectionUpload {
+  document_id: string | null;
+  filename: string;
+  row_count: number;
+  currency: string;
+  // Parser token: 'actual' | 'thousand' | 'million' | 'billion' (singular).
+  scale: string;
+  // How the scale was decided — 'user_section' (the user said so), 'units_llm' /
+  // 'units_text' (the file said so), 'prior', 'llm_fallback', or 'default' (a
+  // guess). Surfaced so a guess is visible rather than silent.
+  scale_source: string;
+  uploaded_at: string;
+}
+
+export interface FinancialSection {
+  section_code: string;
+  title: string;
+  section_group: string;
+  // A section this company created, rather than one of ours.
+  is_custom: boolean;
+  included: boolean;
+  file: FinancialSectionUpload | null;
+}
+
+export interface FinancialsResponse {
+  report_id: string;
+  company_id: string;
+  period: string | null;
+  currency: string;
+  // UI vocabulary ('millions'), not the parser token — this is what every figure
+  // in the report is printed in.
+  scale: string;
+  sections: FinancialSection[];
+  can_continue: boolean;
+  // Titles of sections still ticked with no file. Named, not counted, so the user
+  // doesn't have to hunt for them.
+  blocking: string[];
+}
+
+export interface FinancialsCompleteResult {
+  report_id: string;
+  sections: FinancialSection[];
   next: string;
 }
 
@@ -234,12 +316,19 @@ export interface OutlineSection {
   // True when this section's produced data duplicates an earlier section's — the
   // Preview hides these (keep the first, hide the rest). Computed server-side.
   hidden_duplicate?: boolean;
+  // Custom mode only: a financial section the user unticked on the Financial Data
+  // step. Shown here but not re-tickable — that decision has one home, and the
+  // section has no figures to render anyway. The backend rejects re-including it.
+  financials_excluded?: boolean;
 }
 
 export interface OutlineResponse {
   report_id: string;
   company_id: string;
   total_catalogue?: number;
+  // Which lane built this report. Drives the step indicator (Custom has an extra
+  // Financial Data step) and the greyed-out financial sections.
+  metrics_mode?: 'system' | 'custom';
   // Whole-outline freeze — true once the outline is locked (read-only).
   locked?: boolean;
   // True while the ingest worker is still writing figures. Until it flips false a
@@ -505,6 +594,9 @@ export interface AssembledReportResponse {
   approved_at?: string | null;
   approvedAt?: string | null;
   locked_at?: string | null;
+  // Which lane built this report — for the step indicator, which has an extra
+  // Financial Data step in Custom mode.
+  metrics_mode?: 'system' | 'custom';
 }
 
 // POST .../quarterly/{reportId}/approve response — approve & lock the

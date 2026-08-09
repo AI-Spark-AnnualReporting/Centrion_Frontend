@@ -133,6 +133,8 @@ export default function AssembledReportPage() {
   // approve & lock
   const [approved, setApproved] = useState(false);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -155,6 +157,7 @@ export default function AssembledReportPage() {
           .sort(byDisplayOrder)
           .map(toProduced);
         setSections(list);
+        setMetricsMode(res.metrics_mode ?? null);
         const { key, brand: coverBrand } = readCoverSelection(res);
         if (coverBrand) setBrand(coverBrand);
         if (key) setCoverTemplateKey(key);
@@ -270,7 +273,14 @@ export default function AssembledReportPage() {
   return (
     // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-      {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} locked={approved} />}
+      {reportId && (
+        <QuarterlyReportStepper
+          step="report"
+          reportId={reportId}
+          metricsMode={metricsMode}
+          locked={approved}
+        />
+      )}
 
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 28px 14px', flexShrink: 0, flexWrap: 'wrap' }}>

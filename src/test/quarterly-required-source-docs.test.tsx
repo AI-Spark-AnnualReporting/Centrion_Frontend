@@ -104,19 +104,40 @@ describe("source documents are required", () => {
     await waitFor(() => expect(screen.getByText("mdna.pdf")).toBeInTheDocument());
   });
 
-  it("keeps staged spreadsheets when the metrics mode is toggled", async () => {
+  it("drops a staged spreadsheet when Custom metrics is picked, and hides the field", async () => {
     const { container } = renderForm();
     const { financial } = fileInputs(container);
 
     fireEvent.change(financial, { target: { files: [file("statements.xlsx")] } });
     await waitFor(() => expect(screen.getByText("statements.xlsx")).toBeInTheDocument());
 
-    // The Financial Data field is shown in BOTH modes, so a toggle must not
-    // discard what the user staged.
+    // Custom mode takes its figures one statement per section on the next screen,
+    // and the backend rejects a sheet sent with the report. Keeping the staged file
+    // would make it invisible AND fatal, so it goes the moment the mode changes.
     fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
-    expect(screen.getByText("statements.xlsx")).toBeInTheDocument();
+    expect(screen.queryByText("statements.xlsx")).toBeNull();
+    expect(screen.queryByText(/Financial Data \(Excel \/ CSV \/ Word\)/i)).toBeNull();
 
+    // Back to System: the field returns, empty — nothing is silently resurrected.
     fireEvent.click(screen.getByRole("radio", { name: /system metrics/i }));
-    expect(screen.getByText("statements.xlsx")).toBeInTheDocument();
+    expect(screen.getByText(/Financial Data \(Excel \/ CSV \/ Word\)/i)).toBeInTheDocument();
+    expect(screen.queryByText("statements.xlsx")).toBeNull();
+  });
+
+  it("lets a Custom report generate on source documents alone", async () => {
+    const { container } = renderForm();
+    await pickPeriod(container);
+    const { narrative } = fileInputs(container);
+
+    fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
+    fireEvent.change(narrative, { target: { files: [file("mdna.pdf")] } });
+    await waitFor(() => expect(screen.getByText("mdna.pdf")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Non-financial" }));
+
+    // No spreadsheet and no scale picker — and Generate is still reachable,
+    // because the figures come from the Financial Data screen that follows.
+    expect(screen.queryByLabelText("Numbers are in")).toBeNull();
+    const generate = screen.getByRole("button", { name: /generate report/i });
+    await waitFor(() => expect(generate).not.toBeDisabled());
   });
 });

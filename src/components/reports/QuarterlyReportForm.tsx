@@ -1151,10 +1151,12 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  // Both lanes are required on a new report. The financial lane is the only
-  // figure source; the narrative lane is the only prose source, and the report's
-  // narrative sections have nothing to write from without it.
+  // System mode needs both lanes on a new report: the financial lane is its only
+  // figure source, the narrative lane its only prose source. Custom mode takes its
+  // figures one statement at a time on the Financial Data screen that follows, so
+  // here it asks for narrative documents and nothing else.
   const hasFinancialFiles = financialFiles.length > 0;
+  const needsFinancialUpload = !isUploadMode && metricsMode === 'system';
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
@@ -1175,8 +1177,7 @@ export default function QuarterlyReportForm({
         customYear != null &&
         quarter != null &&
         hasFiles &&
-        hasFinancialFiles &&
-        !!financialScale &&
+        (!needsFinancialUpload || (hasFinancialFiles && !!financialScale)) &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
@@ -1199,9 +1200,9 @@ export default function QuarterlyReportForm({
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : !hasFinancialFiles
+                : needsFinancialUpload && !hasFinancialFiles
                   ? 'Upload the financial statements (Excel, CSV or Word) to continue'
-                  : !financialScale
+                  : needsFinancialUpload && !financialScale
                     ? 'Tell us what scale the financial figures are in to continue'
                     : companyType == null
                       ? 'Select the company type to continue'
@@ -1304,11 +1305,14 @@ export default function QuarterlyReportForm({
         // Dedicated Excel/CSV lane → lean extraction. Currency and scale are
         // user-declared: currency picks the column when a sheet carries more than
         // one, scale is both the fallback for unlabelled rows and the scale every
-        // figure is reported in.
-        financial_files: financialFiles.length > 0 ? financialFiles : undefined,
-        financial_currency: financialFiles.length > 0 ? currencyValue : undefined,
-        financial_scale: financialFiles.length > 0 ? financialScale || undefined : undefined,
-        // custom = extract the sheet's lines as-is, section-assigned (no metric map).
+        // figure is reported in. System mode only — the backend rejects a sheet
+        // sent in Custom mode, which takes its figures per section on the next
+        // screen (and asks for currency/scale there).
+        financial_files: needsFinancialUpload && hasFinancialFiles ? financialFiles : undefined,
+        financial_currency: needsFinancialUpload && hasFinancialFiles ? currencyValue : undefined,
+        financial_scale:
+          needsFinancialUpload && hasFinancialFiles ? financialScale || undefined : undefined,
+        // custom = the user's own lines, one uploaded statement per section.
         metrics_mode: metricsMode,
       })
       .then((handle) => {
@@ -1324,6 +1328,10 @@ export default function QuarterlyReportForm({
           conflictMessage: handle.message,
           reportType: 'quarterly',
           period: `${quarter} ${customYear}`,
+          // Custom mode has no figures yet — this run only read the narrative
+          // documents. Land on the Financial Data screen, which is where its
+          // numbers come from.
+          quarterlyNext: metricsMode === 'custom' ? 'financials' : 'extraction',
         };
         navigate('/reports/processing', { state: processingState });
       })
@@ -1637,12 +1645,13 @@ export default function QuarterlyReportForm({
                 <div style={{ marginBottom: 8 }}>
                   <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
                   {' — we map your data to our standard set of metrics and lay it out in the '}
-                  standard report template.
+                  standard report template. Upload the statements below.
                 </div>
                 <div>
                   <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
-                  {' — we take the figures from your Excel/CSV exactly as they are, place each '}
-                  line in the right section, and print them as-is.
+                  {' — your own line items, printed as-is. On the next screen you pick the '}
+                  sections you want and upload one statement into each, so every figure lands
+                  where you put it.
                 </div>
               </LabelHelp>
             </label>
@@ -1664,12 +1673,17 @@ export default function QuarterlyReportForm({
                       checked={metricsMode === m}
                       onChange={() => {
                         setMetricsMode(m);
-                        // The Financial Data field is shown in BOTH modes, so staged
-                        // sheets are never hidden and must not be discarded here.
-                        // The catalogue pill does unmount in custom mode — reset it so
-                        // a hover in flight (or a pinned panel) can't spring back open
-                        // on the way back to system.
-                        if (m !== 'system') resetMetricsList();
+                        if (m !== 'system') {
+                          // The Financial Data field unmounts in custom mode, and the
+                          // backend rejects a sheet sent with it — so a staged file
+                          // would be invisible AND fatal. Drop it here, while the user
+                          // is looking at the control that caused it.
+                          setFinancialFiles([]);
+                          // The catalogue pill unmounts too — reset it so a hover in
+                          // flight (or a pinned panel) can't spring back open on the
+                          // way back to system.
+                          resetMetricsList();
+                        }
                       }}
                       style={{ accentColor: '#4040C8', width: 14, height: 14 }}
                     />
@@ -1799,7 +1813,7 @@ export default function QuarterlyReportForm({
                   company's own additions — those are theirs, not ours. */}
               {metricsMode === 'system'
                 ? `We map your data to${systemMetrics ? ` these ${systemMetrics.total}` : ' our standard'} metrics and lay it out in the standard report template.`
-                : 'We take the figures from your Excel/CSV exactly as they are, place each line in the right section, and print them as-is.'}
+                : 'We print your figures exactly as they are. You upload one statement per section on the next screen, so nothing has to guess where a line belongs.'}
             </div>
           </div>
         )}
@@ -2026,9 +2040,11 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Financial Data — the report's ONLY source of figures, in both metrics
-            modes. Nothing is read out of the narrative documents above. */}
-        {!isOpenMode && (
+        {/* Financial Data — System mode's ONLY source of figures. Nothing is read
+            out of the narrative documents above. Hidden in Custom mode, which takes
+            one statement per section on the next screen instead: there the section
+            is chosen by the user rather than guessed from the label. */}
+        {!isOpenMode && (isUploadMode || metricsMode === 'system') && (
           <div style={{ marginBottom: 18, position: 'relative' }}>
             <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Financial Data (Excel / CSV / Word)

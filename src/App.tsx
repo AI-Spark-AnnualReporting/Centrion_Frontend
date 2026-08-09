@@ -29,6 +29,7 @@ import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
 import ExtractionReviewPage from "./pages/quarterly/ExtractionReviewPage";
+import FinancialSectionsPage from "./pages/quarterly/FinancialSectionsPage";
 import OutlinePage from "./pages/quarterly/OutlinePage";
 import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
@@ -124,6 +125,8 @@ const App = () => (
           {/* Step 2 — confirm which extracted figures are which metric. Sits before
               the outline: the outline's data badges are only meaningful once the
               figure set is settled. */}
+          {/* Custom-metrics only — one uploaded statement per section, before extraction. */}
+          <Route path="/quarterly-report/:reportId/financials" element={<FinancialSectionsPage />} />
           <Route path="/quarterly-report/:reportId/extraction" element={<ExtractionReviewPage />} />
           <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
           <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />

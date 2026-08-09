@@ -73,11 +73,14 @@ function CheckBox({
   disabled,
   onToggle,
   label,
+  title,
 }: {
   checked: boolean;
   disabled?: boolean;
   onToggle?: () => void;
   label: string;
+  // Why it's disabled, when "you can't tick this" needs an explanation.
+  title?: string;
 }) {
   return (
     <button
@@ -86,6 +89,7 @@ function CheckBox({
       aria-checked={checked}
       aria-disabled={disabled || undefined}
       aria-label={label}
+      title={title}
       onClick={
         disabled
           ? undefined
@@ -127,9 +131,13 @@ function CheckBox({
 // ─── Page shell (stepper + bounded flex column) ───────────────────────────────
 function Shell({
   reportId,
+  metricsMode,
   children,
 }: {
   reportId?: string;
+  // Custom reports have an extra Financial Data step in the indicator. Unknown
+  // until the outline loads, which is why it's nullable rather than defaulted.
+  metricsMode?: 'system' | 'custom' | null;
   children: React.ReactNode;
 }) {
   return (
@@ -145,7 +153,9 @@ function Shell({
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={3} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="outline" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -214,14 +224,23 @@ function SectionRow({
         <GripVertical size={16} aria-hidden />
       </span>
 
+      {/* financials_excluded: a Custom report's financial section the user unticked
+          on the Financial Data step. It has no figures, so re-ticking it here would
+          only add an empty table — and that decision has one home. The backend
+          rejects it too, so this isn't the only thing holding the rule up. */}
       <CheckBox
         checked={section.included}
-        disabled={locked || isRequired || ingesting}
+        disabled={locked || isRequired || ingesting || section.financials_excluded === true}
         onToggle={onToggle}
         label={
           section.included
             ? `Exclude ${section.title}`
             : `Include ${section.title}`
+        }
+        title={
+          section.financials_excluded
+            ? 'Excluded on the Financial Data step — upload a file for it there to bring it back'
+            : undefined
         }
       />
 
@@ -254,6 +273,11 @@ function SectionRow({
         </div>
         <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
           {section.part_label}
+          {section.financials_excluded && (
+            <span style={{ color: '#B45309' }}>
+              {' · '}excluded on Financial Data
+            </span>
+          )}
         </div>
       </div>
 
@@ -288,6 +312,9 @@ export default function OutlinePage() {
   // in a bin at the bottom), and any row can be dragged anywhere.
   const [sections, setSections] = useState<OutlineSection[]>([]);
   const [totalCatalogue, setTotalCatalogue] = useState(0);
+  // Custom reports have an extra Financial Data step, and their financial sections
+  // were already decided there — see the greyed rows below.
+  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   // Ingest worker still writing figures — badges are provisional until it clears.
   const [ingesting, setIngesting] = useState(false);
@@ -352,6 +379,7 @@ export default function OutlinePage() {
       // un-untickable empty box and then PUT as false, which the backend 409s.
       .map((s) => (s.requirement === 'required' ? { ...s, included: true } : s));
     setSections(all);
+    setMetricsMode(res.metrics_mode ?? null);
     setTotalCatalogue(res.total_catalogue ?? res.sections.length);
     // Whole-outline freeze: explicit flag, or every section locked.
     // (api.ts normalises the backend's `outline_locked` onto `locked`.)
@@ -681,7 +709,7 @@ export default function OutlinePage() {
   // ── Loading / error ───────────────────────────────────────────────────────
   if (loading) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <Spinner pad={80} />
       </Shell>
     );
@@ -689,7 +717,7 @@ export default function OutlinePage() {
 
   if (fetchError) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ padding: '24px 28px' }}>
           <div
             style={{
@@ -722,7 +750,7 @@ export default function OutlinePage() {
 
   if (sections.length === 0) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div
           style={{
             flex: 1,
@@ -767,7 +795,7 @@ export default function OutlinePage() {
   ];
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode={metricsMode}>
       {/* Header */}
       <div
         style={{

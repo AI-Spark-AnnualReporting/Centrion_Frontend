@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
+import { CustomExtractionReview } from '@/components/quarterly/CustomExtractionReview';
 import type {
   ExtractionReviewFigure,
   ExtractionReviewResponse,
@@ -112,7 +113,15 @@ function groupByStatement(rows: ExtractionReviewFigure[]) {
   }));
 }
 
-function Shell({ reportId, children }: { reportId?: string; children: React.ReactNode }) {
+function Shell({
+  reportId,
+  metricsMode,
+  children,
+}: {
+  reportId?: string;
+  metricsMode?: 'system' | 'custom' | null;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
@@ -124,7 +133,9 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={2} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="extraction" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -426,11 +437,29 @@ export default function ExtractionReviewPage() {
     );
   }
 
+  // Custom mode is a different screen entirely. There is nothing to confirm: the
+  // user settled each figure's section when they chose which file to upload to it,
+  // on the step before this one. What is left is tidying — a databook carries
+  // spacer rows and repeated subtotals, and a label can read badly out of its
+  // sheet. So the rows are editable rather than answerable.
+  if (data?.metrics_mode === 'custom' && companyId && reportId) {
+    return (
+      <Shell reportId={reportId} metricsMode="custom">
+        <CustomExtractionReview
+          companyId={companyId}
+          reportId={reportId}
+          data={data}
+          onData={setData}
+        />
+      </Shell>
+    );
+  }
+
   const confirmed = data?.confirmed ?? [];
   const summary = data?.summary;
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode="system">
       {/* Header */}
       <div
         style={{

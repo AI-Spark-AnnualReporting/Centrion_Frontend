@@ -1731,6 +1731,108 @@ export const quarterlyReports = {
       { method: "POST", body: { decisions } },
     ),
 
+  // Custom mode only: rename or delete lines read from the per-section uploads.
+  // There is no yes/no here — the section was settled at upload time, so what's
+  // left is tidying a databook's spacer rows and awkward labels.
+  editCustomFigures: (
+    companyId: string,
+    reportId: string,
+    edits: import("@/types/quarterly").CustomFigureEdit[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/custom-figures`,
+      { method: "POST", body: { edits } },
+    ),
+
+  // ── Financial Data (Custom mode, the step before Extraction) ──
+  // One statement per section, so nothing has to guess where a figure belongs.
+  getFinancials: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials`,
+      { signal },
+    ),
+
+  // Report-wide currency + scale. Every figure is printed in this scale.
+  saveFinancialsSettings: (
+    companyId: string,
+    reportId: string,
+    body: { currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/settings`,
+      { method: "PATCH", body },
+    ),
+
+  // Read one statement into one section. Re-uploading replaces it. currency/scale
+  // are the user correcting our reading for THIS section — omit them and the
+  // file's own units decide.
+  uploadFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    file: File,
+    units?: { currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (units?.currency) fd.append("currency", units.currency);
+    if (units?.scale) fd.append("scale", units.scale);
+    return request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    );
+  },
+
+  deleteFinancialsSectionUpload: (
+    companyId: string,
+    reportId: string,
+    code: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "DELETE" },
+    ),
+
+  // Include/exclude a section, or correct the units we read for it. A units change
+  // reinterprets the stored numbers — it never re-reads the file.
+  patchFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body: { included?: boolean; currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}`,
+      { method: "PATCH", body },
+    ),
+
+  // A section of the company's own — saved against the COMPANY, so it comes back
+  // next quarter and prior-period comparison lines up against it.
+  addFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    title: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections`,
+      { method: "POST", body: { title } },
+    ),
+
+  // 422 with the section titles still missing a file — the gate that stops an
+  // empty table reaching the report.
+  completeFinancials: (
+    companyId: string,
+    reportId: string,
+  ): Promise<import("@/types/quarterly").FinancialsCompleteResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/complete`,
+      { method: "POST" },
+    ),
+
   addDriver: (
     companyId: string,
     reportId: string,

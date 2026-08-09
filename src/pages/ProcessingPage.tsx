@@ -128,7 +128,9 @@ export interface ProcessingPageState {
   // Where a completed quarterly run hands off. Extraction → "extraction" (default),
   // the review screen where the user confirms which figures are which metric;
   // section-production (produceAll, kicked from the Outline) → "preview".
-  quarterlyNext?: "extraction" | "outline" | "preview";
+  // Custom-metrics reports → "financials": this run only read their narrative
+  // documents, and their figures come from the per-section uploads on that screen.
+  quarterlyNext?: "extraction" | "financials" | "outline" | "preview";
   // Set when the caller navigated BEFORE a run existed, so the user reaches the
   // loader on the click instead of watching a dead button. Locking an outline takes
   // a few seconds and produceAll can only be kicked after it, so the Outline page

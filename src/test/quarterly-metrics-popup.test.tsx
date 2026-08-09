@@ -130,8 +130,10 @@ describe("System metrics hover list", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
 
+    // Custom no longer promises to work out where a line belongs — the user says
+    // so, by uploading one statement per section on the next screen.
     expect(
-      screen.getByText(/exactly as they are, place each line in the right section/i),
+      screen.getByText(/one statement per section on the next screen/i),
     ).toBeInTheDocument();
   });
 
