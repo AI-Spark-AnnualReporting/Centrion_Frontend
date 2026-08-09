@@ -1,5 +1,5 @@
 // Derives the disclosure "events" that drive the Disclosure Timeline card and the
-// IR Calendar page from data the app already serves — no backend changes.
+// Board & Meetings calendar from data the app already serves — no backend changes.
 //
 // Sources:
 //   • DERIVED next-due milestones — the latest uploaded annual/ESG report's fiscal

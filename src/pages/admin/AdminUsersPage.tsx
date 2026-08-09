@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { admin, adminConsole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER } from './admin-flags';
 import {
   ASSIGNABLE_ROLES,
   CAPABILITY_GROUPS,
   ROLE_DISPLAY,
   ROLE_ORDER,
+  roleLabel,
   type BackendRole,
 } from '@/constants/roles';
 import type {
@@ -149,9 +152,9 @@ function InviteModal({
       const dept = departments.find((d) => d.id === departmentId);
       if (dept?.has_hod) {
         const ok = window.confirm(
-          `${dept.department_name} already has an HR Lead` +
+          `${dept.department_name} already has a ${dept.department_code} Lead` +
             (dept.hod_name ? ` (${dept.hod_name})` : '') +
-            `. Creating this user will replace them as the HR Lead. Continue?`,
+            `. Creating this user will replace them as the ${dept.department_code} Lead. Continue?`,
         );
         if (!ok) return;
       }
@@ -223,17 +226,22 @@ function InviteModal({
           </div>
           <div className="fl">
             <label className="fl-label">Role</label>
-            <select
-              className="inp sel"
-              value={role}
-              onChange={(e) => setRole(e.target.value as BackendRole)}
-            >
-              {ASSIGNABLE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
-                </option>
-              ))}
-            </select>
+            {/* A native <select>'s open list is an OS-level popup that ignores
+                the modal's bounds entirely — it visibly spilled out past the
+                card. Radix's Select renders its own positioned, scrollable
+                popover instead, so it stays inside the viewport. */}
+            <Select value={role} onValueChange={(v) => setRole(v as BackendRole)}>
+              <SelectTrigger className="inp" style={{ height: 40 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Department — required for department_user and hod. */}
@@ -254,24 +262,27 @@ function InviteModal({
                   No departments available. Create a department first.
                 </div>
               ) : (
-                <select
-                  className="inp sel"
-                  value={departmentId ?? ''}
-                  onChange={(e) => setDepartmentId(e.target.value || null)}
+                <Select
+                  value={departmentId ?? undefined}
+                  onValueChange={(v) => setDepartmentId(v)}
                 >
-                  <option value="">Select a department</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.department_name} ({d.department_code})
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="inp" style={{ height: 40 }}>
+                    <SelectValue placeholder="Select a department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.department_name} ({d.department_code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               {role === 'hod' &&
                 departmentId &&
                 departments.find((d) => d.id === departmentId)?.has_hod && (
                   <div style={{ marginTop: 6, fontSize: 10.5, color: '#B45309', fontWeight: 600 }}>
-                    ⚠ This department already has an HR Lead
+                    ⚠ This department already has a {departments.find((d) => d.id === departmentId)?.department_code} Lead
                     {departments.find((d) => d.id === departmentId)?.hod_name
                       ? ` (${departments.find((d) => d.id === departmentId)?.hod_name})`
                       : ''}
@@ -940,7 +951,7 @@ function UsersView(props: {
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${meta.badgeClass}`}>● {meta.label}</span>
+                        <span className={`badge ${meta.badgeClass}`}>● {roleLabel(u.role, u.department_code)}</span>
                       </td>
                       <td>
                         {u.department_name ? (
@@ -1002,6 +1013,7 @@ function UsersView(props: {
                       <tr>
                         <td colSpan={8} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                            {SHOW_CHANGE_ROLE && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
                                 Change role
@@ -1027,6 +1039,7 @@ function UsersView(props: {
                                 </span>
                               )}
                             </div>
+                            )}
 
                             {/* Change department — for department_user and hod. They
                                 must always belong to a department, so there's no
@@ -1068,7 +1081,7 @@ function UsersView(props: {
                               </div>
                             )}
 
-                            {u.status !== 'suspended' ? (
+                            {SHOW_SUSPEND_USER && (u.status !== 'suspended' ? (
                               <button
                                 className="btn bs bsm"
                                 disabled={isSelf || rowBusy === u.user_id}
@@ -1090,7 +1103,7 @@ function UsersView(props: {
                               >
                                 Reactivate user
                               </button>
-                            )}
+                            ))}
 
                             {/* Until they activate. `has_temp_password` alone
                                 isn't enough: an invite created before the
@@ -1111,6 +1124,20 @@ function UsersView(props: {
                                 Copy invite link
                               </button>
                             )}
+
+                            {/* With role + suspend hidden, an active admin/PM with no temp
+                                password has nothing left here — say so rather than opening
+                                a blank strip. */}
+                            {!SHOW_CHANGE_ROLE &&
+                              !SHOW_SUSPEND_USER &&
+                              u.role !== 'department_user' &&
+                              u.role !== 'hod' &&
+                              u.status !== 'invited' &&
+                              !u.has_temp_password && (
+                                <span style={{ fontSize: 11, color: '#9BA3C4' }}>
+                                  No actions available for this user.
+                                </span>
+                              )}
                           </div>
                         </td>
                       </tr>

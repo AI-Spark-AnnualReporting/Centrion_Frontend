@@ -146,6 +146,11 @@ function isPreRules(c: Candidate): boolean {
 //                                   the console, `msg` is for the banner.
 function readComplianceDetail(err: unknown): string | null {
   if (!(err instanceof ApiError)) return null;
+  // 429/5xx come from infra/upstream provider failures, not deliberate
+  // FastAPI responses — never trust raw `detail` there, it can be a leaked
+  // exception string (e.g. an OpenAI RateLimitError). readRunError's own
+  // status-based fallback handles these instead.
+  if (err.status === 429 || err.status >= 500) return null;
   const detail = (err.body as { detail?: unknown } | undefined)?.detail;
   if (!detail) return null;
   if (typeof detail === 'string') return detail.trim() || null;
@@ -167,7 +172,9 @@ function readRunError(err: unknown): string {
   if (detail) return detail;
   if (err instanceof ApiError) {
     if (err.status === 403) return 'That report doesn’t belong to your company.';
-    if (err.status >= 500) return 'The compliance service couldn’t start the run. Please try again.';
+    if (err.status === 429 || err.status >= 500) {
+      return 'The compliance service couldn’t start the run. Please try again.';
+    }
     return 'Validation failed. Please try again.';
   }
   return err instanceof Error ? err.message : 'Validation failed. Please try again.';

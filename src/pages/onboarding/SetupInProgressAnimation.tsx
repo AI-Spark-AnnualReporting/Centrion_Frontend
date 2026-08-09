@@ -48,9 +48,19 @@ function RingLogo() {
 export default function SetupInProgressAnimation({
   payload,
   files = [],
+  force = false,
+  overlay = false,
 }: {
-  payload: OnboardingPayload;
+  // null when this runs OUTSIDE onboarding (the Upload Reports page): onboarding is
+  // already complete and there's no payload to submit, so completeOnboarding is
+  // skipped entirely and we go straight to the dashboard once the ingest lands.
+  payload: OnboardingPayload | null;
   files?: UploadedReportFile[];
+  // Re-run an ingest that already finished — see ingest_onboarding_endpoint.
+  force?: boolean;
+  // Cover the app shell instead of stretching a 100vh block inside its content
+  // column. Only the in-app page needs this; /onboarding is already shell-less.
+  overlay?: boolean;
 }) {
   const navigate = useNavigate();
   const { completeOnboarding, user } = useAuth();
@@ -101,21 +111,26 @@ export default function SetupInProgressAnimation({
         if (cancelled) return;
         setFinishing(true);
         setDetail('Setting up your workspace…');
-        try {
-          await completeOnboarding(payloadRef.current);
-        } catch {
-          /* still enter — onboarding is best-effort at this point */
+        // No payload → not onboarding; there is nothing to finalize.
+        if (payloadRef.current) {
+          try {
+            await completeOnboarding(payloadRef.current);
+          } catch {
+            /* still enter — onboarding is best-effort at this point */
+          }
         }
         if (!cancelled) enterDashboard();
       };
 
       // Nothing to ingest → just finalize + enter.
       if (!cid || !items.length) {
-        try {
-          await completeOnboarding(payloadRef.current);
-        } catch (e) {
-          if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
-          return;
+        if (payloadRef.current) {
+          try {
+            await completeOnboarding(payloadRef.current);
+          } catch (e) {
+            if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
+            return;
+          }
         }
         if (!cancelled) enterDashboard();
         return;
@@ -124,7 +139,7 @@ export default function SetupInProgressAnimation({
       // Kick off the heavy ingest FIRST so the real backend stages show immediately
       // (onboarding stays "incomplete" meanwhile, so ProtectedRoute doesn't redirect).
       try {
-        await companies.ingestOnboarding(cid, items);
+        await companies.ingestOnboarding(cid, items, force);
       } catch {
         await finalizeAndEnter(); // couldn't start the ingest → don't trap the user
         return;
@@ -159,7 +174,7 @@ export default function SetupInProgressAnimation({
 
     run();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [retryTick, completeOnboarding, enterDashboard]);
+  }, [retryTick, completeOnboarding, enterDashboard, force]);
 
   // Rotate the playful gerund + the tips (text updates in place — no remount).
   useEffect(() => {
@@ -177,9 +192,15 @@ export default function SetupInProgressAnimation({
     setRetryTick((t) => t + 1);
   };
 
+  // Full-bleed on /onboarding (shell-less); a fixed overlay when it runs inside
+  // AppLayout, so it covers the sidebar instead of stretching the content column.
+  const rootFill: React.CSSProperties = overlay
+    ? { position: 'fixed', inset: 0, zIndex: 1400 }
+    : { minHeight: '100vh' };
+
   if (error) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F5FB', padding: 20 }}>
+      <div style={{ ...rootFill, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F4F5FB', padding: 20 }}>
         <div className="card" style={{ maxWidth: 440, padding: 32, textAlign: 'center' }}>
           <div style={{ fontSize: 17, fontWeight: 800, color: '#1A1D2E', marginBottom: 8 }}>Setup encountered an issue</div>
           <div style={{ fontSize: 12, color: '#5A6080', marginBottom: 18 }}>{error}</div>
@@ -192,7 +213,7 @@ export default function SetupInProgressAnimation({
   const pct = Math.round(percent);
 
   return (
-    <div style={{ minHeight: '100vh', background: 'radial-gradient(120% 80% at 50% -10%, #EEEFFE 0%, #F4F5FB 45%, #F4F5FB 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div style={{ ...rootFill, background: 'radial-gradient(120% 80% at 50% -10%, #EEEFFE 0%, #F4F5FB 45%, #F4F5FB 100%)', position: overlay ? 'fixed' : 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ position: 'absolute', top: -120, right: -80, width: 320, height: 320, borderRadius: '50%', background: 'radial-gradient(circle,rgba(64,64,200,.18),transparent 70%)', animation: 'onb-float 11s ease-in-out infinite', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', bottom: -140, left: -90, width: 360, height: 360, borderRadius: '50%', background: 'radial-gradient(circle,rgba(91,201,226,.14),transparent 70%)', animation: 'onb-float2 13s ease-in-out infinite', pointerEvents: 'none' }} />
 

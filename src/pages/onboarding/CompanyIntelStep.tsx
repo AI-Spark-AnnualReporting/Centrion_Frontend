@@ -43,6 +43,18 @@ export default function CompanyIntelStep({
     setFile(f);
   };
 
+  // One document only — extraction is a single LLM call, so a second file would
+  // double the cost for no benefit. A multi-file drop is rejected rather than
+  // silently reduced to the first: we can't know which one was meant.
+  const pickDropped = (list: FileList | null) => {
+    if (list && list.length > 1) {
+      setFile(null);
+      setError('One document at a time — please drop a single file.');
+      return;
+    }
+    pickFile(list?.[0] ?? null);
+  };
+
   const handleAnalyse = () => {
     if (!file) {
       setError('Upload a document, or fill the details in manually below.');
@@ -72,7 +84,7 @@ export default function CompanyIntelStep({
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          pickFile(e.dataTransfer.files?.[0] ?? null);
+          pickDropped(e.dataTransfer.files);
         }}
       >
         <div style={{ fontSize: 30, lineHeight: 1 }}>📁</div>
@@ -83,11 +95,13 @@ export default function CompanyIntelStep({
             <div style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E', marginTop: 8 }}>
               Drop your company profile here
             </div>
-            <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>PDF, DOCX — up to 50 MB</div>
+            <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 4 }}>
+              One file — PDF or DOCX, up to 50 MB
+            </div>
           </>
         )}
         <button type="button" className="ob-browse" onClick={() => inputRef.current?.click()}>
-          {file ? 'Replace file' : 'Browse files'}
+          {file ? 'Replace file' : 'Browse file'}
         </button>
         <input
           ref={inputRef}

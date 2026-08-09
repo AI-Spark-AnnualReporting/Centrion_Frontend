@@ -91,16 +91,24 @@ export function EditableProse({
   // is today's real signal; `feeder_status` is read too so this upgrades for
   // free once the backend adds feeder here (see the backend spec).
   const externallyUnfixable = section.feeder_status === 'external';
+  // Without a feeder object yet, `content` doubles as the needs_input
+  // explanation (e.g. "No figures were found…") when there's no dedicated
+  // `feeder_message`. But `status`/`feeder_status` can go stale — the backend
+  // sometimes fills in real generated prose without flipping the flag off
+  // needs_input. A genuine explanation is a short generic sentence; real
+  // section prose runs to a full paragraph. Past that length it's implausible
+  // as a "needs more input" message, so treat it as produced content instead
+  // of clobbering it with the input form.
+  const contentLooksLikeRealProse =
+    !section.feeder_message && !!section.content && section.content.trim().length > 400;
   const needsUserInput =
     !externallyUnfixable &&
+    !contentLooksLikeRealProse &&
     (section.feeder_status === 'needs_input' || section.status === 'needs_input') &&
     !locked &&
     !!onSaveInput &&
     !!onExtractInput;
   if (needsUserInput) {
-    // Without a feeder object yet, the backend puts the explanation straight
-    // in `content` for a needs_input section (e.g. "No figures were found…");
-    // prefer that over a generic line when it's there.
     const message =
       section.feeder_message ??
       (section.content && section.content.trim() ? section.content : null) ??

@@ -249,6 +249,15 @@ function detailOf(body: unknown): string | null {
   return null;
 }
 
+// 429/5xx responses come from infra or an upstream provider (rate limits,
+// exhausted API credits, crashes) rather than deliberate FastAPI
+// HTTPExceptions, so `detail` there is often a raw exception string never
+// meant for an end user — e.g. a leaked
+// `RateLimitError: ... insufficient_quota ...` blob. Those always get this
+// generic line instead, regardless of what's in `detail`.
+const SERVICE_UNAVAILABLE_MESSAGE =
+  "The system is temporarily unavailable. Please try again in a few minutes.";
+
 export class ApiError<TBody = unknown> extends Error {
   constructor(
     public status: number,
@@ -256,11 +265,18 @@ export class ApiError<TBody = unknown> extends Error {
     public body: TBody,
     public url: string,
   ) {
-    // Prefer the backend's own words. Callers all over the app surface
-    // `err.message` straight into the UI, and "API 409 Conflict — http://…"
-    // tells the user nothing while "Email already registered" tells them
-    // exactly what to fix. Status and url stay on the instance for debugging.
-    super(detailOf(body) ?? `API ${status} ${statusText} — ${url}`);
+    // Prefer the backend's own words for deliberate business-logic rejections
+    // (403/404/409/422 etc. — "Email already registered" tells the user
+    // exactly what to fix). Callers all over the app surface `err.message`
+    // straight into the UI, and "API 409 Conflict — http://…" tells the user
+    // nothing while "Email already registered" tells them exactly what to
+    // fix. Status and url stay on the instance for debugging either way.
+    const isInfraFailure = status === 429 || status >= 500;
+    super(
+      isInfraFailure
+        ? SERVICE_UNAVAILABLE_MESSAGE
+        : (detailOf(body) ?? `API ${status} ${statusText} — ${url}`),
+    );
     this.name = "ApiError";
   }
 }
@@ -466,8 +482,21 @@ export interface GenerateQuarterlyBody {
 export interface ComparisonAvailability {
   available: boolean; // all required prior periods have figures ('both' needs both)
   comparison: Comparison;
+  // The mode the answer was computed for — read this rather than the live radio,
+  // which may have moved on since the request went out.
+  metrics_mode?: 'system' | 'custom';
   target_period: string; // e.g. "Q3-2025"
-  specs: { key: string; period: string; label: string; present: boolean }[];
+  specs: {
+    key: string;
+    period: string;
+    label: string;
+    present: boolean;
+    // The prior period HAS figures, just in the lane this report won't read
+    // (system data for a custom report, or vice versa). System and custom only
+    // ever compare against themselves, so this is "unavailable, but for a
+    // reason worth explaining" rather than "no data at all".
+    other_mode_present?: boolean;
+  }[];
 }
 
 // One selectable "Report Area" card on the Generate Quarterly Report screen.
@@ -482,6 +511,27 @@ export interface QuarterlyReportArea {
 
 export interface QuarterlyReportAreasResponse {
   areas: QuarterlyReportArea[];
+}
+
+// The full system metric catalogue, grouped by statement — backs the "System
+// metrics" hover list. Group titles and their order come from the API; render
+// them as returned rather than rebuilding the grouping client-side. `code` is
+// null for the sector/operational KPI group (metrics with no statement).
+export interface QuarterlySystemMetric {
+  key: string;
+  label: string;
+}
+
+export interface QuarterlySystemMetricGroup {
+  code: string | null;
+  title: string;
+  count: number;
+  metrics: QuarterlySystemMetric[];
+}
+
+export interface QuarterlySystemMetricsResponse {
+  total: number;
+  groups: QuarterlySystemMetricGroup[];
 }
 
 // One single-select questionnaire item on the Generate Quarterly Report screen.
@@ -748,13 +798,17 @@ export const companies = {
 
   // Onboarding submit: kick off the heavy ingest (reports + chunks + embeddings + all
   // dashboard data) for the already-validated docs. Non-blocking — returns { status }.
+  // `force` re-runs an ingest that already finished — the standalone Upload Reports
+  // page needs it, since the backend otherwise no-ops once report_extraction_status
+  // is 'done'. An in-flight run still wins regardless.
   ingestOnboarding: (
     companyId: string,
     items: OnboardingIngestItem[],
+    force = false,
   ): Promise<{ status: string }> =>
     request(`/api/v1/companies/${encodeURIComponent(companyId)}/ingest-onboarding`, {
       method: "POST",
-      body: { items },
+      body: force ? { items, force: true } : { items },
     }),
 };
 
@@ -1383,6 +1437,13 @@ export const reports = {
       `/api/v1/reports/quarterly/report-areas`,
     ),
 
+  // Every active system metric, grouped by statement. Broader than
+  // getQuarterlyReportAreas, which only covers metrics tagged with a report area.
+  getQuarterlySystemMetrics: () =>
+    request<QuarterlySystemMetricsResponse>(
+      `/api/v1/reports/quarterly/system-metrics`,
+    ),
+
   // Source of truth for the on-form questionnaire (single-select). Company-
   // scoped so the backend can tailor questions to the company's context.
   getQuarterlyQuestions: (companyId: string) =>
@@ -1661,6 +1722,32 @@ export const quarterlyReports = {
       { query, signal },
     );
   },
+
+  // ── Extraction review (step 2) ──
+  // The figures the mapper matched exactly (already stored) plus the ones it
+  // wasn't confident enough about, which the user confirms one by one. Nothing in
+  // `pending` is in the report yet.
+  getExtractionReview: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { signal },
+    ),
+
+  // Apply the yes/no answers. Anything not accepted — rejected OR left unanswered
+  // — is dropped, so a figure only ever lands in the report with a human's yes.
+  submitExtractionReview: (
+    companyId: string,
+    reportId: string,
+    decisions: import("@/types/quarterly").ExtractionReviewDecision[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { method: "POST", body: { decisions } },
+    ),
 
   addDriver: (
     companyId: string,

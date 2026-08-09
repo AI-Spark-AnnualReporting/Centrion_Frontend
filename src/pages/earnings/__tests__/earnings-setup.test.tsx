@@ -12,7 +12,21 @@ const h = vi.hoisted(() => {
     body: unknown;
     url: string;
     constructor(status: number, statusText: string, body: unknown, url: string) {
-      super(`API ${status}`);
+      // Mirrors real ApiError: `detail` (FastAPI's field) becomes .message,
+      // and 429/5xx always get a generic message instead — see src/lib/api.ts.
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      const fromDetail =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d) => (d as { msg?: string })?.msg).filter(Boolean).join('. ')
+            : null;
+      const isInfraFailure = status === 429 || status >= 500;
+      super(
+        isInfraFailure
+          ? 'The system is temporarily unavailable. Please try again in a few minutes.'
+          : fromDetail || `API ${status}`,
+      );
       this.status = status;
       this.statusText = statusText;
       this.body = body;
@@ -37,6 +51,15 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { company_id: 'co-1', company_name: 'Acme' } }),
+}));
+
+// Annual is hidden from the live screen for now (see earnings-flags.ts), but the
+// code path behind it is unchanged and we intend to bring it back — so this
+// suite keeps exercising it rather than letting that coverage rot. That the
+// option really is hidden by default is asserted in
+// src/test/earnings-report-type-hidden.test.tsx, which does NOT override this.
+vi.mock('@/components/earnings/earnings-flags', () => ({
+  HIDDEN_EARNINGS_VARIANTS: [],
 }));
 
 vi.mock('@/lib/api', async () => {

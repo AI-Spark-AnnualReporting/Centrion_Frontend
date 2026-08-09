@@ -16,7 +16,6 @@ const PAGE_NAMES: Record<string, string> = {
   '/meetings': 'Board & Meetings',
   '/comms': 'Communication Hub',
   '/stakeholders': 'Leadership',
-  '/ir-calendar': 'IR Calendar',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
   '/profile': 'Profile',
@@ -60,6 +59,27 @@ const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/compliance', 'Compliance Validation'],
 ];
 
+// The quarterly report-building flow. These screens are full-height layouts that
+// end in their own footer bar — exactly where the floating launcher sits — and
+// /reports/processing is a full-screen progress overlay the launcher floats on
+// top of. Hiding it here also un-raises the compliance dock and lets .content
+// reclaim the clearance it reserves (see .content--flush in index.css).
+//
+// /reports/processing is shared with the ESG run, not quarterly-only. That's
+// intentional: a full-screen progress page is the last place the launcher
+// belongs, and route state would be lost on refresh anyway.
+const REPORT_FLOW_EXACT = ['/reports/processing'];
+const REPORT_FLOW_PREFIXES = ['/quarterly-report'];
+
+// Exact-or-segment match, NOT a bare startsWith, so a future sibling route like
+// /quarterly-reports-archive can't accidentally match.
+function isReportFlowRoute(pathname: string): boolean {
+  return (
+    REPORT_FLOW_EXACT.includes(pathname) ||
+    REPORT_FLOW_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  );
+}
+
 export function AppLayout() {
   const location = useLocation();
   const pageName =
@@ -70,7 +90,8 @@ export function AppLayout() {
   // The board report builder fills the viewport and scrolls inside itself, so a
   // launcher floating over its footer controls is in the way, not to hand.
   const boardBuilder = location.pathname.startsWith('/board-report');
-  const chatbotShown = location.pathname !== '/dashboard' && !boardBuilder;
+  const reportFlow = isReportFlowRoute(location.pathname);
+  const chatbotShown = location.pathname !== '/dashboard' && !boardBuilder && !reportFlow;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched
@@ -83,13 +104,22 @@ export function AppLayout() {
           <Topbar pageName={pageName} />
           {/* `no-fab` drops the bottom padding that exists only to clear the
               launcher — dead space on a page that doesn't scroll. */}
-          <div className={boardBuilder ? 'content no-fab' : 'content'}>
+          <div
+            className={
+              boardBuilder
+                ? 'content no-fab'
+                : reportFlow
+                  ? 'content content--flush'
+                  : 'content'
+            }
+          >
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>
           </div>
         </div>
-        {/* Home has its own Ask Copilot card, so hide the floating chat there. */}
+        {/* Home has its own Ask Copilot card, and the report-building flow needs
+            the corner for its own footer — hide the floating chat on both. */}
         {chatbotShown && <FloatingChatbot />}
         {/* Shown everywhere, including the dashboard: the point of the dock is
             that it survives going off to do something else. */}

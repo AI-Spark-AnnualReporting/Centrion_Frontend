@@ -1,19 +1,50 @@
 import { useEffect, useMemo, useState } from 'react';
-import { meetings as meetingsApi, ApiError } from '@/lib/api';
+import { useNavigate } from 'react-router-dom';
+import {
+  meetings as meetingsApi,
+  reports as reportsApi,
+  sarCycles,
+  companies as companiesApi,
+  ApiError,
+} from '@/lib/api';
 import type {
   Meeting,
   MeetingPlatform,
   MeetingResponse,
   MeetingType,
 } from '@/types/meeting';
+import type { Company } from '@/types/company';
+import type { Cycle } from '@/types/cycles';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
+import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import {
+  MONTHS,
+  SHORT_MONTHS,
+  WEEKDAYS,
+  diffDays,
+  formatCountdown,
+  formatTime,
+  isSameDay,
+  toIsoDate,
+  toLocalDate,
+} from '@/lib/calendar';
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const SHORT_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+/**
+ * Board & Meetings — the app's single calendar. Two layers on one month grid:
+ *
+ *   • MEETINGS (`meetings` rows, per-user) — schedulable, editable, cancellable.
+ *   • DISCLOSURE events, derived client-side by lib/disclosure.ts from the
+ *     company's reports + annual cycles — report due-dates, official cycle
+ *     deadlines, and filed reports. Read-only; there is nothing to persist.
+ *
+ * Absorbed the former standalone IR Calendar page, which showed only the second
+ * layer over a copy of this grid.
+ */
+
+const MEETING_COLOR = '#4040C8';
 
 const TYPE_OPTIONS: { value: MeetingType; label: string }[] = [
   { value: 'investor_call', label: 'Investor Call' },
@@ -36,40 +67,6 @@ function typeLabel(t: string): string {
 
 function platformLabel(p: string): string {
   return PLATFORM_OPTIONS.find((o) => o.value === p)?.label ?? p;
-}
-
-// "YYYY-MM-DD" + "HH:mm:ss" → local Date. Treating both fields as wall-clock
-// values so calendar placement matches what the user picked, regardless of TZ.
-function toLocalDate(dateStr: string, timeStr: string): Date {
-  const [y, m, d] = dateStr.split('-').map((x) => parseInt(x, 10));
-  const [hh = 0, mm = 0, ss = 0] = (timeStr ?? '00:00:00').split(':').map((x) => parseInt(x, 10));
-  return new Date(y, (m || 1) - 1, d || 1, hh, mm, ss);
-}
-
-function formatTime(timeStr: string): string {
-  const [h, m] = timeStr.split(':').map((x) => parseInt(x, 10));
-  if (Number.isNaN(h)) return timeStr;
-  const period = h >= 12 ? 'PM' : 'AM';
-  const hour12 = ((h + 11) % 12) + 1;
-  return `${hour12}:${(m || 0).toString().padStart(2, '0')} ${period}`;
-}
-
-function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function diffDays(target: Date, from: Date) {
-  const a = new Date(target.getFullYear(), target.getMonth(), target.getDate());
-  const b = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  return Math.round((a.getTime() - b.getTime()) / 86400000);
-}
-
-function formatRelative(target: Date, from: Date) {
-  const d = diffDays(target, from);
-  if (d === 0) return 'Today';
-  if (d === 1) return 'Tomorrow';
-  if (d < 0) return `${Math.abs(d)} days ago`;
-  return `${d} days`;
 }
 
 function relativeBadgeClass(target: Date, from: Date) {
@@ -125,12 +122,60 @@ interface ModalState {
   linkOrLocation: string;
 }
 
+// One row of the calendar, whichever layer it came from. `date` is pre-resolved
+// so the grid, the day panel, the upcoming rail, and the export can all sort and
+// filter on a single field without re-parsing.
+type CalItem =
+  | { kind: 'meeting'; id: string; date: Date; color: string; meeting: Meeting }
+  | { kind: 'disclosure'; id: string; date: Date; color: string; event: TimelineEvent };
 
-function toIsoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = (d.getMonth() + 1).toString().padStart(2, '0');
-  const day = d.getDate().toString().padStart(2, '0');
-  return `${y}-${m}-${day}`;
+// ── Calendar export (.ics) ────────────────────────────────────────────────
+// Meetings go out with their real start time; derived disclosure events are
+// all-day. Neither carries a timezone — the app treats meeting_date/_time as
+// wall-clock values, and a floating VEVENT keeps that promise in the importing
+// calendar.
+
+function escapeIcs(s: string): string {
+  return (s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+
+function icsDate(d: Date): string {
+  return `${d.getFullYear()}${(d.getMonth() + 1).toString().padStart(2, '0')}${d.getDate().toString().padStart(2, '0')}`;
+}
+
+function icsDateTime(d: Date): string {
+  const p = (n: number) => n.toString().padStart(2, '0');
+  return `${icsDate(d)}T${p(d.getHours())}${p(d.getMinutes())}00`;
+}
+
+function buildIcs(items: CalItem[]): string {
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Centriyon//Board & Meetings//EN', 'CALSCALE:GREGORIAN'];
+  for (const it of items) {
+    lines.push('BEGIN:VEVENT', `UID:${it.id}@centriyon`);
+    if (it.kind === 'meeting') {
+      // No duration on a meeting row, so give the importing calendar an hour
+      // rather than a zero-length block it would render as a sliver.
+      const end = new Date(it.date.getTime() + 60 * 60 * 1000);
+      lines.push(
+        `DTSTART:${icsDateTime(it.date)}`,
+        `DTEND:${icsDateTime(end)}`,
+        `SUMMARY:${escapeIcs(it.meeting.title)}`,
+        `DESCRIPTION:${escapeIcs(it.meeting.agenda || meetingMeta(it.meeting))}`,
+      );
+      if (it.meeting.link_or_location) {
+        lines.push(`LOCATION:${escapeIcs(it.meeting.link_or_location)}`);
+      }
+    } else {
+      lines.push(
+        `DTSTART;VALUE=DATE:${icsDate(it.date)}`,
+        `SUMMARY:${escapeIcs(it.event.title)}`,
+        `DESCRIPTION:${escapeIcs(it.event.subtitle)}`,
+      );
+    }
+    lines.push('END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
 }
 
 const ICON_CAL = (
@@ -474,6 +519,7 @@ function MeetingDetailModal({
 
 export default function MeetingsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const companyId = user?.company_id ?? null;
   const companyName = user?.company_name ?? '';
   const today = useMemo(() => new Date(), []);
@@ -485,6 +531,10 @@ export default function MeetingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeMeeting, setActiveMeeting] = useState<Meeting | null>(null);
+  // null = still loading. The disclosure layer is best-effort: every source is
+  // settled independently so one dead endpoint can't take the meetings grid
+  // down with it.
+  const [disclosure, setDisclosure] = useState<TimelineEvent[] | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -509,6 +559,31 @@ export default function MeetingsPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const isAdmin = user?.role === 'admin';
+    (async () => {
+      const [rRes, cRes, coRes] = await Promise.allSettled([
+        companyId
+          ? reportsApi.list<{ reports?: ReportListItem[] }>(companyId)
+          : Promise.resolve({ reports: [] as ReportListItem[] }),
+        // SAR cycles are a separate, admin-only backend — best-effort only.
+        isAdmin ? sarCycles.list() : Promise.resolve([] as Cycle[]),
+        companiesApi.getMyCompany(),
+      ]);
+      if (cancelled) return;
+      const reports = rRes.status === 'fulfilled' ? rRes.value?.reports ?? [] : [];
+      const cycles = cRes.status === 'fulfilled' ? cRes.value ?? [] : [];
+      const company: Company | null = coRes.status === 'fulfilled' ? coRes.value : null;
+      // No meetings passed in on purpose: this page renders the real meeting
+      // rows itself, with far more detail than deriveEvents can carry.
+      setDisclosure(deriveEvents({ reports, cycles, company, meetings: [] }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, user?.role]);
+
   const decorated = useMemo(
     () =>
       data
@@ -518,21 +593,51 @@ export default function MeetingsPage() {
     [data],
   );
 
+  // Both layers on one timeline — everything below reads from this.
+  const items = useMemo<CalItem[]>(() => {
+    const merged: CalItem[] = [
+      ...decorated.map((m): CalItem => ({
+        kind: 'meeting', id: `mtg-${m.id}`, date: m._date, color: MEETING_COLOR, meeting: m,
+      })),
+      ...(disclosure ?? []).map((e): CalItem => ({
+        kind: 'disclosure', id: e.id, date: e.date, color: e.dotColor, event: e,
+      })),
+    ];
+    return merged.sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [decorated, disclosure]);
+
+  const startToday = useMemo(
+    () => new Date(today.getFullYear(), today.getMonth(), today.getDate()),
+    [today],
+  );
+
+  // Filed reports are history — they stay as markers on the grid but never
+  // belong in a list of what's coming.
   const upcoming = useMemo(
-    () => decorated.filter((m) => m._date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())),
-    [decorated, today],
+    () => items.filter((it) => it.date >= startToday && !(it.kind === 'disclosure' && it.event.kind === 'filed')),
+    [items, startToday],
   );
 
-  const monthMeetings = useMemo(
-    () => decorated.filter((m) => m._date.getMonth() === viewMonth.getMonth() && m._date.getFullYear() === viewMonth.getFullYear()),
-    [decorated, viewMonth],
+  const monthItems = useMemo(
+    () => items.filter((it) => it.date.getMonth() === viewMonth.getMonth() && it.date.getFullYear() === viewMonth.getFullYear()),
+    [items, viewMonth],
   );
 
-  const eventDays = useMemo(() => new Set(monthMeetings.map((m) => m._date.getDate())), [monthMeetings]);
+  // day-of-month → the dot colours to paint under that cell.
+  const dayDots = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const it of monthItems) {
+      const day = it.date.getDate();
+      const dots = map.get(day) ?? [];
+      if (!dots.includes(it.color)) dots.push(it.color);
+      map.set(day, dots);
+    }
+    return map;
+  }, [monthItems]);
 
-  const selectedMeetings = useMemo(
-    () => (selectedDate ? decorated.filter((m) => isSameDay(m._date, selectedDate)) : []),
-    [decorated, selectedDate],
+  const selectedItems = useMemo(
+    () => (selectedDate ? items.filter((it) => isSameDay(it.date, selectedDate)) : []),
+    [items, selectedDate],
   );
 
   const firstWeekday = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1).getDay();
@@ -545,18 +650,41 @@ export default function MeetingsPage() {
     setSelectedDate(null);
   };
 
+  const handleExport = () => {
+    const blob = new Blob([buildIcs(items)], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'board-and-meetings.ics';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 22, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.5px', marginBottom: 3 }}>Board & Investor Meetings</h2>
-          <p style={{ fontSize: 12, color: '#5A6080' }}>Click a date to view meeting details</p>
+          <p style={{ fontSize: 12, color: '#5A6080' }}>Meetings, disclosure deadlines, and filing milestones — click a date for details</p>
         </div>
-        <button className="btn bp" onClick={() => setScheduleOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px' }}>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg>
-          Schedule Meeting
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn bs"
+            onClick={handleExport}
+            disabled={items.length === 0}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', opacity: items.length === 0 ? 0.5 : 1 }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v6.5M3.5 5.5L6 8l2.5-2.5M2 10h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Export
+          </button>
+          <button className="btn bp" onClick={() => setScheduleOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px' }}>
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg>
+            Schedule Meeting
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -596,19 +724,38 @@ export default function MeetingsPage() {
                 const cellDate = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
                 const isToday = isSameDay(cellDate, today);
                 const isSelected = selectedDate && isSameDay(cellDate, selectedDate);
-                const hasEvent = eventDays.has(day);
+                const dots = dayDots.get(day) ?? [];
                 return (
                   <button
                     key={day}
                     type="button"
                     onClick={() => setSelectedDate(cellDate)}
-                    className={`cal-day ${isToday ? 'today' : ''} ${hasEvent ? 'has-event' : ''}`}
+                    // Deliberately no `has-event` class: that CSS rule paints one
+                    // fixed-colour dot, and a day can now carry a meeting and a
+                    // deadline at once. The dots below are drawn per type instead.
+                    className={`cal-day ${isToday ? 'today' : ''}`}
                     style={{
                       border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                       ...(isSelected && !isToday ? { background: '#EEEEFF', color: '#4040C8', fontWeight: 800, boxShadow: 'inset 0 0 0 1.5px #4040C8' } : {}),
                     }}
                   >
                     {day}
+                    {dots.length > 0 && (
+                      <span style={{ position: 'absolute', bottom: 4, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 2.5 }}>
+                        {dots.slice(0, 3).map((c) => (
+                          <span
+                            key={c}
+                            style={{
+                              width: 5, height: 5, borderRadius: '50%',
+                              // Today's cell is solid indigo — a coloured dot on it
+                              // would disappear, so fall back to a light one.
+                              background: isToday ? 'rgba(255,255,255,.75)' : c,
+                              opacity: isToday ? 1 : 0.85,
+                            }}
+                          />
+                        ))}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -617,43 +764,70 @@ export default function MeetingsPage() {
             {/* Selected day detail */}
             {selectedDate && (
               <div style={{ marginTop: 16, padding: 12, background: '#F2F3FA', borderRadius: 10, border: '1px solid #ECEEF8' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: selectedMeetings.length ? 8 : 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: selectedItems.length ? 8 : 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>
                     {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                   </div>
                   <button className="btn bs bsm" onClick={() => setSelectedDate(null)} style={{ padding: '3px 9px', fontSize: 10 }}>Clear</button>
                 </div>
-                {selectedMeetings.length === 0 ? (
-                  <div style={{ fontSize: 11, color: '#9BA3C4' }}>No meetings scheduled. <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>Add one →</button></div>
+                {selectedItems.length === 0 ? (
+                  <div style={{ fontSize: 11, color: '#9BA3C4' }}>Nothing scheduled. <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>Add a meeting →</button></div>
                 ) : (
-                  selectedMeetings.map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => setActiveMeeting(m)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 10px', background: '#fff', borderRadius: 8, marginBottom: 6,
-                        fontSize: 11, border: '1px solid transparent', cursor: 'pointer', fontFamily: 'inherit',
-                      }}
-                    >
-                      <div style={{ fontWeight: 700, color: '#1A1D2E', marginBottom: 2 }}>{m.title}</div>
-                      <div style={{ color: '#5A6080', fontSize: 10 }}>{meetingMeta(m)}</div>
-                    </button>
-                  ))
+                  selectedItems.map((it) =>
+                    it.kind === 'meeting' ? (
+                      <button
+                        key={it.id}
+                        onClick={() => setActiveMeeting(it.meeting)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                          padding: '8px 10px', background: '#fff', borderRadius: 8, marginBottom: 6,
+                          fontSize: 11, border: '1px solid transparent', cursor: 'pointer', fontFamily: 'inherit',
+                        }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: 'block', fontWeight: 700, color: '#1A1D2E', marginBottom: 2 }}>{it.meeting.title}</span>
+                          <span style={{ display: 'block', color: '#5A6080', fontSize: 10 }}>{meetingMeta(it.meeting)}</span>
+                        </span>
+                      </button>
+                    ) : (
+                      // Derived, not stored — there is nothing to open or edit.
+                      <div
+                        key={it.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 10px', background: '#fff', borderRadius: 8, marginBottom: 6,
+                        }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>{it.event.title}</div>
+                          <div style={{ fontSize: 10, color: '#9BA3C4' }}>{it.event.subtitle}</div>
+                        </div>
+                      </div>
+                    ),
+                  )
                 )}
               </div>
             )}
 
             {/* Legend */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14, paddingTop: 12, borderTop: '1px solid #ECEEF8', fontSize: 10, color: '#5A6080' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap', marginTop: 14, paddingTop: 12, borderTop: '1px solid #ECEEF8', fontSize: 10, color: '#5A6080' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 12, height: 12, borderRadius: 4, background: '#4040C8', display: 'inline-block' }} />Today
               </span>
+              {/* Colours match deriveEvents' dotColor scale in lib/disclosure.ts. */}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ position: 'relative', width: 12, height: 12, border: '1.5px solid #E2E4F0', borderRadius: 4 }}>
-                  <span style={{ position: 'absolute', bottom: 1, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: '#4040C8' }} />
-                </span>
-                Has meeting
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: MEETING_COLOR }} />Meeting
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E8A33D' }} />Deadline
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E5484D' }} />Due soon
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#0F9D6B' }} />Filed
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 12, height: 12, borderRadius: 4, background: '#EEEEFF', boxShadow: 'inset 0 0 0 1.5px #4040C8' }} />Selected
@@ -662,75 +836,113 @@ export default function MeetingsPage() {
           </div>
         </div>
 
-        {/* Upcoming Meetings */}
+        {/* Upcoming — meetings and disclosure deadlines on one timeline */}
         <div className="card">
           <div className="ch">
-            <div className="ct">Upcoming Meetings</div>
+            <div className="ct">Upcoming</div>
             <span className="badge b-or">
-              {loading ? 'Loading…' : `${upcoming.length} scheduled`}
+              {loading || disclosure === null ? 'Loading…' : `${upcoming.length} upcoming`}
             </span>
           </div>
           <div style={{ padding: '6px 18px 14px' }}>
-            {loading && data.length === 0 ? (
+            {(loading && data.length === 0) || disclosure === null ? (
               <div style={{ padding: '32px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
                 <div className="proc-ring" style={{ margin: '0 auto 10px', width: 28, height: 28, borderWidth: 2.5 }} />
-                Loading meetings…
+                Loading calendar…
               </div>
             ) : upcoming.length === 0 ? (
-              <div style={{ padding: '28px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
-                No upcoming meetings.{' '}
+              <div style={{ padding: '28px 4px', textAlign: 'center', color: '#9BA3C4', fontSize: 12, lineHeight: 1.6 }}>
+                Nothing upcoming. Report deadlines and cycle dates appear here as they're set up.{' '}
                 <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
-                  Schedule one →
+                  Schedule a meeting →
                 </button>
               </div>
             ) : (
-              upcoming.map((m, i) => {
-                const day = m._date.getDate().toString().padStart(2, '0');
-                const month = SHORT_MONTHS[m._date.getMonth()];
-                const relative = formatRelative(m._date, today);
-                const relCls = relativeBadgeClass(m._date, today);
-                return (
-                  <div
-                    key={m.id}
-                    onClick={() => setActiveMeeting(m)}
-                    style={{
-                      display: 'flex', gap: 12, padding: '12px 0',
-                      borderBottom: i < upcoming.length - 1 ? '1px solid #ECEEF8' : 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{
-                      minWidth: 46, height: 46, background: '#EEEEFF',
-                      border: '1px solid rgba(64,64,200,.15)', borderRadius: 10,
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: '#4040C8', lineHeight: 1 }}>{day}</div>
-                      <div style={{ fontSize: 8, fontWeight: 800, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.6px', marginTop: 2 }}>{month}</div>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{m.title}</div>
-                        {m.status !== 'scheduled' && (
-                          <span className={`badge ${statusBadgeClass(m.status)}`} style={{ fontSize: 9, padding: '1px 6px' }}>
-                            {m.status}
-                          </span>
-                        )}
+              upcoming.map((it, i) => {
+                const day = it.date.getDate().toString().padStart(2, '0');
+                const month = SHORT_MONTHS[it.date.getMonth()];
+                const rowStyle = {
+                  display: 'flex' as const, gap: 12, padding: '12px 0',
+                  borderBottom: i < upcoming.length - 1 ? '1px solid #ECEEF8' : 'none',
+                };
+                // Same pill on both layers so the rail reads as one list; the
+                // date tile's colour is what tells the two apart.
+                const countdown = (
+                  <span className={`badge ${relativeBadgeClass(it.date, today)}`} style={{ flexShrink: 0, alignSelf: 'flex-start', whiteSpace: 'nowrap' }}>
+                    {formatCountdown(it.date, today)}
+                  </span>
+                );
+
+                if (it.kind === 'meeting') {
+                  const m = it.meeting;
+                  return (
+                    <div key={it.id} onClick={() => setActiveMeeting(m)} style={{ ...rowStyle, cursor: 'pointer' }}>
+                      <div style={{
+                        minWidth: 46, height: 46, background: '#EEEEFF',
+                        border: '1px solid rgba(64,64,200,.15)', borderRadius: 10,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: '#4040C8', lineHeight: 1 }}>{day}</div>
+                        <div style={{ fontSize: 8, fontWeight: 800, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.6px', marginTop: 2 }}>{month}</div>
                       </div>
-                      <div style={{ fontSize: 10, color: '#9BA3C4', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {meetingMeta(m)}
-                      </div>
-                      {m.participants.length > 0 && (
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {m.participants.slice(0, 3).map((p) => (
-                            <span key={p} className="badge b-gy" style={{ fontSize: 9 }}>{p}</span>
-                          ))}
-                          {m.participants.length > 3 && (
-                            <span className="badge b-gy" style={{ fontSize: 9 }}>+{m.participants.length - 3}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{m.title}</div>
+                          {m.status !== 'scheduled' && (
+                            <span className={`badge ${statusBadgeClass(m.status)}`} style={{ fontSize: 9, padding: '1px 6px' }}>
+                              {m.status}
+                            </span>
                           )}
                         </div>
+                        <div style={{ fontSize: 10, color: '#9BA3C4', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {meetingMeta(m)}
+                        </div>
+                        {m.participants.length > 0 && (
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {m.participants.slice(0, 3).map((p) => (
+                              <span key={p} className="badge b-gy" style={{ fontSize: 9 }}>{p}</span>
+                            ))}
+                            {m.participants.length > 3 && (
+                              <span className="badge b-gy" style={{ fontSize: 9 }}>+{m.participants.length - 3}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {countdown}
+                    </div>
+                  );
+                }
+
+                const e = it.event;
+                return (
+                  <div key={it.id} style={{ ...rowStyle, alignItems: 'flex-start' }}>
+                    <div style={{
+                      minWidth: 46, height: 46, background: '#F2F3FA',
+                      border: `1px solid ${it.color}33`, borderRadius: 10,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: it.color, lineHeight: 1 }}>{day}</div>
+                      <div style={{ fontSize: 8, fontWeight: 800, color: it.color, textTransform: 'uppercase', letterSpacing: '.6px', marginTop: 2 }}>{month}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{e.title}</span>
+                        {e.tone === 'urgent' && (
+                          <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '1px 6px', borderRadius: 999 }}>URGENT</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9BA3C4' }}>{e.subtitle}</div>
+                      {e.cta && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(e.cta!.path)}
+                          style={{ marginTop: 7, fontSize: 10.5, fontWeight: 700, color: '#4040C8', background: '#ECEEFF', border: 'none', borderRadius: 7, padding: '4px 9px', cursor: 'pointer', fontFamily: 'inherit' }}
+                        >
+                          {e.cta.label} →
+                        </button>
                       )}
                     </div>
-                    <span className={`badge ${relCls}`} style={{ flexShrink: 0, alignSelf: 'flex-start', whiteSpace: 'nowrap' }}>{relative}</span>
+                    {countdown}
                   </div>
                 );
               })

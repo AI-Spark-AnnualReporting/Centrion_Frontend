@@ -1,5 +1,12 @@
 import { Fragment, lazy, Suspense } from "react";
-import { BrowserRouter, Outlet, Route, Routes, useParams } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useParams,
+} from "react-router-dom";
 import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
@@ -20,6 +27,7 @@ import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
 import BrandIdentityPage from "./pages/BrandIdentityPage";
+import UploadReportsPage from "./pages/UploadReportsPage";
 import MeetingsPage from "./pages/MeetingsPage";
 import { CommsPage } from "./pages/OtherPages";
 import { CompliancePage } from "./pages/OtherPages";
@@ -27,6 +35,7 @@ import CommunicationHubPage from "./pages/CommunicationHubPage";
 import StakeholdersPage from "./pages/StakeholdersPage";
 import QuestionsPage from "./pages/QuestionsPage";
 import NotFound from "./pages/NotFound";
+import ExtractionReviewPage from "./pages/quarterly/ExtractionReviewPage";
 import OutlinePage from "./pages/quarterly/OutlinePage";
 import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
@@ -67,9 +76,6 @@ function PerReport({ children }: { children: React.ReactNode }) {
   const { reportId } = useParams();
   return <Fragment key={reportId}>{children}</Fragment>;
 }
-
-// IR Calendar — admin + IR. Code-split; renders inside AppLayout.
-const IRCalendarPage = lazy(() => import("./pages/IRCalendarPage"));
 
 // Compliance Validation — 3-step wizard (Set up → Review → Gate). Code-split;
 // the run id in the URL makes Review and Gate deep-linkable.
@@ -142,6 +148,10 @@ const App = () => (
           <Route path="/reports/quarterly" element={<ReportsPage />} />
           <Route path="/reports/processing" element={<ProcessingPage />} />
           <Route path="/reports/:reportId" element={<ReportDetailPage />} />
+          {/* Step 2 — confirm which extracted figures are which metric. Sits before
+              the outline: the outline's data badges are only meaningful once the
+              figure set is settled. */}
+          <Route path="/quarterly-report/:reportId/extraction" element={<ExtractionReviewPage />} />
           <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
           <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />
           <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
@@ -173,6 +183,10 @@ const App = () => (
           />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/meetings" element={<MeetingsPage />} />
+          {/* The IR Calendar was merged into Board & Meetings — its disclosure
+              deadlines now render on that page's grid. Kept as a redirect so
+              old bookmarks and links don't 404. */}
+          <Route path="/ir-calendar" element={<Navigate to="/meetings" replace />} />
           <Route path="/comms" element={<CommunicationHubPage />} />
           {/* Notification deep-link — opens the thread-view modal on the hub. */}
           <Route
@@ -188,6 +202,10 @@ const App = () => (
               sidebar item is gated to match so it's never a dead link. */}
           <Route element={<ProtectedRoute requiredRole="admin" />}>
             <Route path="/brand-identity" element={<BrandIdentityPage />} />
+            {/* The onboarding upload step, reachable after the fact — onboarding
+                can be skipped, which otherwise leaves the account with no
+                documents and no way to run the ingest. Admin-only to match. */}
+            <Route path="/upload-reports" element={<UploadReportsPage />} />
           </Route>
           {/* Admin Console — admin-only, rendered inside the main shell so the
               sidebar's expandable Admin section drives navigation. */}
@@ -244,7 +262,6 @@ const App = () => (
                 </PerReport>
               }
             />
-            <Route path="/ir-calendar" element={<IRCalendarPage />} />
           </Route>
         </Route>
       </Route>

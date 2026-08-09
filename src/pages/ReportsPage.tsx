@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
@@ -26,6 +26,9 @@ interface ReportGenerationConfig {
   regulator_ids?: string[];
   framework_codes?: string[];
   gri_scope?: 'standard' | 'full' | string | null;
+  // Quarterly only — 'system' | 'custom'. Absent on reports created before the
+  // custom-metrics lane existed.
+  metrics_mode?: string;
 }
 
 interface ReportPillarCoverage {
@@ -78,6 +81,13 @@ interface ReportsListResponse {
 // Normalise API period strings like "FY-2026" → "FY 2026" for display.
 function formatPeriod(period: string): string {
   return period.replace(/-/g, ' ').trim();
+}
+
+// Which metric set built a quarterly report. Reports created before the custom
+// lane existed carry no metrics_mode — those were all system, which is also how
+// the backend reads them (gen_cfg.get("metrics_mode") or "system").
+function metricsModeLabel(r: ReportSummary): string {
+  return r.generation_config?.metrics_mode === 'custom' ? 'Custom metrics' : 'System metrics';
 }
 
 // Earnings Reports are a separate feature (its own /earnings/* pages) that
@@ -424,12 +434,10 @@ export default function ReportsPage() {
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
+  // ApiError.message already carries the backend's `detail` (or a generic
+  // message for 429/5xx infra failures) — read it rather than re-parsing
+  // `err.body.detail` directly, which would bypass that sanitization.
   const extractApiError = (err: unknown): string => {
-    if (err instanceof ApiError) {
-      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
-      if (typeof body?.detail === 'string') return body.detail;
-      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
-    }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
   };
@@ -874,6 +882,12 @@ export default function ReportsPage() {
                             {formatPeriod(r.period)}
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, position: 'relative' }}>
+                            {/* Which metric set built this report — always shown.
+                                Quarterly reports carry no scope/frameworks, so this
+                                replaces the old "ESG Reporting" placeholder. */}
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
+                              {metricsModeLabel(r)}
+                            </span>
                             {scopeLabel && (
                               <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 999, background: 'rgba(255,255,255,.16)' }}>
                                 {scopeLabel}
@@ -884,9 +898,6 @@ export default function ReportsPage() {
                                 {fw}
                               </span>
                             ))}
-                            {frameworks.length === 0 && !scopeLabel && (
-                              <span style={{ fontSize: 10, fontWeight: 600, opacity: .7 }}>ESG Reporting</span>
-                            )}
                           </div>
                         </div>
                         <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1 }}>

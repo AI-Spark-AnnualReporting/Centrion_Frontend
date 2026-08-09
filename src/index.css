@@ -364,6 +364,13 @@ body {
 }
 /* Pages with no launcher over them need no clearance under them. */
 .content.no-fab { padding-bottom: 20px; }
+/* The report-building flow hides the launcher (isReportFlowRoute in AppLayout),
+   so the clearance above is dead space under what is meant to be a full-height
+   page — it left the section list clipped ~130px short of the bottom. Give those
+   screens the same 20px gutter as the top. Deliberately NOT applied to
+   /dashboard: it also hides the launcher, but it's an ordinary scrolling page
+   whose last cards want the breathing room. */
+.content--flush { padding-bottom: 20px; }
 .content::-webkit-scrollbar { width: 5px; }
 .content::-webkit-scrollbar-thumb { background: #E2E4F0; border-radius: 3px; }
 

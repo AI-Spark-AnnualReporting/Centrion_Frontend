@@ -32,20 +32,11 @@ const PRODUCE_TIPS = [
   "You can refine any AI-written section's tone right in the preview.",
 ];
 
-// Pull a human message out of an ApiError body (FastAPI puts it under `detail`,
-// which can be a string or a validation array).
+// ApiError.message already carries the backend's `detail` (or a generic
+// message for 429/5xx infra failures) — read it rather than re-parsing
+// `err.body.detail` directly, which would bypass that sanitization.
 function apiErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    const body = err.body as { detail?: unknown } | null;
-    const detail = body?.detail;
-    if (typeof detail === 'string' && detail) return detail;
-    if (Array.isArray(detail) && detail.length) {
-      const first = detail[0] as { msg?: string };
-      if (first?.msg) return first.msg;
-    }
-    return err.message || fallback;
-  }
-  return err instanceof Error ? err.message : fallback;
+  return err instanceof Error ? err.message || fallback : fallback;
 }
 
 // "Available to add" is sorted by requirement tier (Required sections are

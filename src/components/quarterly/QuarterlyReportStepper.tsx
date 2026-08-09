@@ -1,11 +1,22 @@
+import { useNavigate } from 'react-router-dom';
+
 interface QuarterlyReportStepperProps {
   activeStep: number; // 1-based
-  reportId?: string;
-  /** Override the labels — the Annual Board Report builder has its own four. */
-  steps?: string[];
+  reportId: string;
+  // Once the report is approved & locked, no step should be navigable away
+  // from the read-only Report screen.
+  locked?: boolean;
 }
 
-const QUARTERLY_STEPS = ['Period', 'Extraction', 'Outline', 'Preview', 'Report'];
+// Period has no dedicated per-report screen — it's chosen once in the New
+// Report setup on the reports list — so it routes back there.
+const STEPS = [
+  { label: 'Period', path: () => `/reports/quarterly` },
+  { label: 'Extraction', path: (id: string) => `/quarterly-report/${id}/extraction` },
+  { label: 'Outline', path: (id: string) => `/quarterly-report/${id}/outline` },
+  { label: 'Preview', path: (id: string) => `/quarterly-report/${id}/preview` },
+  { label: 'Report', path: (id: string) => `/quarterly-report/${id}/report` },
+];
 
 const ACCENT = '#4040C8';
 const ACCENT_LIGHT = '#E8E8F8';
@@ -62,9 +73,9 @@ function StepCircle({
   );
 }
 
-export function QuarterlyReportStepper({ activeStep, steps }: QuarterlyReportStepperProps) {
+export function QuarterlyReportStepper({ activeStep, reportId, locked = false }: QuarterlyReportStepperProps) {
   const activeIndex = activeStep - 1; // convert to 0-based
-  const STEPS = (steps ?? QUARTERLY_STEPS).map((label) => ({ label }));
+  const navigate = useNavigate();
 
   return (
     <div
@@ -78,17 +89,34 @@ export function QuarterlyReportStepper({ activeStep, steps }: QuarterlyReportSte
         {STEPS.map((step, i) => {
           const state: 'done' | 'active' | 'inactive' =
             i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'inactive';
+          // Only steps already reached (done/active) are navigable — jumping
+          // ahead to a step not yet reached could land on a screen whose
+          // prerequisite data isn't there yet. Locked (approved report): no
+          // step is navigable, since nothing upstream is editable anymore.
+          const dest = !locked && state !== 'inactive' ? step.path(reportId) : null;
 
           return (
             <div key={step.label} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 'none' }}>
-              {/* Step node — display only, not interactive */}
               <div
+                role={dest ? 'button' : undefined}
+                tabIndex={dest ? 0 : undefined}
+                onClick={dest ? () => navigate(dest) : undefined}
+                onKeyDown={
+                  dest
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(dest);
+                        }
+                      }
+                    : undefined
+                }
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: 4,
-                  cursor: 'default',
+                  cursor: dest ? 'pointer' : 'default',
                   opacity: state === 'inactive' ? 0.45 : 1,
                   transition: 'opacity 0.15s',
                 }}

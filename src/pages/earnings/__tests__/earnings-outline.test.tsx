@@ -8,7 +8,21 @@ const h = vi.hoisted(() => {
     status: number;
     body: unknown;
     constructor(status: number, body: unknown) {
-      super(`API ${status}`);
+      // Mirrors real ApiError: `detail` (FastAPI's field) becomes .message,
+      // and 429/5xx always get a generic message instead — see src/lib/api.ts.
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      const fromDetail =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d) => (d as { msg?: string })?.msg).filter(Boolean).join('. ')
+            : null;
+      const isInfraFailure = status === 429 || status >= 500;
+      super(
+        isInfraFailure
+          ? 'The system is temporarily unavailable. Please try again in a few minutes.'
+          : fromDetail || `API ${status}`,
+      );
       this.status = status;
       this.body = body;
     }

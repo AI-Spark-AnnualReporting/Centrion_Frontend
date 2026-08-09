@@ -37,9 +37,45 @@ export function SectionContent({
     return <NoData />;
   }
 
+  const parsed = tryParseJson(content);
+
+  // Structured sections (a table and/or a narrative in one JSON payload —
+  // {rows, analysis} for hybrid table+analysis, {heading, content} for a
+  // sub-headed narrative) report mode 'generate'/'template', not 'table'/
+  // 'kpi' — detect the shape itself rather than trusting `mode`, so it
+  // renders as a heading + table + prose instead of a raw blob.
+  const hasStructuredShape =
+    isRecord(parsed) &&
+    (Array.isArray(parsed.rows) || Array.isArray(parsed.tables) || parsed.analysis != null || parsed.content != null || parsed.heading != null);
+  if (hasStructuredShape && isRecord(parsed)) {
+    // Only actually build a table when a table shape is present — otherwise
+    // normalizeTables()'s "plain object → key/value rows" fallback would turn
+    // e.g. {heading, content} itself into a bogus 2-row table.
+    const hasTableShape = Array.isArray(parsed.rows) || Array.isArray(parsed.tables);
+    const tables = hasTableShape ? normalizeTables(parsed) : [];
+    const heading = asString(parsed.heading);
+    // An array-shaped analysis/content is a list of discrete points, not
+    // flowing prose — render those as bullets. A plain string is real prose
+    // (its own \n\n breaks are paragraphs, not separate points).
+    const narrativeItems = asProseItems(parsed.analysis) ?? asProseItems(parsed.content);
+    const narrativeText = asString(parsed.analysis) ?? asString(parsed.content);
+    if (tables.some((t) => t.rows.length > 0) || narrativeItems || narrativeText || heading) {
+      return (
+        <>
+          {heading && (
+            <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{heading}</h3>
+          )}
+          {tables.map((t, i) => (
+            <TableBlock key={i} table={t} showTitle={tables.length > 1} />
+          ))}
+          {narrativeItems ? <Bullets items={narrativeItems} /> : narrativeText && <Prose text={narrativeText} />}
+        </>
+      );
+    }
+  }
+
   const isTabular = mode === 'table' || mode === 'kpi';
   if (isTabular) {
-    const parsed = tryParseJson(content);
     if (parsed !== undefined) {
       const tables = normalizeTables(parsed);
       if (tables.some((t) => t.rows.length > 0)) {
@@ -96,6 +132,27 @@ function Prose({ text }: { text: string }) {
         </p>
       ))}
     </>
+  );
+}
+
+// A discrete list of points (e.g. a hybrid table section's per-point
+// analysis) — one bullet per item, not justified paragraph blocks.
+function Bullets({ items }: { items: string[] }) {
+  return (
+    <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      {items.map((item, i) => (
+        <li
+          key={i}
+          style={{
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+            marginTop: i === 0 ? 0 : 10, fontSize: 14, lineHeight: 1.75, color: '#2A2E47',
+          }}
+        >
+          <span style={{ flexShrink: 0, marginTop: 10, width: 5, height: 5, borderRadius: '50%', background: BRAND }} />
+          <span style={{ whiteSpace: 'pre-wrap' }}>{item}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -390,6 +447,14 @@ function isRecord(v: unknown): v is LooseRow {
 }
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
+}
+// A structured section's `analysis`/`content` field is sometimes an array of
+// discrete points (rendered as bullets — see Bullets) rather than one prose
+// string (rendered as justified paragraphs — see Prose).
+function asProseItems(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const items = v.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+  return items.length ? items : undefined;
 }
 function cell(r: LooseRow, ...keys: string[]): unknown {
   for (const k of keys) if (r[k] != null) return r[k];

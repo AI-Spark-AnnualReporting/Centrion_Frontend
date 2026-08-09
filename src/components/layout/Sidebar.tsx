@@ -64,10 +64,11 @@ const NAV_ITEMS: {
   {
     section: 'Stakeholders',
     items: [
-      { key: 'meetings', label: 'Board & Meetings', path: '/meetings', icon: 'cal', badge: null },
+      // The one calendar: board/investor meetings plus the derived disclosure
+      // deadlines the separate "IR Calendar" item used to carry.
+      { key: 'meetings', label: 'Board & Meetings', path: '/meetings', icon: 'calchk', badge: null },
       { key: 'stakeholders', label: 'Leadership', path: '/stakeholders', icon: 'people', badge: null },
       { key: 'comms', label: 'Communication Hub', path: '/comms', icon: 'mail', badge: null },
-      { key: 'ircalendar', label: 'IR Calendar', path: '/ir-calendar', icon: 'calchk', badge: null },
     ],
   },
   {
@@ -76,6 +77,9 @@ const NAV_ITEMS: {
       { key: 'docs', label: 'Document Bank', path: '/docs', icon: 'file', badge: null },
       { key: 'questions', label: 'Questions Bank', path: '/questions', icon: 'question', badge: null },
       { key: 'profile', label: 'Profile', path: '/profile', icon: 'user', badge: null },
+      // The onboarding upload step, reachable after the fact. Admin-only for the
+      // same reason as Brand Identity below — the route is gated to match.
+      { key: 'uploadReports', label: 'Upload Reports', path: '/upload-reports', icon: 'file', badge: null, adminOnly: true },
       // Admin-only to match PATCH /companies/me — ProtectedRoute bounces every
       // other role to /dashboard, so showing it to them would be a dead link.
       { key: 'brand', label: 'Brand Identity', path: '/brand-identity', icon: 'brand', badge: null, adminOnly: true },
@@ -89,7 +93,6 @@ const icons: Record<string, JSX.Element> = {
   chart: <svg viewBox="0 0 13 13" fill="none"><path d="M1.5 9.5l3-3.5 2 2.5L9 5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/></svg>,
   shield: <svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5L2 3.5v3.2c0 2.8 2 5 4.5 5.8 2.5-.8 4.5-3 4.5-5.8V3.5z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>,
   chat: <svg viewBox="0 0 13 13" fill="none"><path d="M6.5 1C3.5 1 1 3.2 1 5.9c0 1.4.6 2.6 1.6 3.5L2 11l2.8-1.3c.6.2 1.1.3 1.7.3 3 0 5.5-2.2 5.5-4.9S9.5 1 6.5 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>,
-  cal: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1v2M9 1v2M1 5.5h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   mail: <svg viewBox="0 0 13 13" fill="none"><path d="M2 2h9a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4L2 11.5V3a1 1 0 0 1 0-.9z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>,
   people: <svg viewBox="0 0 13 13" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.2"/><circle cx="9" cy="4" r="2" stroke="currentColor" strokeWidth="1.2"/><path d="M1 11c0-1.7 1.3-3 3-3s3 1.3 3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M7.5 8.2c.4-.1.9-.2 1.5-.2 1.7 0 3 1.3 3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   file: <svg viewBox="0 0 13 13" fill="none"><path d="M2 1.5h6l3 3V12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.2"/><path d="M8 1.5v3h3" stroke="currentColor" strokeWidth="1.2"/></svg>,

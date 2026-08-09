@@ -326,13 +326,12 @@ export default function CycleDetailPage() {
       setSubmitMsg('Departments assigned. The project manager can now kick off the cycle.');
       await fetchOverview();
     } catch (e) {
+      // ApiError.message already carries the backend's `detail` (or a
+      // generic message for 429/5xx infra failures) — read it rather than
+      // re-parsing `e.body.detail` directly, which would bypass that
+      // sanitization.
       const status = e instanceof ApiError ? e.status : undefined;
-      const msg =
-        e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
-          ? (e.body as { detail: string }).detail
-          : e instanceof Error
-            ? e.message
-            : 'Failed to save departments.';
+      const msg = e instanceof Error ? e.message : 'Failed to save departments.';
       if (status === 400 && /draft/i.test(msg)) {
         setSubmitErr('This cycle is no longer in draft. Refreshing…');
         await fetchOverview();
@@ -413,7 +412,7 @@ export default function CycleDetailPage() {
                 type="button"
                 onClick={handleSubmitCycle}
                 disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Add at least one department, and each must have an HR Lead assigned' : undefined}
+                title={!canSubmit ? 'Add at least one department, and each must have a department lead assigned' : undefined}
               >
                 {submitting ? 'Submitting…' : '✓ Submit'}
               </button>

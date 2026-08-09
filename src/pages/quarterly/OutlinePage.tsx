@@ -137,7 +137,9 @@ function Shell({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100% - 48px)',
+        // 100%, not calc(100% - 48px): the 48px was double-counting the stepper,
+        // which renders INSIDE this shell. .content already provides the gutter.
+        height: '100%',
         background: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
@@ -149,7 +151,9 @@ function Shell({
   );
 }
 
-// A single row (used for both required and optional groups).
+// A single row. One list holds both required and optional sections, so the row
+// carries the whole required/optional distinction: the tint, the disabled tick,
+// and the badges.
 function SectionRow({
   section,
   number,
@@ -162,7 +166,9 @@ function SectionRow({
   dragHandleProps,
 }: {
   section: OutlineSection;
-  number: number;
+  // null = no number: either an excluded section (not in the report, so it has
+  // no position) or the hidden Table of Contents.
+  number: number | null;
   locked: boolean; // whole-outline frozen
   // Ingest in flight — include-defaults are computed from a half-written figure
   // set, so ticking is frozen until it lands (same treatment as `locked`).
@@ -230,10 +236,12 @@ function SectionRow({
           textAlign: 'right',
         }}
       >
-        {number}
+        {number ?? '—'}
       </span>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Excluded sections stay in the list (so they can be ticked or moved) but
+          read as "not in the report" at a glance, alongside the dashed number. */}
+      <div style={{ flex: 1, minWidth: 0, opacity: section.included ? 1 : 0.55 }}>
         <div
           style={{
             fontSize: 13.5,
@@ -249,11 +257,19 @@ function SectionRow({
         </div>
       </div>
 
-      {/* Badges */}
+      {/* Badges. With one merged list these are the only thing telling the user
+          which sections they can actually remove, so optional rows are labelled
+          explicitly rather than by absence of a REQUIRED badge. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <FeederBadge feeder={section.feeder} ingesting={ingesting} />
-        {isRequired && <span className="badge b-gy">REQUIRED</span>}
-        {isRequired && <span className="badge b-gy">LOCKED</span>}
+        {isRequired ? (
+          <>
+            <span className="badge b-gy">REQUIRED</span>
+            <span className="badge b-gy">LOCKED</span>
+          </>
+        ) : (
+          <span className="badge b-or">OPTIONAL</span>
+        )}
       </div>
     </div>
   );
@@ -266,9 +282,11 @@ export default function OutlinePage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
 
-  // Required sections are pinned+sorted; optionals are user-orderable.
-  const [required, setRequired] = useState<OutlineSection[]>([]);
-  const [optionals, setOptionals] = useState<OutlineSection[]>([]);
+  // ONE list, required and optional interleaved, ordered purely by display_order.
+  // The blueprint catalogue already interleaves them in true document order (the
+  // CEO statement belongs between the front matter and the results headline, not
+  // in a bin at the bottom), and any row can be dragged anywhere.
+  const [sections, setSections] = useState<OutlineSection[]>([]);
   const [totalCatalogue, setTotalCatalogue] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   // Ingest worker still writing figures — badges are provisional until it clears.
@@ -286,12 +304,12 @@ export default function OutlinePage() {
   // Debounce + latest-wins guards for autosave.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSeqRef = useRef(0);
-  // Drag state. `dragGroup` scopes highlight + drop to the group being dragged
-  // (required or optional) so the two lists reorder independently.
+  // Has the user reordered or ticked anything since the last server truth? Guards
+  // the ingest poll below from overwriting unsaved local edits.
+  const userTouchedRef = useRef(false);
+  // Drag state — one flat list, so a single index is enough.
   const dragIndexRef = useRef<number | null>(null);
-  const dragGroupRef = useRef<'required' | 'optional' | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dragGroup, setDragGroup] = useState<'required' | 'optional' | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -320,27 +338,35 @@ export default function OutlinePage() {
     };
   }, [companyId, reportId, retryKey]);
 
-  // Split a response into pinned required + ordered optionals.
+  // Adopt a server response as the new truth: one list in display_order.
   const applyResponse = (res: OutlineResponse) => {
-    const req = res.sections
-      .filter((s) => s.requirement === 'required')
+    const all = res.sections
+      // Catalogue-drift rows come back with no requirement; the old two-array
+      // split dropped them silently, so keep dropping them rather than render a
+      // row with no title. Omitting a code from the PUT leaves its row untouched.
+      .filter((s) => s.requirement === 'required' || s.requirement === 'optional')
+      .slice()
+      // Stable sort, so display_order ties keep the backend's own ordering.
       .sort(byDisplayOrder)
-      .map((s) => ({ ...s, included: true }));
-    const opt = res.sections
-      .filter((s) => s.requirement === 'optional')
-      .sort(byDisplayOrder);
-    setRequired(req);
-    setOptionals(opt);
+      // Force required rows included: a stale included:false would render an
+      // un-untickable empty box and then PUT as false, which the backend 409s.
+      .map((s) => (s.requirement === 'required' ? { ...s, included: true } : s));
+    setSections(all);
     setTotalCatalogue(res.total_catalogue ?? res.sections.length);
     // Whole-outline freeze: explicit flag, or every section locked.
+    // (api.ts normalises the backend's `outline_locked` onto `locked`.)
     setIsLocked(
       res.locked === true ||
         (res.sections.length > 0 && res.sections.every((s) => s.locked)),
     );
     setIngesting(res.ingest_running === true);
     defaultIncludedRef.current = Object.fromEntries(
-      opt.map((s) => [s.section_code, s.recommended]),
+      all
+        .filter((s) => s.requirement === 'optional')
+        .map((s) => [s.section_code, s.recommended]),
     );
+    // We just took server state wholesale — nothing local is pending any more.
+    userTouchedRef.current = false;
   };
 
   // ── Poll while ingestion is in flight ────────────────────────────────────
@@ -355,7 +381,27 @@ export default function OutlinePage() {
       quarterlyReports
         .getOutline(companyId, reportId)
         .then((res) => {
-          if (!cancelled) applyResponse(res);
+          if (cancelled) return;
+          // Untouched → adopt server truth wholesale; that IS the point of the poll.
+          if (!userTouchedRef.current) {
+            applyResponse(res);
+            return;
+          }
+          // Touched → the server doesn't know about the user's unsaved order/ticks
+          // yet (autosave is debounced 700ms), so refresh ONLY the volatile fields
+          // this poll exists for. Replacing the whole list here would silently undo
+          // a drag mid-ingest — harmless when the two groups were segregated,
+          // glaring now that one list carries the real report order.
+          const byCode = new Map(res.sections.map((s) => [s.section_code, s]));
+          setSections((prev) =>
+            prev.map((s) => {
+              const fresh = byCode.get(s.section_code);
+              return fresh
+                ? { ...s, feeder: fresh.feeder, recommended: fresh.recommended }
+                : s;
+            }),
+          );
+          setIngesting(res.ingest_running === true);
         })
         .catch(() => {
           /* transient — the next tick retries; don't surface a fetch error here */
@@ -373,21 +419,27 @@ export default function OutlinePage() {
     };
   }, []);
 
-  // The Table of Contents is hidden on this screen (see isTableOfContentsSection), but
-  // it stays in `required` so every autosaved payload still carries it and it still
-  // reaches the assembled report. Only the rendering and the counts skip it.
+  // The Table of Contents is hidden on this screen (see isTableOfContentsSection),
+  // but it stays in `sections` so every autosaved payload still carries it and it
+  // still reaches the assembled report. Only the rendering and the counts skip it.
   //
-  // Row numbers are assigned per VISIBLE row so a hidden section leaves no gap; the
-  // drag handlers keep using the real array index, so reordering is untouched.
-  const requiredNumbers: (number | null)[] = [];
-  let visibleRequiredCount = 0;
-  for (const s of required) {
-    if (isTableOfContentsSection(s.section_code)) requiredNumbers.push(null);
-    else requiredNumbers.push(++visibleRequiredCount);
+  // Numbers go to INCLUDED, rendered rows only, 1..N in list order — so the number
+  // a row shows is its actual position in the generated report. Excluded rows get
+  // null (rendered as a dash): they aren't in the report, so they have no position.
+  // Drag handlers keep using the real array index, so reordering is unaffected.
+  const rowNumbers: (number | null)[] = [];
+  let includedCount = 0;
+  let visibleTotal = 0;
+  for (const s of sections) {
+    if (isTableOfContentsSection(s.section_code)) {
+      rowNumbers.push(null);
+      continue;
+    }
+    visibleTotal++;
+    rowNumbers.push(s.included ? ++includedCount : null);
   }
 
-  const includedCount =
-    visibleRequiredCount + optionals.filter((o) => o.included).length;
+  const optionalRows = sections.filter((s) => s.requirement === 'optional');
 
   // ── Persist (debounced PUT) ───────────────────────────────────────────────
   // includedOnly: post-lock the SET is frozen, so a reorder must carry ONLY the
@@ -395,13 +447,13 @@ export default function OutlinePage() {
   // display_order reads as "positioning a section not in the set" and the backend
   // rejects it (409). Pre-lock we send the full catalogue so tick/untick persists.
   const buildPayload = useCallback(
-    (req: OutlineSection[], opts: OutlineSection[], includedOnly = false) => {
-      const all = [...req, ...opts];
-      const rows = includedOnly ? all.filter((s) => s.included) : all;
+    (rows: OutlineSection[], includedOnly = false) => {
+      const list = includedOnly ? rows.filter((s) => s.included) : rows;
       return {
-        sections: rows.map((s, i) => ({
+        sections: list.map((s, i) => ({
           section_code: s.section_code,
           included: s.included,
+          // The list IS the order — index is the section's position in the report.
           display_order: i,
         })),
       };
@@ -425,7 +477,7 @@ export default function OutlinePage() {
   }, [companyId, reportId]);
 
   const scheduleSave = useCallback(
-    (req: OutlineSection[], opts: OutlineSection[]) => {
+    (rows: OutlineSection[]) => {
       // Persist reorders even when locked — the SET is frozen (include toggles are
       // disabled), so any autosave here is a display_order change, which the
       // backend must accept on a locked report (no 409, no regeneration).
@@ -439,7 +491,7 @@ export default function OutlinePage() {
       // locked and we revert (a real backend bug, now surfaced).
       const runSave = (includedOnly: boolean, seq: number, retried: boolean) => {
         quarterlyReports
-          .saveOutline(companyId, reportId, buildPayload(req, opts, includedOnly))
+          .saveOutline(companyId, reportId, buildPayload(rows, includedOnly))
           .then(() => {
             if (seq === saveSeqRef.current) setSaveState('saved');
           })
@@ -472,63 +524,62 @@ export default function OutlinePage() {
   );
 
   // ── Mutations ─────────────────────────────────────────────────────────────
-  const toggleOptional = (code: string) => {
+  const toggleSection = (code: string) => {
     if (isLocked) return;
-    setOptionals((prev) => {
-      const next = prev.map((o) =>
-        o.section_code === code ? { ...o, included: !o.included } : o,
+    userTouchedRef.current = true;
+    setSections((prev) => {
+      const next = prev.map((s) =>
+        // Required sections can never be unticked (the checkbox is already
+        // disabled; this guards the shared handler too — the backend 409s).
+        s.section_code === code && s.requirement !== 'required'
+          ? { ...s, included: !s.included }
+          : s,
       );
-      scheduleSave(required, next);
+      scheduleSave(next);
       return next;
     });
   };
 
   const applyPreset = (preset: Preset) => {
     if (isLocked) return;
-    setOptionals((prev) => {
-      const next = prev.map((o) => {
-        let included = o.included;
-        if (preset === 'required') included = false;
-        else if (preset === 'everything') included = true;
-        else included = defaultIncludedRef.current[o.section_code] ?? false;
-        return { ...o, included };
+    userTouchedRef.current = true;
+    setSections((prev) => {
+      const next = prev.map((s) => {
+        if (s.requirement === 'required') return s;
+        const included =
+          preset === 'required'
+            ? false
+            : preset === 'everything'
+              ? true
+              : (defaultIncludedRef.current[s.section_code] ?? false);
+        return { ...s, included };
       });
-      scheduleSave(required, next);
+      scheduleSave(next);
       return next;
     });
   };
 
-  const moveRequired = (from: number, to: number) => {
+  const move = (from: number, to: number) => {
     // Reordering is allowed even when the set is locked — only the include/exclude
     // SET is frozen, not the display order.
-    if (to < 0 || to >= required.length || from === to) return;
-    setRequired((prev) => {
+    if (to < 0 || to >= sections.length || from === to) return;
+    userTouchedRef.current = true;
+    setSections((prev) => {
       const next = [...prev];
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
-      scheduleSave(next, optionals);
-      return next;
-    });
-  };
-
-  const moveOptional = (from: number, to: number) => {
-    if (to < 0 || to >= optionals.length || from === to) return;
-    setOptionals((prev) => {
-      const next = [...prev];
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      scheduleSave(required, next);
+      scheduleSave(next);
       return next;
     });
   };
 
   // Which quick-select preset the current optional set matches (for highlight).
   const activePreset: Preset | null = (() => {
-    if (optionals.length === 0) return null;
-    if (optionals.every((o) => o.included)) return 'everything';
-    if (optionals.every((o) => !o.included)) return 'required';
+    if (optionalRows.length === 0) return null;
+    if (optionalRows.every((o) => o.included)) return 'everything';
+    if (optionalRows.every((o) => !o.included)) return 'required';
     if (
-      optionals.every(
+      optionalRows.every(
         (o) => o.included === (defaultIncludedRef.current[o.section_code] ?? false),
       )
     )
@@ -570,52 +621,60 @@ export default function OutlinePage() {
       quarterlyNext: 'preview',
       bootstrap: {
         kind: 'quarterly-produce',
-        outlinePayload: buildPayload(required, optionals),
+        outlinePayload: buildPayload(sections),
       },
     };
     navigate('/reports/processing', { state: processingState });
   };
 
-  // ── Drag handlers — group-aware (required and optional both reorderable, each
-  //    within its own group). `group` scopes the drag so a required row can't be
-  //    dropped into the optional list or vice versa. ─────────────────────────
-  type DragGroup = 'required' | 'optional';
-  const moveInGroup = (group: DragGroup, from: number, to: number) =>
-    group === 'required' ? moveRequired(from, to) : moveOptional(from, to);
-
+  // ── Drag handlers — one flat list, so any row can be dropped anywhere. An
+  //    optional section can be dragged above the required ones; the backend
+  //    stores whatever display_order it is sent and the render path reads it, so
+  //    the order here is literally the order of the generated report. ─────────
   const resetDrag = () => {
     dragIndexRef.current = null;
-    dragGroupRef.current = null;
     setDragIndex(null);
-    setDragGroup(null);
     setOverIndex(null);
   };
-  const onDragStart = (group: DragGroup, index: number) => (e: React.DragEvent) => {
+  const onDragStart = (index: number) => (e: React.DragEvent) => {
     dragIndexRef.current = index;
-    dragGroupRef.current = group;
     setDragIndex(index);
-    setDragGroup(group);
     e.dataTransfer.effectAllowed = 'move';
   };
-  const onDragOver = (group: DragGroup, index: number) => (e: React.DragEvent) => {
-    if (dragIndexRef.current === null || dragGroupRef.current !== group) return;
+  const onDragOver = (index: number) => (e: React.DragEvent) => {
+    if (dragIndexRef.current === null) return;
     e.preventDefault();
     if (index !== overIndex) setOverIndex(index);
   };
-  const onDrop = (group: DragGroup, index: number) => (e: React.DragEvent) => {
-    if (dragIndexRef.current === null || dragGroupRef.current !== group) return;
+  const onDrop = (index: number) => (e: React.DragEvent) => {
+    if (dragIndexRef.current === null) return;
     e.preventDefault();
-    moveInGroup(group, dragIndexRef.current, index);
+    move(dragIndexRef.current, index);
     resetDrag();
   };
   const onDragEnd = () => resetDrag();
-  const onGripKeyDown = (group: DragGroup, index: number) => (e: React.KeyboardEvent) => {
+
+  // Arrow keys step over rows that aren't rendered (the hidden Table of Contents),
+  // otherwise a press swaps with an invisible row and the row appears not to move.
+  // Drag needs no equivalent: an unrendered row has no drop target.
+  const nextVisibleIndex = (from: number, dir: 1 | -1) => {
+    let i = from + dir;
+    while (
+      i >= 0 &&
+      i < sections.length &&
+      isTableOfContentsSection(sections[i].section_code)
+    ) {
+      i += dir;
+    }
+    return i;
+  };
+  const onGripKeyDown = (index: number) => (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      moveInGroup(group, index, index - 1);
+      move(index, nextVisibleIndex(index, -1));
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      moveInGroup(group, index, index + 1);
+      move(index, nextVisibleIndex(index, 1));
     }
   };
 
@@ -661,7 +720,7 @@ export default function OutlinePage() {
     );
   }
 
-  if (required.length === 0 && optionals.length === 0) {
+  if (sections.length === 0) {
     return (
       <Shell reportId={reportId}>
         <div
@@ -733,8 +792,8 @@ export default function OutlinePage() {
             Report outline
           </h1>
           <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 560 }}>
-            Required sections are locked at the top. Tick optional ones to include
-            them, then drag to set their order.
+            Tick the sections you want, then drag any row to set the order they
+            appear in the report. Required sections can be moved but not removed.
           </p>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -826,86 +885,48 @@ export default function OutlinePage() {
         )}
       </div>
 
-      {/* Scrollable body */}
+      {/* Scrollable body — ONE list, required and optional interleaved in the
+          order they will appear in the report. */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 28px 20px' }}>
-        {/* REQUIRED group */}
-        {visibleRequiredCount > 0 && (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="ch">
-              <span className="ct">
-                REQUIRED — always included · drag to reorder
-              </span>
-            </div>
-            <div
-              className="cb"
-              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-            >
-              {required.map((s, i) => requiredNumbers[i] === null ? null : (
+        <div className="card">
+          <div className="ch">
+            <span className="ct">Report sections — tick to include · drag to reorder</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#9BA3C4' }}>
+              {includedCount} of {visibleTotal} included
+            </span>
+          </div>
+          <div
+            className="cb"
+            style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+          >
+            {sections.map((s, i) =>
+              isTableOfContentsSection(s.section_code) ? null : (
                 <div
                   key={s.section_code}
-                  onDragOver={onDragOver('required', i)}
-                  onDrop={onDrop('required', i)}
+                  onDragOver={onDragOver(i)}
+                  onDrop={onDrop(i)}
                 >
                   <SectionRow
                     section={s}
-                    number={requiredNumbers[i] as number}
+                    number={rowNumbers[i]}
                     locked={isLocked}
                     ingesting={ingesting}
-                    isRequired
-                    dragging={dragGroup === 'required' && dragIndex === i}
-                    dragOver={dragGroup === 'required' && overIndex === i && dragIndex !== i}
+                    isRequired={s.requirement === 'required'}
+                    dragging={dragIndex === i}
+                    dragOver={overIndex === i && dragIndex !== i}
+                    onToggle={() => toggleSection(s.section_code)}
                     dragHandleProps={{
                       draggable: true,
-                      onDragStart: onDragStart('required', i),
+                      onDragStart: onDragStart(i),
                       onDragEnd,
-                      onKeyDown: onGripKeyDown('required', i),
+                      onKeyDown: onGripKeyDown(i),
                     }}
                   />
                 </div>
-              ))}
-            </div>
+              ),
+            )}
           </div>
-        )}
-
-        {/* OPTIONAL group */}
-        {optionals.length > 0 && (
-          <div className="card">
-            <div className="ch">
-              <span className="ct">
-                OPTIONAL — drag to reorder
-              </span>
-            </div>
-            <div
-              className="cb"
-              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-            >
-              {optionals.map((s, i) => (
-                <div
-                  key={s.section_code}
-                  onDragOver={onDragOver('optional', i)}
-                  onDrop={onDrop('optional', i)}
-                >
-                  <SectionRow
-                    section={s}
-                    number={visibleRequiredCount + i + 1}
-                    locked={isLocked}
-                    ingesting={ingesting}
-                    isRequired={false}
-                    dragging={dragGroup === 'optional' && dragIndex === i}
-                    dragOver={dragGroup === 'optional' && overIndex === i && dragIndex !== i}
-                    onToggle={() => toggleOptional(s.section_code)}
-                    dragHandleProps={{
-                      draggable: true,
-                      onDragStart: onDragStart('optional', i),
-                      onDragEnd,
-                      onKeyDown: onGripKeyDown('optional', i),
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Footer */}
@@ -924,7 +945,7 @@ export default function OutlinePage() {
         <button
           className="btn bs"
           style={{ fontSize: 13, padding: '10px 18px' }}
-          onClick={() => navigate('/reports/quarterly')}
+          onClick={() => navigate(`/quarterly-report/${reportId}/extraction`)}
         >
           ← Back
         </button>

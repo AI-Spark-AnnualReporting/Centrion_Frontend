@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
-import { SectionContent } from '@/components/quarterly/SectionContent';
+import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
@@ -68,7 +68,8 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100% - 48px)',
+        // See OutlinePage: the 48px double-counted the stepper rendered inside.
+        height: '100%',
         background: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
@@ -222,6 +223,12 @@ export default function PreviewPage() {
   const [extracting, setExtracting] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // inline edit (produced sections — figures and prose are both editable)
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [savedCode, setSavedCode] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+
   // ── Cover design + brand color (Part 6) ──
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
@@ -354,51 +361,61 @@ export default function PreviewPage() {
     };
   }, [companyId, reportId, retryKey, patchSection]);
 
-  // ── produce a single section (manual). Covers three cases:
-  //   • needs_input / no-data (empty): the user PROVIDES the content as text (a
-  //     document is extracted into the field first, see handleExtract). Saved via
-  //     produce — Template sections keep it verbatim, AI-written use it as a steer.
-  //   • produced: an explicit Regenerate — re-produce with no user_input.
+  // ── produce a single section (manual): needs_input / no-data (empty) sections
+  // let the user PROVIDE the content as text (a document is extracted into the
+  // field first, see handleExtract). Saved via produce — Template sections keep
+  // it verbatim, AI-written use it as a steer. Produced sections are edited
+  // in-place instead (see handleSaveContent), not re-produced.
   const handleProduce = useCallback(
     async (section: ProducedSection) => {
       if (!companyId || !reportId) return;
       const code = section.section_code;
       const text = (inputText[code] ?? '').trim();
-      const provideContent = wantsInput(sectionState(section));
-
-      // ── needs_input / empty: save the supplied text as the section content.
-      if (provideContent) {
-        if (!text) return; // uploaded docs are extracted into the field first
-        setBusy((b) => ({ ...b, [code]: true }));
-        setErrors((e) => ({ ...e, [code]: '' }));
-        try {
-          const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
-          patchSection(code, res);
-          setInputText((m) => ({ ...m, [code]: '' }));
-          setSectionFile((m) => ({ ...m, [code]: null }));
-        } catch (err: unknown) {
-          setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not save this section.' }));
-        } finally {
-          setBusy((b) => ({ ...b, [code]: false }));
-        }
-        return;
-      }
-
-      // ── produced → Regenerate: re-produce from the backend (no user_input).
+      if (!text) return; // uploaded docs are extracted into the field first
       setBusy((b) => ({ ...b, [code]: true }));
       setErrors((e) => ({ ...e, [code]: '' }));
-      patchSection(code, { status: 'drafting' });
       try {
-        const res = await quarterlyReports.produceSection(companyId, reportId, code, undefined);
+        const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
         patchSection(code, res);
+        setInputText((m) => ({ ...m, [code]: '' }));
+        setSectionFile((m) => ({ ...m, [code]: null }));
       } catch (err: unknown) {
-        patchSection(code, { status: 'done' });
-        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not regenerate this section.' }));
+        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not save this section.' }));
       } finally {
         setBusy((b) => ({ ...b, [code]: false }));
       }
     },
     [companyId, reportId, inputText, patchSection],
+  );
+
+  // "Saved ✓" flash auto-clears.
+  useEffect(() => {
+    if (!savedCode) return;
+    const t = setTimeout(() => setSavedCode(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedCode]);
+
+  // ── inline edit a produced section's content (figures or prose) in place.
+  const handleSaveContent = useCallback(
+    async (code: string, content: string) => {
+      if (!companyId || !reportId) return;
+      const prev = sections.find((s) => s.section_code === code)?.content ?? null;
+      setSavingCode(code);
+      setEditError(null);
+      patchSection(code, { content }); // optimistic
+      try {
+        const res = await quarterlyReports.saveSectionContent(companyId, reportId, code, { content });
+        patchSection(code, { content: res.section?.content ?? content }); // authoritative
+        setEditingCode(null);
+        setSavedCode(code);
+      } catch (err: unknown) {
+        patchSection(code, { content: prev }); // revert
+        setEditError(err instanceof Error ? err.message : 'Could not save. Please try again.');
+      } finally {
+        setSavingCode(null);
+      }
+    },
+    [companyId, reportId, sections, patchSection],
   );
 
   // ── document upload for a section awaiting input.
@@ -595,6 +612,13 @@ export default function PreviewPage() {
                   companyId={companyId}
                   reportId={reportId ?? null}
                   onRefined={handleRefined}
+                  editing={editingCode === section.section_code}
+                  saving={savingCode === section.section_code}
+                  saved={savedCode === section.section_code}
+                  editError={editingCode === section.section_code ? editError : null}
+                  onStartEdit={() => { setEditError(null); setEditingCode(section.section_code); }}
+                  onCancelEdit={() => { setEditError(null); setEditingCode(null); }}
+                  onSaveContent={(content) => handleSaveContent(section.section_code, content)}
                 />
               )}
             </div>
@@ -693,6 +717,13 @@ function SectionPanel({
   companyId,
   reportId,
   onRefined,
+  editing,
+  saving,
+  saved,
+  editError,
+  onStartEdit,
+  onCancelEdit,
+  onSaveContent,
 }: {
   section: ProducedSection;
   busy: boolean;
@@ -708,6 +739,13 @@ function SectionPanel({
   companyId: string | null;
   reportId: string | null;
   onRefined: (s: ProducedSection) => void;
+  editing: boolean;
+  saving: boolean;
+  saved: boolean;
+  editError: string | null;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveContent: (content: string) => void;
 }) {
   const state = sectionState(section);
   // Input-seeking states (needs_input / empty) stay in their own panel while
@@ -729,44 +767,43 @@ function SectionPanel({
     );
   }
 
-  // 2) Produced → real content (+ Regenerate, + refine for AI-written sections).
-  //    Regenerate is the ONLY path that re-hits the producer for a done section;
-  //    revisiting never auto-regenerates.
+  // 2) Produced → real content, editable in place (figures and prose alike).
+  //    No Regenerate — the user edits the produced content directly instead.
   if (state === 'produced') {
     return (
       <>
-        {/* Regenerate only for sections that actually re-generate — hidden for
-            Template/External and user-supplied (typed/uploaded) content. */}
-        {section.regeneratable !== false && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginBottom: 12 }}>
-          {busy && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: ACCENT }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
-                <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
+          {saved && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 6.2L5 8.7l4.5-5" stroke={GREEN} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Regenerating…
+              Saved
             </span>
           )}
-          <button
-            type="button"
-            className="btn bs"
-            onClick={onProduce}
-            disabled={busy}
-            title="Regenerate this section"
-            style={{ fontSize: 12.5, padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 7, opacity: busy ? 0.6 : 1 }}
-          >
-            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-              <path d="M16 5a7 7 0 1 0 1.5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              <path d="M16 2v3.5h-3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Regenerate
-          </button>
+          {!editing && (
+            <button
+              type="button"
+              onClick={onStartEdit}
+              aria-label={`Edit ${section.title}`}
+              title="Edit section"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 7, border: '1px solid #E4E6F1', background: '#fff', color: MUTED, cursor: 'pointer' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
         </div>
-        )}
-        {error && <div style={{ marginBottom: 12, fontSize: 12, color: '#DC2626' }}>{error}</div>}
-        <SectionContent section={section} />
-        {canRefine && companyId && reportId && (
+        <EditableSectionContent
+          section={section}
+          editing={editing}
+          saving={saving}
+          error={editing ? editError : null}
+          onSave={onSaveContent}
+          onCancel={onCancelEdit}
+        />
+        {canRefine && !editing && companyId && reportId && (
           <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
         )}
       </>
