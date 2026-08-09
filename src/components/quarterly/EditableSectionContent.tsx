@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProducedSection } from '@/types/quarterly';
 import { SectionContent } from '@/components/quarterly/SectionContent';
+import { asStringArray } from '@/components/quarterly/sectionState';
 
 const ACCENT = '#4040C8';
 const DARK = '#1F2340';
@@ -16,6 +17,7 @@ export function EditableSectionContent({
   editing,
   saving,
   error,
+  markdown = false,
   onSave,
   onCancel,
 }: {
@@ -23,10 +25,14 @@ export function EditableSectionContent({
   editing: boolean;
   saving: boolean;
   error: string | null;
+  /** Render the read-only view as Markdown — see SectionContent. */
+  markdown?: boolean;
   onSave: (content: string) => void;
   onCancel: () => void;
 }) {
-  if (!editing) return <SectionContent section={section} />;
+  // The editor always works on the raw source, Markdown and all — that is what
+  // gets saved, so it is what the reviewer must see while editing.
+  if (!editing) return <SectionContent section={section} markdown={markdown} />;
 
   // Detect a tabular shape from the content itself (not just `mode`) — hybrid
   // sections (table + analysis JSON) report mode 'generate', not 'table'/'kpi'.
@@ -123,7 +129,35 @@ function ProseEditor({
           resize: 'none', outline: 'none', boxSizing: 'border-box', background: '#fff',
         }}
       />
-      <EditHint saving={saving} error={error} hint="Blur or ⌘+Enter to save · Esc to cancel" />
+      {/* Clicking away still saves, but nobody should have to know that.
+          preventDefault on mousedown keeps the textarea focused, so the button
+          click is the only save — without it, blur would fire one too. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        {/* Unchanged text is not a save: it would PATCH the same string back and
+            mark the section hand-edited, which then makes produce skip it. */}
+        <button
+          className="btn bp"
+          disabled={saving || !draft.trim() || draft.trim() === value.trim()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onSave(draft.trim())}
+          style={{ fontSize: 12.5, padding: '8px 18px' }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          className="btn bs"
+          disabled={saving}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            cancelledRef.current = true;
+          }}
+          onClick={onCancel}
+          style={{ fontSize: 12.5, padding: '8px 16px' }}
+        >
+          Cancel
+        </button>
+      </div>
+      <EditHint saving={saving} error={error} hint="⌘+Enter to save · Esc to cancel" />
     </div>
   );
 }
@@ -182,7 +216,7 @@ function TableEditor({
   return (
     <div>
       {tables.map((t, ti) => {
-        const cols = columnsOf(t.rows);
+        const cols = columnsOf(t.rows, t.columns);
         return (
           <div key={ti} style={{ marginBottom: 18, overflowX: 'auto' }}>
             {t.title && (
@@ -293,19 +327,31 @@ function cellStr(v: unknown): string {
 
 // Return references to the editable row arrays inside `parsed` (mutating them
 // mutates parsed). Handles {rows}, {tables:[{rows}]}, array-of-rows/tables.
-function editableTables(parsed: unknown): { title?: string; rows: Row[] }[] {
+function editableTables(parsed: unknown): { title?: string; rows: Row[]; columns?: string[] }[] {
   if (Array.isArray(parsed)) {
     if (parsed.length && isRec(parsed[0]) && Array.isArray((parsed[0] as Row).rows)) {
-      return (parsed as Row[]).map((t) => ({ title: asStr(t.title), rows: (t.rows as Row[]) ?? [] }));
+      return (parsed as Row[]).map((t) => ({
+        title: asStr(t.title),
+        rows: (t.rows as Row[]) ?? [],
+        columns: asStringArray(t.columns),
+      }));
     }
     return [{ rows: parsed.filter(isRec) as Row[] }];
   }
   if (isRec(parsed)) {
     if (Array.isArray(parsed.tables)) {
-      return (parsed.tables as Row[]).map((t) => ({ title: asStr(t.title), rows: (t.rows as Row[]) ?? [] }));
+      return (parsed.tables as Row[]).map((t) => ({
+        title: asStr(t.title),
+        rows: (t.rows as Row[]) ?? [],
+        columns: asStringArray(t.columns),
+      }));
     }
     if (Array.isArray(parsed.rows)) {
-      return [{ title: asStr(parsed.title), rows: parsed.rows as Row[] }];
+      return [{
+        title: asStr(parsed.title),
+        rows: parsed.rows as Row[],
+        columns: asStringArray(parsed.columns),
+      }];
     }
   }
   return [];
@@ -338,13 +384,17 @@ function parseDisplayValue(raw: unknown): number | null {
   return n * mult;
 }
 
-function columnsOf(rows: Row[]): string[] {
-  const cols = new Set<string>();
-  rows.forEach((r) => {
-    Object.entries(r).forEach(([k, v]) => {
-      if (v == null || typeof v !== 'object') cols.add(k);
+// `explicit` is the table's own column list where it has one — it fixes both the
+// set and the order, so a grid edits in the same layout it renders in.
+function columnsOf(rows: Row[], explicit?: string[]): string[] {
+  const cols = new Set<string>(explicit ?? []);
+  if (!explicit) {
+    rows.forEach((r) => {
+      Object.entries(r).forEach(([k, v]) => {
+        if (v == null || typeof v !== 'object') cols.add(k);
+      });
     });
-  });
+  }
   HIDDEN_COLS.forEach((h) => cols.delete(h));
   return Array.from(cols);
 }

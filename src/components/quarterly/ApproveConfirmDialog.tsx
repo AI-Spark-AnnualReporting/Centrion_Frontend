@@ -10,11 +10,19 @@ export function ApproveConfirmDialog({
   error,
   onConfirm,
   onClose,
+  title = 'Approve and lock this report?',
+  confirmLabel = 'Approve & Lock',
+  children,
 }: {
   approving?: boolean;
   error?: string | null;
   onConfirm: () => void;
   onClose: () => void;
+  /** Defaults keep the original quarterly wording. */
+  title?: string;
+  confirmLabel?: string;
+  /** Rendered under the copy — the board flow lists its approval blockers here. */
+  children?: React.ReactNode;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -28,7 +36,7 @@ export function ApproveConfirmDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Approve and lock this report?"
+      aria-label={title}
       onClick={approving ? undefined : onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1400,
@@ -46,12 +54,13 @@ export function ApproveConfirmDialog({
         }}
       >
         <div style={{ padding: '20px 22px 4px' }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: DARK }}>Approve and lock this report?</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: DARK }}>{title}</div>
           <p style={{ margin: '10px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             By approving, you confirm the report content is final. After this you will{' '}
             <strong>NOT</strong> be able to edit any section, regenerate content, or change the
             outline. The report will be locked and available for export.
           </p>
+          {children}
           {error && <div style={{ marginTop: 10, fontSize: 12, color: '#DC2626' }}>{error}</div>}
         </div>
 
@@ -66,7 +75,7 @@ export function ApproveConfirmDialog({
             disabled={approving}
             style={{ fontSize: 13, padding: '10px 22px', opacity: approving ? 0.6 : 1 }}
           >
-            {approving ? 'Approving…' : 'Approve & Lock'}
+            {approving ? 'Approving…' : confirmLabel}
           </button>
         </div>
       </div>

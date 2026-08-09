@@ -9,6 +9,16 @@ export function isCoverSection(s: Pick<ProducedSection, 'section_code'>): boolea
   return /cover/i.test(s.section_code);
 }
 
+// A non-empty all-string array, or undefined. A table's `columns` — the explicit
+// column list and order sent by sections whose shape varies (governance grids).
+// Shared so SectionContent and EditableSectionContent read it identically and a
+// grid edits in the same layout it renders in.
+export function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string')
+    ? (v as string[])
+    : undefined;
+}
+
 // The Table of Contents is generated from the finished document (source_type
 // "Template", mode "auto"), so it has nothing to show or configure while the report
 // is still being built. Hide it on Outline and Preview; it stays in the outline the

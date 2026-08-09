@@ -1,4 +1,7 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
+import { asStringArray } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Preview conventions) ────────────────────
 const GREEN = '#10B981';
@@ -16,7 +19,14 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
-export function SectionContent({ section }: { section: ProducedSection }) {
+export function SectionContent({
+  section,
+  markdown = false,
+}: {
+  section: ProducedSection;
+  /** Render prose as Markdown — see MarkdownProse. */
+  markdown?: boolean;
+}) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
   // rather than a JSON string. Normalise to a string so `.trim()`/JSON.parse work.
@@ -81,11 +91,11 @@ export function SectionContent({ section }: { section: ProducedSection }) {
       return <NoData />;
     }
     // Not valid JSON — treat the string as prose.
-    return <Prose text={content} />;
+    return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
   }
 
   // generate / template / anything else → prose.
-  return <Prose text={content} />;
+  return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
 }
 
 // Honest empty state — shown when a section produced no usable content.
@@ -96,6 +106,18 @@ function NoData() {
 }
 
 // ─── prose ────────────────────────────────────────────────────────────────────
+// Board narrative content is lifted verbatim out of the source document, which
+// means it arrives as Markdown — headings, bullets, GFM tables. Rendered as
+// plain text it reads as "## Heading" and "| a | b |". Off by default so the
+// quarterly and earnings payloads, which are plain prose, are untouched.
+function MarkdownProse({ text }: { text: string }) {
+  return (
+    <div className="md-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 function Prose({ text }: { text: string }) {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const blocks = paragraphs.length ? paragraphs : [text];
@@ -145,6 +167,11 @@ interface ComparePeriod {
 interface NormTable {
   title?: string;
   rows: LooseRow[];
+  // Explicit column list AND order, for tables whose shape varies per section
+  // (governance grids: director profiles, remuneration, meeting attendance —
+  // which grows a column per meeting held). Absent → derived from the row keys.
+  // Its presence also means the table is NOT a financial statement.
+  columns?: string[];
   comparePeriods?: ComparePeriod[]; // present → render one value+change column per period
   currentLabel?: string | null; // header for the current column, e.g. "Q3 2025"
 }
@@ -174,6 +201,7 @@ function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        columns: asStringArray(t.columns),
       }));
     }
     return [{ rows: parsed.filter(isRecord) as LooseRow[] }];
@@ -183,12 +211,14 @@ function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed.tables as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        columns: asStringArray(t.columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {
       return [{
         title: asString(parsed.title),
         rows: parsed.rows as LooseRow[],
+        columns: asStringArray(parsed.columns),
         comparePeriods: normalizeComparePeriods(parsed.compare_periods),
         currentLabel: asString(parsed.current_label) ?? null,
       }];
@@ -204,7 +234,10 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
   if (rows.length === 0) return null;
 
   // Financial shape (label + current_display[/prior/change]) vs generic object rows.
-  const financial = rows.some((r) => cell(r, 'current_display', 'current', 'value') != null);
+  // An explicit column list settles it: only grids carry one, so a grid with a
+  // column literally named "value" can't be misread as a financial statement.
+  const financial =
+    !table.columns && rows.some((r) => cell(r, 'current_display', 'current', 'value') != null);
 
   return (
     <div style={{ marginBottom: 24, overflowX: 'auto' }}>
@@ -218,7 +251,7 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
           currentLabel={table.currentLabel}
         />
       ) : (
-        <GenericTable rows={rows} />
+        <GenericTable rows={rows} columns={table.columns} />
       )}
     </div>
   );
@@ -361,13 +394,19 @@ function FinancialTable({
   );
 }
 
-function GenericTable({ rows }: { rows: LooseRow[] }) {
-  const cols = Array.from(
-    rows.reduce((set, r) => {
-      Object.keys(r).forEach((k) => set.add(k));
-      return set;
-    }, new Set<string>()),
-  );
+function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] }) {
+  // ponytail: the derived fallback is Object.keys order, which puts integer-like
+  // keys ("2024", "2025") first regardless of where they sit in the row. Send an
+  // explicit `columns` when order matters; fixing the derivation itself is a
+  // bigger diff than the bug and no current payload without `columns` hits it.
+  const cols =
+    columns ??
+    Array.from(
+      rows.reduce((set, r) => {
+        Object.keys(r).forEach((k) => set.add(k));
+        return set;
+      }, new Set<string>()),
+    );
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>

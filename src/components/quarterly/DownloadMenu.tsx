@@ -14,12 +14,18 @@ export function DownloadMenu({
   title,
   disabled = false,
   label = 'Export',
+  onDownload,
 }: {
   companyId: string | null;
   reportId: string | null;
   title?: string;
   disabled?: boolean;
   label?: string;
+  /**
+   * Override the download call — the board report exports through its own
+   * endpoint. When given, `companyId` is not required.
+   */
+  onDownload?: (format: 'pdf' | 'docx') => Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [downloading, setDownloading] = useState<null | 'pdf' | 'docx'>(null);
@@ -37,12 +43,13 @@ export function DownloadMenu({
   }, [menuOpen]);
 
   const handleDownload = async (fmt: 'pdf' | 'docx') => {
-    if (!companyId || !reportId) return;
+    if (!reportId || (!onDownload && !companyId)) return;
     setMenuOpen(false);
     setDownloadError(null);
     setDownloading(fmt);
     try {
-      await quarterlyReports.downloadExport(companyId, reportId, fmt, title);
+      if (onDownload) await onDownload(fmt);
+      else await quarterlyReports.downloadExport(companyId as string, reportId, fmt, title);
     } catch (e) {
       setDownloadError(e instanceof Error ? e.message : 'Download failed.');
     } finally {
@@ -50,7 +57,7 @@ export function DownloadMenu({
     }
   };
 
-  const isDisabled = disabled || !!downloading || !companyId || !reportId;
+  const isDisabled = disabled || !!downloading || !reportId || (!onDownload && !companyId);
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
