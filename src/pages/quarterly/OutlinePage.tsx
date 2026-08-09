@@ -377,7 +377,13 @@ export default function OutlinePage() {
       .sort(byDisplayOrder)
       // Force required rows included: a stale included:false would render an
       // un-untickable empty box and then PUT as false, which the backend 409s.
-      .map((s) => (s.requirement === 'required' ? { ...s, included: true } : s));
+      // EXCEPT one the user unticked on the Financial Data step — 12 of the 18
+      // financial sections are mandatory in the blueprint, so forcing those back on
+      // would undo that decision on load and then PUT included:true, which the
+      // backend now 409s in the other direction. There, exclusion wins.
+      .map((s) =>
+        s.requirement === 'required' && !s.financials_excluded ? { ...s, included: true } : s,
+      );
     setSections(all);
     setMetricsMode(res.metrics_mode ?? null);
     setTotalCatalogue(res.total_catalogue ?? res.sections.length);
