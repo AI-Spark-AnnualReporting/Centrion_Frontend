@@ -229,6 +229,107 @@ describe("Financial Data screen", () => {
     );
   });
 
+  // ── "Is this how we should read your file?" ──────────────────────────────
+  // The dialog exists because an Aramco equity sheet held three tables and a
+  // column of share-capital amounts that looked like line names, and went in with
+  // "75000" as a label. Nothing may be stored while this is open.
+  const CONFIRMATION = {
+    needs_confirmation: true as const,
+    section_code: "financial_position",
+    section_title: "Statement of Financial Position",
+    filename: "equity.xlsx",
+    reasons: ["This file holds 2 separate tables."],
+    currency: "SAR",
+    scale: "million",
+    tables: [
+      {
+        key: "0:0",
+        sheet: "Changes in Equity",
+        columns: [
+          { index: 0, name: "Movement" },
+          { index: 1, name: "Share capital" },
+          { index: 5, name: "Total SAR mn" },
+        ],
+        header_row: 4,
+        label_col: 0,
+        value_col: 5,
+        row_count: 14,
+        preview: [{ label: "Balance at January 1, 2022", value: 1280668 }],
+        header_options: [3, 4, 5],
+      },
+      {
+        key: "0:1",
+        sheet: "Changes in Equity",
+        columns: [
+          { index: 0, name: "Third quarter 2022 movement" },
+          { index: 2, name: "Total SAR mn" },
+        ],
+        header_row: 11,
+        label_col: 0,
+        value_col: 2,
+        row_count: 7,
+        preview: [{ label: "Net income for the quarter", value: 159115 }],
+        header_options: [11],
+      },
+    ],
+  };
+
+  const uploadEquity = async () => {
+    await renderPage();
+    uploadFinancialsSection.mockResolvedValueOnce(CONFIRMATION);
+    fireEvent.click(screen.getByText("Statement of Financial Position"));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "equity.xlsx")] },
+    });
+    await screen.findByRole("dialog");
+  };
+
+  it("asks instead of guessing, and stores nothing while it asks", async () => {
+    await uploadEquity();
+
+    expect(screen.getByText(/Is this how we should read equity.xlsx/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing has been saved yet/i)).toBeInTheDocument();
+    expect(screen.getByText("This file holds 2 separate tables.")).toBeInTheDocument();
+    // Our reading is pre-filled — the user confirms rather than works it out.
+    expect((screen.getByLabelText("Line names") as HTMLSelectElement).value).toBe("0");
+    expect((screen.getByLabelText("Figures") as HTMLSelectElement).value).toBe("5");
+    expect(screen.getByText("Balance at January 1, 2022")).toBeInTheDocument();
+  });
+
+  it("sends the chosen table and columns back with the same file", async () => {
+    await uploadEquity();
+
+    fireEvent.click(screen.getByRole("button", { name: /Table 2 · 7 lines/ }));
+    fireEvent.change(screen.getByLabelText("Numbers are in"), {
+      target: { value: "thousands" },
+    });
+    uploadFinancialsSection.mockResolvedValueOnce(structuredClone(RESPONSE));
+    fireEvent.click(screen.getByRole("button", { name: "Use this" }));
+
+    await waitFor(() => expect(uploadFinancialsSection).toHaveBeenCalledTimes(2));
+    const [, , code, file, units, structure] = uploadFinancialsSection.mock.calls[1];
+    expect(code).toBe("financial_position");
+    expect((file as File).name).toBe("equity.xlsx");   // the same bytes, re-sent
+    expect(units).toMatchObject({ scale: "thousands" });
+    expect(structure).toEqual({
+      table_key: "0:1",
+      header_row: 11,
+      label_col: 0,
+      value_col: 2,
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("cancel closes it and uploads nothing", async () => {
+    await uploadEquity();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(uploadFinancialsSection).toHaveBeenCalledTimes(1);   // the probe only
+  });
+
   it("rejects a file the extractor can't read as a grid", async () => {
     await renderPage();
 

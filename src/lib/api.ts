@@ -1770,17 +1770,33 @@ export const quarterlyReports = {
   // Read one statement into one section. Re-uploading replaces it. currency/scale
   // are the user correcting our reading for THIS section — omit them and the
   // file's own units decide.
+  //
+  // Two possible responses: the screen payload (stored), or a confirmation request
+  // (nothing stored) when it isn't obvious which table/columns to read. Send the
+  // SAME file back with `structure` filled in to commit the user's answer — the
+  // file is re-posted rather than parked server-side, so there is no temp copy to
+  // expire, clean up, or get out of step with what they're looking at.
   uploadFinancialsSection: (
     companyId: string,
     reportId: string,
     code: string,
     file: File,
     units?: { currency?: string; scale?: string },
-  ): Promise<import("@/types/quarterly").FinancialsResponse> => {
+    structure?: import("@/types/quarterly").SheetStructureChoice,
+  ): Promise<
+    | import("@/types/quarterly").FinancialsResponse
+    | import("@/types/quarterly").FinancialsConfirmation
+  > => {
     const fd = new FormData();
     fd.append("file", file);
     if (units?.currency) fd.append("currency", units.currency);
     if (units?.scale) fd.append("scale", units.scale);
+    if (structure) {
+      fd.append("table_key", structure.table_key);
+      fd.append("header_row", String(structure.header_row));
+      fd.append("label_col", String(structure.label_col));
+      fd.append("value_col", String(structure.value_col));
+    }
     return request(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
       { method: "POST", form: fd },

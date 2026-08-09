@@ -276,6 +276,57 @@ export interface FinancialsResponse {
   blocking: string[];
 }
 
+// ─── "Is this how we should read your file?" ────────────────────────────────
+// A confident read is stored straight away. When it isn't obvious which table or
+// which columns to use, NOTHING is written and this comes back instead — the user
+// answers, and the same file is re-sent with their answer attached.
+
+export interface SheetColumn {
+  index: number;
+  name: string;
+}
+
+export interface SheetTable {
+  // "<sheet index>:<table index>" — opaque, sent back as-is.
+  key: string;
+  sheet: string;
+  columns: SheetColumn[];
+  header_row: number;
+  label_col: number;
+  value_col: number;
+  row_count: number;
+  preview: { label: string; value: number }[];
+  // Rows the header could plausibly be, for the picker — a merged banner often
+  // sits above the real header.
+  header_options: number[];
+}
+
+export interface FinancialsConfirmation {
+  needs_confirmation: true;
+  section_code: string;
+  section_title: string;
+  filename: string;
+  // Plain sentences explaining why we stopped, shown at the top of the dialog.
+  reasons: string[];
+  tables: SheetTable[];
+  currency: string;
+  scale: string;
+}
+
+// What the user chose in the dialog, sent back with the same file.
+export interface SheetStructureChoice {
+  table_key: string;
+  header_row: number;
+  label_col: number;
+  value_col: number;
+}
+
+export function needsConfirmation(
+  res: FinancialsResponse | FinancialsConfirmation,
+): res is FinancialsConfirmation {
+  return (res as FinancialsConfirmation).needs_confirmation === true;
+}
+
 export interface FinancialsCompleteResult {
   report_id: string;
   sections: FinancialSection[];

@@ -20,10 +20,14 @@ import {
   isKnownCurrency,
   type FinancialScale,
 } from '@/constants/currency';
-import type {
-  FinancialSection,
-  FinancialSectionUpload,
-  FinancialsResponse,
+import { SheetReadingDialog } from '@/components/quarterly/SheetReadingDialog';
+import {
+  needsConfirmation,
+  type FinancialSection,
+  type FinancialSectionUpload,
+  type FinancialsConfirmation,
+  type FinancialsResponse,
+  type SheetStructureChoice,
 } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
@@ -424,6 +428,12 @@ export default function FinancialSectionsPage() {
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
+  // An upload the server wouldn't guess at. We hold the File alongside it because
+  // confirming re-sends the same bytes with the user's answer — nothing is parked
+  // server-side, so there is no temp copy to expire or clean up.
+  const [pending, setPending] = useState<
+    { data: FinancialsConfirmation; file: File } | null
+  >(null);
 
   useEffect(() => {
     if (!companyId || !reportId) return;
@@ -469,6 +479,52 @@ export default function FinancialSectionsPage() {
       }
     },
     [],
+  );
+
+  // Upload has two possible outcomes, so it can't go through `run` (which assumes
+  // the screen payload comes back): either it stored the figures, or it stored
+  // nothing and is asking how to read the file.
+  const doUpload = useCallback(
+    async (
+      code: string,
+      file: File,
+      units?: { currency?: string; scale?: string },
+      structure?: SheetStructureChoice,
+    ) => {
+      if (!companyId || !reportId) return;
+      setBusyCode(code);
+      setRowErrors((prev) => {
+        const next = { ...prev };
+        delete next[code];
+        return next;
+      });
+      setContinueError(null);
+      try {
+        const res = await quarterlyReports.uploadFinancialsSection(
+          companyId,
+          reportId,
+          code,
+          file,
+          units,
+          structure,
+        );
+        if (needsConfirmation(res)) {
+          setPending({ data: res, file });
+        } else {
+          setPending(null);
+          setData(res);
+        }
+      } catch (err) {
+        setPending(null);
+        setRowErrors((prev) => ({
+          ...prev,
+          [code]: errorText(err, 'That didn’t work. Try again.'),
+        }));
+      } finally {
+        setBusyCode(null);
+      }
+    },
+    [companyId, reportId],
   );
 
   const grouped = useMemo(() => {
@@ -651,16 +707,8 @@ export default function FinancialSectionsPage() {
                   );
                 }}
                 onUpload={(file) => {
-                  if (!companyId || !reportId) return;
                   setOpenCode(s.section_code);
-                  void run(s.section_code, () =>
-                    quarterlyReports.uploadFinancialsSection(
-                      companyId,
-                      reportId,
-                      s.section_code,
-                      file,
-                    ),
-                  );
+                  void doUpload(s.section_code, file);
                 }}
                 onRemove={() => {
                   if (!companyId || !reportId) return;
@@ -793,6 +841,19 @@ export default function FinancialSectionsPage() {
           {continuing ? 'Saving…' : 'Continue to extraction →'}
         </button>
       </div>
+
+      {/* Only when the read wasn't obvious. Cancel writes nothing — the section is
+          untouched, exactly as it was before the file was picked. */}
+      {pending && (
+        <SheetReadingDialog
+          data={pending.data}
+          busy={busyCode === pending.data.section_code}
+          onCancel={() => setPending(null)}
+          onConfirm={(choice, units) =>
+            void doUpload(pending.data.section_code, pending.file, units, choice)
+          }
+        />
+      )}
     </Shell>
   );
 }
