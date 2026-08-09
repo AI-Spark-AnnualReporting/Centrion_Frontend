@@ -141,20 +141,28 @@ function YesNoIgnore({
   value,
   onChange,
   label,
+  noDisabledReason,
 }: {
   value: Answer | undefined;
   onChange: (a: Answer) => void;
   label: string;
+  // Set when "No" would mint a duplicate of a metric that already holds a figure.
+  // Disabled rather than merely warned: the cost is a permanent second metric
+  // meaning the same thing, which then auto-matches every quarter.
+  noDisabledReason?: string;
 }) {
   const btn = (a: Answer, text: string, activeBg: string) => {
     const active = value === a;
+    const off = a === 'no' && !!noDisabledReason;
     return (
       <button
         type="button"
         role="radio"
         aria-checked={active}
         aria-label={`${text} — ${label}`}
-        onClick={() => onChange(a)}
+        aria-disabled={off}
+        title={off ? noDisabledReason : undefined}
+        onClick={() => !off && onChange(a)}
         style={{
           padding: '5px 14px',
           fontSize: 12,
@@ -162,8 +170,8 @@ function YesNoIgnore({
           fontFamily: 'inherit',
           border: `1px solid ${active ? activeBg : '#D9DCEC'}`,
           background: active ? activeBg : '#fff',
-          color: active ? '#fff' : '#6B7280',
-          cursor: 'pointer',
+          color: off ? '#C3C7DA' : active ? '#fff' : '#6B7280',
+          cursor: off ? 'not-allowed' : 'pointer',
           transition: 'background .12s, border-color .12s, color .12s',
         }}
       >
@@ -245,10 +253,12 @@ export default function ExtractionReviewPage() {
   const groups = useMemo(() => groupByStatement(pending), [pending]);
   const sectionGroups = useMemo(() => data?.metric_sections ?? [], [data]);
 
-  // Which suggested metrics are already taken, and by what. Two rows accepted as
-  // the same metric silently collapse to one on the server, so telling the user
-  // up front saves a wasted answer — and usually means the second row is their own
-  // line rather than a duplicate of the first.
+  // Which suggested metrics already hold a figure, and which line filled it.
+  //
+  // This matters more than "you'd waste an answer". Yes on one of these is stored
+  // but never rendered — the report keeps the first figure per metric. No is worse:
+  // it mints a permanent custom metric that means the same thing as the built-in,
+  // so the number can print twice under two names, every quarter from then on.
   const claimedBy = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of data?.confirmed ?? []) {
@@ -261,6 +271,9 @@ export default function ExtractionReviewPage() {
     }
     return m;
   }, [data, pending, answers]);
+
+  const isClaimed = (f: ExtractionReviewFigure) =>
+    !!f.metric_key && claimedBy.has(f.metric_key) && answers[f.id] !== 'yes';
 
   // A sheet carrying two currency columns yields the same metric twice, once per
   // currency, and the report prints both. Detected here rather than by comparing
@@ -330,10 +343,24 @@ export default function ExtractionReviewPage() {
     (f) => answers[f.id] === 'no' && !drafts[f.id]?.sectionCode,
   );
 
+  // A row can become claimed AFTER it was answered No — say Yes to one copy of a
+  // line and the other copy's metric is now filled. The No button disables, but the
+  // answer already made is still sitting there, so it has to be caught here too.
+  const claimedCreates = pending.filter((f) => answers[f.id] === 'no' && isClaimed(f));
+
   const onContinue = () => {
     setError(null);
     if (pending.length === 0) {
       goOutline();
+      return;
+    }
+    if (claimedCreates.length > 0) {
+      const f = claimedCreates[0];
+      setError(
+        `“${f.source_label}” would add a second metric meaning the same as ` +
+          `${f.metric_label ?? f.metric_key}, which already has a figure. ` +
+          'Choose Ignore for it instead.',
+      );
       return;
     }
     if (incompleteCreates.length > 0) {
@@ -637,13 +664,16 @@ export default function ExtractionReviewPage() {
                         {f.source_page != null && <span>page {f.source_page}</span>}
                         <ConfidencePill value={f.confidence} />
                       </div>
-                      {/* The metric is already spoken for. Saying yes here would
-                          drop one of the two on the server, so the answer is almost
-                          always "no, this is our own line". */}
-                      {f.metric_key && claimedBy.has(f.metric_key) && answers[f.id] !== 'yes' && (
+                      {/* Already spoken for. Naming the other line reads as
+                          nonsense when it is the SAME wording from a second file,
+                          which is the common case — figures arrive per document, so
+                          one line appears once per file it is in. Say what to do
+                          instead of restating the label back at the user. */}
+                      {isClaimed(f) && (
                         <div style={{ marginTop: 5, fontSize: 11, color: '#B45309' }}>
-                          {f.metric_label ?? f.metric_key} is already matched to “
-                          {claimedBy.get(f.metric_key)}”
+                          {claimedBy.get(f.metric_key!) === (f.source_label ?? '')
+                            ? `Already in the report — this line was read from more than one of your files. Skip it.`
+                            : `${f.metric_label ?? f.metric_key} is already filled by “${claimedBy.get(f.metric_key!)}”. Skip this one unless it is a different figure.`}
                         </div>
                       )}
                     </div>
@@ -667,6 +697,11 @@ export default function ExtractionReviewPage() {
                         }
                       }}
                       label={`${f.source_label ?? 'figure'} is ${f.metric_label ?? f.metric_key}`}
+                      noDisabledReason={
+                        isClaimed(f)
+                          ? `${f.metric_label ?? f.metric_key} already has a figure. Adding this as your own metric would put the same number in the report twice, under two names.`
+                          : undefined
+                      }
                     />
                   </div>
 

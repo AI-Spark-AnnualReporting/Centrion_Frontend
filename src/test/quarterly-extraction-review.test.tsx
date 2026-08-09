@@ -370,9 +370,51 @@ describe("quarterly extraction review", () => {
       ]);
     });
 
-    it("says when the suggested metric is already taken", async () => {
-      // total_assets is already confirmed, so a second row proposing it would
-      // silently lose one figure on the server.
+    it("will not let you duplicate a metric that already has a figure", async () => {
+      // Saying No here mints a permanent custom metric meaning the same as the
+      // built-in, so the number can print twice under two names — every quarter.
+      // Disabled rather than warned: the cost outlives the mistake.
+      const dup = structuredClone(RESPONSE);
+      dup.pending[0] = {
+        ...dup.pending[0],
+        id: "p-dup",
+        metric_key: "total_assets",
+        metric_label: "Total Assets",
+        source_label: "Total assets",
+      };
+      getExtractionReview.mockResolvedValue(dup);
+      await renderPage();
+
+      const no = await screen.findByRole("radio", { name: /^No — Total assets/ });
+      expect(no).toHaveAttribute("aria-disabled", "true");
+
+      fireEvent.click(no);
+      expect(no).toHaveAttribute("aria-checked", "false");   // click does nothing
+      expect(screen.queryByLabelText(/Part of the report/i)).toBeNull();
+    });
+
+    it("names the file collision rather than restating the label", async () => {
+      // The same line read from two of the user's files is the common case, and
+      // "X is already matched to X" read as nonsense.
+      const dup = structuredClone(RESPONSE);
+      dup.pending[0] = {
+        ...dup.pending[0],
+        id: "p-dup",
+        metric_key: "total_assets",
+        metric_label: "Total Assets",
+        source_label: "Total assets",   // identical to the confirmed row's label
+      };
+      getExtractionReview.mockResolvedValue(dup);
+      await renderPage();
+
+      const row = await screen.findByTestId("row-p-dup");
+      expect(row).toHaveTextContent(/read from more than one of your files/i);
+      expect(row).not.toHaveTextContent(/already matched to .Total assets./i);
+    });
+
+    it("names the line that already filled the metric, when it differs", async () => {
+      // A DIFFERENT wording proposing an already-filled metric — here the user does
+      // need to see which line took it, because the two might be different figures.
       const dup = structuredClone(RESPONSE);
       dup.pending[0] = {
         ...dup.pending[0],
@@ -384,9 +426,9 @@ describe("quarterly extraction review", () => {
       getExtractionReview.mockResolvedValue(dup);
       await renderPage();
 
-      expect(await screen.findByText(/already matched to/i)).toHaveTextContent(
-        /Total assets/i,
-      );
+      const row = await screen.findByTestId("row-p-dup");
+      expect(row).toHaveTextContent(/already filled by .Total assets./i);
+      expect(row).toHaveTextContent(/unless it is a different figure/i);
     });
   });
 });
