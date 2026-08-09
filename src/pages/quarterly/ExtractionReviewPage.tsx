@@ -263,35 +263,23 @@ export default function ExtractionReviewPage() {
   }, [data, pending, answers]);
 
   // A sheet carrying two currency columns yields the same metric twice, once per
-  // currency, and the report prints both. Detect it here rather than comparing
-  // against the currency chosen on the setup form — that choice doesn't survive
-  // the route, and mixed units are diagnostic on their own.
+  // currency, and the report prints both. Detected here rather than by comparing
+  // against the currency chosen on the setup form — that choice doesn't survive the
+  // route, and mixed units are diagnostic on their own.
+  //
+  // ONLY mixed currency. This used to also warn that "N metrics appear more than
+  // once, so the report may print each of them twice", which was wrong twice over:
+  // qr_figures is unique per DOCUMENT, so uploading an income statement and a cash
+  // flow separately legitimately writes the same metric from each — and the render
+  // layer already collapses those to one row per metric. It warned about normal
+  // input and then advised reselecting a currency that was never wrong. The
+  // already-matched badge on each row covers the useful half of that, in context
+  // and per figure.
   const unitWarning = useMemo(() => {
-    const confirmedRows = data?.confirmed ?? [];
-    const rows = [...confirmedRows, ...(data?.pending ?? [])];
+    const rows = [...(data?.confirmed ?? []), ...(data?.pending ?? [])];
     if (rows.length === 0) return null;
-
     const currencies = [...new Set(rows.map((r) => currencyOf(r.unit)).filter(Boolean))] as string[];
-
-    const count = new Map<string, number>();
-    for (const r of rows) {
-      if (!r.metric_key) continue;
-      const key = `${r.metric_key}|${r.period ?? ''}`;
-      count.set(key, (count.get(key) ?? 0) + 1);
-    }
-    const duplicatedKeys = [...count.entries()].filter(([, n]) => n > 1).map(([k]) => k);
-    if (currencies.length < 2 && duplicatedKeys.length === 0) return null;
-
-    // Only pending rows can be dismissed here. If the duplicates are already
-    // confirmed, this screen has no remedy and the honest advice is to regenerate.
-    const confirmedKeys = new Set(
-      confirmedRows.filter((r) => r.metric_key).map((r) => `${r.metric_key}|${r.period ?? ''}`),
-    );
-    return {
-      currencies,
-      duplicateCount: duplicatedKeys.length,
-      inConfirmed: duplicatedKeys.some((k) => confirmedKeys.has(k)),
-    };
+    return currencies.length > 1 ? { currencies } : null;
   }, [data]);
   const answered = pending.filter((f) => answers[f.id]).length;
   // Both Yes and No put a figure in the report — No just puts it there under the
@@ -480,20 +468,12 @@ export default function ExtractionReviewPage() {
             </svg>
             <div>
               <div style={{ fontWeight: 700, color: '#B45309', marginBottom: 3 }}>
-                {unitWarning.currencies.length > 1
-                  ? `Figures were read in more than one currency (${unitWarning.currencies.join(', ')})`
-                  : 'The same metric was read more than once'}
+                Figures were read in more than one currency (
+                {unitWarning.currencies.join(', ')})
               </div>
-              {unitWarning.duplicateCount > 0 && (
-                <>
-                  {unitWarning.duplicateCount} metric
-                  {unitWarning.duplicateCount === 1 ? '' : 's'} appear more than once, so the report
-                  may print each of them twice.{' '}
-                </>
-              )}
-              {unitWarning.inConfirmed
-                ? 'Some of these are already saved and cannot be removed here — regenerate the report with the right currency selected.'
-                : 'Answer “No” to the rows in the currency you do not want, or regenerate with the right currency selected.'}
+              Your report is denominated in one currency, so the figures in the others will
+              be left out. If that is the wrong way round, regenerate with the currency you
+              want selected on the upload step.
             </div>
           </div>
         )}

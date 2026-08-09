@@ -255,9 +255,27 @@ describe("quarterly extraction review", () => {
       expect(note).toHaveTextContent(/more than one currency/i);
       expect(note).toHaveTextContent("SAR");
       expect(note).toHaveTextContent("USD");
-      // Both rows are pending, so dismissing them here is a real remedy.
-      expect(note).toHaveTextContent(/answer .no./i);
+      // The remedy is on the upload step, not this screen.
+      expect(note).toHaveTextContent(/regenerate/i);
       expect(screen.getByText("USD · millions")).toBeInTheDocument();
+    });
+
+    it("does not cry duplicate when one metric came from several files", async () => {
+      // qr_figures is unique per DOCUMENT, so uploading an income statement and a
+      // cash flow separately legitimately writes the same metric from each — and
+      // the render layer collapses them to one row. Warning here told the user the
+      // report would print figures twice when it would not, and advised fixing a
+      // currency that was never wrong.
+      const repeated = structuredClone(RESPONSE);
+      repeated.pending.push({
+        ...repeated.pending[0],
+        id: "p1-second-file",
+        source_label: "Profit for the period",
+      });
+      getExtractionReview.mockResolvedValue(repeated);
+      await renderPage();
+
+      expect(screen.queryByRole("note", { name: /mixed units/i })).toBeNull();
     });
 
     it("tells the user to regenerate when the duplicates are already saved", async () => {

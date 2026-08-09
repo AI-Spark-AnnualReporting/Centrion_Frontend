@@ -1795,8 +1795,10 @@ export default function QuarterlyReportForm({
             </div>
 
             <div style={{ marginTop: 7, fontSize: 11, color: '#9BA3C4', lineHeight: 1.5 }}>
+              {/* "our standard N" stopped being true once the total included the
+                  company's own additions — those are theirs, not ours. */}
               {metricsMode === 'system'
-                ? `We map your data to our standard${systemMetrics ? ` ${systemMetrics.total}` : ''} metrics and lay it out in the standard report template.`
+                ? `We map your data to${systemMetrics ? ` these ${systemMetrics.total}` : ' our standard'} metrics and lay it out in the standard report template.`
                 : 'We take the figures from your Excel/CSV exactly as they are, place each line in the right section, and print them as-is.'}
             </div>
           </div>
