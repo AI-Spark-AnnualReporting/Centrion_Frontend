@@ -148,7 +148,24 @@ export interface ExtractionReviewFigure {
   // right metric", not "did we read the number correctly".
   confidence: number | null;
   source: string | null;
+  // Where the line sat: which file, which sheet, and its position in the file.
+  // The review screen groups on the first two and orders on the third — and
+  // (document_id, source_page) is the row's identity, so "Total" on two sheets
+  // stays two rows instead of collapsing into one.
   source_page: number | null;
+  document_id?: string | null;
+  source_table?: string | null;
+}
+
+// One (file, sheet) that carries lines the user has to file. `guessed_section` is
+// derived from the metrics that DID match on that sheet, and is null when the
+// sheet matched nothing — an empty picker that blocks Continue beats a confident
+// wrong guess filed silently.
+export interface ExtractionReviewSource {
+  document_id: string | null;
+  source_table: string | null;
+  filename: string;
+  guessed_section: string | null;
 }
 
 export interface ExtractionReviewResponse {
@@ -168,6 +185,9 @@ export interface ExtractionReviewResponse {
   // Where a figure can be placed when the user says "no, that's our own line".
   // Sent with the figures so the screen needs no second request.
   metric_sections?: MetricSectionGroup[];
+  // One entry per (file, sheet) with pending lines: the filename to head the
+  // group, and the section guess to pre-fill its rows.
+  sources?: ExtractionReviewSource[];
   // Present (and 'custom') on a Custom-metrics report, where this screen is a
   // different thing entirely: nothing to confirm, because the user already chose
   // each figure's section by choosing which file to upload to it. `sections` holds
@@ -210,16 +230,23 @@ export interface MetricSectionGroup {
 
 export type MetricUnitType = 'currency' | 'percent' | 'count';
 
-// accept — map it to the metric we suggested.
-// create — no, it's the company's own line: add it to their catalogue under the
-//          document's own wording and put the figure in this report.
-// ignore — drop the figure.
-export type ExtractionReviewAction = 'accept' | 'create' | 'ignore';
+// keep    — file this line: add it to the company's catalogue under `label` and put
+//           the figure in this report's `section_code`.
+// exclude — leave it out, and stop asking about this wording in future quarters.
+//
+// `accept`, `create` and `ignore` were the previous vocabulary, from when the
+// server proposed a metric and the user agreed or not. The server still honours
+// them so a browser holding the old bundle can answer a report parked before this
+// shipped; nothing here emits them.
+export type ExtractionReviewAction = 'keep' | 'exclude';
 
 export interface ExtractionReviewDecision {
   id: string;
   action: ExtractionReviewAction;
-  // Required for `create` only.
+  // Required for `keep` only. `label` is what the user chose to call the line —
+  // the document's own wording is kept server-side as a synonym, so renaming it
+  // does not opt the line out of matching next quarter.
+  label?: string;
   section_code?: string;
   unit_type?: MetricUnitType;
 }
