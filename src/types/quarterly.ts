@@ -251,6 +251,18 @@ export interface ExtractionReviewDecision {
   unit_type?: MetricUnitType;
 }
 
+// A wording the company told us to stop asking about. One entry per distinct
+// label however many quarters it was excluded in — it is one thing to undo.
+export interface ExclusionEntry {
+  source_label: string;
+  excluded_at: string | null;
+}
+
+export interface ExclusionsResponse {
+  company_id: string;
+  exclusions: ExclusionEntry[];
+}
+
 export interface ExtractionReviewResult {
   report_id: string;
   accepted: number;

@@ -14,11 +14,14 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type {
   ExtractionReviewResponse,
   ExtractionReviewDecision,
+  ExclusionsResponse,
 } from "@/types/quarterly";
 
 const getExtractionReview = vi.fn<() => Promise<ExtractionReviewResponse>>();
 const submitExtractionReview =
   vi.fn<(c: string, r: string, d: ExtractionReviewDecision[]) => Promise<unknown>>();
+const listExclusions = vi.fn<() => Promise<ExclusionsResponse>>();
+const undoExclusions = vi.fn<(c: string, labels: string[]) => Promise<unknown>>();
 const navigateMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
@@ -26,6 +29,8 @@ vi.mock("@/lib/api", () => ({
     getExtractionReview: () => getExtractionReview(),
     submitExtractionReview: (c: string, r: string, d: ExtractionReviewDecision[]) =>
       submitExtractionReview(c, r, d),
+    listExclusions: () => listExclusions(),
+    undoExclusions: (c: string, labels: string[]) => undoExclusions(c, labels),
   },
 }));
 
@@ -97,6 +102,13 @@ beforeEach(() => {
     report_id: "rpt-1", accepted: 2, created: 2, ignored: 0, rejected: 0,
     next: "/quarterly-report/rpt-1/outline",
   });
+  listExclusions.mockReset().mockResolvedValue({
+    company_id: "co-1",
+    exclusions: [
+      { source_label: "Note 14 reference", excluded_at: "2026-05-02T10:00:00Z" },
+    ],
+  });
+  undoExclusions.mockReset().mockResolvedValue({ company_id: "co-1", restored: 1 });
   navigateMock.mockReset();
 });
 
@@ -138,7 +150,9 @@ describe("quarterly extraction review", () => {
     // correcting the guesses, not answering a question per row.
     await renderPage();
     expect(screen.getByText(/2 to add/)).toBeInTheDocument();
-    expect(screen.queryByText(/excluded/)).toBeNull();
+    // The footer counter specifically — a bare /excluded/ also matches the
+    // excluded-lines panel's heading, which is always on the page.
+    expect(screen.queryByText(/· \d+ excluded/)).toBeNull();
     for (const id of ["doc-1#5", "doc-1#6"]) {
       const picker = within(rowFor(id)).getByRole("combobox", { name: /Section for/i });
       expect(picker).toHaveValue("Income Statement");
@@ -347,6 +361,69 @@ describe("quarterly extraction review", () => {
       fireEvent.click(screen.getByRole("button", { name: /Continue to outline/i }));
       await waitFor(() => expect(submitExtractionReview).toHaveBeenCalled());
       expect(submitted()[0]).toMatchObject({ unit_type: "percent" });
+    });
+  });
+
+  // Excluding is the only decision on this screen that outlives the report, so it
+  // is the only one that needed a way back. Without this a mis-click is permanent
+  // and the remedy is a hand-written DELETE against the database.
+  describe("excluded lines", () => {
+    it("is not fetched until the panel is opened", async () => {
+      await renderPage();
+      expect(listExclusions).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: /Lines you've excluded/i }));
+      await waitFor(() => expect(listExclusions).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText("Note 14 reference")).toBeInTheDocument();
+    });
+
+    it("brings a line back and stops showing it", async () => {
+      await renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /Lines you've excluded/i }));
+      await screen.findByText("Note 14 reference");
+
+      fireEvent.click(screen.getByRole("button", { name: /Ask me again/i }));
+      await waitFor(() =>
+        expect(undoExclusions).toHaveBeenCalledWith("co-1", ["Note 14 reference"]),
+      );
+      await waitFor(() => expect(screen.queryByText("Note 14 reference")).toBeNull());
+    });
+
+    it("is reachable when there is nothing left to file", async () => {
+      // The case that matters most: a user who excluded everything sees an empty
+      // review screen, and that is exactly when they need to get back in.
+      getExtractionReview.mockResolvedValue({
+        ...structuredClone(RESPONSE),
+        awaiting_review: false,
+        pending: [],
+        sources: [],
+        summary: { confirmed_count: 1, pending_count: 0, discarded_count: 0 },
+      });
+      await renderPage();
+      expect(screen.getByText(/Nothing left to file/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Lines you've excluded/i }));
+      expect(await screen.findByText("Note 14 reference")).toBeInTheDocument();
+    });
+
+    it("says so plainly when nothing has been excluded", async () => {
+      listExclusions.mockResolvedValue({ company_id: "co-1", exclusions: [] });
+      await renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /Lines you've excluded/i }));
+      expect(await screen.findByText(/haven't excluded anything yet/i)).toBeInTheDocument();
+    });
+
+    it("keeps the line listed when the restore fails", async () => {
+      // Removing it optimistically would tell the user it is back when it is not,
+      // and the next upload would skip it with no sign why.
+      undoExclusions.mockRejectedValue(new Error("network down"));
+      await renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /Lines you've excluded/i }));
+      await screen.findByText("Note 14 reference");
+
+      fireEvent.click(screen.getByRole("button", { name: /Ask me again/i }));
+      expect(await screen.findByText(/network down/i)).toBeInTheDocument();
+      expect(screen.getByText("Note 14 reference")).toBeInTheDocument();
     });
   });
 });
