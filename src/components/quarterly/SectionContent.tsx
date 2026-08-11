@@ -187,6 +187,12 @@ function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed.tables as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        // Per table, not per section: a sheet that stacked a grid and a list gives
+        // them different columns, and dropping these rendered the grid as a bare
+        // label/value pair with its categories gone.
+        comparePeriods: normalizeComparePeriods(t.compare_periods),
+        currentLabel: asString(t.current_label) ?? null,
+        matrixColumns: normalizeComparePeriods(t.matrix_columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {
