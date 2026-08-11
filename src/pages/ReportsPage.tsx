@@ -7,6 +7,7 @@ import {
   type ActivePipelineRecord,
 } from '@/lib/active-pipeline';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import type { Sector } from '@/types/company';
 import type {
   CountriesResponse,
@@ -98,8 +99,17 @@ function isEarningsReport(r: ReportSummary): boolean {
   return /earnings/i.test(r.title ?? '');
 }
 
+// IR Briefing reports (its own /ir-briefing/* feature — see ActiveReportsCard's
+// report_type map) also write into the same reports table and default to a
+// "QN-YYYY"-shaped period, so the period regex below would otherwise pull them
+// into this page's Quarterly gallery too.
+function isIRBriefingReport(r: ReportSummary): boolean {
+  return (r.report_type ?? '').toLowerCase() === 'ir_briefing' || /ir briefing/i.test(r.title ?? '');
+}
+
 function isQuarterlyReport(r: ReportSummary): boolean {
-  if (isEarningsReport(r)) return false;
+  if (isEarningsReport(r) || isIRBriefingReport(r)) return false;
+  if ((r.report_type ?? '').toLowerCase() === 'quarterly') return true;
   if (r.title?.toLowerCase().includes('quarterly')) return true;
   return /^Q[1-4][\s-]/i.test(r.period);
 }
@@ -241,6 +251,14 @@ export default function ReportsPage() {
   )
     ? 'quarterly'
     : 'esg';
+  // Per-action gating — a user might see this route (visible_features) but
+  // only have read, not create, or vice versa. create implies read, so the
+  // create form is never shown without also being able to see the read list
+  // it depends on (e.g. ESG's "select an existing report" dropdown).
+  const { canCreate: canCreateQuarterly, canRead: canReadQuarterly } =
+    useFeaturePermissions('quarterly_report');
+  const { canCreate: canCreateEsg, canRead: canReadEsg } =
+    useFeaturePermissions('esg_validator');
 
   // Dashboard "Generate ESG Report" modal hands off a payload here. We show
   // the full-width loading screen and run the same generate → coverage chain
@@ -776,7 +794,9 @@ export default function ReportsPage() {
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
           {activeTab === 'quarterly'
             ? 'Document-first quarterly results — figures, drivers & YoY narrative'
-            : 'Configure parameters & run the ESG & sustainability validator'}
+            : canCreateEsg
+              ? 'Configure parameters & run the ESG & sustainability validator'
+              : 'Review previously generated ESG & sustainability validator reports'}
         </p>
       </div>
 
@@ -841,13 +861,15 @@ export default function ReportsPage() {
         const quarterlyReportsList = existingReports.filter(isQuarterlyReport);
         return (
           <>
-            <QuarterlyReportForm
-              companyId={companyId}
-              existingReports={quarterlyReportsList}
-              periodsLoading={periodsLoading}
-            />
+            {canCreateQuarterly && (
+              <QuarterlyReportForm
+                companyId={companyId}
+                existingReports={quarterlyReportsList}
+                periodsLoading={periodsLoading}
+              />
+            )}
 
-            {quarterlyReportsList.length > 0 && (
+            {canReadQuarterly && quarterlyReportsList.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
@@ -875,6 +897,23 @@ export default function ReportsPage() {
                         <div style={{ background: gradient, padding: '20px 20px 22px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
                           <div style={{ position: 'absolute', top: -34, right: -34, width: 124, height: 124, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
                           <div style={{ position: 'absolute', bottom: -48, right: 26, width: 84, height: 84, borderRadius: '50%', background: 'rgba(255,255,255,.05)' }} />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 16,
+                              right: 16,
+                              fontSize: 9,
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              letterSpacing: '.5px',
+                              padding: '4px 9px',
+                              borderRadius: 999,
+                              background: isApprovedReport(r) ? '#fff' : 'rgba(255,255,255,.16)',
+                              color: isApprovedReport(r) ? '#059669' : '#fff',
+                            }}
+                          >
+                            {isApprovedReport(r) ? 'Approved' : 'Draft'}
+                          </div>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', opacity: .8, marginBottom: 10, position: 'relative' }}>
                             {r.title || 'Quarterly Report'}
                           </div>
@@ -921,6 +960,7 @@ export default function ReportsPage() {
       {activeTab === 'esg' && (
       <>
       {/* Generate New ESG Report — collapsible */}
+      {canCreateEsg && (
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer', borderBottom: genOpen ? '1px solid #ECEEF8' : 'none' }} onClick={() => setGenOpen(!genOpen)}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1489,12 +1529,13 @@ export default function ReportsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Recent Reports — driven by GET /api/v1/reports/{company_id}.
           While the list is loading we show a centered spinner. */}
-      {periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
+      {canReadEsg && periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
 
-      {esgReports.length > 0 && (
+      {canReadEsg && esgReports.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
           {esgReports.map((r, idx) => {
             const score = Math.round(r.coverage?.percentage ?? 0);

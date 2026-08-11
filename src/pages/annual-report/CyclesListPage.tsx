@@ -3,6 +3,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
 import { sarCycles } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import type { Cycle, CycleStatus } from '@/types/cycles';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import CycleForm from './CycleForm';
@@ -90,7 +91,8 @@ function StatTile({
 export default function CyclesListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canManage = user?.role === 'admin';
+  const { canCreate: canCreateAnnual, canRead: canReadAnnual } = useFeaturePermissions('annual_report');
+  const canManage = user?.role === 'admin' && canCreateAnnual;
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -108,8 +110,12 @@ export default function CyclesListPage() {
   };
 
   useEffect(() => {
+    if (!canReadAnnual) {
+      setLoading(false);
+      return;
+    }
     fetchCycles();
-  }, []);
+  }, [canReadAnnual]);
 
   const counts = useMemo(() => {
     const byStatus = (s: CycleStatus) => cycles.filter((c) => c.status === s).length;
@@ -172,6 +178,8 @@ export default function CyclesListPage() {
         <CycleForm onCreated={(cycle) => navigate(`/annual-report/cycles/${cycle.id}`)} />
       )}
 
+      {canReadAnnual && (
+      <>
       {/* Stat tiles */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
         <StatTile
@@ -316,6 +324,8 @@ export default function CyclesListPage() {
           </table>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

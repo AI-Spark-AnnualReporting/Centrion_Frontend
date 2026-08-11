@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { admin, adminConsole } from '@/lib/api';
+import { admin, adminConsole, adminUserPermissions } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER } from './admin-flags';
+import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER, SHOW_CHANGE_DEPARTMENT } from './admin-flags';
 import {
   ASSIGNABLE_ROLES,
   CAPABILITY_GROUPS,
@@ -12,14 +12,17 @@ import {
   roleLabel,
   type BackendRole,
 } from '@/constants/roles';
+import { GRANTABLE_FEATURES } from '@/constants/features';
 import type {
   AdminUserRow,
   Department,
   InviteUserPayload,
   InviteUserResponse,
   PermissionMatrix,
+  UserPermissionsResponse,
   UserStatus,
 } from '@/types/admin';
+import type { FeaturePermissions } from '@/types/auth';
 import { relativeTime } from '@/lib/time';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import { downloadText } from '@/lib/utils';
@@ -61,15 +64,42 @@ function normalizeUser(raw: any): AdminUserRow {
 // ── Role summary cards ─────────────────────────────────────────────────────
 function RoleCards({
   counts,
+  total,
   active,
   onPick,
+  onClear,
 }: {
   counts: Record<string, number>;
+  total: number;
   active: BackendRole | null;
   onPick: (role: BackendRole) => void;
+  onClear: () => void;
 }) {
   return (
     <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+      <button
+        type="button"
+        onClick={onClear}
+        className="card"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          padding: 14,
+          textAlign: 'left',
+          cursor: 'pointer',
+          border: active === null ? `1.5px solid ${PRIMARY}` : undefined,
+          boxShadow: active === null ? '0 4px 16px rgba(64,64,200,.16)' : undefined,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#9BA3C4' }} />
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>All</span>
+          </div>
+          <span style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>{total}</span>
+        </div>
+        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 6 }}>Every role, no filter</div>
+      </button>
       {ROLE_ORDER.map((role) => {
         const meta = ROLE_DISPLAY[role];
         const isActive = active === role;
@@ -746,8 +776,10 @@ export default function AdminUsersPage() {
 
       <RoleCards
         counts={counts}
+        total={users.length}
         active={roleFilter}
         onPick={(r) => setRoleFilter((prev) => (prev === r ? null : r))}
+        onClear={() => setRoleFilter(null)}
       />
 
       {view === 'users' ? (
@@ -915,7 +947,6 @@ function UsersView(props: {
                 <th>Status</th>
                 <th>Onboarding</th>
                 <th>Last active</th>
-                <th style={{ textAlign: 'right' }}>Reports</th>
                 <th style={{ width: 44 }} />
               </tr>
             </thead>
@@ -992,9 +1023,6 @@ function UsersView(props: {
                           <span style={{ color: '#C4C9DD' }}>Never</span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: "'DM Mono', monospace", fontWeight: 700, color: u.reports_count ? '#1A1D2E' : '#C4C9DD' }}>
-                        {u.reports_count ?? 0}
-                      </td>
                       <td style={{ textAlign: 'right' }}>
                         <span className={`uchev ${isOpen ? 'open' : ''}`}>
                           <svg
@@ -1011,7 +1039,7 @@ function UsersView(props: {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
+                        <td colSpan={7} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                             {SHOW_CHANGE_ROLE && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1044,7 +1072,7 @@ function UsersView(props: {
                             {/* Change department — for department_user and hod. They
                                 must always belong to a department, so there's no
                                 "none" option. */}
-                            {(u.role === 'department_user' || u.role === 'hod') && (
+                            {SHOW_CHANGE_DEPARTMENT && (u.role === 'department_user' || u.role === 'hod') && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
                                   Change department
@@ -1139,6 +1167,7 @@ function UsersView(props: {
                                 </span>
                               )}
                           </div>
+                          <UserPermissionsPanel user={u} />
                         </td>
                       </tr>
                     )}
@@ -1156,6 +1185,190 @@ function UsersView(props: {
 // Fragment wrapper so each user maps to two <tr> rows without key warnings.
 function RowGroup({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+// ── Per-user permissions (expanded row) ─────────────────────────────────────
+// Additive-only grants on top of this user's role defaults — a DIFFERENT
+// system from PermissionMatrixView below (that one is role-keyed and covers
+// admin-ops capabilities like manage_users_roles; this one is per-user and
+// covers the 16-key feature catalogue). Fetched fresh every time the row
+// opens rather than cached, since another admin could have changed it.
+function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<UserPermissionsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busyCell, setBusyCell] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    adminUserPermissions
+      .get(user.user_id)
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Could not load permissions.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user.user_id]);
+
+  const isDefault = (featureKey: string, action: string) =>
+    Boolean(data?.role_defaults?.[featureKey]?.[action as keyof FeaturePermissions]);
+
+  const extraGrant = (featureKey: string, action: string) =>
+    data?.extra_grants.find((g) => g.feature_key === featureKey && g.action === action);
+
+  const toggle = async (featureKey: string, action: string, nextChecked: boolean) => {
+    const cellKey = `${featureKey}:${action}`;
+    setBusyCell(cellKey);
+    try {
+      if (nextChecked) {
+        await adminUserPermissions.grant(user.user_id, featureKey, action);
+        setData((prev) =>
+          prev
+            ? { ...prev, extra_grants: [...prev.extra_grants, { feature_key: featureKey, action }] }
+            : prev,
+        );
+      } else {
+        await adminUserPermissions.revoke(user.user_id, featureKey, action);
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                extra_grants: prev.extra_grants.filter(
+                  (g) => !(g.feature_key === featureKey && g.action === action),
+                ),
+              }
+            : prev,
+        );
+      }
+      toast({
+        title: 'Permission updated',
+        description: "This change takes effect the next time the user logs in.",
+        variant: 'success',
+      });
+    } catch (e) {
+      toast({
+        title: 'Could not update permission',
+        description: e instanceof Error ? e.message : 'Something went wrong.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyCell(null);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        paddingTop: 14,
+        borderTop: '1px solid #E5E7EF',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#5A6080', marginBottom: 8 }}>
+        Additional permissions
+      </div>
+      {loading ? (
+        <Spinner />
+      ) : error ? (
+        <div style={{ fontSize: 12, color: '#DC2626' }}>{error}</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ECEEF8' }}>
+                <th
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#9BA3C4',
+                    textTransform: 'uppercase',
+                    letterSpacing: '.5px',
+                  }}
+                >
+                  Feature
+                </th>
+                {(['read', 'create', 'access'] as const).map((action) => (
+                  <th
+                    key={action}
+                    style={{
+                      textAlign: 'center',
+                      padding: '8px 10px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#9BA3C4',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.5px',
+                    }}
+                  >
+                    {action}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {GRANTABLE_FEATURES.map((feature) => (
+                <tr key={feature.key} style={{ borderBottom: '1px solid #F4F5FB' }}>
+                  <td style={{ padding: '8px 10px', fontSize: 12, color: '#1A1D2E' }}>{feature.label}</td>
+                  {(['read', 'create', 'access'] as const).map((action) => {
+                    if (!feature.actions.includes(action)) {
+                      return <td key={action} style={{ padding: '8px 10px' }} />;
+                    }
+                    const locked = isDefault(feature.key, action);
+                    const granted = Boolean(extraGrant(feature.key, action));
+                    const checked = locked || granted;
+                    const cellKey = `${feature.key}:${action}`;
+                    const disabled = locked || busyCell === cellKey;
+                    return (
+                      <td key={action} style={{ padding: '8px 10px', textAlign: 'center' }}>
+                        <span
+                          role="checkbox"
+                          aria-checked={checked}
+                          aria-disabled={disabled}
+                          title={locked ? 'Included in this role by default' : undefined}
+                          onClick={() => !disabled && toggle(feature.key, action, !checked)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 22,
+                            height: 22,
+                            borderRadius: 6,
+                            background: checked ? (locked ? '#E8EAF5' : '#4040C8') : '#fff',
+                            border: checked ? 'none' : '1.5px solid #E2E4F0',
+                            color: checked ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
+                            fontSize: 12,
+                            cursor: disabled ? 'default' : 'pointer',
+                            opacity: busyCell === cellKey ? 0.5 : 1,
+                          }}
+                        >
+                          {checked ? '✓' : '✕'}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Permission matrix ──────────────────────────────────────────────────────

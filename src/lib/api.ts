@@ -10,6 +10,7 @@
 import type {
   AuthUser,
   DepartmentOption,
+  JwtPermissionClaims,
   LoginResponse,
   OnboardingPayload,
   OnboardingResponse,
@@ -124,6 +125,7 @@ import type {
   RegenerateTempPasswordResponse,
   SavePermissionsPayload,
   TempPasswordResponse,
+  UserPermissionsResponse,
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
@@ -3756,6 +3758,29 @@ export const adminConsole = {
     }),
 };
 
+// Per-user feature-permission grants — additive-only on top of a user's role
+// defaults, distinct from the role-keyed matrix above (getPermissions/
+// savePermissions, which is a separate, older system: manage_users_roles etc).
+// A grant/revoke here only takes effect on the target user's NEXT login.
+export const adminUserPermissions = {
+  get: (userId: string) =>
+    request<UserPermissionsResponse>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions`,
+    ),
+
+  grant: (userId: string, featureKey: string, action: string) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions`,
+      { method: "POST", body: { feature_key: featureKey, action } },
+    ),
+
+  revoke: (userId: string, featureKey: string, action: string) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions/${encodeURIComponent(featureKey)}/${encodeURIComponent(action)}`,
+      { method: "DELETE" },
+    ),
+};
+
 // ---------------------------------------------------------------------------
 // SAR — Annual Report (Cycles). Separate backend (VITE_SAR_URL, :8010 local).
 // `sarRequest` is just `request` pinned to the SAR host; the Centriyon JWT is
@@ -4125,15 +4150,25 @@ export async function login(
   // onboarding flag, which we mirror onto the user (preferring the explicit
   // top-level field) so ProtectedRoute can gate on it.
   const user: AuthUser = { ...res.user };
-  const claims = parseJwtPayload<{
-    company_id?: string | null;
-    onboarding_completed?: boolean | null;
-  }>(res.access_token);
+  const claims = parseJwtPayload<
+    {
+      company_id?: string | null;
+      onboarding_completed?: boolean | null;
+    } & JwtPermissionClaims
+  >(res.access_token);
   if (user.company_id == null && claims && "company_id" in claims) {
     user.company_id = claims.company_id;
   }
   user.onboarding_completed =
     res.onboarding_completed ?? claims?.onboarding_completed ?? null;
+
+  // Feature/app permission system — computed once at login, baked into both
+  // the response and the JWT. Prefer the response field, fall back to the
+  // claim, same pattern as company_id above.
+  user.permissions = res.permissions ?? claims?.permissions ?? null;
+  user.visible_features = res.visible_features ?? claims?.visible_features ?? null;
+  user.apps = res.apps ?? claims?.apps ?? null;
+  user.default_app = res.default_app ?? claims?.default_app ?? null;
 
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -4164,19 +4199,29 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
   try {
     const user = JSON.parse(raw) as AuthUser;
-    // Nothing to backfill if both already present.
-    if (user.company_id != null && user.onboarding_completed != null) {
+    // Nothing to backfill if every field a prior session might be missing is
+    // already present. `visible_features` is checked by key presence, not
+    // nullish, since a legitimate empty array (a fully-locked-out user) must
+    // not be mistaken for "needs backfill".
+    if (
+      user.company_id != null &&
+      user.onboarding_completed != null &&
+      "visible_features" in user
+    ) {
       return user;
     }
 
     // Backfill from the JWT for sessions saved before these fields were
-    // captured, so the onboarding gate still resolves on a page reload.
+    // captured, so the onboarding gate + permission gates still resolve on a
+    // page reload.
     const token = getAuthToken();
     if (!token) return user;
-    const claims = parseJwtPayload<{
-      company_id?: string | null;
-      onboarding_completed?: boolean | null;
-    }>(token);
+    const claims = parseJwtPayload<
+      {
+        company_id?: string | null;
+        onboarding_completed?: boolean | null;
+      } & JwtPermissionClaims
+    >(token);
     if (!claims) return user;
     const merged: AuthUser = { ...user };
     if (merged.company_id == null && "company_id" in claims) {
@@ -4184,6 +4229,18 @@ export function getStoredUser(): AuthUser | null {
     }
     if (merged.onboarding_completed == null && "onboarding_completed" in claims) {
       merged.onboarding_completed = claims.onboarding_completed;
+    }
+    if (!("visible_features" in merged) && "visible_features" in claims) {
+      merged.visible_features = claims.visible_features;
+    }
+    if (!("permissions" in merged) && "permissions" in claims) {
+      merged.permissions = claims.permissions;
+    }
+    if (!("apps" in merged) && "apps" in claims) {
+      merged.apps = claims.apps;
+    }
+    if (!("default_app" in merged) && "default_app" in claims) {
+      merged.default_app = claims.default_app;
     }
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
     return merged;

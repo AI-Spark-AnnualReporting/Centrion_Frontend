@@ -221,11 +221,19 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={startDate}
                 onChange={(e) => {
                   const v = e.target.value;
+                  // Native date inputs fire onChange with an empty string on every
+                  // keystroke while a segment (day/month/year) is still incomplete —
+                  // committing that would reset the whole field mid-type. Only commit
+                  // once the date is fully valid; a real clear is caught on blur.
+                  if (!v) return;
                   setStartDate(v);
                   // Downstream dates can't precede the new start — clear them
                   // instead of leaving a now-invalid value in place.
                   if (endDate && endDate < v) setEndDate('');
                   if (submissionDeadline && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setStartDate('');
                 }}
               />
             </div>
@@ -238,9 +246,13 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={endDate}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v && startDate && v < startDate) return;
+                  if (!v) return;
+                  if (startDate && v < startDate) return;
                   setEndDate(v);
-                  if (submissionDeadline && v && submissionDeadline < v) setSubmissionDeadline('');
+                  if (submissionDeadline && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setEndDate('');
                 }}
               />
             </div>
@@ -253,8 +265,13 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={submissionDeadline}
                 onChange={(e) => {
                   const v = e.target.value;
+                  if (!v) return;
                   const floor = endDate && endDate > today ? endDate : today;
-                  setSubmissionDeadline(v && v < floor ? '' : v);
+                  if (v < floor) return;
+                  setSubmissionDeadline(v);
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setSubmissionDeadline('');
                 }}
               />
             </div>

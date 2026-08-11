@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { auth } from '@/lib/api';
 import type { UserProfile } from '@/types/auth';
-import { CompanyDetailsCard } from '@/components/profile/CompanyDetailsCard';
 
 // Header certification chips — also static placeholders.
 const CERTIFICATIONS = ['SAMA Licensed', 'GRI Certified'];
-
-// Active Standards section is hidden until the backend exposes a
-// per-company standards endpoint. Static demo previously rendered here:
-//   GRI Universal 2021 / IFRS S1 / S2 / SAMA Regulatory / CMA CGR / ISAE 3000 Assurance
-const ACTIVE_STANDARDS: Array<{ name: string; tone: 'green' | 'violet' }> = [];
 
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -51,14 +45,12 @@ export default function ProfilePage() {
   }, []);
 
   return (
-    // Bottom padding clears the fixed "Ask Centriyon" chatbot button so the
-    // Company Details card (and its Save button) don't sit under it.
     <div style={{ paddingBottom: 96 }}>
       {/* Page heading */}
       <div style={{ marginBottom: 14 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Profile</h2>
+        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>User Profile</h2>
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
-          Account settings and organisation preferences
+          Your account details
         </p>
       </div>
 
@@ -132,123 +124,58 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Two-column layout: Personal Information + Active Standards.
-              When there are no active standards to show (backend hasn't
-              exposed them yet), Personal Information takes the full row. */}
-          <div style={{ display: 'grid', gridTemplateColumns: ACTIVE_STANDARDS.length > 0 ? '1fr 1fr' : '1fr', gap: 14 }}>
-            {/* Personal Information */}
+          {/* Personal Information */}
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 14,
+              border: '1px solid #E2E4F0',
+              padding: '18px 22px',
+            }}
+          >
             <div
               style={{
-                background: '#fff',
-                borderRadius: 14,
-                border: '1px solid #E2E4F0',
-                padding: '18px 22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 14,
               }}
             >
-              <div
+              <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+                Personal Information
+              </span>
+              <button
+                type="button"
+                disabled
+                title="Profile edit will be wired up when the backend exposes the endpoint."
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: 14,
+                  padding: '5px 14px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#5A6080',
+                  background: '#fff',
+                  border: '1px solid #E2E4F0',
+                  borderRadius: 999,
+                  cursor: 'not-allowed',
+                  opacity: 0.7,
                 }}
               >
-                <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
-                  Personal Information
-                </span>
-                <button
-                  type="button"
-                  disabled
-                  title="Profile edit will be wired up when the backend exposes the endpoint."
-                  style={{
-                    padding: '5px 14px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: '#5A6080',
-                    background: '#fff',
-                    border: '1px solid #E2E4F0',
-                    borderRadius: 999,
-                    cursor: 'not-allowed',
-                    opacity: 0.7,
-                  }}
-                >
-                  Edit
-                </button>
-              </div>
-
-              <ProfileRow label="Full name" value={profile.full_name} />
-              <ProfileRow label="Email" value={profile.email} valueColor="#4040C8" />
-              <ProfileRow label="Phone" value={null} />
-              <ProfileRow label="Role" value={titleCase(profile.role)} />
-              <ProfileRow
-                label="Organisation"
-                value={profile.company_name ?? null}
-              />
-              <ProfileRow label="Location" value={null} />
+                Edit
+              </button>
             </div>
 
-            {/* Active Standards — only renders when we actually have data. */}
-            {ACTIVE_STANDARDS.length > 0 && (
-              <div
-                style={{
-                  background: '#fff',
-                  borderRadius: 14,
-                  border: '1px solid #E2E4F0',
-                  padding: '18px 22px',
-                }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E', marginBottom: 14 }}>
-                  Active Standards
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {ACTIVE_STANDARDS.map((s) => {
-                    const isGreen = s.tone === 'green';
-                    return (
-                      <div
-                        key={s.name}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 14px',
-                          borderRadius: 10,
-                          background: isGreen ? 'rgba(34,197,94,.08)' : 'rgba(64,64,200,.08)',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: isGreen ? '#16A34A' : '#4040C8',
-                          }}
-                        >
-                          {s.name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: '3px 10px',
-                            borderRadius: 999,
-                            background: isGreen ? 'rgba(34,197,94,.15)' : 'rgba(64,64,200,.15)',
-                            color: isGreen ? '#16A34A' : '#4040C8',
-                          }}
-                        >
-                          Active
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            <ProfileRow label="Full name" value={profile.full_name} />
+            <ProfileRow label="Email" value={profile.email} valueColor="#4040C8" />
+            <ProfileRow label="Phone" value={null} />
+            <ProfileRow label="Role" value={titleCase(profile.role)} />
+            <ProfileRow
+              label="Organisation"
+              value={profile.company_name ?? null}
+            />
+            <ProfileRow label="Location" value={null} />
           </div>
         </>
       )}
-
-      {/* Company Details — loads independently; visible to all roles, editable
-          by admin only. */}
-      <CompanyDetailsCard />
     </div>
   );
 }

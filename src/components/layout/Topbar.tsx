@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { NotificationBell } from './NotificationBell';
+import { AppSwitcher } from './AppSwitcher';
 
 interface TopbarProps {
   pageName: string;
@@ -35,6 +36,7 @@ export function Topbar({ pageName }: TopbarProps) {
         )}
       </div>
       <div className="tb-actions">
+        <AppSwitcher />
         <NotificationBell />
         <div className="tb-av">{initials}</div>
         <div>

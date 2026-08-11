@@ -3,6 +3,7 @@ import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
 import { Spinner } from '@/components/shared/Spinner';
+import { useAuth } from '@/context/AuthContext';
 import { ApiError, auth, companies, quarterlyReports } from '@/lib/api';
 import type { BrandColors, ColorPalette } from '@/types/brand';
 import {
@@ -20,9 +21,12 @@ import {
 import type { CompanyBrandUpdate } from '@/types/company';
 
 // The three brand values from onboarding step 3, editable after the fact —
-// admin-only, matching PATCH /companies/me. Structurally a sibling of
-// components/profile/CompanyDetailsCard.tsx: load once, diff against the loaded
-// baseline, PATCH only what changed, report inline.
+// visible to anyone with profile access (rendered as a section of the Company
+// Profile page), editable by admin only, matching PATCH /companies/me.
+// Structurally a sibling of components/profile/CompanyDetailsCard.tsx: load
+// once, diff against the loaded baseline, PATCH only what changed, report
+// inline. Non-admin viewers get every control wrapped in a disabled
+// <fieldset> — same read-only pattern CompanyDetailsCard uses.
 //
 // The whole backend for this already existed:
 //   GET  /companies/me       → brand_identity + brand_colors (logo stripped)
@@ -48,7 +52,11 @@ const FALLBACK_BRAND: BrandColors = {
   palette_key: FALLBACK_COLOR_PALETTES[0].key,
 };
 
-export default function BrandIdentityPage() {
+// hideHeading — when rendered as a tab of Company Profile, that page's own
+// header already says "Brand Identity"; repeating it here would be redundant.
+export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boolean } = {}) {
+  const { user } = useAuth();
+  const canEdit = user?.role === 'admin';
   const [baseline, setBaseline] = useState<Baseline | null>(null);
   const [identity, setIdentity] = useState('');
   const [colors, setColors] = useState<BrandColors>(FALLBACK_BRAND);
@@ -206,14 +214,17 @@ export default function BrandIdentityPage() {
 
   return (
     // Bottom padding clears the fixed "Ask Centriyon" chatbot button so the
-    // Save bar doesn't sit under it — same as ProfilePage.
-    <div style={{ paddingBottom: 96 }}>
+    // Save bar doesn't sit under it — same as ProfilePage. Skipped when
+    // embedded as a Company Profile tab, which already provides it.
+    <div style={hideHeading ? undefined : { paddingBottom: 96 }}>
+      {!hideHeading && (
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Brand Identity</h2>
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
           Your logo, brand language and colors — used across the reports you generate
         </p>
       </div>
+      )}
 
       {loading ? (
         <div className="card"><div className="cb"><Spinner pad={32} /></div></div>
@@ -232,6 +243,7 @@ export default function BrandIdentityPage() {
               </div>
             </div>
             <div className="cb">
+              <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0 }}>
               <BrandUploadBox
                 icon="🖼️"
                 prompt="Drag your logo here"
@@ -259,6 +271,7 @@ export default function BrandIdentityPage() {
                 applied={logoColors.applied}
                 onUndo={logoColors.undo}
               />
+              </fieldset>
             </div>
           </div>
 
@@ -273,6 +286,7 @@ export default function BrandIdentityPage() {
               </div>
             </div>
             <div className="cb">
+              <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0 }}>
               <BrandUploadBox
                 icon="📄"
                 prompt="Drag a new guideline here"
@@ -314,6 +328,7 @@ export default function BrandIdentityPage() {
                   </div>
                 )}
               </div>
+              </fieldset>
             </div>
           </div>
 
@@ -338,17 +353,20 @@ export default function BrandIdentityPage() {
               {/* forget() first: a colour the user picked by hand must not be
                   relabelled as "set from your logo", nor overwritten by a
                   detection that is still in flight. */}
+              <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0 }}>
               <BrandColorPicker
                 palettes={palettes}
                 value={colors}
                 onChange={(next) => { logoColors.forget(); setColors(next); }}
               />
+              </fieldset>
             </div>
           </div>
 
           {error && <Banner tone="error" spaced>{error}</Banner>}
           {success && <Banner tone="success" spaced>{success}</Banner>}
 
+          {canEdit && (
           <div style={{ marginTop: 22, display: 'flex', justifyContent: 'flex-end' }}>
             <button
               className="btn bp"
@@ -359,6 +377,7 @@ export default function BrandIdentityPage() {
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
+          )}
         </>
       )}
     </div>

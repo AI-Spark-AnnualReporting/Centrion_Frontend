@@ -3,6 +3,7 @@
 // degrades gracefully rather than crashing on a missing key.
 
 import type { BackendRole } from "@/constants/roles";
+import type { FeaturePermissions } from "@/types/auth";
 
 export type UserStatus = "active" | "invited" | "suspended";
 
@@ -212,6 +213,31 @@ export interface SavePermissionsPayload {
   role: BackendRole;
   capability: string;
   enabled: boolean;
+}
+
+// ── Per-user permissions (GET/POST/DELETE /api/v1/admin/users/{id}/permissions) ──
+// A DIFFERENT system from PermissionMatrix above: per-user rather than
+// per-role, additive-only (grants can only add beyond role_defaults, never
+// remove them). Do not merge with PermissionMatrix/SavePermissionsPayload.
+export type RoleDefaults = Record<string, FeaturePermissions>;
+
+export interface ExtraGrant {
+  feature_key: string;
+  action: string;
+}
+
+export interface FeatureCatalogueEntry {
+  key: string;
+  label?: string;
+  actions: string[];
+}
+
+export interface UserPermissionsResponse {
+  user_id: string;
+  role: BackendRole;
+  role_defaults: RoleDefaults;
+  extra_grants: ExtraGrant[];
+  features: Record<string, FeatureCatalogueEntry>;
 }
 
 // ── Departments (/api/v1/admin/departments) ────────────────────────────────
