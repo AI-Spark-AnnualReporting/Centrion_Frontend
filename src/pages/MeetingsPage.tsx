@@ -16,6 +16,7 @@ import type {
 import type { Company } from '@/types/company';
 import type { Cycle } from '@/types/cycles';
 import { useAuth } from '@/context/AuthContext';
+import { canCreateFeature } from '@/lib/features';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
@@ -522,6 +523,7 @@ export default function MeetingsPage() {
   const navigate = useNavigate();
   const companyId = user?.company_id ?? null;
   const companyName = user?.company_name ?? '';
+  const canCreateMeeting = canCreateFeature(user, 'board_meetings');
   const today = useMemo(() => new Date(), []);
   const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -680,10 +682,12 @@ export default function MeetingsPage() {
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v6.5M3.5 5.5L6 8l2.5-2.5M2 10h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
             Export
           </button>
-          <button className="btn bp" onClick={() => setScheduleOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px' }}>
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            Schedule Meeting
-          </button>
+          {canCreateMeeting && (
+            <button className="btn bp" onClick={() => setScheduleOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px' }}>
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="white" strokeWidth="1.6" strokeLinecap="round" /></svg>
+              Schedule Meeting
+            </button>
+          )}
         </div>
       </div>
 
@@ -771,7 +775,12 @@ export default function MeetingsPage() {
                   <button className="btn bs bsm" onClick={() => setSelectedDate(null)} style={{ padding: '3px 9px', fontSize: 10 }}>Clear</button>
                 </div>
                 {selectedItems.length === 0 ? (
-                  <div style={{ fontSize: 11, color: '#9BA3C4' }}>Nothing scheduled. <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>Add a meeting →</button></div>
+                  <div style={{ fontSize: 11, color: '#9BA3C4' }}>
+                    Nothing scheduled.
+                    {canCreateMeeting && (
+                      <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}> Add a meeting →</button>
+                    )}
+                  </div>
                 ) : (
                   selectedItems.map((it) =>
                     it.kind === 'meeting' ? (
@@ -853,9 +862,11 @@ export default function MeetingsPage() {
             ) : upcoming.length === 0 ? (
               <div style={{ padding: '28px 4px', textAlign: 'center', color: '#9BA3C4', fontSize: 12, lineHeight: 1.6 }}>
                 Nothing upcoming. Report deadlines and cycle dates appear here as they're set up.{' '}
-                <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
-                  Schedule a meeting →
-                </button>
+                {canCreateMeeting && (
+                  <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
+                    Schedule a meeting →
+                  </button>
+                )}
               </div>
             ) : (
               upcoming.map((it, i) => {

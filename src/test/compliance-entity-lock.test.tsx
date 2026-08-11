@@ -25,7 +25,12 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ user: { company_id: "c1" } }),
+  useAuth: () => ({
+    user: {
+      company_id: "c1",
+      permissions: { compliance_validation: { read: true, create: true } },
+    },
+  }),
 }));
 
 vi.mock("@/context/ComplianceRunsContext", () => ({
