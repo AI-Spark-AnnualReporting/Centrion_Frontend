@@ -14,6 +14,12 @@ const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: F
   // annual_report access lives in the spark_studio workspace app, reached via
   // the app switcher — not a per-item deep link.
   { key: 'annual', label: 'Annual', path: '/annual-report', featureKey: 'annual_report', allowedRoles: ['admin', 'ir'] },
+  // The board-report builder. Its own top-level path rather than a child of
+  // /annual-report, so opening it doesn't also light up "Annual" (that item
+  // matches on prefix, and must keep matching /annual-report/cycles/...). Its
+  // own feature key (board_report) — gated independently of Annual Report,
+  // no role restriction (unlike annual, it's not admin/ir-only).
+  { key: 'board', label: 'Board Report', path: '/board-report', featureKey: 'board_report' },
 ];
 
 // Sub-sections shown when the "Reports Validator" item is expanded — the two

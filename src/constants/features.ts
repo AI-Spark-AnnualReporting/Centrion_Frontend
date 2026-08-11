@@ -1,6 +1,12 @@
-// Single source of truth for the backend's 16-key feature catalogue. Never
-// hardcode a feature key inline — import from here. Mirrors the convention in
+// Single source of truth for the backend's feature catalogue. Never hardcode
+// a feature key inline — import from here. Mirrors the convention in
 // src/constants/roles.ts.
+//
+// board_report is new (added when the Board of Directors' Report builder
+// landed on staging) and isn't part of the original 16-key catalogue — the
+// backend needs GRANTABLE_FEATURE_KEYS/role_defaults/visible_features updated
+// to actually grant it. Until then it fails closed (hidden for everyone),
+// which is the safe default, not a bug.
 //
 // Visibility is computed entirely server-side into `visible_features` on
 // login — this file never recomputes gating/derivation rules, it only names
@@ -14,6 +20,7 @@ export type FeatureKey =
   | "quarterly_report"
   | "earnings_report"
   | "annual_report"
+  | "board_report"
   | "esg_validator"
   | "compliance_validation"
   | "board_meetings"
@@ -37,6 +44,7 @@ export const CATALOGUED_FEATURE_KEYS: FeatureKey[] = [
   "quarterly_report",
   "earnings_report",
   "annual_report",
+  "board_report",
   "esg_validator",
   "compliance_validation",
   "board_meetings",
@@ -62,6 +70,7 @@ export const GRANTABLE_FEATURES: GrantableFeature[] = [
   { key: "command_center", label: "Command Center", actions: ["read"] },
   { key: "quarterly_report", label: "Quarterly Report", actions: ["read", "create"] },
   { key: "earnings_report", label: "Earnings Report", actions: ["read", "create"] },
+  { key: "board_report", label: "Board Report", actions: ["read", "create"] },
   { key: "esg_validator", label: "ESG Validator", actions: ["read", "create"] },
   { key: "compliance_validation", label: "Compliance Validation", actions: ["read", "create"] },
   { key: "board_meetings", label: "Board & Meetings", actions: ["read", "create"] },
