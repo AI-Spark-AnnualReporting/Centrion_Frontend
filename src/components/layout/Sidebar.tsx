@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { SAR_APP_URL } from '@/lib/sar';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. Annual lives in the separate
@@ -132,7 +133,7 @@ export function Sidebar() {
         : user?.role === 'department_user'
           ? '/department'
           : '/admin';
-    window.location.href = `http://localhost:3000${seg}`;
+    window.location.href = `${SAR_APP_URL}${seg}`;
   };
 
   const handleLogout = () => {

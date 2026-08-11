@@ -7,7 +7,7 @@
 
 import { getToken } from "@/lib/api";
 
-const SAR_APP_URL = (
+export const SAR_APP_URL = (
   import.meta.env.VITE_SAR_APP_URL ?? "http://localhost:3000"
 ).replace(/\/+$/, "");
 
