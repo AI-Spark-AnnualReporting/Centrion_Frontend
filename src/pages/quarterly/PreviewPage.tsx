@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
@@ -12,6 +12,7 @@ import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSe
 import {
   isCoverSection,
   sectionState,
+  isProducing,
   wantsInput,
   neededInput,
   sourceTypeLabel,
@@ -100,11 +101,13 @@ function RailItem({
   onClick: () => void;
 }) {
   const state = sectionState(section);
-  const drafting = section.status === 'drafting';
+  // A section still in the production queue spins like one being drafted, because
+  // that is what it is — waiting, not missing.
+  const drafting = section.status === 'drafting' || state === 'pending';
   const produced = state === 'produced';
   const needs = wantsInput(state); // needs_input + no-data both want the user's input
 
-  // dot: green produced · amber needs-input · accent(spin) drafting · grey empty
+  // dot: green produced · amber needs-input · accent(spin) waiting/drafting · grey empty
   const dotBg = produced ? GREEN_LIGHT : needs ? AMBER_LIGHT : drafting ? ACCENT : '#F1F2F6';
   const dotColor = produced ? GREEN : needs ? AMBER : drafting ? '#fff' : MUTED;
   const dotBorder = produced ? '#A7F3D0' : needs ? '#FDE68A' : drafting ? ACCENT : '#E5E7EF';
@@ -181,7 +184,9 @@ function RailItem({
 function StatusPill({ section }: { section: ProducedSection }) {
   const state = sectionState(section);
   const drafting = section.status === 'drafting';
-  const cfg = drafting
+  const cfg = state === 'pending'
+    ? { label: 'Waiting…', color: ACCENT, bg: '#EEEEFF', tick: false }
+    : drafting
     ? { label: 'Composing…', color: ACCENT, bg: '#EEEEFF', tick: false }
     : state === 'produced'
       ? { label: 'Produced', color: GREEN, bg: GREEN_LIGHT, tick: true }
@@ -215,6 +220,14 @@ export default function PreviewPage() {
   const companyId = user?.company_id ?? null;
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
+  // Read by the production poll. A ref rather than the state itself so patching one
+  // section does not tear down and restart the interval on every tick.
+  const sectionsRef = useRef<ProducedSection[]>([]);
+  sectionsRef.current = sections;
+  // Batch production runs in the background after the outline is locked and takes
+  // minutes on a large report, so Preview is routinely opened while it is still
+  // working. Declared here because the poll effect below reads it.
+  const producing = isProducing(sections);
   // Only for the step indicator — Custom reports have an extra Financial Data step.
   const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -370,6 +383,35 @@ export default function PreviewPage() {
     };
   }, [companyId, reportId, retryKey, patchSection]);
 
+  // ── while batch production is still running, re-read the sections it hasn't
+  // reached yet. Production is kicked from the Outline and runs in the background;
+  // on a 49-section report it takes minutes, so Preview is routinely opened partway
+  // through. Without this the page shows whatever was true at load and never moves.
+  //
+  // Only the pending ones are re-fetched — a produced section will not change under
+  // us, and re-reading forty of them every few seconds to learn nothing is waste.
+  useEffect(() => {
+    if (!companyId || !reportId || !producing) return;
+    let cancelled = false;
+
+    const id = window.setInterval(async () => {
+      const waiting = sectionsRef.current.filter((s) => sectionState(s) === 'pending');
+      if (!waiting.length) return;
+      const results = await Promise.allSettled(
+        waiting.map((s) => quarterlyReports.getSection(companyId, reportId, s.section_code)),
+      );
+      if (cancelled) return;
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') patchSection(waiting[i].section_code, r.value);
+      });
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [companyId, reportId, producing, patchSection]);
+
   // ── produce a single section (manual): needs_input / no-data (empty) sections
   // let the user PROVIDE the content as text (a document is extracted into the
   // field first, see handleExtract). Saved via produce — Template sections keep
@@ -477,6 +519,7 @@ export default function PreviewPage() {
   // i.e. nothing is still waiting on the user (needs_input, unfilled).
   const allResolved =
     total > 0 &&
+    !producing &&
     sections.every((s) => sectionState(s) !== 'needs_input' || skipped.has(s.section_code));
   const doneCount = sections.filter((s) => sectionState(s) === 'produced').length;
 
@@ -653,8 +696,13 @@ export default function PreviewPage() {
         <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
           ← Back
         </button>
-        <span style={{ fontSize: 13, color: allResolved ? GREEN : MUTED, fontWeight: 600 }}>
-          {doneCount} of {total} produced
+        <span
+          style={{ fontSize: 13, color: allResolved ? GREEN : producing ? ACCENT : MUTED, fontWeight: 600 }}
+          aria-live="polite"
+        >
+          {producing
+            ? `Producing sections… ${doneCount} of ${total} done`
+            : `${doneCount} of ${total} produced`}
         </span>
         <button
           className="bp"
@@ -760,7 +808,9 @@ function SectionPanel({
   // Input-seeking states (needs_input / empty) stay in their own panel while
   // saving (button shows "Saving…") — only a fresh produce shows the full
   // "Composing…" spinner.
-  const drafting = (section.status === 'drafting' || busy) && state !== 'produced' && !wantsInput(state);
+  const drafting =
+    (section.status === 'drafting' || busy || state === 'pending')
+    && state !== 'produced' && !wantsInput(state);
   const canRefine = state === 'produced' && section.mode === 'generate';
 
   // 1) Composing (produce in-flight)
@@ -771,7 +821,11 @@ function SectionPanel({
           <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
           <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Composing this section…</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {state === 'pending' && !busy
+            ? 'Waiting to be produced — this section has not been reached yet.'
+            : 'Composing this section…'}
+        </span>
       </div>
     );
   }

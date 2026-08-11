@@ -468,7 +468,18 @@ export interface OutlineLockResponse {
 //   - mode 'generate'       → analytical prose text.
 //   - mode 'template'       → filled boilerplate text.
 //   - null                  → not produced yet.
-export type SectionStatus = "pending" | "drafting" | "done";
+// quarterly_report_sections.status, as the DB's own CHECK constraint defines it.
+// This used to read "pending" | "drafting" | "done", and "done" is a value the
+// backend has never sent — which is why sectionState() had to cast to string to
+// compare against "needs_input". A type that lies about the values it holds hides
+// exactly the comparison you most want checked.
+export type SectionStatus =
+  | "pending"      // in the outline, not produced yet
+  | "drafting"     // being produced right now
+  | "locked"
+  | "produced"
+  | "needs_input"  // produced, and it needs something from the user
+  | "empty";       // produced, and there was nothing to put in it
 
 export interface ProducedSection {
   section_code: string;

@@ -86,7 +86,9 @@ function toProduced(s: AssembledSection): ProducedSection {
     display_order: s.display_order ?? 0,
     source_type: s.source_type ?? '',
     mode: s.mode,
-    status: 'done',
+    // /assemble only ever returns sections that were produced, and this shape is
+    // synthesised rather than read — "done" was a value the backend has never sent.
+    status: 'produced',
     content,
     feeder_status: 'ready',
   };
