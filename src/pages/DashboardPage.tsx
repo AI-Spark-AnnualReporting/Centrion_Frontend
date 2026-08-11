@@ -12,9 +12,10 @@ import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  // Admins default to the Home (workspace) tab; other roles (e.g. ir) keep ESG.
-  const [activeTab, setActiveTab] = useState<'home' | 'esg' | 'brd'>(isAdmin ? 'home' : 'esg');
+  // Home (the workspace overview) is the primary Command Center view — anyone
+  // reaching this page already has command_center permission (route-gated in
+  // App.tsx), so it's not restricted to admins.
+  const [activeTab, setActiveTab] = useState<'home' | 'esg' | 'brd'>('home');
   const [esgModalOpen, setEsgModalOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   // Bumped on every successful schedule so the Board dashboard re-fetches its
@@ -92,8 +93,8 @@ export default function DashboardPage() {
         {/* Right — tab switcher with the action button stacked just beneath it (close, right-aligned) */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
           <div className="tabs" style={{ marginBottom: 0 }}>
-            {/* Home (workspace) tab — admin only, sits to the left of ESG. */}
-            {isAdmin && <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>}
+            {/* Home (workspace) tab — sits to the left of ESG. */}
+            <button className={`tab ${activeTab === 'home' ? 'act' : ''}`} onClick={() => setActiveTab('home')}>Home</button>
             <button className={`tab ${activeTab === 'esg' ? 'act' : ''}`} onClick={() => setActiveTab('esg')}>ESG</button>
             {/* Financial tab hidden until the financial dashboard is wired up. */}
             <button className={`tab ${activeTab === 'brd' ? 'act' : ''}`} onClick={() => setActiveTab('brd')}>Board</button>
@@ -126,7 +127,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {isAdmin && activeTab === 'home' && <DashboardWorkspace company={gate.companyData} companyName={displayName} />}
+      {activeTab === 'home' && <DashboardWorkspace company={gate.companyData} companyName={displayName} />}
       {activeTab === 'esg' && <DashboardESG />}
       {activeTab === 'brd' && <DashboardBoard refreshKey={meetingsRefresh} />}
 

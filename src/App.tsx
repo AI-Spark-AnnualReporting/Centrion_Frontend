@@ -19,7 +19,7 @@ import KPIPage from "./pages/KPIPage";
 import AIPage from "./pages/AIPage";
 import DocsPage from "./pages/DocsPage";
 import ProfilePage from "./pages/ProfilePage";
-import BrandIdentityPage from "./pages/BrandIdentityPage";
+import CompanyProfilePage from "./pages/CompanyProfilePage";
 import UploadReportsPage from "./pages/UploadReportsPage";
 import MeetingsPage from "./pages/MeetingsPage";
 import { CommsPage } from "./pages/OtherPages";
@@ -113,71 +113,106 @@ const App = () => (
         {/* First-login onboarding — also shell-less, same as change-password. */}
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route element={<AppLayout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          {/* Quarterly shares ReportsPage (route-driven view), surfaced as a
-              sidebar child of Reports. Static path outranks /reports/:reportId. */}
-          <Route path="/reports/quarterly" element={<ReportsPage />} />
+          <Route element={<ProtectedRoute requiredFeature="command_center" />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+          </Route>
+          {/* /reports (bare) is the ESG Validator entry point; /reports/quarterly
+              shares the same component (route-driven view) but is the Quarterly
+              entry point — gated separately since a user can have one feature
+              without the other. /reports/processing and /reports/:reportId are
+              shared deep-flow pages reachable from either entry point, so they're
+              deliberately left ungated here rather than guessing which feature
+              owns them. */}
+          <Route element={<ProtectedRoute requiredFeature="esg_validator" />}>
+            <Route path="/reports" element={<ReportsPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="quarterly_report" />}>
+            <Route path="/reports/quarterly" element={<ReportsPage />} />
+            {/* Step 2 — confirm which extracted figures are which metric. Sits before
+                the outline: the outline's data badges are only meaningful once the
+                figure set is settled. */}
+            <Route path="/quarterly-report/:reportId/extraction" element={<ExtractionReviewPage />} />
+            <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
+            <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />
+            <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
+          </Route>
           <Route path="/reports/processing" element={<ProcessingPage />} />
           <Route path="/reports/:reportId" element={<ReportDetailPage />} />
-          {/* Step 2 — confirm which extracted figures are which metric. Sits before
-              the outline: the outline's data badges are only meaningful once the
-              figure set is settled. */}
-          <Route path="/quarterly-report/:reportId/extraction" element={<ExtractionReviewPage />} />
-          <Route path="/quarterly-report/:reportId/outline" element={<OutlinePage />} />
-          <Route path="/quarterly-report/:reportId/preview" element={<PreviewPage />} />
-          <Route path="/quarterly-report/:reportId/report" element={<AssembledReportPage />} />
           {/* Earnings report (Part 1 = setup). Static /earnings/setup is declared
               before the /earnings/:reportId param route so it outranks it. */}
-          <Route path="/earnings/setup" element={<EarningsSetupPage />} />
-          <Route path="/earnings/:reportId/extract" element={<EarningsExtractPage />} />
-          <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
-          <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
-          <Route path="/kpi" element={<KPIPage />} />
-          <Route path="/compliance" element={<ComplianceSetupPage />} />
-          {/* The 30–60s wait after POST /runs gets its own screen so the run is
-              deep-linkable and a refresh resumes polling instead of losing it. */}
-          <Route
-            path="/compliance/runs/:runId/running"
-            element={<ComplianceRunningPage />}
-          />
-          <Route
-            path="/compliance/runs/:runId"
-            element={<ComplianceReviewPage />}
-          />
-          <Route
-            path="/compliance/runs/:runId/gate"
-            element={<ComplianceGatePage />}
-          />
-          <Route
-            path="/compliance/runs/:runId/certificate"
-            element={<CertificatePage />}
-          />
-          <Route path="/ai" element={<AIPage />} />
-          <Route path="/meetings" element={<MeetingsPage />} />
+          <Route element={<ProtectedRoute requiredFeature="earnings_report" />}>
+            <Route path="/earnings/setup" element={<EarningsSetupPage />} />
+            <Route path="/earnings/:reportId/extract" element={<EarningsExtractPage />} />
+            <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
+            <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="kpi_normalizer" />}>
+            <Route path="/kpi" element={<KPIPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="compliance_validation" />}>
+            <Route path="/compliance" element={<ComplianceSetupPage />} />
+            {/* The 30–60s wait after POST /runs gets its own screen so the run is
+                deep-linkable and a refresh resumes polling instead of losing it. */}
+            <Route
+              path="/compliance/runs/:runId/running"
+              element={<ComplianceRunningPage />}
+            />
+            <Route
+              path="/compliance/runs/:runId"
+              element={<ComplianceReviewPage />}
+            />
+            <Route
+              path="/compliance/runs/:runId/gate"
+              element={<ComplianceGatePage />}
+            />
+            <Route
+              path="/compliance/runs/:runId/certificate"
+              element={<CertificatePage />}
+            />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="ai_copilot" />}>
+            <Route path="/ai" element={<AIPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="board_meetings" />}>
+            <Route path="/meetings" element={<MeetingsPage />} />
+          </Route>
           {/* The IR Calendar was merged into Board & Meetings — its disclosure
               deadlines now render on that page's grid. Kept as a redirect so
               old bookmarks and links don't 404. */}
           <Route path="/ir-calendar" element={<Navigate to="/meetings" replace />} />
-          <Route path="/comms" element={<CommunicationHubPage />} />
-          {/* Notification deep-link — opens the thread-view modal on the hub. */}
-          <Route
-            path="/communications/threads/:threadId"
-            element={<CommunicationHubPage />}
-          />
-          <Route path="/stakeholders" element={<StakeholdersPage />} />
-          <Route path="/docs" element={<DocsPage />} />
-          <Route path="/questions" element={<QuestionsPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          {/* Brand Identity — the onboarding Brand step's three values, editable
-              after the fact. Admin-only because PATCH /companies/me is; the
-              sidebar item is gated to match so it's never a dead link. */}
+          <Route element={<ProtectedRoute requiredFeature="communication_hub" />}>
+            <Route path="/comms" element={<CommunicationHubPage />} />
+            {/* Notification deep-link — opens the thread-view modal on the hub. */}
+            <Route
+              path="/communications/threads/:threadId"
+              element={<CommunicationHubPage />}
+            />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="leadership" />}>
+            <Route path="/stakeholders" element={<StakeholdersPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="document_bank" />}>
+            <Route path="/docs" element={<DocsPage />} />
+          </Route>
+          <Route element={<ProtectedRoute requiredFeature="questions_bank" />}>
+            <Route path="/questions" element={<QuestionsPage />} />
+          </Route>
+          {/* Profile — User Profile (personal info) and Company Profile
+              (company details + brand identity, editable by admin only —
+              gated internally by each card/section, not the route). Both
+              live under the same "profile" feature. */}
+          <Route element={<ProtectedRoute requiredFeature="profile" />}>
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/profile/company" element={<CompanyProfilePage />} />
+          </Route>
+          {/* Brand Identity moved into Company Profile — redirect old
+              bookmarks/links so they don't 404. */}
+          <Route path="/brand-identity" element={<Navigate to="/profile/company" replace />} />
+          {/* The onboarding upload step, reachable after the fact — onboarding
+              can be skipped, which otherwise leaves the account with no
+              documents and no way to run the ingest. Admin-only to match. */}
           <Route element={<ProtectedRoute requiredRole="admin" />}>
-            <Route path="/brand-identity" element={<BrandIdentityPage />} />
-            {/* The onboarding upload step, reachable after the fact — onboarding
-                can be skipped, which otherwise leaves the account with no
-                documents and no way to run the ingest. Admin-only to match. */}
             <Route path="/upload-reports" element={<UploadReportsPage />} />
           </Route>
           {/* Admin Console — admin-only, rendered inside the main shell so the
@@ -194,7 +229,7 @@ const App = () => (
               sidebar + topbar stay. Admins manage cycles; IR is read-only
               (create/edit hidden in the pages). No separate /new route — the
               create form lives on the list page (ESG-style). */}
-          <Route element={<ProtectedRoute requiredRole={["admin", "ir"]} />}>
+          <Route element={<ProtectedRoute requiredRole={["admin", "ir"]} requiredFeature="annual_report" />}>
             <Route path="/annual-report" element={<CyclesListPage />} />
             <Route
               path="/annual-report/cycles/:cycleId"

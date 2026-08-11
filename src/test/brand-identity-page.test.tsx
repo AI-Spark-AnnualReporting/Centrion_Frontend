@@ -22,6 +22,14 @@ const extractBrandLanguage = vi.fn();
 const detectLogoColors = vi.fn();
 const getColorPalettesGlobal = vi.fn();
 
+// The page now disables every field for non-admins (it's reachable by anyone
+// with profile access, not just admins, since it's folded into Company
+// Profile) — mock an admin so this file's existing save-payload assertions
+// keep exercising the editable path.
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: { role: "admin" } }),
+}));
+
 // Mock the real export names — see onboarding-brand-step.test.tsx for why that
 // matters. brand-identity-api-contract.test.tsx is the backstop.
 vi.mock("@/lib/api", () => ({

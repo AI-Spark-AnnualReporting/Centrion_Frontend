@@ -7,6 +7,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { ApiError, companies, complianceValidation } from '@/lib/api';
 import { rememberScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import { useComplianceRuns } from '@/context/ComplianceRunsContext';
 import type {
   Candidate,
@@ -567,6 +568,7 @@ export default function ComplianceSetupPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? '';
+  const { canCreate, canRead } = useFeaturePermissions('compliance_validation');
   // So a new run is in the dock the moment it is accepted, rather than whenever
   // the next discovery sweep happens to come round.
   const { report: reportRun } = useComplianceRuns();
@@ -989,8 +991,10 @@ export default function ComplianceSetupPage() {
   return (
     <div>
       <ComplianceHeader />
-      <ComplianceStepper activeStep={1} />
 
+      {canCreate && (
+      <>
+      <ComplianceStepper activeStep={1} />
       {/* ── Card 1 · Source ─────────────────────────────────────────────── */}
       <Card
         step={1}
@@ -1256,13 +1260,19 @@ export default function ComplianceSetupPage() {
           </div>
         )}
       </Card>
+      </>
+      )}
 
       {/* Unfinished business, then past sign-offs — both for whichever report
           type is selected above, and both render nothing when empty. They sit
           below Validate because they're where you go back to, not part of
           setting a new run up. */}
+      {canRead && (
+      <>
       <ResumeGallery companyId={companyId} reportType={reportType} />
       <CertifiedGallery companyId={companyId} reportType={reportType} />
+      </>
+      )}
     </div>
   );
 }

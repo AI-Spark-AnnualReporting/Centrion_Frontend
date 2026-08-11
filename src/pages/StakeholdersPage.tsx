@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { team, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { canCreateFeature } from '@/lib/features';
 
 // Backend `position_type` enum, kept verbatim so the value posted to the
 // API is always one of the five the server accepts. Sending any other value
@@ -205,6 +206,7 @@ export default function StakeholdersPage() {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const companyName = user?.company_name ?? '';
+  const canCreatePerson = canCreateFeature(user, 'leadership');
 
   const [people, setPeople] = useState<Person[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('board');
@@ -335,25 +337,27 @@ export default function StakeholdersPage() {
             Board members, institutional investors &amp; key stakeholders
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => openAddModal()}
-          disabled={!companyId}
-          style={{
-            padding: '9px 18px',
-            fontSize: 12,
-            fontWeight: 700,
-            borderRadius: 10,
-            border: 'none',
-            background: '#4040C8',
-            color: '#fff',
-            cursor: companyId ? 'pointer' : 'not-allowed',
-            opacity: companyId ? 1 : 0.55,
-            boxShadow: '0 3px 10px rgba(64,64,200,.25)',
-          }}
-        >
-          + Add Person
-        </button>
+        {canCreatePerson && (
+          <button
+            type="button"
+            onClick={() => openAddModal()}
+            disabled={!companyId}
+            style={{
+              padding: '9px 18px',
+              fontSize: 12,
+              fontWeight: 700,
+              borderRadius: 10,
+              border: 'none',
+              background: '#4040C8',
+              color: '#fff',
+              cursor: companyId ? 'pointer' : 'not-allowed',
+              opacity: companyId ? 1 : 0.55,
+              boxShadow: '0 3px 10px rgba(64,64,200,.25)',
+            }}
+          >
+            + Add Person
+          </button>
+        )}
       </div>
 
       {createdCredential && (
@@ -540,6 +544,7 @@ export default function StakeholdersPage() {
             </div>
           ))}
 
+          {canCreatePerson && (
           <button
             type="button"
             onClick={() => openAddModal(activeTab)}
@@ -586,6 +591,7 @@ export default function StakeholdersPage() {
             </svg>
             <span>{PLACEHOLDER_LABELS[activeTab]}</span>
           </button>
+          )}
         </div>
       )}
 
