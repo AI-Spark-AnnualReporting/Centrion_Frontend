@@ -147,6 +147,10 @@ interface NormTable {
   rows: LooseRow[];
   comparePeriods?: ComparePeriod[]; // present → render one value+change column per period
   currentLabel?: string | null; // header for the current column, e.g. "Q3 2025"
+  // present → the source printed this section as a GRID (a note schedule: line items
+  // down the side, categories across the top). One column per category, read from
+  // each row's `cells`, and no change column — categories aren't comparable.
+  matrixColumns?: ComparePeriod[];
 }
 
 function normalizeComparePeriods(v: unknown): ComparePeriod[] | undefined {
@@ -191,6 +195,7 @@ function normalizeTables(parsed: unknown): NormTable[] {
         rows: parsed.rows as LooseRow[],
         comparePeriods: normalizeComparePeriods(parsed.compare_periods),
         currentLabel: asString(parsed.current_label) ?? null,
+        matrixColumns: normalizeComparePeriods(parsed.matrix_columns),
       }];
     }
     // Plain object → key/value pairs as a 2-column table.
@@ -216,6 +221,7 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
           rows={rows}
           comparePeriods={table.comparePeriods}
           currentLabel={table.currentLabel}
+          matrixColumns={table.matrixColumns}
         />
       ) : (
         <GenericTable rows={rows} />
@@ -246,24 +252,39 @@ function compFor(r: LooseRow, key: string): LooseRow | undefined {
   return (arr as unknown[]).find((c) => isRecord(c) && c.key === key) as LooseRow | undefined;
 }
 
+// A row's grid cell for a category key (from the row's `cells`).
+function cellFor(r: LooseRow, key: string): string {
+  const arr = cell(r, 'cells');
+  if (!Array.isArray(arr)) return '';
+  const hit = (arr as unknown[]).find((c) => isRecord(c) && c.key === key);
+  return (isRecord(hit) ? asString(hit.display) : '') ?? '';
+}
+
 function FinancialTable({
   rows,
   comparePeriods,
   currentLabel,
+  matrixColumns,
 }: {
   rows: LooseRow[];
   comparePeriods?: ComparePeriod[];
   currentLabel?: string | null;
+  matrixColumns?: ComparePeriod[];
 }) {
-  const compare = comparePeriods ?? [];
+  // A grid wins over a comparison: eight categories times two periods is not a table
+  // anyone can read, and a section printed as a grid is not comparing.
+  const matrix = matrixColumns ?? [];
+  const compare = matrix.length ? [] : comparePeriods ?? [];
   const hasCompare = compare.length > 0;
   // Legacy single-prior columns only when there's no per-period comparison data
   // (older produced content / sections that don't compare) — unchanged behavior.
   const showPrior = !hasCompare && rows.some((r) => cell(r, 'prior_display', 'prior') != null);
   const showChange = !hasCompare && rows.some((r) => cell(r, 'change_pct', 'change') != null);
   const currentHeader = currentLabel || 'Current';
-  const colCount =
-    2 + (hasCompare ? compare.length * 2 : (showPrior ? 1 : 0) + (showChange ? 1 : 0));
+  // A grid has no "Current" column of its own — every column is a category.
+  const colCount = matrix.length
+    ? 1 + matrix.length
+    : 2 + (hasCompare ? compare.length * 2 : (showPrior ? 1 : 0) + (showChange ? 1 : 0));
 
   const cellPad = { padding: '9px 10px' } as const;
   return (
@@ -271,7 +292,11 @@ function FinancialTable({
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
           <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
-          <th style={{ ...TH, textAlign: 'right' }}>{currentHeader}</th>
+          {!matrix.length && <th style={{ ...TH, textAlign: 'right' }}>{currentHeader}</th>}
+          {matrix.length > 0 &&
+            matrix.map((c) => (
+              <th key={`m-${c.key}`} style={{ ...TH, textAlign: 'right' }}>{c.label}</th>
+            ))}
           {hasCompare
             ? compare.flatMap((p) => [
                 <th key={`v-${p.key}`} style={{ ...TH, textAlign: 'right' }}>{p.label}</th>,
@@ -318,12 +343,23 @@ function FinancialTable({
               }}>
                 {stringifyCell(cell(r, 'label', 'metric', 'name'))}
               </td>
-              <td style={{
-                ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
-                fontWeight: 700, borderTop: topBorder,
-              }}>
-                {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
-              </td>
+              {!matrix.length && (
+                <td style={{
+                  ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
+                  fontWeight: 700, borderTop: topBorder,
+                }}>
+                  {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
+                </td>
+              )}
+              {matrix.length > 0 &&
+                matrix.map((c) => (
+                  <td key={`m-${c.key}`} style={{
+                    ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
+                    fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
+                  }}>
+                    {cellFor(r, c.key) || '—'}
+                  </td>
+                ))}
               {hasCompare
                 ? compare.flatMap((p) => {
                     const c = compFor(r, p.key);

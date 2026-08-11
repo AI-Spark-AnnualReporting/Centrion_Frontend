@@ -66,8 +66,18 @@ function HowWeRead({ t, period }: { t: UserExtractionTable; period?: string | nu
       {t.status === 'extracted' && (
         <>
           <span style={{ color: '#B9BED4' }}> · </span>
-          {t.rows} lines · header row {t.header_row} · values from column {t.value_col}
-          {t.value_col_header ? ` “${t.value_col_header}”` : ''} · {periodNote(t, period)}
+          {t.shape === 'matrix'
+            ? `${t.rows} cells across ${t.column_count} columns · header row ${t.header_row}`
+            : `${t.rows} lines · header row ${t.header_row} · values from column ${t.value_col}` +
+              (t.value_col_header ? ` “${t.value_col_header}”` : '')}
+          {' · '}{periodNote(t, period)}
+          {(t.groups?.length ?? 0) > 0 && (
+            <>
+              <span style={{ color: '#B9BED4' }}> · </span>
+              grouped under {t.groups!.slice(0, 3).join(', ')}
+              {t.groups!.length > 3 ? ` +${t.groups!.length - 3}` : ''}
+            </>
+          )}
         </>
       )}
     </div>
@@ -171,6 +181,11 @@ export default function UserExtractionReview({ reportId, data }: Props) {
               {srcTables.length > 1 && (
                 <span className="badge" style={{ background: '#EEF0FC', color: ACCENT, border: 'none' }}>
                   {srcTables.length} tables merged
+                </span>
+              )}
+              {units?.shape === 'matrix' && (
+                <span className="badge" style={{ background: '#EEF0FC', color: ACCENT, border: 'none' }}>
+                  grid · {units.column_count} columns
                 </span>
               )}
               <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>

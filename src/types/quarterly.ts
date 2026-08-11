@@ -230,6 +230,12 @@ export interface UserExtractionTable {
   period_source: 'column' | 'declared' | 'assumed' | null;
   // Other tables merged into the same section as this one.
   grouped_with: string[];
+  // 'matrix' = the source printed it as a grid (line items down, categories across),
+  // so `rows` counts CELLS rather than lines.
+  shape?: 'flat' | 'matrix';
+  column_count?: number;
+  // The headings found inside the table ("Cost", "Accumulated depreciation").
+  groups?: string[];
 }
 
 export interface UserExtractionSummary {
