@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import type { MetricsMode } from '@/types/quarterly';
 
 // A step is named, not numbered. Custom-metrics reports have one more of them
 // (Financial Data), so an index would mean every page doing its own arithmetic to
@@ -14,9 +15,9 @@ export type QuarterlyStep =
 interface QuarterlyReportStepperProps {
   step: QuarterlyStep;
   reportId: string;
-  // Custom reports upload one statement per section on a Financial Data step
-  // between Period and Extraction. Absent = the System (5-step) flow.
-  metricsMode?: 'system' | 'custom' | null;
+  // Custom reports upload one statement per section on a Financial Data step between
+  // Period and Extraction (6 steps). System and User both have 5.
+  metricsMode?: MetricsMode | null;
   // Once the report is approved & locked, no step should be navigable away
   // from the read-only Report screen.
   locked?: boolean;
@@ -95,8 +96,11 @@ export function QuarterlyReportStepper({
   locked = false,
 }: QuarterlyReportStepperProps) {
   const navigate = useNavigate();
-  const steps =
-    metricsMode === 'custom' ? ALL_STEPS : ALL_STEPS.filter((s) => s.key !== 'financials');
+  // Custom uploads per section, so it keeps Financial Data. User uploads once, so it
+  // does not — but it still has an Extraction step: nothing to answer there, only the
+  // tables we read and the ones we could not.
+  const skip: QuarterlyStep[] = metricsMode === 'custom' ? [] : ['financials'];
+  const steps = ALL_STEPS.filter((s) => !skip.includes(s.key));
   // An unknown key (e.g. 'financials' before the mode has loaded) would light up
   // nothing; fall back to the first step rather than rendering a dead indicator.
   const activeIndex = Math.max(0, steps.findIndex((s) => s.key === step));

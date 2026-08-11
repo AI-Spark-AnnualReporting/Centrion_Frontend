@@ -11,7 +11,7 @@ import type {
   ComparisonAvailability,
   QuarterlySystemMetricsResponse,
 } from '@/lib/api';
-import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
+import type { CompanyType, Voice, ReportTone, Comparison, MetricsMode } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import {
   REPORTING_CURRENCIES,
@@ -597,7 +597,7 @@ export default function QuarterlyReportForm({
   // data at all" from "prior data exists but in the other metrics lane", plus
   // the mode the backend actually answered for (the radio may have moved since).
   const [compSpecs, setCompSpecs] = useState<ComparisonAvailability['specs'] | null>(null);
-  const [compCheckedMode, setCompCheckedMode] = useState<'system' | 'custom' | null>(null);
+  const [compCheckedMode, setCompCheckedMode] = useState<MetricsMode | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -653,7 +653,7 @@ export default function QuarterlyReportForm({
   // System vs Custom metrics. system (default) = map the sheet to our standard
   // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
   // Both modes take their figures from the Financial Data field.
-  const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
+  const [metricsMode, setMetricsMode] = useState<MetricsMode>('system');
   // Which "?" panel is open, by id — one slot, so opening one closes the others.
   const [helpOpen, setHelpOpen] = useState<string | null>(null);
   // The standard metric catalogue behind the "System metrics" hover list. null
@@ -1156,7 +1156,9 @@ export default function QuarterlyReportForm({
   // figures one statement at a time on the Financial Data screen that follows, so
   // here it asks for narrative documents and nothing else.
   const hasFinancialFiles = financialFiles.length > 0;
-  const needsFinancialUpload = !isUploadMode && metricsMode === 'system';
+  // Both System and User take every figure from this field, so both require it.
+  // Custom takes its figures per section on the next screen instead.
+  const needsFinancialUpload = !isUploadMode && metricsMode !== 'custom';
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
@@ -1331,6 +1333,8 @@ export default function QuarterlyReportForm({
           // Custom mode has no figures yet — this run only read the narrative
           // documents. Land on the Financial Data screen, which is where its
           // numbers come from.
+          // User mode confirms nothing, but it still stops at Extraction — that is
+          // where it shows which tables became sections and which produced nothing.
           quarterlyNext: metricsMode === 'custom' ? 'financials' : 'extraction',
         };
         navigate('/reports/processing', { state: processingState });
@@ -1639,25 +1643,31 @@ export default function QuarterlyReportForm({
                 id="metrics"
                 openId={helpOpen}
                 onOpenChange={setHelpOpen}
-                ariaLabel="What are System and Custom metrics?"
-                panelLabel="System and Custom metrics"
+                ariaLabel="How should we read your figures?"
+                panelLabel="How we read your figures"
               >
                 <div style={{ marginBottom: 8 }}>
                   <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
                   {' — we map your data to our standard set of metrics and lay it out in the '}
                   standard report template. Upload the statements below.
                 </div>
-                <div>
+                <div style={{ marginBottom: 8 }}>
                   <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
                   {' — your own line items, printed as-is. On the next screen you pick the '}
                   sections you want and upload one statement into each, so every figure lands
                   where you put it.
                 </div>
+                <div>
+                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Sections from my files</strong>
+                  {' — your own line items again, but you upload everything at once and each '}
+                  table in your files becomes a section of the report, named after that table.
+                  Tables covering the same thing are printed together.
+                </div>
               </LabelHelp>
             </label>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
-              {(['system', 'custom'] as const).map((m) => {
+              {(['system', 'custom', 'user'] as const).map((m) => {
                 const radio = (
                   <label
                     style={{
@@ -1673,21 +1683,27 @@ export default function QuarterlyReportForm({
                       checked={metricsMode === m}
                       onChange={() => {
                         setMetricsMode(m);
-                        if (m !== 'system') {
+                        if (m === 'custom') {
                           // The Financial Data field unmounts in custom mode, and the
                           // backend rejects a sheet sent with it — so a staged file
                           // would be invisible AND fatal. Drop it here, while the user
                           // is looking at the control that caused it.
+                          // NOT done for 'user': that mode keeps the field and needs
+                          // the file, so clearing it would silently undo their upload.
                           setFinancialFiles([]);
-                          // The catalogue pill unmounts too — reset it so a hover in
-                          // flight (or a pinned panel) can't spring back open on the
-                          // way back to system.
+                        }
+                        if (m !== 'system') {
+                          // The catalogue pill unmounts outside system mode — reset it
+                          // so a hover in flight (or a pinned panel) can't spring back
+                          // open on the way back to system.
                           resetMetricsList();
                         }
                       }}
                       style={{ accentColor: '#4040C8', width: 14, height: 14 }}
                     />
-                    {m === 'system' ? 'System metrics' : 'Custom metrics'}
+                    {m === 'system' ? 'System metrics'
+                      : m === 'custom' ? 'Custom metrics'
+                      : 'Sections from my files'}
                   </label>
                 );
 
@@ -1813,7 +1829,9 @@ export default function QuarterlyReportForm({
                   company's own additions — those are theirs, not ours. */}
               {metricsMode === 'system'
                 ? `We map your data to${systemMetrics ? ` these ${systemMetrics.total}` : ' our standard'} metrics and lay it out in the standard report template.`
-                : 'We print your figures exactly as they are. You upload one statement per section on the next screen, so nothing has to guess where a line belongs.'}
+                : metricsMode === 'custom'
+                ? 'We print your figures exactly as they are. You upload one statement per section on the next screen, so nothing has to guess where a line belongs.'
+                : 'We print your figures exactly as they are, and build the report around the tables in your files — each one becomes a section named after it, with related tables printed together.'}
             </div>
           </div>
         )}
@@ -2044,7 +2062,7 @@ export default function QuarterlyReportForm({
             out of the narrative documents above. Hidden in Custom mode, which takes
             one statement per section on the next screen instead: there the section
             is chosen by the user rather than guessed from the label. */}
-        {!isOpenMode && (isUploadMode || metricsMode === 'system') && (
+        {!isOpenMode && (isUploadMode || metricsMode !== 'custom') && (
           <div style={{ marginBottom: 18, position: 'relative' }}>
             <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Financial Data (Excel / CSV / Word)

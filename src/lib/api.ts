@@ -15,6 +15,7 @@ import type {
   OnboardingResponse,
 } from "@/types/auth";
 import type { DetectedBrandColors } from "@/types/brand";
+import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
@@ -456,7 +457,7 @@ export interface GenerateQuarterlyBody {
   financial_scale?: string;    // actual | thousands | millions | billions
   // system = map the sheet to our standard metrics + template (default).
   // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
-  metrics_mode?: "system" | "custom";
+  metrics_mode?: MetricsMode;
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -466,7 +467,7 @@ export interface ComparisonAvailability {
   comparison: Comparison;
   // The mode the answer was computed for — read this rather than the live radio,
   // which may have moved on since the request went out.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
   target_period: string; // e.g. "Q3-2025"
   specs: {
     key: string;
@@ -1627,7 +1628,7 @@ export const quarterlyReports = {
   // "no data" dialog when a required period is missing.
   checkComparisonAvailability: (
     companyId: string,
-    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: MetricsMode },
   ) =>
     request<ComparisonAvailability>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +

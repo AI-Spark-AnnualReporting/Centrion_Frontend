@@ -10,14 +10,7 @@ import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialo
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
-import type {
-  ProducedSection,
-  AssembledSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -134,7 +127,7 @@ export default function AssembledReportPage() {
   const [approved, setApproved] = useState(false);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
   // Only for the step indicator — Custom reports have an extra Financial Data step.
-  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);

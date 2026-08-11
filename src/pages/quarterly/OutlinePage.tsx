@@ -4,7 +4,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports, ApiError } from '@/lib/api';
-import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
+import type { OutlineSection, OutlineResponse, MetricsMode } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { byDisplayOrder, isTableOfContentsSection } from '@/components/quarterly/sectionState';
@@ -137,7 +137,7 @@ function Shell({
   reportId?: string;
   // Custom reports have an extra Financial Data step in the indicator. Unknown
   // until the outline loads, which is why it's nullable rather than defaulted.
-  metricsMode?: 'system' | 'custom' | null;
+  metricsMode?: MetricsMode | null;
   children: React.ReactNode;
 }) {
   return (
@@ -314,7 +314,7 @@ export default function OutlinePage() {
   const [totalCatalogue, setTotalCatalogue] = useState(0);
   // Custom reports have an extra Financial Data step, and their financial sections
   // were already decided there — see the greyed rows below.
-  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   // Ingest worker still writing figures — badges are provisional until it clears.
   const [ingesting, setIngesting] = useState(false);

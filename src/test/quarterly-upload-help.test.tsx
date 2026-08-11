@@ -116,9 +116,12 @@ describe("upload help panels", () => {
   it("still explains the metrics modes", async () => {
     renderForm();
     fireEvent.click(
-      screen.getByRole("button", { name: /what are system and custom metrics/i }),
+      screen.getByRole("button", { name: /how should we read your figures/i }),
     );
-    const panel = await screen.findByRole("note", { name: /system and custom metrics/i });
+    const panel = await screen.findByRole("note", { name: /how we read your figures/i });
+    // One line per mode — the panel is the only place the three are compared.
     expect(panel).toHaveTextContent(/standard report template/i);
+    expect(panel).toHaveTextContent(/one statement into each/i);
+    expect(panel).toHaveTextContent(/becomes a section/i);
   });
 });

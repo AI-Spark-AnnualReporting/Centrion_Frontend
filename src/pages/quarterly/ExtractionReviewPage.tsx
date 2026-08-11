@@ -16,12 +16,8 @@ import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { CustomExtractionReview } from '@/components/quarterly/CustomExtractionReview';
-import type {
-  ExtractionReviewFigure,
-  ExtractionReviewResponse,
-  ExtractionReviewDecision,
-  MetricUnitType,
-} from '@/types/quarterly';
+import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
+import type { ExtractionReviewFigure, ExtractionReviewResponse, ExtractionReviewDecision, MetricUnitType, MetricsMode } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const MUTED = '#6B7280';
@@ -119,7 +115,7 @@ function Shell({
   children,
 }: {
   reportId?: string;
-  metricsMode?: 'system' | 'custom' | null;
+  metricsMode?: MetricsMode | null;
   children: React.ReactNode;
 }) {
   return (
@@ -442,6 +438,16 @@ export default function ExtractionReviewPage() {
   // on the step before this one. What is left is tidying — a databook carries
   // spacer rows and repeated subtotals, and a label can read badly out of its
   // sheet. So the rows are editable rather than answerable.
+  // Neither own-label lane has a mapping to confirm — only the lines we read. They
+  // differ in what there is to say about them: Custom lets you tidy a label, User
+  // shows which TABLE each section came from and which tables produced nothing.
+  if (data?.metrics_mode === 'user' && reportId) {
+    return (
+      <Shell reportId={reportId} metricsMode="user">
+        <UserExtractionReview reportId={reportId} data={data} />
+      </Shell>
+    );
+  }
   if (data?.metrics_mode === 'custom' && companyId && reportId) {
     return (
       <Shell reportId={reportId} metricsMode="custom">

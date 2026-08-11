@@ -8,13 +8,7 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type {
-  ProducedSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
@@ -70,7 +64,7 @@ function Shell({
   reportId?: string;
   // Custom reports have an extra Financial Data step in the indicator. Unknown
   // until the outline loads, which is why it's nullable rather than defaulted.
-  metricsMode?: 'system' | 'custom' | null;
+  metricsMode?: MetricsMode | null;
   children: React.ReactNode;
 }) {
   return (
@@ -222,7 +216,7 @@ export default function PreviewPage() {
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
   // Only for the step indicator — Custom reports have an extra Financial Data step.
-  const [metricsMode, setMetricsMode] = useState<'system' | 'custom' | null>(null);
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);

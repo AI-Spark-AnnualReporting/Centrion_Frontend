@@ -25,6 +25,13 @@ export type ReportTone =
 // (no reportId; runs at form time). The backend derives the company type from
 // the company's sector so the setup form can pre-select the pill + show a
 // DETECTED badge. NOT part of the creation flow — purely a UI hint.
+// Where a quarterly report's figures come from, and who decides what each one is
+// called. Absent on reports created before the custom lane — those read as 'system'.
+//   system → mapped onto the standard metric catalogue, printed into our sections
+//   custom → the user's own lines, into a section they picked per upload
+//   user   → the user's own lines, into sections taken from their files' own tables
+export type MetricsMode = 'system' | 'custom' | 'user';
+
 export interface DetectCompanyTypeResponse {
   detected_company_type: CompanyType | null;
 }
@@ -172,9 +179,13 @@ export interface ExtractionReviewResponse {
   // different thing entirely: nothing to confirm, because the user already chose
   // each figure's section by choosing which file to upload to it. `sections` holds
   // the lines to tidy; `confirmed`/`pending` are always empty.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
   editable?: boolean;
   sections?: CustomExtractionSection[];
+  // User mode only: one record per table found, extracted or not, plus the quarter
+  // we were looking for. `summary` carries the extra counts alongside its own.
+  tables?: UserExtractionTable[];
+  period?: string | null;
 }
 
 // ─── Custom-mode extraction (rename / delete, no yes-no) ────────────────────
@@ -193,6 +204,42 @@ export interface CustomExtractionSection {
   title: string;
   is_custom: boolean;
   rows: CustomExtractionRow[];
+}
+
+// ─── User-mode extraction (read-only: one record per TABLE found) ───────────
+// The rows are the same CustomExtractionSection shape; this is the part the custom
+// payload cannot carry, because a table that produced NOTHING leaves no figure row
+// to infer it from — and in this lane that is a missing section.
+export interface UserExtractionTable {
+  file: string;
+  table: string;
+  status: 'extracted' | 'skipped';
+  // A sentence, not a code — it is read by a person.
+  reason: string | null;
+  rows: number;
+  section_code: string | null;
+  section_title: string | null;
+  currency: string | null;
+  scale: string | null;
+  header_row: number | null;
+  label_col: number | null;
+  value_col: number | null;
+  value_col_header: string | null;
+  // How we knew this was the report's quarter: a column named it, a heading above
+  // the table named it, or nothing did and we assumed.
+  period_source: 'column' | 'declared' | 'assumed' | null;
+  // Other tables merged into the same section as this one.
+  grouped_with: string[];
+}
+
+export interface UserExtractionSummary {
+  file_count: number;
+  table_count: number;
+  extracted_count: number;
+  skipped_count: number;
+  section_count: number;
+  assumed_count: number;
+  confirmed_count: number;
 }
 
 // One edit per row: a new label, or gone. Renaming is not cosmetic — the
@@ -379,7 +426,7 @@ export interface OutlineResponse {
   total_catalogue?: number;
   // Which lane built this report. Drives the step indicator (Custom has an extra
   // Financial Data step) and the greyed-out financial sections.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
   // Whole-outline freeze — true once the outline is locked (read-only).
   locked?: boolean;
   // True while the ingest worker is still writing figures. Until it flips false a
@@ -647,7 +694,7 @@ export interface AssembledReportResponse {
   locked_at?: string | null;
   // Which lane built this report — for the step indicator, which has an extra
   // Financial Data step in Custom mode.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
 }
 
 // POST .../quarterly/{reportId}/approve response — approve & lock the
