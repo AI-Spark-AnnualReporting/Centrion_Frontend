@@ -47,6 +47,21 @@ vi.mock("@/lib/api", () => ({
     regenerateTempPassword: (id: string) => regenerateTempPassword(id),
     updateUserDepartment: vi.fn(),
   },
+  // The expanded row also mounts the per-user permissions panel — give it an
+  // empty-but-resolved response so it doesn't throw and race the assertions
+  // this file actually cares about.
+  adminUserPermissions: {
+    get: () =>
+      Promise.resolve({
+        user_id: "usr_admin",
+        role: "department_user",
+        role_defaults: {},
+        extra_grants: [],
+        features: {},
+      }),
+    grant: vi.fn(),
+    revoke: vi.fn(),
+  },
   ApiError,
 }));
 

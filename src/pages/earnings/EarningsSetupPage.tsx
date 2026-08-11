@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import { earnings, ApiError } from '@/lib/api';
 import type { EarningsVariant, EarningsQuarter, ReportTone, EarningsReportSummary } from '@/types/earnings';
 import { canContinue } from './helpers';
@@ -65,6 +66,7 @@ export default function EarningsSetupPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  const { canCreate, canRead } = useFeaturePermissions('earnings_report');
 
   const [variant, setVariant] = useState<EarningsVariant | null>(null);
   const [fiscalYear, setFiscalYear] = useState<number | null>(null);
@@ -131,7 +133,7 @@ export default function EarningsSetupPage() {
   const [reportsError, setReportsError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!companyId) {
+    if (!companyId || !canRead) {
       setReports([]);
       setReportsLoading(false);
       return;
@@ -153,7 +155,7 @@ export default function EarningsSetupPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, canRead]);
 
   // A draft already created this session (via upload) is enough to Continue —
   // its uploaded sources are attached server-side even while they extract. A
@@ -200,6 +202,7 @@ export default function EarningsSetupPage() {
 
   return (
     <div>
+      {canCreate && (
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Set up your earnings report
@@ -208,7 +211,9 @@ export default function EarningsSetupPage() {
           Choose the report type, period, tone, and the sources it draws from.
         </p>
       </div>
+      )}
 
+      {canCreate && (
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         {/* Collapsible header — matches the Quarterly "Generate Report" card. */}
         <div
@@ -374,8 +379,10 @@ export default function EarningsSetupPage() {
         </div>
         )}
       </div>
+      )}
 
       {/* Your earnings reports — dashboard tiles. Each opens the preview screen. */}
+      {canRead && (
       <div style={{ marginTop: 28 }}>
         <div style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your earnings reports</h2>
@@ -409,6 +416,7 @@ export default function EarningsSetupPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

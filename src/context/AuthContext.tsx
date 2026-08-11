@@ -81,20 +81,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Reconcile the /auth/me payload with the stored shape — /me types `role`
     // as a plain string while AuthUser narrows it to the 3 known roles, so
     // coerce defensively (default to the least-privileged role).
-    const next: AuthUser = {
-      user_id: me.user_id,
-      email: me.email,
-      full_name: me.full_name,
-      role: (me.role as AuthUser["role"]) ?? "department_user",
-      company_id: me.company_id,
-      company_name: me.company_name,
-      must_change_password: me.must_change_password ?? false,
-      // Carry the onboarding flag through — omitting it here would silently
-      // wipe the gate when refreshUser runs (e.g. after changePassword).
-      onboarding_completed: me.onboarding_completed ?? null,
-    };
-    setStoredUser(next);
-    setUser(next);
+    setUser((prev) => {
+      const next: AuthUser = {
+        user_id: me.user_id,
+        email: me.email,
+        full_name: me.full_name,
+        role: (me.role as AuthUser["role"]) ?? "department_user",
+        company_id: me.company_id,
+        company_name: me.company_name,
+        must_change_password: me.must_change_password ?? false,
+        // Carry the onboarding flag through — omitting it here would silently
+        // wipe the gate when refreshUser runs (e.g. after changePassword).
+        onboarding_completed: me.onboarding_completed ?? null,
+        // /auth/me doesn't carry the permission system's fields — preserve
+        // whatever was already in state so a refresh (e.g. after
+        // changePassword) doesn't silently wipe them.
+        permissions: prev?.permissions,
+        visible_features: prev?.visible_features,
+        apps: prev?.apps,
+        default_app: prev?.default_app,
+      };
+      setStoredUser(next);
+      return next;
+    });
   }, []);
 
   const completeOnboarding = useCallback(

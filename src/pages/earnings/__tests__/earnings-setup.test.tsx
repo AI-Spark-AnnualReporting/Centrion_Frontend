@@ -50,7 +50,13 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: { company_id: 'co-1', company_name: 'Acme' } }),
+  useAuth: () => ({
+    user: {
+      company_id: 'co-1',
+      company_name: 'Acme',
+      permissions: { earnings_report: { read: true, create: true } },
+    },
+  }),
 }));
 
 // Annual is hidden from the live screen for now (see earnings-flags.ts), but the
