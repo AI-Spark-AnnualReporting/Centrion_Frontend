@@ -19,11 +19,14 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
+//
+// Typed on the two fields it actually reads, so the reviewer view can pass the
+// same section it holds for the earnings renderer without a cast.
 export function SectionContent({
   section,
   markdown = false,
 }: {
-  section: ProducedSection;
+  section: Pick<ProducedSection, 'mode' | 'content'>;
   /** Render prose as Markdown — see MarkdownProse. */
   markdown?: boolean;
 }) {
