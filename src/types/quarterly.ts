@@ -197,6 +197,12 @@ export interface CustomExtractionRow {
   unit: string | null;
   // The tab of the workbook this line came from, when there was more than one.
   sheet: string | null;
+  // Where the line sat in its own table: the heading above it, the column it was read
+  // from, and which table when the sheet held several. Null for every flat, ungrouped
+  // line and for everything the other lanes write.
+  group?: string | null;
+  column?: string | null;
+  table?: string | null;
 }
 
 export interface CustomExtractionSection {

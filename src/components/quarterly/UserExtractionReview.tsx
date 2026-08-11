@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ChevronDown, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import type {
+  CustomExtractionRow,
   CustomExtractionSection,
   ExtractionReviewResponse,
   UserExtractionTable,
@@ -44,6 +45,25 @@ function periodNote(t: UserExtractionTable, period?: string | null): string {
   if (t.period_source === 'column') return `column names ${period ?? 'the quarter'}`;
   if (t.period_source === 'declared') return 'period from the heading above the table';
   return `nothing named a period — assumed ${period ?? 'the report quarter'}`;
+}
+
+type Item =
+  | { kind: 'heading'; key: string; label: string }
+  | { kind: 'row'; row: CustomExtractionRow; indented: boolean };
+
+/** Interleave a subsection heading wherever the source printed one. */
+function withHeadings(rows: CustomExtractionRow[]): Item[] {
+  const out: Item[] = [];
+  let current: string | null = null;
+  rows.forEach((row, i) => {
+    const group = (row.group ?? '').trim();
+    if (group !== (current ?? '')) {
+      if (group) out.push({ kind: 'heading', key: `${i}-${group}`, label: group });
+      current = group || null;
+    }
+    out.push({ kind: 'row', row, indented: Boolean(current) });
+  });
+  return out;
 }
 
 function Stat({ n, label, tone }: { n: number; label: string; tone?: string }) {
@@ -206,32 +226,54 @@ export default function UserExtractionReview({ reportId, data }: Props) {
                   ))}
                 </div>
 
-                {rows.map((r) => (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '6px 0', borderBottom: '1px solid #F6F7FC', fontSize: 12.5,
-                    }}
-                  >
-                    <span style={{ flex: 1, color: DARK, minWidth: 0, overflow: 'hidden',
-                                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                          title={r.label ?? undefined}>
-                      {r.label}
-                    </span>
-                    {srcTables.length > 1 && r.sheet && (
-                      <span style={{ fontSize: 10.5, color: MUTED, maxWidth: 150, overflow: 'hidden',
-                                     textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                            title={r.sheet}>
-                        {r.sheet}
+                {withHeadings(rows).map((item) =>
+                  item.kind === 'heading' ? (
+                    // The subsection the source printed above these lines. Without it a
+                    // line that legitimately appears under two headings — Note 10 prints
+                    // "Other revenue" in both — reads as a duplicate.
+                    <div
+                      key={`h-${item.key}`}
+                      style={{
+                        marginTop: 12, marginBottom: 2, fontSize: 10.5, fontWeight: 800,
+                        letterSpacing: '0.05em', textTransform: 'uppercase', color: ACCENT,
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                  ) : (
+                    <div
+                      key={item.row.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '6px 0', borderBottom: '1px solid #F6F7FC', fontSize: 12.5,
+                      }}
+                    >
+                      <span style={{ flex: 1, color: DARK, minWidth: 0, overflow: 'hidden',
+                                     textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                     paddingLeft: item.indented ? 12 : 0 }}
+                            title={item.row.label ?? undefined}>
+                        {item.row.label}
                       </span>
-                    )}
-                    <span style={{ minWidth: 130, textAlign: 'right', color: DARK,
-                                   fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                      {r.value_display}
-                    </span>
-                  </div>
-                ))}
+                      {item.row.column && (
+                        <span className="badge" style={{ fontSize: 10, background: '#F1F2FA',
+                                                         color: MUTED, border: 'none' }}>
+                          {item.row.column}
+                        </span>
+                      )}
+                      {srcTables.length > 1 && item.row.sheet && (
+                        <span style={{ fontSize: 10.5, color: MUTED, maxWidth: 150, overflow: 'hidden',
+                                       textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              title={item.row.sheet}>
+                          {item.row.sheet}
+                        </span>
+                      )}
+                      <span style={{ minWidth: 130, textAlign: 'right', color: DARK,
+                                     fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                        {item.row.value_display}
+                      </span>
+                    </div>
+                  ),
+                )}
 
                 {sec.rows.length > ROWS_COLLAPSED && (
                   <button
