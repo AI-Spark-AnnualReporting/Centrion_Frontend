@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import { ApiError, boardReports, companies, getSectors } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { BoardReportCard } from '@/components/annual-report/BoardReportCard';
@@ -45,6 +46,7 @@ export default function BoardSetupPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  const { canCreate, canRead } = useFeaturePermissions('board_report');
 
   const thisYear = new Date().getFullYear();
   const [fiscalYear, setFiscalYear] = useState(thisYear - 1);
@@ -88,7 +90,7 @@ export default function BoardSetupPage() {
   }, []);
 
   useEffect(() => {
-    if (!companyId) {
+    if (!companyId || !canRead) {
       setListLoading(false);
       return;
     }
@@ -109,7 +111,7 @@ export default function BoardSetupPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, canRead]);
 
   const setField = useCallback(
     <K extends keyof BoardIssuerProfile>(key: K, value: BoardIssuerProfile[K]) => {
@@ -148,6 +150,8 @@ export default function BoardSetupPage() {
 
   return (
     <div>
+      {canCreate && (
+      <>
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Set up your board report
@@ -249,7 +253,10 @@ export default function BoardSetupPage() {
           </button>
         </div>
       </SetupCard>
+      </>
+      )}
 
+      {canRead && (
       <div style={{ marginTop: 28 }}>
         <div style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your board reports</h2>
@@ -280,6 +287,7 @@ export default function BoardSetupPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

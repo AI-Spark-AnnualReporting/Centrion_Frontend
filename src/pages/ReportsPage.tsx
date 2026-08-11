@@ -99,8 +99,17 @@ function isEarningsReport(r: ReportSummary): boolean {
   return /earnings/i.test(r.title ?? '');
 }
 
+// IR Briefing reports (its own /ir-briefing/* feature — see ActiveReportsCard's
+// report_type map) also write into the same reports table and default to a
+// "QN-YYYY"-shaped period, so the period regex below would otherwise pull them
+// into this page's Quarterly gallery too.
+function isIRBriefingReport(r: ReportSummary): boolean {
+  return (r.report_type ?? '').toLowerCase() === 'ir_briefing' || /ir briefing/i.test(r.title ?? '');
+}
+
 function isQuarterlyReport(r: ReportSummary): boolean {
-  if (isEarningsReport(r)) return false;
+  if (isEarningsReport(r) || isIRBriefingReport(r)) return false;
+  if ((r.report_type ?? '').toLowerCase() === 'quarterly') return true;
   if (r.title?.toLowerCase().includes('quarterly')) return true;
   return /^Q[1-4][\s-]/i.test(r.period);
 }
@@ -888,6 +897,23 @@ export default function ReportsPage() {
                         <div style={{ background: gradient, padding: '20px 20px 22px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
                           <div style={{ position: 'absolute', top: -34, right: -34, width: 124, height: 124, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
                           <div style={{ position: 'absolute', bottom: -48, right: 26, width: 84, height: 84, borderRadius: '50%', background: 'rgba(255,255,255,.05)' }} />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 16,
+                              right: 16,
+                              fontSize: 9,
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              letterSpacing: '.5px',
+                              padding: '4px 9px',
+                              borderRadius: 999,
+                              background: isApprovedReport(r) ? '#fff' : 'rgba(255,255,255,.16)',
+                              color: isApprovedReport(r) ? '#059669' : '#fff',
+                            }}
+                          >
+                            {isApprovedReport(r) ? 'Approved' : 'Draft'}
+                          </div>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', opacity: .8, marginBottom: 10, position: 'relative' }}>
                             {r.title || 'Quarterly Report'}
                           </div>
