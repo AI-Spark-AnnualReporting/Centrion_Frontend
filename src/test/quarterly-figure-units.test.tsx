@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { moneyParts, deriveUnits, bareFigure, unitsCaption } from '@/components/quarterly/figureUnits';
+import { moneyParts, deriveUnits, bareFigure, unitsCaption, gridValue, NIL_CELL } from '@/components/quarterly/figureUnits';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import type { ProducedSection } from '@/types/quarterly';
 
@@ -117,5 +117,45 @@ describe('a grid on the report page', () => {
     const table = screen.getByRole('table');
     expect(within(table).getByText('SAR 100M')).toBeInTheDocument();
     expect(within(table).getByText('USD 5M')).toBeInTheDocument();
+  });
+});
+
+// ── nil cells ────────────────────────────────────────────────────────────────
+// A statement of changes in equity is mostly nil. Printed as zeros the real
+// movements are buried in them; a filing prints a dash.
+
+describe('a nil cell', () => {
+  it.each(['SAR 0M', '(SAR 0M)', 'SAR 0', 'USD 0M', '0', '0.00', '(0)', ''])(
+    '%s prints as a dash', (display) => {
+      expect(gridValue(display, 'SAR')).toBe(NIL_CELL);
+    });
+
+  it.each(['0.0%', '0%', '0 bps'])('but a zero RATE stays: %s', (display) => {
+    // Zero percent is a fact about the business; an empty equity column is not.
+    expect(gridValue(display, 'SAR')).toBe(display);
+  });
+
+  it('is dashed even when the units disagreed and nothing was stripped', () => {
+    expect(gridValue('SAR 0M', null)).toBe(NIL_CELL);
+    expect(gridValue('SAR 100M', null)).toBe('SAR 100M');
+  });
+
+  it('leaves real figures alone', () => {
+    expect(gridValue('SAR 100,603M', 'SAR')).toBe('100,603');
+    expect(gridValue('(SAR 10M)', 'SAR')).toBe('(10)');
+  });
+});
+
+describe('the equity grid on the report page', () => {
+  it('prints no zeros at all', () => {
+    render(<SectionContent section={gridSection([
+      ['Share capital', 'SAR 0M'],
+      ['Retained earnings', 'SAR 307,135M'],
+    ])} />);
+    const table = screen.getByRole('table');
+    expect(within(table).queryByText('0')).not.toBeInTheDocument();
+    expect(within(table).queryByText('SAR 0M')).not.toBeInTheDocument();
+    expect(within(table).getByText('307,135')).toBeInTheDocument();
+    expect(within(table).getAllByText(NIL_CELL).length).toBeGreaterThan(0);
   });
 });

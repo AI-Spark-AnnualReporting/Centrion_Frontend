@@ -9,7 +9,7 @@ import type {
 } from '@/types/quarterly';
 // Shared with the report tables and with report_export.py — the extraction screen
 // and the report must not disagree about what a figure's units are.
-import { bareFigure } from './figureUnits';
+import { gridValue, NIL_CELL } from './figureUnits';
 
 /**
  * User-metrics extraction — read-only.
@@ -216,9 +216,6 @@ function gridLines(rows: CustomExtractionRow[]): Line[] {
   return order.map((k) => by[k]);
 }
 
-/** Zero and empty print as a dash in a filing, and the eye goes to the real numbers. */
-const isBlank = (v: string) => !v || /^\(?0(\.0+)?\)?$/.test(v.trim());
-
 /** The column that ties. Weight and a hairline only — the hover tint is the loud thing. */
 const isTotalColumn = (name: string) => /^(total|consolidated)\b/i.test(name.trim());
 
@@ -328,8 +325,11 @@ function ExtractionGrid({
                     {line.label}
                   </th>
                   {cols.map((c) => {
-                    const v = bareFigure(line.cells[c] ?? '', currency);
-                    const blank = isBlank(v);
+                    // One shared rule with the report and the export: currency
+                    // stripped, nil as a dash. Blank-ness is read back off it
+                    // rather than tested a second time here.
+                    const v = gridValue(line.cells[c] ?? '', currency);
+                    const blank = v === NIL_CELL;
                     return (
                       <td
                         key={c}
@@ -345,7 +345,7 @@ function ExtractionGrid({
                           background: lit || hover?.col === c ? TINT : undefined,
                         }}
                       >
-                        {blank ? '–' : v}
+                        {v}
                       </td>
                     );
                   })}

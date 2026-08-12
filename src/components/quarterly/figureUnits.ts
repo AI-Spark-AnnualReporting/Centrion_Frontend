@@ -72,6 +72,27 @@ export function bareFigure(display: string | null | undefined, currency?: string
 }
 
 /**
+ * What a filing prints where there is nothing: never a bare 0. A statement of changes
+ * in equity is mostly nil cells — printed as zeros they are a wall of noise with the
+ * real movements buried in it.
+ */
+export const NIL_CELL = '—';
+
+// A zero amount, whether or not the currency was stripped — "0", "0.00", "(0)",
+// "SAR 0M", "(SAR 0M)". A table whose units disagree keeps its prefixes, and a nil
+// cell there is still nil.
+//
+// A rate of "0.0%" and "0 bps" deliberately do NOT match: zero percent is a fact
+// about the business, an empty equity column is not.
+const NIL_RE = /^\(?\s*(?:[A-Z]{3}\s*)?0(?:[.,]0+)?\s*[KMB]?\s*\)?$/i;
+
+/** How one grid cell prints: currency stripped, nil as a dash. */
+export function gridValue(display: string | null | undefined, currency?: string | null): string {
+  const value = bareFigure(display, currency);
+  return !value || NIL_RE.test(value) ? NIL_CELL : value;
+}
+
+/**
  * "All amounts in SAR millions unless otherwise stated."
  *
  * The trailing clause earns its place: a grid can carry a rate column beside the

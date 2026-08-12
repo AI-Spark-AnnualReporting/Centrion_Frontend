@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { ProducedSection } from '@/types/quarterly';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
-import { bareFigure, deriveUnits, unitsCaption } from './figureUnits';
+import { deriveUnits, gridValue, unitsCaption } from './figureUnits';
 
 // ─── colours (match Coverage / Gaps / Preview conventions) ────────────────────
 const GREEN = '#10B981';
@@ -418,7 +418,7 @@ function FinancialTable({
                     ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
                     fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
                   }}>
-                    {bareFigure(cellFor(r, c.key), currency) || '—'}
+                    {gridValue(cellFor(r, c.key), currency)}
                   </td>
                 ))}
               {hasCompare

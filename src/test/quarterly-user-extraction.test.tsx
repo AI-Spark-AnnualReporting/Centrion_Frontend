@@ -11,6 +11,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
 import type { ExtractionReviewResponse, UserExtractionTable } from '@/types/quarterly';
+import { NIL_CELL } from '@/components/quarterly/figureUnits';
 
 function table(over: Partial<UserExtractionTable> = {}): UserExtractionTable {
   return {
@@ -215,7 +216,7 @@ describe('a section the source printed as a grid', () => {
   it('prints zero as a dash, the way a filing does', () => {
     renderScreen(gridPayload(ROWS));
     // "Other income · Corporate" is 0 — four of these shouting "SAR 0M" was the noise.
-    expect(screen.getAllByText('–').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(NIL_CELL).length).toBeGreaterThan(0);
     expect(screen.queryByText('SAR 0M')).not.toBeInTheDocument();
   });
 
