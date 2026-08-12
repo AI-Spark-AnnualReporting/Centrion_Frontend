@@ -676,27 +676,69 @@ body {
 /* Indeterminate bar — compliance validation has no progress % to report. */
 @keyframes compliance-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(365%); } }
 
-/* Reading head — the Analyse button's waiting state. A band travels down the
-   section's own table, the way an eye tracks a column of figures.
-   `top` (not translateY) because a translate % resolves against the BAND's
-   height, and the band has to cross the whole container whatever its size. */
-@keyframes analysis-sweep { from { top: -160px; } to { top: 100%; } }
-.analysis-sweep {
-  position: absolute; left: 0; right: 0; height: 160px; top: -160px;
-  pointer-events: none; border-radius: 10px;
-  /* Plain-accent fallback first; browsers without color-mix keep this one. */
-  background: linear-gradient(180deg,
-    transparent 0%, rgba(64,64,200,.09) 45%, rgba(64,64,200,.13) 55%, transparent 100%);
-  background: linear-gradient(180deg,
-    transparent 0%,
-    color-mix(in srgb, var(--brand-primary, #4040C8) 9%, transparent) 45%,
-    color-mix(in srgb, var(--brand-primary, #4040C8) 13%, transparent) 55%,
-    transparent 100%);
-  animation: analysis-sweep 2.4s cubic-bezier(.45, 0, .55, 1) infinite;
+/* ── Analyse: read, then write ────────────────────────────────────────────────
+   One two-beat sequence, because that is what actually happens. First the table
+   is READ: a band travels down it the way an eye tracks a column of figures, and
+   the figures sit back while it passes. Then the commentary is WRITTEN: a rule
+   draws itself under the table like a pen laying a stroke, and the paragraphs
+   arrive behind it. Nothing here is ambient — each part marks a real step. */
+
+/* Beat 1 — the reading head. `top` (not translateY) because a translate %
+   resolves against the BAND's own height, and the band has to cross the whole
+   container whatever its size. The leading edge is a hairline so it reads as a
+   scan line rather than a glow. */
+@keyframes analysis-sweep {
+  0%   { top: -170px; opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
 }
-/* The band is decoration; the status line beside it carries the meaning, so
-   removing it costs the user nothing. */
-@media (prefers-reduced-motion: reduce) { .analysis-sweep { display: none; } }
+.analysis-sweep {
+  position: absolute; left: 0; right: 0; height: 170px; top: -170px;
+  pointer-events: none;
+  /* Plain-accent fallback first; browsers without color-mix keep this one. */
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(64,64,200,.10) 62%, rgba(64,64,200,.16) 97%, transparent 100%);
+  background:
+    linear-gradient(180deg, transparent 0%,
+      color-mix(in srgb, var(--brand-primary, #4040C8) 10%, transparent) 62%,
+      color-mix(in srgb, var(--brand-primary, #4040C8) 16%, transparent) 97%,
+      transparent 100%);
+  border-bottom: 1px solid rgba(64,64,200,.45);
+  border-bottom-color: color-mix(in srgb, var(--brand-primary, #4040C8) 45%, transparent);
+  animation: analysis-sweep 2.6s cubic-bezier(.37, 0, .63, 1) infinite;
+}
+/* The figures step back while they are being read, and come forward again the
+   moment the commentary lands. */
+.analysis-reading { opacity: .55; transition: opacity .28s ease-out; }
+
+/* Beat 2 — the pen stroke, then the words behind it. */
+@keyframes analysis-rule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes analysis-rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to   { opacity: 1; transform: none; }
+}
+.analysis-rule {
+  height: 2px; border-radius: 2px; transform-origin: left center;
+  background: var(--brand-primary, #4040C8);
+  animation: analysis-rule .42s cubic-bezier(.22, .61, .36, 1) both;
+}
+.analysis-rise { animation: analysis-rise .38s cubic-bezier(.22, .61, .36, 1) both; }
+
+/* The confirm dialog arrives rather than blinks — it is asking for a decision. */
+@keyframes analysis-pop {
+  from { opacity: 0; transform: scale(.96) translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.analysis-pop { animation: analysis-pop .22s cubic-bezier(.22, .61, .36, 1) both; }
+
+/* Motion is the decoration here; the status line and the prose carry the meaning,
+   so removing all of it costs the reader nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .analysis-sweep { display: none; }
+  .analysis-reading { opacity: 1; }
+  .analysis-rule, .analysis-rise, .analysis-pop { animation: none; }
+}
 
 /* Onboarding — eye-catching reveals */
 @keyframes onb-rise { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }

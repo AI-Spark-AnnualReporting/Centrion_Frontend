@@ -387,6 +387,7 @@ export default function AssembledReportPage() {
                       error={isEditing ? editError : null}
                       onSave={(content) => handleSave(s.section_code, content)}
                       onCancel={() => { setEditError(null); setEditingCode(null); }}
+                      showAnalysis
                     />
                   </section>
                 );

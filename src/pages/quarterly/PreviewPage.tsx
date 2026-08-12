@@ -865,14 +865,16 @@ function SectionPanel({
             wraps the content — and sits OUTSIDE the table's own overflow-x
             scroller, which would otherwise clip a vertically-moving band. */}
         <div style={{ position: 'relative', overflow: analysing ? 'hidden' : undefined }}>
-          <EditableSectionContent
-            section={section}
-            editing={editing}
-            saving={saving}
-            error={editing ? editError : null}
-            onSave={onSaveContent}
-            onCancel={onCancelEdit}
-          />
+          <div className={analysing ? 'analysis-reading' : undefined}>
+            <EditableSectionContent
+              section={section}
+              editing={editing}
+              saving={saving}
+              error={editing ? editError : null}
+              onSave={onSaveContent}
+              onCancel={onCancelEdit}
+            />
+          </div>
           {analysing && <ReadingBand />}
         </div>
         {!editing && companyId && reportId && isFinancialTable(section) && (

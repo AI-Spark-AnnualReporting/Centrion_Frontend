@@ -1619,6 +1619,18 @@ export const quarterlyReports = {
       { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
     ),
 
+  // Replace the analysis prose by hand. An empty string removes it from the report.
+  saveSectionAnalysis: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    text: string,
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
   // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
   // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive
   // the returned handle with usePipelinePoll and refresh getSection per tick.

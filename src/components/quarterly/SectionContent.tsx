@@ -16,7 +16,29 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
-export function SectionContent({ section }: { section: ProducedSection }) {
+export function SectionContent({
+  section,
+  showAnalysis = false,
+}: {
+  section: ProducedSection;
+  // The Analyse button's commentary, printed under the table(s) — it is part of
+  // the report. Off by default because on Preview the SectionAnalysis control
+  // renders it instead, so it can own the edit state; the read-only report view
+  // turns it on.
+  showAnalysis?: boolean;
+}) {
+  const analysis = showAnalysis ? (section.analysis?.text ?? '').trim() : '';
+  const body = <SectionBody section={section} />;
+  if (!analysis) return body;
+  return (
+    <>
+      {body}
+      <Prose text={analysis} />
+    </>
+  );
+}
+
+function SectionBody({ section }: { section: ProducedSection }) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
   // rather than a JSON string. Normalise to a string so `.trim()`/JSON.parse work.
@@ -96,7 +118,10 @@ function NoData() {
 }
 
 // ─── prose ────────────────────────────────────────────────────────────────────
-function Prose({ text }: { text: string }) {
+// Exported so the Preview's SectionAnalysis prints its paragraphs in exactly the
+// same type as the report page does — the same prose must not shift between the
+// two screens.
+export function Prose({ text }: { text: string }) {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const blocks = paragraphs.length ? paragraphs : [text];
   return (

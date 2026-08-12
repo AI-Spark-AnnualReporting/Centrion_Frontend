@@ -545,20 +545,25 @@ export interface ProducedSection {
   analysis?: SectionAnalysis | null;
 }
 
-// POST .../sections/{code}/analyse — an on-screen read of the section's figures.
-// Deliberately not part of the report: it never reaches the DOCX/PDF exporters.
+// POST .../sections/{code}/analyse — the commentary printed under a section's
+// table(s). Part of the report: stored on quarterly_report_sections.analysis and
+// rendered by both exporters.
 export interface SectionAnalysis {
   section_code?: string;
   text: string;
   generated_at: string;
-  model: string;
-  // Covers the table, the model AND the prompt text — so a stored analysis whose
-  // fingerprint no longer matches was written about different numbers.
-  fingerprint: string;
+  model: string | null;
+  // Covers the table, the model, the prompt text, the tone and the language — so a
+  // stored analysis whose fingerprint no longer matches was written about
+  // different numbers, or in a different voice.
+  fingerprint: string | null;
   warnings?: string[];
   line_count?: number;
   cached?: boolean;
-  persisted?: boolean;
+  // True once a human has rewritten the prose, so it is never attributed to the
+  // model afterwards and a later Analyse click cannot overwrite it from cache.
+  edited?: boolean;
+  edited_at?: string | null;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.

@@ -18,6 +18,7 @@ export function EditableSectionContent({
   error,
   onSave,
   onCancel,
+  showAnalysis = false,
 }: {
   section: ProducedSection;
   editing: boolean;
@@ -25,8 +26,12 @@ export function EditableSectionContent({
   error: string | null;
   onSave: (content: string) => void;
   onCancel: () => void;
+  // Print the Analyse button's paragraphs under the table(s). The report view
+  // sets this; Preview leaves it off because SectionAnalysis renders them there
+  // along with the controls to rewrite or edit them.
+  showAnalysis?: boolean;
 }) {
-  if (!editing) return <SectionContent section={section} />;
+  if (!editing) return <SectionContent section={section} showAnalysis={showAnalysis} />;
 
   // Detect a tabular shape from the content itself (not just `mode`) — hybrid
   // sections (table + analysis JSON) report mode 'generate', not 'table'/'kpi'.

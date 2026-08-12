@@ -16,7 +16,10 @@ import type { ProducedSection, SectionAnalysis as Analysis } from '@/types/quart
 
 const analyseSection = vi.fn();
 vi.mock('@/lib/api', () => ({
-  quarterlyReports: { analyseSection: (...a: unknown[]) => analyseSection(...a) },
+  quarterlyReports: {
+    analyseSection: (...a: unknown[]) => analyseSection(...a),
+    saveSectionAnalysis: (...a: unknown[]) => saveSectionAnalysis(...a),
+  },
 }));
 
 function section(over: Partial<ProducedSection> = {}): ProducedSection {
@@ -50,6 +53,8 @@ const RESULT: Analysis = {
   model: 'gpt-4.1',
   fingerprint: 'abc123',
 };
+
+const saveSectionAnalysis = vi.fn();
 
 // ── 1. Which sections get the button ─────────────────────────────────────────
 
@@ -120,9 +125,10 @@ describe('sending the figures needs consent', () => {
   const renderIt = (s = section()) =>
     render(<SectionAnalysis companyId="c1" reportId="r1" section={s} />);
 
-  it('says where the figures go before anything is clicked', () => {
+  it('says where the figures go, and that the result lands in the report', () => {
     renderIt();
     expect(screen.getByText(/Sends this section’s figures to OpenAI/)).toBeInTheDocument();
+    expect(screen.getByText(/go into your report/)).toBeInTheDocument();
   });
 
   it('clicking Analyse asks first and sends nothing', () => {
@@ -138,7 +144,7 @@ describe('sending the figures needs consent', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('2 lines');
     expect(dialog).toHaveTextContent('Income & Comprehensive Income');
-    expect(dialog).toHaveTextContent(/not added to the report you export/);
+    expect(dialog).toHaveTextContent(/printed under this table in the report you export/);
   });
 
   it('cancelling sends nothing', () => {
@@ -208,10 +214,17 @@ describe('waiting and the result', () => {
     expect(screen.getByRole('button', { name: 'Re-analyse' })).toBeInTheDocument();
   });
 
-  it('names the model and says the analysis is not in the export', () => {
+  it('names the model that wrote it', () => {
     render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
     expect(screen.getByText(/gpt-4\.1/)).toBeInTheDocument();
-    expect(screen.getByText(/Not included in the exported report/)).toBeInTheDocument();
+  });
+
+  it('credits you, not the model, once you have edited it', () => {
+    render(<SectionAnalysis companyId="c1" reportId="r1" section={section({
+      analysis: { ...RESULT, edited: true, edited_at: '2026-08-12T11:00:00Z' },
+    })} />);
+    expect(screen.getByText(/Edited by you/)).toBeInTheDocument();
+    expect(screen.queryByText(/gpt-4\.1/)).not.toBeInTheDocument();
   });
 
   it('surfaces a figure the fact-check could not verify instead of hiding it', () => {
@@ -234,10 +247,96 @@ describe('waiting and the result', () => {
     expect(screen.getByText(/figures changed/)).toBeInTheDocument();
   });
 
-  it('re-analysing asks for consent again', () => {
+  it('re-analysing asks for consent again, and warns it replaces what is there', () => {
     render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }));
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(/will be replaced, including any edits/);
     expect(analyseSection).not.toHaveBeenCalled();
+  });
+});
+
+// ── 4. Editing, because it is going into a published report ──────────────────
+
+describe('editing the paragraphs', () => {
+  beforeEach(() => {
+    analyseSection.mockReset();
+    saveSectionAnalysis.mockReset();
+    saveSectionAnalysis.mockImplementation((_c, _r, _s, text) =>
+      Promise.resolve({ ...RESULT, text, edited: true, edited_at: '2026-08-12T11:00:00Z' }));
+  });
+
+  const openEditor = () => {
+    render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  };
+
+  it('opens with the current prose in the box', () => {
+    openEditor();
+    expect(screen.getByRole('textbox')).toHaveValue(RESULT.text);
+  });
+
+  it('saves a rewritten paragraph and shows it', async () => {
+    openEditor();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My own wording.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveSectionAnalysis).toHaveBeenCalledWith('c1', 'r1', 'sec_income', 'My own wording.'));
+    expect(await screen.findByText('My own wording.')).toBeInTheDocument();
+  });
+
+  it('cancelling changes nothing', () => {
+    openEditor();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'discarded' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(saveSectionAnalysis).not.toHaveBeenCalled();
+    expect(screen.getByText(/Revenue was SAR 424,095/)).toBeInTheDocument();
+  });
+
+  it('says what clearing the box does, since that removes it from the report', () => {
+    openEditor();
+    expect(screen.getByText(/removes these paragraphs from the report/)).toBeInTheDocument();
+  });
+
+  it('emptying the box drops the analysis entirely', async () => {
+    openEditor();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveSectionAnalysis).toHaveBeenCalled());
+    expect(await screen.findByRole('button', { name: 'Analyse' })).toBeInTheDocument();
+  });
+});
+
+// ── 5. It is report content, so it renders in the report view ────────────────
+// The whole point of moving it off `feeder`: these paragraphs print under the
+// table, on the report page and in the exported document.
+
+describe('the analysis as part of the section', () => {
+  const withAnalysis = section({ analysis: RESULT });
+
+  it('prints under the table on the report page', async () => {
+    const { SectionContent } = await import('@/components/quarterly/SectionContent');
+    const { container } = render(<SectionContent section={withAnalysis} showAnalysis />);
+    const html = container.innerHTML;
+    expect(html.indexOf('Revenue was SAR 424,095 for the quarter.')).toBeGreaterThan(html.indexOf('<table'));
+    expect(screen.getByText(/Net income was SAR 122,188\./)).toBeInTheDocument();
+  });
+
+  it('splits on blank lines into real paragraphs, not one block', async () => {
+    const { SectionContent } = await import('@/components/quarterly/SectionContent');
+    const { container } = render(<SectionContent section={withAnalysis} showAnalysis />);
+    expect(container.querySelectorAll('p').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('is left out where the controls render it instead', async () => {
+    const { SectionContent } = await import('@/components/quarterly/SectionContent');
+    render(<SectionContent section={withAnalysis} />);
+    expect(screen.queryByText(/Revenue was SAR 424,095 for the quarter\./)).not.toBeInTheDocument();
+  });
+
+  it('changes nothing for a section that was never analysed', async () => {
+    const { SectionContent } = await import('@/components/quarterly/SectionContent');
+    const { container } = render(<SectionContent section={section()} showAnalysis />);
+    expect(container.querySelector('table')).toBeInTheDocument();
+    expect(container.querySelectorAll('p').length).toBe(0);
   });
 });
