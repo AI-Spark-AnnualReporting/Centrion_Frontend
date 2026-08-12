@@ -29,7 +29,6 @@ import {
   MUTED,
   Notice,
   ProfileFields,
-  ResolvedProfilePanel,
   SetupCard,
 } from './board-ui';
 
@@ -53,7 +52,10 @@ export default function BoardSetupPage() {
   const years = Array.from({ length: 8 }, (_, i) => thisYear - i);
 
   const [profile, setProfile] = useState<BoardIssuerProfile>(BLANK_PROFILE);
-  const [prefilled, setPrefilled] = useState(false);
+  // What the company profile actually seeded — held separately from `profile`
+  // so a DETECTED badge can show per-field, only while the live value still
+  // matches what was detected (same convention as the quarterly report).
+  const [detectedProfile, setDetectedProfile] = useState<BoardIssuerProfile | null>(null);
   // A slow /companies/me must never overwrite an answer already given.
   const [touched, setTouched] = useState(false);
   const [sectors, setSectors] = useState<Sector[] | null>(null);
@@ -76,8 +78,9 @@ export default function BoardSetupPage() {
         setSectors(list);
         if (!c || touched) return;
         const sectorName = c.sector_name ?? list.find((s) => s.id === c.sector_id)?.name ?? null;
-        setProfile(profileFromCompany(c, sectorName));
-        setPrefilled(true);
+        const seeded = profileFromCompany(c, sectorName);
+        setProfile(seeded);
+        setDetectedProfile(seeded);
       })
       .catch(() => {
         if (!cancelled) setSectors([]);
@@ -166,13 +169,6 @@ export default function BoardSetupPage() {
         title="Generate Board Report"
         sub="Board of Directors&rsquo; Report for a single financial year"
       >
-        {prefilled && (
-          <Notice tone="green">
-            Issuer profile prefilled from your company profile — change anything that differs for
-            this report.
-          </Notice>
-        )}
-
         <Block n={1} title="Financial year" hint="appears on the cover">
           <label htmlFor="board-fiscal-year" className="fl-label">
             Financial year
@@ -195,11 +191,22 @@ export default function BoardSetupPage() {
           </select>
         </Block>
 
-        <ProfileFields profile={profile} sectors={sectors} startAt={2} onChange={setField} />
-
-        <div style={{ marginBottom: 18 }}>
-          <ResolvedProfilePanel profile={profile} />
-        </div>
+        <ProfileFields
+          profile={profile}
+          sectors={sectors}
+          startAt={2}
+          onChange={setField}
+          detected={
+            detectedProfile
+              ? {
+                  issuer_type: profile.issuer_type === detectedProfile.issuer_type,
+                  sector: profile.sector === detectedProfile.sector,
+                  sharia_compliant: profile.sharia_compliant === detectedProfile.sharia_compliant,
+                  has_capital_instruments: profile.has_capital_instruments === detectedProfile.has_capital_instruments,
+                }
+              : undefined
+          }
+        />
 
         {conflict && (
           <div

@@ -20,6 +20,7 @@ import type {
   BoardOutlineSavePayload,
   BoardProduceSummary,
   BoardReportSummary,
+  BoardRequirement,
   BoardSection,
   BoardSourcesResponse,
 } from '@/types/board';
@@ -30,6 +31,11 @@ export const ISSUER_TYPES: { value: BoardIssuerProfile['issuer_type']; label: st
   { value: 'bank', label: 'Bank (SAMA-regulated)' },
   { value: 'corporate', label: 'Non-financial (corporate)' },
 ];
+
+// Full-word requirement label — same convention as the quarterly report's
+// REQUIRED/OPTIONAL section pills. No raw "M"/"O"/"C" codes. Shared by the
+// Sections list and the Review panel's section header so they can't drift.
+export const REQ_TEXT: Record<BoardRequirement, string> = { M: 'Required', O: 'Optional', C: 'Conditional' };
 
 /** Field-by-field equality, so an unchanged profile skips the PATCH. */
 export const sameProfile = (a: BoardIssuerProfile | null, b: BoardIssuerProfile | null): boolean =>
