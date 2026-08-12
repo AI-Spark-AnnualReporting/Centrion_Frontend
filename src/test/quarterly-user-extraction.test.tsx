@@ -151,3 +151,118 @@ describe('user-metrics extraction screen', () => {
     expect(screen.getByText('Line 19')).toBeInTheDocument();
   });
 });
+
+// ─── grids ───────────────────────────────────────────────────────────────────
+// A 6x5 table printed one row per CELL was 28 rows, the line name repeated five times
+// and the unit twenty-eight. The screen exists so someone can check what we read
+// against the workbook open beside them, so it has to read like that workbook.
+
+function cell(
+  label: string, column: string, display: string, group = '', id = `${label}-${column}`,
+) {
+  return {
+    id, label, value: 1, value_display: display, unit: 'SAR_million',
+    sheet: 'N4 Operating Segments', group: group || null, column, table: null,
+  };
+}
+
+function gridPayload(rows: ReturnType<typeof cell>[], over: Partial<UserExtractionTable> = {}) {
+  return payload({
+    sections: [{
+      section_code: 'sec_seg', title: 'N4 Operating Segments', is_custom: true, rows,
+    }],
+    tables: [table({
+      table: 'N4 Operating Segments', section_code: 'sec_seg',
+      section_title: 'N4 Operating Segments', shape: 'matrix', column_count: 5,
+      rows: rows.length, currency: 'SAR', ...over,
+    })],
+  });
+}
+
+describe('a section the source printed as a grid', () => {
+  const ROWS = [
+    cell('External revenue', 'Upstream', 'SAR 170,324M'),
+    cell('External revenue', 'Downstream', 'SAR 245,808M'),
+    cell('External revenue', 'Corporate', 'SAR 496M'),
+    cell('External revenue', 'Consolidated', 'SAR 416,628M'),
+    cell('Other income related to sales', 'Upstream', 'SAR 20,009M'),
+    cell('Other income related to sales', 'Downstream', 'SAR 27,988M'),
+    cell('Other income related to sales', 'Corporate', 'SAR 0M'),
+    cell('Other income related to sales', 'Consolidated', 'SAR 47,997M'),
+  ];
+
+  it('prints one row per line item, not one per cell', () => {
+    renderScreen(gridPayload(ROWS));
+    // Eight cells, two line items — and each name appears ONCE.
+    expect(screen.getAllByText('External revenue')).toHaveLength(1);
+    expect(screen.getAllByText('Other income related to sales')).toHaveLength(1);
+  });
+
+  it('names each category once, as a column heading', () => {
+    renderScreen(gridPayload(ROWS));
+    for (const c of ['Upstream', 'Downstream', 'Corporate', 'Consolidated']) {
+      expect(screen.getByRole('columnheader', { name: c })).toBeInTheDocument();
+    }
+  });
+
+  it('states the unit once and leaves the figures bare', () => {
+    renderScreen(gridPayload(ROWS));
+    // The header carries "SAR · million"; a cell carries the number alone.
+    expect(screen.getByText('170,324')).toBeInTheDocument();
+    expect(screen.queryByText('SAR 170,324M')).not.toBeInTheDocument();
+  });
+
+  it('prints zero as a dash, the way a filing does', () => {
+    renderScreen(gridPayload(ROWS));
+    // "Other income · Corporate" is 0 — four of these shouting "SAR 0M" was the noise.
+    expect(screen.getAllByText('–').length).toBeGreaterThan(0);
+    expect(screen.queryByText('SAR 0M')).not.toBeInTheDocument();
+  });
+
+  it('keeps a percentage intact — it is not the table currency', () => {
+    renderScreen(gridPayload([
+      cell('Average annualized capitalization rate', 'Rate', '4.7%'),
+      cell('Average annualized capitalization rate', 'Total', 'SAR 452M'),
+    ]));
+    expect(screen.getByText('4.7%')).toBeInTheDocument();
+    expect(screen.getByText('452')).toBeInTheDocument();
+  });
+
+  it('orders columns by the widest line, matching the report', () => {
+    // Note 10 opens with a reconciliation filling only Total; first-appearance order
+    // would put Total ahead of the segments the filing prints before it.
+    renderScreen(gridPayload([
+      cell('Revenue', 'Total', 'SAR 416,628M', 'Revenue reconciliation'),
+      cell('Crude oil', 'Upstream', 'SAR 158,771M', 'Disaggregation'),
+      cell('Crude oil', 'Downstream', 'SAR 45,776M', 'Disaggregation'),
+      cell('Crude oil', 'Total', 'SAR 204,547M', 'Disaggregation'),
+    ]));
+    const heads = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(heads).toEqual(['Line item', 'Upstream', 'Downstream', 'Total']);
+  });
+
+  it('shows the subsection the source printed above a group of lines', () => {
+    renderScreen(gridPayload([
+      cell('Revenue', 'Total', 'SAR 416,628M', 'Revenue reconciliation'),
+      cell('Crude oil', 'Total', 'SAR 204,547M', 'Disaggregation of revenue'),
+    ]));
+    expect(screen.getByText('Revenue reconciliation')).toBeInTheDocument();
+    expect(screen.getByText('Disaggregation of revenue')).toBeInTheDocument();
+  });
+
+  it('leaves a flat section as the list it already was', () => {
+    const flat = payload({
+      sections: [{
+        section_code: 'sec_income', title: 'Income & Comprehensive Income', is_custom: true,
+        rows: [{ id: 'f1', label: 'Revenue', value: 416628, value_display: 'SAR 416,628M',
+                 unit: 'SAR_million', sheet: 'Income', group: null, column: null, table: null }],
+      }],
+      tables: [table({ table: 'Income & Comprehensive Income', section_code: 'sec_income',
+                       section_title: 'Income & Comprehensive Income', shape: 'flat' })],
+    });
+    renderScreen(flat);
+    // No grid: the unit stays on the figure and there are no category headings.
+    expect(screen.getByText('SAR 416,628M')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
+  });
+});

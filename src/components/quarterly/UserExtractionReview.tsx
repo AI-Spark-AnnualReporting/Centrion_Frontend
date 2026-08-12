@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ChevronDown, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import type {
@@ -28,6 +28,7 @@ const MUTED = '#6B7280';
 const DARK = '#1F2340';
 const AMBER = '#B45309';
 const LINE = '#ECEEF8';
+const MONO = "'DM Mono', 'Courier New', monospace";
 const ROWS_COLLAPSED = 8;
 
 interface Props {
@@ -47,23 +48,330 @@ function periodNote(t: UserExtractionTable, period?: string | null): string {
   return `nothing named a period — assumed ${period ?? 'the report quarter'}`;
 }
 
-type Item =
-  | { kind: 'heading'; key: string; label: string }
-  | { kind: 'row'; row: CustomExtractionRow; indented: boolean };
+interface Part {
+  key: string;
+  /** Only when a section holds several tables — otherwise the section title says it. */
+  title: string | null;
+  table?: UserExtractionTable;
+  grid: boolean;
+  rows: CustomExtractionRow[];
+}
 
-/** Interleave a subsection heading wherever the source printed one. */
-function withHeadings(rows: CustomExtractionRow[]): Item[] {
-  const out: Item[] = [];
-  let current: string | null = null;
-  rows.forEach((row, i) => {
-    const group = (row.group ?? '').trim();
-    if (group !== (current ?? '')) {
-      if (group) out.push({ kind: 'heading', key: `${i}-${group}`, label: group });
-      current = group || null;
+/**
+ * A section can hold several tables of different shapes — a sheet that stacks a movement
+ * matrix and a one-column list under it — so each is rendered as what it is.
+ */
+function splitByTable(rows: CustomExtractionRow[], tables: UserExtractionTable[]): Part[] {
+  const order: string[] = [];
+  const by: Record<string, CustomExtractionRow[]> = {};
+  for (const r of rows) {
+    const name = (r.table ?? '').trim() || '';
+    if (!by[name]) {
+      by[name] = [];
+      order.push(name);
     }
-    out.push({ kind: 'row', row, indented: Boolean(current) });
+    by[name].push(r);
+  }
+  const single = order.length === 1;
+  return order.map((name) => {
+    const table = tables.find((t) => t.table === name) ?? (single ? tables[0] : undefined);
+    return {
+      key: name || '_only',
+      title: single ? null : name || null,
+      table,
+      grid: table?.shape === 'matrix',
+      rows: by[name],
+    };
   });
+}
+
+/** The list shape: one line per figure, with the subsection the source printed above it. */
+function FlatLines({ rows, showSheet }: { rows: CustomExtractionRow[]; showSheet: boolean }) {
+  let current: string | null = null;
+  return (
+    <>
+      {rows.map((row, i) => {
+        const group = (row.group ?? '').trim();
+        const heading = group && group !== current ? group : null;
+        current = group || null;
+        return (
+          <React.Fragment key={row.id}>
+            {heading && (
+              // Without it a line the source prints under two headings — Note 10 has
+              // "Other revenue" under both — reads as a duplicate.
+              <div
+                key={`h-${i}`}
+                style={{
+                  marginTop: 12, marginBottom: 2, fontSize: 10.5, fontWeight: 800,
+                  letterSpacing: '.05em', textTransform: 'uppercase', color: ACCENT,
+                }}
+              >
+                {heading}
+              </div>
+            )}
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '6px 0', borderBottom: '1px solid #F6F7FC', fontSize: 12.5,
+              }}
+            >
+              <span
+                style={{
+                  flex: 1, color: DARK, minWidth: 0, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  paddingLeft: current ? 12 : 0,
+                }}
+                title={row.label ?? undefined}
+              >
+                {row.label}
+              </span>
+              {showSheet && row.sheet && (
+                <span
+                  style={{
+                    fontSize: 10.5, color: MUTED, maxWidth: 150, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                  title={row.sheet}
+                >
+                  {row.sheet}
+                </span>
+              )}
+              <span
+                style={{
+                  minWidth: 130, textAlign: 'right', color: DARK, fontFamily: MONO,
+                  fontVariantNumeric: 'tabular-nums', fontWeight: 600,
+                }}
+              >
+                {row.value_display}
+              </span>
+            </div>
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+// ─── grid ─────────────────────────────────────────────────────────────────────
+// A note schedule is a table, and this screen exists so someone can check it against
+// the workbook open in their other window. Printed as one row per CELL it was 28 rows
+// for a 6x5 table, with the line name repeated five times and the unit twenty-eight.
+
+interface Line {
+  group: string;
+  label: string;
+  cells: Record<string, string>;
+}
+
+/**
+ * Column order, matching statement_layout.matrix_columns so the screen and the report
+ * agree. The widest LINE gives the source's order — first appearance does not: Note 10
+ * opens with a reconciliation filling only "Total", which would put Total ahead of the
+ * three segments the filing prints before it.
+ */
+function gridColumns(rows: CustomExtractionRow[]): string[] {
+  let widest: string[] = [];
+  let run: string[] = [];
+  let prev: string | null = null;
+  for (const r of rows) {
+    const col = (r.column ?? '').trim();
+    if (!col) continue;
+    const key = `${r.group ?? ''}|${r.label ?? ''}`;
+    if (key !== prev) {
+      if (run.length > widest.length) widest = run;
+      run = [];
+      prev = key;
+    }
+    if (!run.includes(col)) run.push(col);
+  }
+  if (run.length > widest.length) widest = run;
+
+  const out = [...widest];
+  for (const r of rows) {
+    const col = (r.column ?? '').trim();
+    if (col && !out.includes(col)) out.push(col);
+  }
   return out;
+}
+
+/** One row per line item, cells keyed by column — the shape the source printed. */
+function gridLines(rows: CustomExtractionRow[]): Line[] {
+  const order: string[] = [];
+  const by: Record<string, Line> = {};
+  for (const r of rows) {
+    const col = (r.column ?? '').trim();
+    if (!col) continue;
+    const group = (r.group ?? '').trim();
+    const label = r.label ?? '';
+    const key = `${group}|${label}`;
+    if (!by[key]) {
+      by[key] = { group, label, cells: {} };
+      order.push(key);
+    }
+    if (by[key].cells[col] === undefined) by[key].cells[col] = r.value_display ?? '';
+  }
+  return order.map((k) => by[k]);
+}
+
+/**
+ * "SAR 170,324M" → "170,324". The unit is stated once in the section header; repeating
+ * it in every cell is the noise that made a 6x5 table unreadable.
+ *
+ * Stripped from the display string rather than reformatted from `value`, so whatever
+ * scale the report declared is preserved — and only when the prefix is this table's own
+ * currency, so a percentage row ("4.7%", a coupon rate) is left exactly as it is.
+ */
+function bareFigure(display: string, currency?: string | null): string {
+  const raw = (display ?? '').trim();
+  if (!raw || !currency) return raw;
+  const cur = currency.toUpperCase();
+  const m = raw.match(new RegExp(`^\\((?:${cur})\\s*(.+?)([KMB])?\\)$`, 'i'));
+  if (m) return `(${m[1]})`;
+  const p = raw.match(new RegExp(`^${cur}\\s*(.+?)([KMB])?$`, 'i'));
+  return p ? p[1] : raw;
+}
+
+/** Zero and empty print as a dash in a filing, and the eye goes to the real numbers. */
+const isBlank = (v: string) => !v || /^\(?0(\.0+)?\)?$/.test(v.trim());
+
+/** The column that ties. Weight and a hairline only — the hover tint is the loud thing. */
+const isTotalColumn = (name: string) => /^(total|consolidated)\b/i.test(name.trim());
+
+function ExtractionGrid({
+  rows,
+  currency,
+  maxLines,
+}: {
+  rows: CustomExtractionRow[];
+  currency?: string | null;
+  maxLines: number;
+}) {
+  // Pointer-only, and nothing is lost without it: hovering a cell tints its row and its
+  // column heading, which is the gesture of checking a figure against a spreadsheet.
+  const [hover, setHover] = useState<{ line: number; col: string } | null>(null);
+
+  const cols = useMemo(() => gridColumns(rows), [rows]);
+  const lines = useMemo(() => gridLines(rows), [rows]);
+  const shown = lines.slice(0, maxLines);
+
+  const TINT = 'rgba(64,64,200,.05)';
+  const th: React.CSSProperties = {
+    fontSize: 10, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase',
+    color: MUTED, padding: '0 12px 8px', textAlign: 'right',
+    borderBottom: `1px solid ${LINE}`,
+    // Headings wrap, figures never do. A PP&E note has eight of them and they are
+    // sentences — "Plant, machinery and equipment", "Depots, storage tanks and
+    // pipelines". Held on one line each they push the table past 2,000px and the whole
+    // thing has to be scrolled to be read; wrapped, all eight fit on screen.
+    whiteSpace: 'normal', maxWidth: 92, verticalAlign: 'bottom', lineHeight: 1.35,
+  };
+
+  let lastGroup: string | null = null;
+  return (
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label="Extracted figures"
+      style={{ overflowX: 'auto', margin: '0 -4px', padding: '0 4px' }}
+    >
+      <table style={{ borderCollapse: 'collapse', fontSize: 12.5, minWidth: '100%' }}>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              style={{
+                ...th, textAlign: 'left', position: 'sticky', left: 0, zIndex: 2,
+                background: '#fff', paddingLeft: 0, minWidth: 240,
+              }}
+            >
+              Line item
+            </th>
+            {cols.map((c) => (
+              <th
+                key={c}
+                scope="col"
+                style={{
+                  ...th,
+                  color: hover?.col === c ? ACCENT : MUTED,
+                  background: hover?.col === c ? TINT : undefined,
+                  borderLeft: isTotalColumn(c) ? `1px solid ${LINE}` : undefined,
+                }}
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((line, li) => {
+            const heading = line.group && line.group !== lastGroup ? line.group : null;
+            lastGroup = line.group;
+            const lit = hover?.line === li;
+            return (
+              <React.Fragment key={`${line.group}|${line.label}|${li}`}>
+                {heading && (
+                  <tr>
+                    <td
+                      colSpan={cols.length + 1}
+                      style={{
+                        padding: '14px 0 5px', fontSize: 10.5, fontWeight: 800,
+                        letterSpacing: '.05em', textTransform: 'uppercase', color: ACCENT,
+                        // Pinned so the subsection stays readable while the figures
+                        // scroll; opaque so they do not run underneath it.
+                        position: 'sticky', left: 0, background: '#fff',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {heading}
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <th
+                    scope="row"
+                    style={{
+                      textAlign: 'left', fontWeight: 400, color: DARK, padding: '6px 12px 6px 0',
+                      position: 'sticky', left: 0, zIndex: 1,
+                      background: lit ? '#FAFAFE' : '#fff',
+                      borderBottom: '1px solid #F6F7FC',
+                      paddingLeft: line.group ? 12 : 0,
+                      maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={line.label}
+                  >
+                    {line.label}
+                  </th>
+                  {cols.map((c) => {
+                    const v = bareFigure(line.cells[c] ?? '', currency);
+                    const blank = isBlank(v);
+                    return (
+                      <td
+                        key={c}
+                        onMouseEnter={() => setHover({ line: li, col: c })}
+                        onMouseLeave={() => setHover(null)}
+                        style={{
+                          padding: '6px 12px', textAlign: 'right', fontFamily: MONO,
+                          fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+                          color: blank ? '#C3C7DA' : DARK,
+                          fontWeight: isTotalColumn(c) && !blank ? 700 : 400,
+                          borderBottom: '1px solid #F6F7FC',
+                          borderLeft: isTotalColumn(c) ? `1px solid ${LINE}` : undefined,
+                          background: lit || hover?.col === c ? TINT : undefined,
+                        }}
+                      >
+                        {blank ? '–' : v}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function Stat({ n, label, tone }: { n: number; label: string; tone?: string }) {
@@ -226,54 +534,28 @@ export default function UserExtractionReview({ reportId, data }: Props) {
                   ))}
                 </div>
 
-                {withHeadings(rows).map((item) =>
-                  item.kind === 'heading' ? (
-                    // The subsection the source printed above these lines. Without it a
-                    // line that legitimately appears under two headings — Note 10 prints
-                    // "Other revenue" in both — reads as a duplicate.
-                    <div
-                      key={`h-${item.key}`}
-                      style={{
-                        marginTop: 12, marginBottom: 2, fontSize: 10.5, fontWeight: 800,
-                        letterSpacing: '0.05em', textTransform: 'uppercase', color: ACCENT,
-                      }}
-                    >
-                      {item.label}
-                    </div>
-                  ) : (
-                    <div
-                      key={item.row.id}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        padding: '6px 0', borderBottom: '1px solid #F6F7FC', fontSize: 12.5,
-                      }}
-                    >
-                      <span style={{ flex: 1, color: DARK, minWidth: 0, overflow: 'hidden',
-                                     textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                     paddingLeft: item.indented ? 12 : 0 }}
-                            title={item.row.label ?? undefined}>
-                        {item.row.label}
-                      </span>
-                      {item.row.column && (
-                        <span className="badge" style={{ fontSize: 10, background: '#F1F2FA',
-                                                         color: MUTED, border: 'none' }}>
-                          {item.row.column}
-                        </span>
-                      )}
-                      {srcTables.length > 1 && item.row.sheet && (
-                        <span style={{ fontSize: 10.5, color: MUTED, maxWidth: 150, overflow: 'hidden',
-                                       textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              title={item.row.sheet}>
-                          {item.row.sheet}
-                        </span>
-                      )}
-                      <span style={{ minWidth: 130, textAlign: 'right', color: DARK,
-                                     fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                        {item.row.value_display}
-                      </span>
-                    </div>
-                  ),
-                )}
+                {splitByTable(sec.rows, srcTables).map((part) => (
+                  <div key={part.key} style={{ marginBottom: 4 }}>
+                    {part.title && (
+                      <div style={{ fontSize: 12, fontWeight: 700, color: DARK, margin: '10px 0 6px' }}>
+                        {part.title}
+                      </div>
+                    )}
+                    {part.grid ? (
+                      <ExtractionGrid
+                        rows={part.rows}
+                        currency={part.table?.currency}
+                        maxLines={showAll ? Infinity : ROWS_COLLAPSED}
+                      />
+                    ) : (
+                      <FlatLines
+                        rows={showAll ? part.rows : part.rows.slice(0, ROWS_COLLAPSED)}
+                        showSheet={srcTables.length > 1}
+                      />
+                    )}
+                  </div>
+                ))}
+
 
                 {sec.rows.length > ROWS_COLLAPSED && (
                   <button
