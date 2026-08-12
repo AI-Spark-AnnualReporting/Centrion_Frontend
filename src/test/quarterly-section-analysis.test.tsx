@@ -8,8 +8,8 @@
 //   2. The figures do not leave without consent. The button opens a dialog; the
 //      network call happens on confirm and NOT on cancel.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import SectionAnalysis from '@/components/quarterly/SectionAnalysis';
 import { isFinancialTable } from '@/components/quarterly/sectionState';
 import type { ProducedSection, SectionAnalysis as Analysis } from '@/types/quarterly';
@@ -338,5 +338,66 @@ describe('the analysis as part of the section', () => {
     const { container } = render(<SectionContent section={section()} showAnalysis />);
     expect(container.querySelector('table')).toBeInTheDocument();
     expect(container.querySelectorAll('p').length).toBe(0);
+  });
+});
+
+// ── 6. The waiting state shows this table, not a generic loader ──────────────
+// A three-dot loader says "something is happening somewhere". The section's own
+// line names running past say "your table, this line" — and they are true.
+
+const TICKER_LABELS = [
+  'Borrowing costs capitalized within additions',
+  'Average annualized capitalization rate applied',
+  'Impairment loss, mainly on plant and machinery',
+];
+
+const tickerSection = () => section({
+  content: JSON.stringify({
+    title: 'N5 Property, Plant & Equipment',
+    rows: TICKER_LABELS.map((l, i) => ({ label: l, current_display: `SAR ${i}` })),
+  }),
+});
+
+describe('what plays while it is analysing', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    analyseSection.mockReset();
+    analyseSection.mockImplementation(() => new Promise(() => {}));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const startAndWait = async () => {
+    const view = render(<SectionAnalysis companyId="c1" reportId="r1" section={tickerSection()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyse' }));
+    confirm();
+    await waitFor(() => expect(analyseSection).toHaveBeenCalled());
+    return view;
+  };
+
+  it("streams the section's own line names, one at a time, and wraps", async () => {
+    const { unmount } = await startAndWait();
+    expect(screen.getByText(TICKER_LABELS[0])).toBeInTheDocument();
+    for (const next of [TICKER_LABELS[1], TICKER_LABELS[2], TICKER_LABELS[0]]) {
+      await act(async () => { vi.advanceTimersByTime(620); });
+      expect(screen.getByText(next)).toBeInTheDocument();
+    }
+    unmount();
+  });
+
+  it('still states the true scope alongside them', async () => {
+    const { unmount } = await startAndWait();
+    expect(screen.getByText(/Reading 3 lines from this table/)).toBeInTheDocument();
+    unmount();
+  });
+
+  it('a table with no readable labels still shows the count', async () => {
+    analyseSection.mockImplementation(() => new Promise(() => {}));
+    const bare = section({ content: JSON.stringify({ title: 'T', rows: [{ current_display: 'SAR 1' }] }) });
+    const { unmount } = render(<SectionAnalysis companyId="c1" reportId="r1" section={bare} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyse' }));
+    confirm();
+    await waitFor(() => expect(analyseSection).toHaveBeenCalled());
+    expect(screen.getByText(/Reading 1 line from this table/)).toBeInTheDocument();
+    unmount();
   });
 });

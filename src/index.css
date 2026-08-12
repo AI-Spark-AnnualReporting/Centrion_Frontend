@@ -685,32 +685,61 @@ body {
 
 /* Beat 1 — the reading head. `top` (not translateY) because a translate %
    resolves against the BAND's own height, and the band has to cross the whole
-   container whatever its size. The leading edge is a hairline so it reads as a
-   scan line rather than a glow. */
+   container whatever its size.
+
+   Shape matters more than colour here: a tall soft gradient reads as a shaded
+   BLOCK sitting on the table, not as something moving. So the head is a solid
+   2px rule with a glow under it, and the tint is a short wake trailing behind —
+   the eye tracks the edge, and the wake tells it which way the edge is going. */
 @keyframes analysis-sweep {
-  0%   { top: -170px; opacity: 0; }
-  8%   { opacity: 1; }
-  92%  { opacity: 1; }
+  0%   { top: -104px; opacity: 0; }
+  7%   { opacity: 1; }
+  93%  { opacity: 1; }
   100% { top: 100%; opacity: 0; }
 }
 .analysis-sweep {
-  position: absolute; left: 0; right: 0; height: 170px; top: -170px;
+  position: absolute; left: 0; right: 0; height: 104px; top: -104px;
   pointer-events: none;
   /* Plain-accent fallback first; browsers without color-mix keep this one. */
   background:
-    linear-gradient(180deg, transparent 0%, rgba(64,64,200,.10) 62%, rgba(64,64,200,.16) 97%, transparent 100%);
+    linear-gradient(180deg, transparent 0%, rgba(64,64,200,.05) 46%, rgba(64,64,200,.15) 100%);
   background:
     linear-gradient(180deg, transparent 0%,
-      color-mix(in srgb, var(--brand-primary, #4040C8) 10%, transparent) 62%,
-      color-mix(in srgb, var(--brand-primary, #4040C8) 16%, transparent) 97%,
-      transparent 100%);
-  border-bottom: 1px solid rgba(64,64,200,.45);
-  border-bottom-color: color-mix(in srgb, var(--brand-primary, #4040C8) 45%, transparent);
-  animation: analysis-sweep 2.6s cubic-bezier(.37, 0, .63, 1) infinite;
+      color-mix(in srgb, var(--brand-primary, #4040C8) 5%, transparent) 46%,
+      color-mix(in srgb, var(--brand-primary, #4040C8) 15%, transparent) 100%);
+  border-bottom: 2px solid var(--brand-primary, #4040C8);
+  box-shadow: 0 3px 16px -2px rgba(64,64,200,.45);
+  animation: analysis-sweep 2.3s cubic-bezier(.33, 0, .28, 1) infinite;
 }
 /* The figures step back while they are being read, and come forward again the
    moment the commentary lands. */
 .analysis-reading { opacity: .55; transition: opacity .28s ease-out; }
+
+/* The status line, in place of a stock three-dot loader. What streams past is the
+   section's OWN line names, so the wait shows something true about this table
+   rather than a generic "busy" glyph. Each name arrives from below and the one
+   before it leaves upward — a tape running under the read head. */
+@keyframes analysis-tick {
+  0%   { opacity: 0; transform: translateY(8px); }
+  18%  { opacity: 1; transform: none; }
+  82%  { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+.analysis-tick { animation: analysis-tick .68s cubic-bezier(.22, .61, .36, 1) both; }
+
+/* Indeterminate, because there is no real percentage to report — it says
+   "still running", which is the only honest claim available. */
+@keyframes analysis-rail { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.analysis-rail {
+  position: relative; overflow: hidden; height: 2px; border-radius: 2px;
+  background: rgba(64,64,200,.13);
+  background: color-mix(in srgb, var(--brand-primary, #4040C8) 13%, transparent);
+}
+.analysis-rail::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 28%;
+  border-radius: 2px; background: var(--brand-primary, #4040C8);
+  animation: analysis-rail 1.35s cubic-bezier(.5, 0, .5, 1) infinite;
+}
 
 /* Beat 2 — the pen stroke, then the words behind it. */
 @keyframes analysis-rule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
@@ -737,7 +766,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .analysis-sweep { display: none; }
   .analysis-reading { opacity: 1; }
-  .analysis-rule, .analysis-rise, .analysis-pop { animation: none; }
+  .analysis-rail::after { animation: none; width: 100%; opacity: .35; }
+  .analysis-rule, .analysis-rise, .analysis-pop, .analysis-tick { animation: none; }
 }
 
 /* Onboarding — eye-catching reveals */

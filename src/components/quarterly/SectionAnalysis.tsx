@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { quarterlyReports } from '@/lib/api';
 import type { ProducedSection, SectionAnalysis as Analysis } from '@/types/quarterly';
 import { Prose } from './SectionContent';
@@ -22,6 +22,29 @@ function figureCount(section: ProducedSection): number {
   } catch {
     return 0;
   }
+}
+
+// The section's own line names, in the order the table prints them — what the
+// waiting state streams past instead of a generic busy glyph.
+function rowLabels(section: ProducedSection): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(section.content ?? '');
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+  const o = parsed as { rows?: unknown[]; tables?: { rows?: unknown[] }[] };
+  const rows: unknown[] = Array.isArray(o.tables)
+    ? o.tables.flatMap((t) => (Array.isArray(t?.rows) ? t.rows : []))
+    : Array.isArray(o.rows) ? o.rows : [];
+  const out: string[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const label = (r as { label?: unknown }).label;
+    if (typeof label === 'string' && label.trim()) out.push(label.trim());
+  }
+  return out;
 }
 
 function whenLabel(iso?: string | null): string {
@@ -126,31 +149,48 @@ function ConfirmDialog({
 }
 
 // ── Beat one: reading ────────────────────────────────────────────────────────
-// No fabricated stage cycling — the client cannot know which stage the server is
-// in. The line states the true scope; the band over the table carries the motion.
-function Reading({ lines, slow }: { lines: number; slow: boolean }) {
+// Still no fabricated stage cycling — the client cannot know which stage the
+// server is in. What it CAN show is true: how many lines are going, and the names
+// of those lines, running past like tape under the read head. A three-dot loader
+// says "something is happening somewhere"; this says "your table, this line".
+const TICK_MS = 620;
+
+function Reading({ lines, labels, slow }: { lines: number; labels: string[]; slow: boolean }) {
+  const [i, setI] = useState(0);
+
+  useEffect(() => {
+    if (labels.length < 2) return;
+    const t = window.setInterval(() => setI((n) => (n + 1) % labels.length), TICK_MS);
+    return () => window.clearInterval(t);
+  }, [labels.length]);
+
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        display: 'flex', alignItems: 'center', gap: 9,
-        fontSize: 12.5, fontWeight: 600, color: ACCENT,
-      }}
-    >
-      <span style={{ display: 'inline-flex', gap: 3 }} aria-hidden="true">
-        {[0, 1, 2].map((i) => (
-          <span
+    <div role="status" aria-live="polite" style={{ maxWidth: 460 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 8,
+        fontSize: 12.5, fontWeight: 700, color: ACCENT,
+      }}>
+        Reading {lines} {lines === 1 ? 'line' : 'lines'} from this table
+        {slow && <span style={{ color: MUTED, fontWeight: 500, fontSize: 11.5 }}>still working</span>}
+      </div>
+
+      {labels.length > 0 && (
+        // Fixed height so the row beneath never jumps as names change length.
+        <div style={{ height: 18, overflow: 'hidden', marginTop: 5 }}>
+          <div
             key={i}
+            className="analysis-tick"
             style={{
-              width: 5, height: 5, borderRadius: '50%', background: ACCENT,
-              animation: `pdot .9s ${i * 0.15}s infinite`,
+              fontSize: 12, color: MUTED, whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '18px',
             }}
-          />
-        ))}
-      </span>
-      Reading {lines} {lines === 1 ? 'line' : 'lines'} from this table
-      {slow && <span style={{ color: MUTED, fontWeight: 500 }}>· still working</span>}
+          >
+            {labels[i]}
+          </div>
+        </div>
+      )}
+
+      <div className="analysis-rail" style={{ marginTop: 8, maxWidth: 260 }} />
     </div>
   );
 }
@@ -208,6 +248,7 @@ export default function SectionAnalysis({
   const stale = analysis != null && contentAtRun.current !== (section.content ?? null);
 
   const lines = figureCount(section);
+  const labels = useMemo(() => rowLabels(section), [section]);
 
   const run = useCallback(async (force: boolean) => {
     setConfirming(false);
@@ -273,7 +314,7 @@ export default function SectionAnalysis({
 
   return (
     <div style={{ marginTop: 18 }}>
-      {busy && <Reading lines={lines} slow={slow} />}
+      {busy && <Reading lines={lines} labels={labels} slow={slow} />}
 
       {analysis && !busy && !editing && (
         <>
