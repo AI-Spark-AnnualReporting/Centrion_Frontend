@@ -127,7 +127,7 @@ describe('sending the figures needs consent', () => {
 
   it('says where the figures go, and that the result lands in the report', () => {
     renderIt();
-    expect(screen.getByText(/Sends this section’s figures to OpenAI/)).toBeInTheDocument();
+    expect(screen.getByText(/Sends this section’s figures to AI/)).toBeInTheDocument();
     expect(screen.getByText(/go into your report/)).toBeInTheDocument();
   });
 
@@ -214,17 +214,20 @@ describe('waiting and the result', () => {
     expect(screen.getByRole('button', { name: 'Re-analyse' })).toBeInTheDocument();
   });
 
-  it('names the model that wrote it', () => {
+  it('does not name the model or when it ran — neither is report content', () => {
     render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
-    expect(screen.getByText(/gpt-4\.1/)).toBeInTheDocument();
+    expect(screen.getByText('Analysis')).toBeInTheDocument();
+    expect(screen.queryByText(/gpt-4\.1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Aug 12/)).not.toBeInTheDocument();
   });
 
-  it('credits you, not the model, once you have edited it', () => {
+  it('says so when the prose is yours, so it is never taken as the model output', () => {
     render(<SectionAnalysis companyId="c1" reportId="r1" section={section({
       analysis: { ...RESULT, edited: true, edited_at: '2026-08-12T11:00:00Z' },
     })} />);
-    expect(screen.getByText(/Edited by you/)).toBeInTheDocument();
-    expect(screen.queryByText(/gpt-4\.1/)).not.toBeInTheDocument();
+    expect(screen.getByText('Edited')).toBeInTheDocument();
+    // …but not WHEN it was edited.
+    expect(screen.queryByText(/11:00|Aug 12/)).not.toBeInTheDocument();
   });
 
   it('surfaces a figure the fact-check could not verify instead of hiding it', () => {
@@ -268,7 +271,7 @@ describe('editing the paragraphs', () => {
 
   const openEditor = () => {
     render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit the analysis for/ }));
   };
 
   it('opens with the current prose in the box', () => {

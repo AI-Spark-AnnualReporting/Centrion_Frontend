@@ -47,14 +47,6 @@ function rowLabels(section: ProducedSection): string[] {
   return out;
 }
 
-function whenLabel(iso?: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? ''
-    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
 // ── Consent before the figures go anywhere ───────────────────────────────────
 // Shell mirrors ApproveConfirmDialog, the house convention for confirming a
 // server action. Focus handling is the one addition: no dialog in this app traps
@@ -113,7 +105,7 @@ function ConfirmDialog({
           </div>
           <p style={{ margin: '10px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             This sends the <strong>{lines} {lines === 1 ? 'line' : 'lines'}</strong> of figures in{' '}
-            <strong>{title}</strong> to OpenAI to be read and summarised. Nothing else from your
+            <strong>{title}</strong> to AI to be read and summarised. Nothing else from your
             report is sent.
           </p>
           <p style={{ margin: '8px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
@@ -337,21 +329,31 @@ export default function SectionAnalysis({
             <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', color: ACCENT, textTransform: 'uppercase' }}>
               Analysis
             </span>
-            <span style={{ fontSize: 11, color: MUTED }}>
-              {analysis.edited
-                ? `Edited by you${analysis.edited_at ? ` · ${whenLabel(analysis.edited_at)}` : ''}`
-                : `${analysis.model ?? 'AI'}${analysis.generated_at ? ` · ${whenLabel(analysis.generated_at)}` : ''}`}
-            </span>
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 14 }}>
+            {analysis.edited && (
+              // Kept without a date: the prose is the user's, so it must not read as
+              // the model's, but which minute they changed it is not report content.
+              <span style={{ fontSize: 11, color: MUTED }}>Edited</span>
+            )}
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+              <button type="button" onClick={() => setConfirming(true)} style={linkBtn}>
+                Re-analyse
+              </button>
+              {/* Same pencil the section header and the report page use — editing is
+                  one gesture across the app, not a word here and an icon there. */}
               <button
                 type="button"
                 onClick={() => { setDraft(analysis.text); setEditing(true); }}
-                style={linkBtn}
+                aria-label={`Edit the analysis for ${section.title}`}
+                title="Edit analysis"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 26, height: 26, borderRadius: 7, border: '1px solid #E4E6F1',
+                  background: '#fff', color: MUTED, cursor: 'pointer',
+                }}
               >
-                Edit
-              </button>
-              <button type="button" onClick={() => setConfirming(true)} style={linkBtn}>
-                Re-analyse
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                  <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                </svg>
               </button>
             </span>
           </div>
@@ -424,7 +426,7 @@ export default function SectionAnalysis({
             Analyse
           </button>
           <span style={{ fontSize: 11.5, color: MUTED }}>
-            Sends this section’s figures to OpenAI. The two paragraphs it writes go into your report.
+            Sends this section’s figures to AI. The two paragraphs it writes go into your report.
           </span>
         </div>
       )}
