@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GripVertical, Lock } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Lock } from 'lucide-react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -337,6 +337,8 @@ export default function OutlinePage() {
   // Drag state — one flat list, so a single index is enough.
   const dragIndexRef = useRef<number | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Folded blueprint tables, off by default — see the rowNumbers loop.
+  const [showHidden, setShowHidden] = useState(false);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -461,11 +463,22 @@ export default function OutlinePage() {
   // a row shows is its actual position in the generated report. Excluded rows get
   // null (rendered as a dash): they aren't in the report, so they have no position.
   // Drag handlers keep using the real array index, so reordering is unaffected.
+  //
+  // In user-metrics mode the blueprint's table sections are slots nothing will ever
+  // fill (the sections come from the user's own workbook), so they fold away behind
+  // one line. Same treatment as the ToC: off the screen, still in every payload,
+  // still holding their place in the order.
   const rowNumbers: (number | null)[] = [];
   let includedCount = 0;
   let visibleTotal = 0;
+  let hiddenCount = 0;
   for (const s of sections) {
     if (isTableOfContentsSection(s.section_code)) {
+      rowNumbers.push(null);
+      continue;
+    }
+    if (s.hidden_default && !showHidden) {
+      hiddenCount++;
       rowNumbers.push(null);
       continue;
     }
@@ -934,7 +947,7 @@ export default function OutlinePage() {
             style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
           >
             {sections.map((s, i) =>
-              isTableOfContentsSection(s.section_code) ? null : (
+              isTableOfContentsSection(s.section_code) || (s.hidden_default && !showHidden) ? null : (
                 <div
                   key={s.section_code}
                   onDragOver={onDragOver(i)}
@@ -958,6 +971,24 @@ export default function OutlinePage() {
                   />
                 </div>
               ),
+            )}
+
+            {(hiddenCount > 0 || (showHidden && sections.some((s) => s.hidden_default))) && (
+              <button
+                type="button"
+                onClick={() => setShowHidden((v) => !v)}
+                style={{
+                  alignSelf: 'flex-start', marginTop: 4, border: 'none', background: 'none',
+                  padding: '6px 0', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                  color: '#6B7280', cursor: 'pointer', display: 'inline-flex',
+                  alignItems: 'center', gap: 6,
+                }}
+              >
+                {showHidden ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                {showHidden
+                  ? 'Hide the sections your files do not fill'
+                  : `Show ${hiddenCount} section${hiddenCount === 1 ? '' : 's'} your files do not fill`}
+              </button>
             )}
           </div>
         </div>

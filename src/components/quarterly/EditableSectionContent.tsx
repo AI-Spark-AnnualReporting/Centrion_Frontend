@@ -167,7 +167,10 @@ function TableEditor({
           const cur = parseDisplayValue(row.current_display);
           const prior = parseDisplayValue(row.prior_display);
           if (cur != null && prior != null && prior !== 0) {
-            const pct = Math.round(((cur - prior) / prior) * 1000) / 10; // 1 dp, matches backend
+            // abs(prior), matching backend _change_pct: a negative prior in the
+            // denominator flips the sign of the result, so a cost that grew reads
+            // as a fall. 1 dp, also matching the backend.
+            const pct = Math.round(((cur - prior) / Math.abs(prior)) * 1000) / 10;
             // Direction from the % SIGN (matches backend _change_direction) — not cur>prior,
             // which disagrees when the prior is negative.
             row.change_pct = pct;
@@ -327,17 +330,27 @@ const HIDDEN_COLS = new Set(['role', 'indent']);
 const READONLY_COLS = new Set(['change_pct', 'change_direction']);
 
 // Reverse of the backend _fmt_value_exact3: turn a formatted display string like
-// "$14.773B", "$-318.000M", "SAR 3.038B", or "188.000K" back into a number, so the
-// change % can be recomputed when a figure is hand-edited. null when blank/unparseable.
+// "$14.773B", "$-318.000M", "SAR 3.038B", "(SAR 1,755M)", or "188.000K" back into a
+// number, so the change % can be recomputed when a figure is hand-edited. null when
+// blank/unparseable.
+//
+// Accounting parentheses are how every filed statement writes a negative, so the
+// backend formatter emits them and this has to read them back: without the unwrap,
+// "(SAR 1,755M)" failed the regex and returned null, silently blanking the change
+// column of every expense, outflow and loss row the moment it was edited. Also lets
+// a user TYPE "(1,234)" the way they'd type it into a spreadsheet.
 function parseDisplayValue(raw: unknown): number | null {
   if (raw == null) return null;
   let s = String(raw).trim();
   if (!s) return null;
+  const parenNegative = s.startsWith('(') && s.endsWith(')');
+  if (parenNegative) s = s.slice(1, -1);
   s = s.replace(/(SAR|USD|GBP|EUR|SR)/gi, '').replace(/[$£€,\s]/g, '');
   const m = s.match(/^(-?\d*\.?\d+)([bmk])?$/i);
   if (!m) return null;
-  const n = parseFloat(m[1]);
+  let n = parseFloat(m[1]);
   if (Number.isNaN(n)) return null;
+  if (parenNegative) n = -Math.abs(n);
   const suf = (m[2] || '').toLowerCase();
   const mult = suf === 'b' ? 1e9 : suf === 'm' ? 1e6 : suf === 'k' ? 1e3 : 1;
   return n * mult;

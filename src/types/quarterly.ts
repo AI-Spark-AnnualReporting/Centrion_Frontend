@@ -465,6 +465,11 @@ export interface OutlineSection {
   // True when this section's produced data duplicates an earlier section's — the
   // Preview hides these (keep the first, hide the rest). Computed server-side.
   hidden_duplicate?: boolean;
+  // User-metrics mode: a blueprint TABLE section, which in this lane is a slot
+  // nothing will ever fill — the sections come from the user's own workbook. Folded
+  // behind "Show N hidden" rather than removed: it keeps its place in the list and
+  // in the save payload, and one click brings it back.
+  hidden_default?: boolean;
   // Custom mode only: a financial section the user unticked on the Financial Data
   // step. Shown here but not re-tickable — that decision has one home, and the
   // section has no figures to render anyway. The backend rejects re-including it.
