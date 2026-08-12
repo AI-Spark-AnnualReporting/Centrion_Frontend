@@ -1732,6 +1732,25 @@ export const quarterlyReports = {
       { method: "POST", body: { decisions } },
     ),
 
+  // Company-scoped, not report-scoped: an exclusion applies to every future
+  // upload, so it has to be findable from whichever report the user is on.
+  listExclusions: (
+    companyId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExclusionsResponse> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      signal,
+    }),
+
+  undoExclusions: (
+    companyId: string,
+    labels: string[],
+  ): Promise<{ company_id: string; restored: number }> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      method: "DELETE",
+      body: { labels },
+    }),
+
   // Custom mode only: rename or delete lines read from the per-section uploads.
   // There is no yes/no here — the section was settled at upload time, so what's
   // left is tidying a databook's spacer rows and awkward labels.
