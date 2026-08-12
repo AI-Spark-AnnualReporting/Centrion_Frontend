@@ -61,7 +61,7 @@ export function CommsProvider({ children }: { children: ReactNode }) {
             thread.last_message &&
             !thread.last_message.is_you
           ) {
-            const n = new Notification(thread.report.title, {
+            const n = new Notification(thread.report ? thread.report.title : (thread.subject?.trim() || 'New message'), {
               body: `${thread.last_message.sender_full_name}: ${thread.last_message.preview}`,
               icon: '/favicon.ico',
               tag: thread.thread_id,

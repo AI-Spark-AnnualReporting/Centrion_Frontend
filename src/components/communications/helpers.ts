@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import type { Company } from '@/types/company';
 
 /* Shared helpers for the communication thread components. Extracted from
    CommunicationHubPage so the earnings (IR) report can mount the same flow. */
@@ -45,3 +46,45 @@ export const SECTION_LABEL: CSSProperties = {
   letterSpacing: '.7px',
   marginBottom: 10,
 };
+
+// Client-side mirror of the backend's own attachment validation (see
+// communications.uploadAttachment in api.ts) — just avoids a round-trip for
+// an obvious reject. Shared by the thread-row quick-attach button and the
+// in-thread composer's paperclip.
+export const ATTACHMENT_ACCEPT = ['.pdf', '.xlsx', '.csv', '.docx', '.txt'] as const;
+export const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
+
+export function validateAttachmentFile(file: File): string | null {
+  const lower = file.name.toLowerCase();
+  if (!ATTACHMENT_ACCEPT.some((ext) => lower.endsWith(ext))) {
+    return `Unsupported file type. Allowed: ${ATTACHMENT_ACCEPT.join(', ')}.`;
+  }
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    return 'File is too large. Maximum size is 50MB.';
+  }
+  return null;
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// The company's website host, or a slugified fallback ("shell.com") — used to
+// build the "investor.relations@…" sender address shown in email previews.
+// Shared by ExternalEmailModal (report threads) and SendExternalModal
+// (any thread) so both previews build the sender address the same way.
+export function companyDomain(company: Company | null, fallbackName: string): string {
+  const raw = company?.website_url?.trim();
+  if (raw) {
+    try {
+      const host = new URL(raw.startsWith('http') ? raw : `https://${raw}`).hostname.replace(/^www\./, '');
+      if (host) return host;
+    } catch {
+      /* fall through to the slug */
+    }
+  }
+  const slug = fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return `${slug || 'company'}.com`;
+}
