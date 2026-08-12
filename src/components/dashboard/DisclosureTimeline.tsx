@@ -4,7 +4,7 @@ import { reports as reportsApi, meetings as meetingsApi, sarCycles } from '@/lib
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Cycle } from '@/types/cycles';
-import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import { deriveEvents, splitEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 
 /**
  * Disclosure Timeline — top-right card on the Home dashboard. Read-only: shows a
@@ -51,9 +51,12 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, fye, user?.role]);
 
-  // Compose the compact list: up to 2 most-recent filed reports, then upcoming.
-  // Newest/latest date on top, oldest at the bottom.
-  const rows = [...(events ?? [])].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 6);
+  // Everything still owed, soonest first — the three standing milestones plus any
+  // upcoming meetings — then exactly ONE completed report pinned at the bottom.
+  // Pinned rather than sorted: it is the only backward-looking row on the card, so
+  // it belongs last no matter how its date compares to the deadlines above it.
+  const { upcoming, filed } = splitEvents(events ?? []);
+  const rows = [...upcoming, ...filed.slice(0, 1)];
 
   return (
     <div className="card" style={{ padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -117,7 +120,9 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#1A1D2E' }}>{e.title}</span>
                   {e.tone === 'urgent' && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>URGENT</span>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>
+                      {e.overdue ? 'OVERDUE' : 'URGENT'}
+                    </span>
                   )}
                   {e.kind === 'filed' && (
                     <span style={{ fontSize: 9, fontWeight: 800, color: '#0F9D6B', background: 'rgba(15,157,107,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>COMPLETED</span>
