@@ -1,4 +1,8 @@
+import { useMemo } from 'react';
 import type { ProducedSection } from '@/types/quarterly';
+// One shared rule for reading a figure's units, also used by the extraction screen
+// and mirrored in report_export.py — the screen and the download must agree.
+import { bareFigure, deriveUnits, unitsCaption } from './figureUnits';
 
 // ─── colours (match Coverage / Gaps / Preview conventions) ────────────────────
 const GREEN = '#10B981';
@@ -237,6 +241,24 @@ function normalizeTables(parsed: unknown): NormTable[] {
 
 function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean }) {
   const rows = table.rows;
+
+  // A grid states its currency once above the table and drops it from every cell —
+  // eight categories all repeating "SAR …M" is what made a note schedule unreadable
+  // (and, in the PDF, too wide to fit the page). Grids only: a flat statement keeps
+  // its per-row currency. deriveUnits returns null when the cells don't agree, and
+  // then nothing is stripped and no claim is made.
+  const units = useMemo(() => {
+    if (!table.matrixColumns?.length) return null;
+    return deriveUnits(
+      rows.flatMap((r) => {
+        const cells = cell(r, 'cells');
+        return Array.isArray(cells)
+          ? (cells as unknown[]).map((c) => (isRecord(c) ? asString(c.display) : null))
+          : [];
+      }),
+    );
+  }, [rows, table.matrixColumns]);
+
   if (rows.length === 0) return null;
 
   // Financial shape (label + current_display[/prior/change]) vs generic object rows.
@@ -247,12 +269,16 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
       {showTitle && table.title && (
         <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{table.title}</h3>
       )}
+      {units && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>{unitsCaption(units)}</p>
+      )}
       {financial ? (
         <FinancialTable
           rows={rows}
           comparePeriods={table.comparePeriods}
           currentLabel={table.currentLabel}
           matrixColumns={table.matrixColumns}
+          currency={units?.currency}
         />
       ) : (
         <GenericTable rows={rows} />
@@ -296,11 +322,15 @@ function FinancialTable({
   comparePeriods,
   currentLabel,
   matrixColumns,
+  currency,
 }: {
   rows: LooseRow[];
   comparePeriods?: ComparePeriod[];
   currentLabel?: string | null;
   matrixColumns?: ComparePeriod[];
+  // Set only for a grid whose cells agree on one currency — the caption above the
+  // table then states it, and each cell drops it.
+  currency?: string;
 }) {
   // A grid wins over a comparison: eight categories times two periods is not a table
   // anyone can read, and a section printed as a grid is not comparing.
@@ -388,7 +418,7 @@ function FinancialTable({
                     ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
                     fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
                   }}>
-                    {cellFor(r, c.key) || '—'}
+                    {bareFigure(cellFor(r, c.key), currency) || '—'}
                   </td>
                 ))}
               {hasCompare

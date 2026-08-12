@@ -7,6 +7,9 @@ import type {
   ExtractionReviewResponse,
   UserExtractionTable,
 } from '@/types/quarterly';
+// Shared with the report tables and with report_export.py — the extraction screen
+// and the report must not disagree about what a figure's units are.
+import { bareFigure } from './figureUnits';
 
 /**
  * User-metrics extraction — read-only.
@@ -211,24 +214,6 @@ function gridLines(rows: CustomExtractionRow[]): Line[] {
     if (by[key].cells[col] === undefined) by[key].cells[col] = r.value_display ?? '';
   }
   return order.map((k) => by[k]);
-}
-
-/**
- * "SAR 170,324M" → "170,324". The unit is stated once in the section header; repeating
- * it in every cell is the noise that made a 6x5 table unreadable.
- *
- * Stripped from the display string rather than reformatted from `value`, so whatever
- * scale the report declared is preserved — and only when the prefix is this table's own
- * currency, so a percentage row ("4.7%", a coupon rate) is left exactly as it is.
- */
-function bareFigure(display: string, currency?: string | null): string {
-  const raw = (display ?? '').trim();
-  if (!raw || !currency) return raw;
-  const cur = currency.toUpperCase();
-  const m = raw.match(new RegExp(`^\\((?:${cur})\\s*(.+?)([KMB])?\\)$`, 'i'));
-  if (m) return `(${m[1]})`;
-  const p = raw.match(new RegExp(`^${cur}\\s*(.+?)([KMB])?$`, 'i'));
-  return p ? p[1] : raw;
 }
 
 /** Zero and empty print as a dash in a filing, and the eye goes to the real numbers. */
