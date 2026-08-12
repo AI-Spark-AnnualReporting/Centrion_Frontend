@@ -401,3 +401,45 @@ describe('what plays while it is analysing', () => {
     unmount();
   });
 });
+
+// ── 7. The analysis has to survive leaving the section ───────────────────────
+// It is keyed on section_code so one section's in-flight request and open dialog
+// cannot leak onto the next — which means a rail switch REMOUNTS it and it re-seeds
+// from section.analysis. A freshly generated result therefore has to be written
+// back to the page's shared state, or it is lost until a reload.
+
+describe('a generated analysis outlives a section switch', () => {
+  beforeEach(() => {
+    analyseSection.mockReset();
+    analyseSection.mockImplementation(() => Promise.resolve(RESULT));
+  });
+
+  it('hands the result to the page so it can be stored', async () => {
+    const onAnalysis = vi.fn();
+    render(<SectionAnalysis companyId="c1" reportId="r1" section={section()} onAnalysis={onAnalysis} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyse' }));
+    confirm();
+    await waitFor(() => expect(onAnalysis).toHaveBeenCalledWith(RESULT));
+  });
+
+  it('comes back when the page stored it, exactly as a remount would', async () => {
+    // What the rail switch does: unmount, then mount again from the stored prop.
+    const { unmount } = render(
+      <SectionAnalysis companyId="c1" reportId="r1" section={section()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Analyse' }));
+    confirm();
+    expect(await screen.findByText(/Revenue was SAR 424,095/)).toBeInTheDocument();
+    unmount();
+
+    render(<SectionAnalysis companyId="c1" reportId="r1" section={section({ analysis: RESULT })} />);
+    expect(screen.getByText(/Revenue was SAR 424,095/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Analyse' })).not.toBeInTheDocument();
+  });
+
+  it('without the write-back a remount shows the button again — the bug', () => {
+    // Pins the failure mode itself: remounting from a section that never learned
+    // about the analysis is what the user saw.
+    render(<SectionAnalysis companyId="c1" reportId="r1" section={section()} />);
+    expect(screen.getByRole('button', { name: 'Analyse' })).toBeInTheDocument();
+  });
+});

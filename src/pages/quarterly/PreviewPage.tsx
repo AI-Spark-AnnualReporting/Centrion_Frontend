@@ -9,7 +9,7 @@ import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
+import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
@@ -666,6 +666,7 @@ export default function PreviewPage() {
                   companyId={companyId}
                   reportId={reportId ?? null}
                   onRefined={handleRefined}
+                  onAnalysed={(a) => patchSection(section.section_code, { analysis: a })}
                   editing={editingCode === section.section_code}
                   saving={savingCode === section.section_code}
                   saved={savedCode === section.section_code}
@@ -776,6 +777,7 @@ function SectionPanel({
   companyId,
   reportId,
   onRefined,
+  onAnalysed,
   editing,
   saving,
   saved,
@@ -798,6 +800,7 @@ function SectionPanel({
   companyId: string | null;
   reportId: string | null;
   onRefined: (s: ProducedSection) => void;
+  onAnalysed: (a: Analysis | null) => void;
   editing: boolean;
   saving: boolean;
   saved: boolean;
@@ -884,6 +887,11 @@ function SectionPanel({
             reportId={reportId}
             section={section}
             onBusyChange={setAnalysing}
+            // The key above remounts this on every rail switch (deliberately — it is
+            // what stops one section's in-flight request and open dialog leaking onto
+            // the next), and a remount re-seeds from section.analysis. So a fresh
+            // result has to land HERE or switching away loses it until a reload.
+            onAnalysis={onAnalysed}
           />
         )}
         {canRefine && !editing && companyId && reportId && (

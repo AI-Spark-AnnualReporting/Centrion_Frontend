@@ -75,7 +75,9 @@ function formatApprovedDate(iso: string | null): string {
 
 // The assemble endpoint returns produced sections only. Map to a ProducedSection
 // shape so the shared renderers/editor work unchanged.
-function toProduced(s: AssembledSection): ProducedSection {
+// Exported for its own test: it builds the object field-by-field, so a field added
+// anywhere upstream is silently dropped here unless someone remembers to list it.
+export function toProduced(s: AssembledSection): ProducedSection {
   // /assemble may return table content as a parsed object; normalise to a string
   // so the renderers/editor (which expect a JSON string or prose) work.
   const raw = s.content as unknown;
@@ -91,6 +93,10 @@ function toProduced(s: AssembledSection): ProducedSection {
     status: 'produced',
     content,
     feeder_status: 'ready',
+    // Built field-by-field, so anything new has to be listed here or it is silently
+    // dropped — which is exactly what happened to the analysis: the backend sent it,
+    // showAnalysis asked for it, and this mapper threw it away.
+    analysis: s.analysis ?? null,
   };
 }
 

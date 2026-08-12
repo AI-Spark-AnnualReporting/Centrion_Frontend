@@ -755,6 +755,9 @@ export interface AssembledSection {
   source_type?: string;
   mode: string; // table | kpi | generate | template
   content: string | null; // same keying as ProducedSection.content
+  // The Analyse button's commentary, printed under this section's table(s). Part of
+  // the report — the exporters render it from the same field.
+  analysis?: SectionAnalysis | null;
 }
 
 export interface AssembledReportResponse {
