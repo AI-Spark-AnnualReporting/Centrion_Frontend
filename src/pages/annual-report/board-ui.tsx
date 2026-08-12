@@ -70,20 +70,61 @@ export function SetupCard({
   );
 }
 
+// Green "DETECTED" capsule — shown next to a field whose value was
+// auto-filled from the company profile and still matches it. Same styling as
+// the quarterly report's confirm-context DetectedBadge, so the two flows
+// read as one convention.
+export function DetectedBadge() {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        borderRadius: 999,
+        background: '#E7F7EF',
+        color: GREEN,
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        padding: '3px 9px',
+      }}
+    >
+      Detected
+    </span>
+  );
+}
+
+// Same card shape as the quarterly report's confirm-context question cards
+// (CtxCard in QuarterlyReportForm.tsx) — a bordered box per question, number
+// tile + title + hint stacked on the left, DETECTED badge anchored top-right
+// of that box. The border is what makes the right-anchored badge read as
+// "belonging to this card" instead of floating loose on the page.
 export function Block({
   n,
   title,
   hint,
+  detected,
   children,
 }: {
   n: number;
   title: string;
   hint?: string;
+  // Shows a DETECTED badge — the current value still matches what the
+  // company profile seeded, i.e. the operator hasn't overridden it.
+  detected?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section style={{ marginBottom: 22 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 11 }}>
+    <section
+      style={{
+        border: `1px solid ${BORDER_SOFT}`,
+        borderRadius: 14,
+        padding: '14px 16px 16px',
+        background: '#fff',
+        marginBottom: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
         <span
           style={{
             width: 24,
@@ -101,8 +142,11 @@ export function Block({
         >
           {n}
         </span>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: INK }}>{title}</h2>
-        {hint && <span style={{ fontSize: 11.5, color: FAINT }}>{hint}</span>}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 13.5, fontWeight: 700, color: INK, lineHeight: 1.4 }}>{title}</h2>
+          {hint && <div style={{ fontSize: 12, color: MUTED, marginTop: 3, lineHeight: 1.4 }}>{hint}</div>}
+        </div>
+        {detected && <DetectedBadge />}
       </div>
       <div style={{ marginLeft: 34 }}>{children}</div>
     </section>
@@ -156,11 +200,13 @@ export function Flag({
   label,
   value,
   disabled,
+  detected,
   onChange,
 }: {
   label: string;
   value: boolean;
   disabled?: boolean;
+  detected?: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
@@ -170,6 +216,9 @@ export function Flag({
         <Pill label="Yes" selected={value} disabled={disabled} onClick={() => onChange(true)} />
         <Pill label="No" selected={!value} disabled={disabled} onClick={() => onChange(false)} />
       </PillRow>
+      {/* Trails after the pills, not between label and pills, so the Yes/No
+          columns stay aligned across rows whether or not a badge is shown. */}
+      {detected && <DetectedBadge />}
     </div>
   );
 }
@@ -238,17 +287,28 @@ export function ProfileFields({
   sectors,
   disabled = false,
   startAt = 1,
+  detected,
   onChange,
 }: {
   profile: BoardIssuerProfile;
   sectors: Sector[] | null; // null while loading
   disabled?: boolean;
   startAt?: number;
+  // Which fields still match what the company profile seeded — each shows a
+  // DETECTED badge while true, same convention as the quarterly report's
+  // confirm-context step. Omit entirely when the profile wasn't seeded
+  // (e.g. no company record) so nothing is marked detected.
+  detected?: {
+    issuer_type?: boolean;
+    sector?: boolean;
+    sharia_compliant?: boolean;
+    has_capital_instruments?: boolean;
+  };
   onChange: <K extends keyof BoardIssuerProfile>(key: K, value: BoardIssuerProfile[K]) => void;
 }) {
   return (
     <>
-      <Block n={startAt} title="Issuer type" hint="the biggest driver">
+      <Block n={startAt} title="Issuer type" hint="the biggest driver" detected={detected?.issuer_type}>
         <PillRow>
           {ISSUER_TYPES.map((t) => (
             <Pill
@@ -262,7 +322,12 @@ export function ProfileFields({
         </PillRow>
       </Block>
 
-      <Block n={startAt + 1} title="Sector" hint="sets segment / risk flavour and the fines regulator">
+      <Block
+        n={startAt + 1}
+        title="Sector"
+        hint="sets segment / risk flavour and the fines regulator"
+        detected={detected?.sector}
+      >
         {sectors === null ? (
           <div style={{ fontSize: 12, color: FAINT }}>Loading sectors…</div>
         ) : sectors.length === 0 ? (
@@ -290,6 +355,7 @@ export function ProfileFields({
             label="Sharia-compliant?"
             value={profile.sharia_compliant}
             disabled={disabled}
+            detected={detected?.sharia_compliant}
             onChange={(v) => onChange('sharia_compliant', v)}
           />
           <Flag
@@ -302,6 +368,7 @@ export function ProfileFields({
             label="Regulatory capital instruments (Tier 1 sukuk)?"
             value={profile.has_capital_instruments}
             disabled={disabled}
+            detected={detected?.has_capital_instruments}
             onChange={(v) => onChange('has_capital_instruments', v)}
           />
         </div>

@@ -116,9 +116,37 @@ function NoData() {
 function MarkdownProse({ text }: { text: string }) {
   return (
     <div className="md-prose">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{expandInlineBullets(text)}</ReactMarkdown>
     </div>
   );
+}
+
+// Source extraction sometimes flattens a real bullet list into one line with
+// "•" as an inline separator ("Principal risk categories • Commodity price
+// and market volatility • Geopolitical risk...") instead of actual line
+// breaks — so it renders as a run-on sentence with literal bullet characters
+// rather than a list. Rewrite any such line (2+ "•" separators, so a single
+// stray bullet in normal prose is left alone) into a real nested Markdown
+// list: the text before the first "•" stays as the item's lead-in, each
+// segment after becomes its own indented "- " bullet nested under it.
+function expandInlineBullets(text: string): string {
+  return text
+    .split('\n')
+    .flatMap((line) => {
+      const m = line.match(/^(\s*(?:\d+[.)]|[-*])\s+)(.*)$/);
+      if (!m) return [line];
+      const [, prefix, rest] = m;
+      if (!rest.includes('•')) return [line];
+      const parts = rest
+        .split('•')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (parts.length < 3) return [line];
+      const [lead, ...bullets] = parts;
+      const indent = ' '.repeat(prefix.length);
+      return [`${prefix}${lead}`, '', ...bullets.map((b) => `${indent}- ${b}`), ''];
+    })
+    .join('\n');
 }
 
 function Prose({ text }: { text: string }) {

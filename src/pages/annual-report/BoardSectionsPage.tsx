@@ -12,7 +12,7 @@ import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
-import type { BoardCounts, BoardOutlineSection, BoardRequirement } from '@/types/board';
+import type { BoardCounts, BoardOutlineSection } from '@/types/board';
 import {
   boardProduceSummary,
   boardSheetWarning,
@@ -20,6 +20,7 @@ import {
   isBoardExcluded,
   outlinePayload,
   readExistingRunId,
+  REQ_TEXT,
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
@@ -49,8 +50,30 @@ const BOARD_TIPS = [
   'You can edit any section by hand afterwards — your edit wins over anything regenerated later.',
 ];
 
-const REQ_LABEL: Record<BoardRequirement, string> = { M: 'Mandatory', O: 'Optional', C: 'Conditional' };
-const REQ_CLASS: Record<BoardRequirement, string> = { M: 'b-gn', O: 'b-gy', C: 'b-pp' };
+// Six-dot drag handle, same as the quarterly section list's grip icon.
+const GRIP = (
+  <svg width="10" height="16" viewBox="0 0 10 16" fill="none">
+    <circle cx="2.5" cy="2.5" r="1.3" fill="currentColor" />
+    <circle cx="7.5" cy="2.5" r="1.3" fill="currentColor" />
+    <circle cx="2.5" cy="8" r="1.3" fill="currentColor" />
+    <circle cx="7.5" cy="8" r="1.3" fill="currentColor" />
+    <circle cx="2.5" cy="13.5" r="1.3" fill="currentColor" />
+    <circle cx="7.5" cy="13.5" r="1.3" fill="currentColor" />
+  </svg>
+);
+
+// The one status/source pill each row gets, closest match first:
+//   - awaiting content → red "Needs input" (mirrors quarterly's red pill)
+//   - drawn from an uploaded document → green "From {file}" (same as quarterly)
+//   - system-filled with no source document (e.g. the cover) → grey "System template"
+//   - otherwise data_source names who owns it (Chairman, Finance, ...) — shown as-is
+function sourceBadge(s: BoardOutlineSection): { text: string; cls: string } | null {
+  if (s.status === 'needs_input') return { text: 'Needs input', cls: 'b-rd' };
+  if (s.source_document) return { text: `From ${s.source_document}`, cls: 'b-gn' };
+  if (s.data_source === 'Generated') return { text: 'System template', cls: 'b-gy' };
+  if (s.data_source) return { text: s.data_source, cls: 'b-gy' };
+  return null;
+}
 
 export default function BoardSectionsPage() {
   const { reportId = '' } = useParams<{ reportId: string }>();
@@ -289,6 +312,9 @@ export default function BoardSectionsPage() {
               const mandatory = s.requirement === 'M';
               const draggable = !readOnly;
 
+              const badge = sourceBadge(s);
+              const locked = mandatory || readOnly;
+
               return (
                 <div
                   key={s.section_code}
@@ -310,45 +336,74 @@ export default function BoardSectionsPage() {
                   }}
                   style={{
                     display: 'flex',
-                    alignItems: 'flex-start',
+                    alignItems: 'center',
                     gap: 12,
-                    padding: '11px 18px',
+                    padding: '12px 16px',
                     borderBottom: '1px solid #F4F5FB',
                     borderTop: dragOver === i ? `2px solid ${ACCENT}` : '2px solid transparent',
-                    cursor: draggable ? 'grab' : 'default',
                   }}
                 >
-                  <div style={{ width: 18, flexShrink: 0, paddingTop: 2 }}>
-                    <input
-                      type="checkbox"
-                      checked={s.included}
-                      disabled={mandatory || readOnly}
-                      onChange={() => toggle(s.section_code)}
-                      title={mandatory ? 'Mandatory — always included' : undefined}
-                      style={{
-                        accentColor: ACCENT,
-                        cursor: mandatory || readOnly ? 'not-allowed' : 'pointer',
-                      }}
-                    />
-                  </div>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      display: 'flex',
+                      color: draggable ? FAINT : 'transparent',
+                      cursor: draggable ? 'grab' : 'default',
+                    }}
+                  >
+                    {GRIP}
+                  </span>
+                  <span style={{ width: 18, flexShrink: 0, fontSize: 11.5, color: FAINT, fontWeight: 600, textAlign: 'right' }}>
+                    {i + 1}
+                  </span>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={s.included}
+                    disabled={mandatory || readOnly}
+                    onClick={() => toggle(s.section_code)}
+                    title={mandatory ? 'Mandatory — always included' : undefined}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      flexShrink: 0,
+                      padding: 0,
+                      borderRadius: 5,
+                      border: s.included ? 'none' : `1.5px solid ${BORDER}`,
+                      background: s.included ? ACCENT : '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: mandatory || readOnly ? 'not-allowed' : 'pointer',
+                      opacity: mandatory || readOnly ? 0.55 : 1,
+                    }}
+                  >
+                    {s.included && (
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                        <path d="M2.5 6.2l2.3 2.3 4.7-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{s.title}</div>
-                    <div
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}
-                    >
-                      <span className={`badge ${REQ_CLASS[s.requirement]}`} title={REQ_LABEL[s.requirement]}>
-                        {s.requirement}
-                      </span>
-                      {s.data_source && <span className="badge b-tl">{s.data_source}</span>}
-                      {s.provenance === 'carried_forward' && (
-                        <span className="badge b-am">Carried forward</span>
-                      )}
-                    </div>
+                    {s.category && <div style={{ fontSize: 11, color: FAINT, marginTop: 2 }}>{s.category}</div>}
                     {/* The server's own explanation of what changed or fell away. */}
                     {s.note && (
                       <div style={{ fontSize: 11.5, color: FAINT, fontStyle: 'italic', marginTop: 5 }}>
                         → {s.note}
                       </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {s.provenance === 'carried_forward' && <span className="badge b-am">Carried forward</span>}
+                    {badge && <span className={`badge ${badge.cls}`}>{badge.text}</span>}
+                    <span className="badge b-gy" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                      {REQ_TEXT[s.requirement]}
+                    </span>
+                    {locked && (
+                      <span className="badge b-gy" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                        Locked
+                      </span>
                     )}
                   </div>
                 </div>

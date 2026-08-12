@@ -18,12 +18,12 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import type { BoardOutlineSection, BoardSection } from '@/types/board';
 import {
   BOARD_COMPANY_VOICE,
-  boardContentMode,
   canRefineSection,
   errorMessage,
   isBoardCoverSection,
   isBoardExcluded,
   readExistingRunId,
+  REQ_TEXT,
   toBoardProduced,
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
@@ -293,19 +293,12 @@ export default function BoardPreviewPage() {
   const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
   const active = visible.find((s) => s.section_code === activeCode) ?? visible[0] ?? null;
 
-  // Prose opens straight in its editor — that is what this step is for, and a
-  // textarea of Markdown reads much like the rendered text anyway. A table does
-  // NOT: a grid of inputs is far harder to read than the table itself, so it
-  // stays rendered until the pencil is clicked. Cancel returns to the rendered
-  // view in both cases; an unwritten section keeps its Upload / Write choice.
+  // Every section opens read-only, rendered — click the pencil to edit.
+  // Cancel returns to the rendered view; an unwritten section keeps its
+  // Upload / Write choice regardless.
   useEffect(() => {
-    setEditing(
-      !!active &&
-        !locked &&
-        active.status === 'produced' &&
-        boardContentMode(active.content_type, active.content) === 'generate',
-    );
-  }, [active, locked]);
+    setEditing(false);
+  }, [active]);
 
   // Both columns scroll inside themselves and the footer stays put, as on the
   // quarterly Preview.
@@ -742,9 +735,9 @@ function SectionPanel({
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: INK, flex: 1, minWidth: 0 }}>
           {s.title}
         </h2>
-        {meta?.requirement === 'M' && (
-          <span className="badge b-gn" title="Mandatory">
-            M
+        {meta?.requirement && (
+          <span className="badge b-gy" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>
+            {REQ_TEXT[meta.requirement]}
           </span>
         )}
         {feeder?.edited && <span className="badge b-bl">Edited</span>}
@@ -828,8 +821,9 @@ function SectionPanel({
           }}
         >
           <span>
-            Carried forward{feeder?.carried_forward_from ? ` from ${feeder.carried_forward_from}` : ''} —
-            confirm this is still accurate.
+            The text below is last year&rsquo;s wording
+            {feeder?.carried_forward_from ? ` (from ${feeder.carried_forward_from})` : ''}, carried forward
+            as a starting point — confirm it&rsquo;s still accurate, or edit it for this year.
           </span>
           {!readOnly && (
             <button className="btn bs bsm" disabled={!!busy} onClick={() => onConfirm(s.section_code)}>

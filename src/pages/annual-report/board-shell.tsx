@@ -37,7 +37,6 @@ export function BoardStepper({
           const state: StepState = i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'upcoming';
           const circleBg = state === 'active' ? ACCENT : state === 'done' ? ACCENT_TINT : '#F1F2F6';
           const circleColor = state === 'active' ? '#fff' : state === 'done' ? ACCENT : FAINT;
-          const stepLabelColor = state === 'active' ? ACCENT : state === 'done' ? FAINT : '#B7BCD6';
           const titleColor = state === 'upcoming' ? FAINT : INK;
           const disabled = locked ? i !== activeIndex : !reportId || state === 'upcoming';
 
@@ -90,19 +89,8 @@ export function BoardStepper({
                 >
                   {i + 1}
                 </span>
-                <span style={{ whiteSpace: 'nowrap' }}>
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      fontWeight: 800,
-                      letterSpacing: '0.05em',
-                      color: stepLabelColor,
-                      marginRight: 5,
-                    }}
-                  >
-                    STEP {i + 1}
-                  </span>
-                  <span style={{ fontSize: 12.5, fontWeight: 800, color: titleColor }}>{step.label}</span>
+                <span style={{ whiteSpace: 'nowrap', fontSize: 12.5, fontWeight: 800, color: titleColor }}>
+                  {step.label}
                 </span>
               </button>
 
