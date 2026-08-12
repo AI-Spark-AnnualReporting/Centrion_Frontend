@@ -6,6 +6,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
+import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
@@ -19,6 +20,7 @@ import {
   seedFromOutline,
   byDisplayOrder,
   isTableOfContentsSection,
+  isFinancialTable,
 } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Outline conventions) ────────────────────
@@ -805,6 +807,7 @@ function SectionPanel({
   onSaveContent: (content: string) => void;
 }) {
   const state = sectionState(section);
+  const [analysing, setAnalysing] = useState(false);
   // Input-seeking states (needs_input / empty) stay in their own panel while
   // saving (button shows "Saving…") — only a fresh produce shows the full
   // "Composing…" spinner.
@@ -858,14 +861,29 @@ function SectionPanel({
             </button>
           )}
         </div>
-        <EditableSectionContent
-          section={section}
-          editing={editing}
-          saving={saving}
-          error={editing ? editError : null}
-          onSave={onSaveContent}
-          onCancel={onCancelEdit}
-        />
+        {/* The reading band travels over the table while the analyser works, so it
+            wraps the content — and sits OUTSIDE the table's own overflow-x
+            scroller, which would otherwise clip a vertically-moving band. */}
+        <div style={{ position: 'relative', overflow: analysing ? 'hidden' : undefined }}>
+          <EditableSectionContent
+            section={section}
+            editing={editing}
+            saving={saving}
+            error={editing ? editError : null}
+            onSave={onSaveContent}
+            onCancel={onCancelEdit}
+          />
+          {analysing && <ReadingBand />}
+        </div>
+        {!editing && companyId && reportId && isFinancialTable(section) && (
+          <SectionAnalysis
+            key={section.section_code}
+            companyId={companyId}
+            reportId={reportId}
+            section={section}
+            onBusyChange={setAnalysing}
+          />
+        )}
         {canRefine && !editing && companyId && reportId && (
           <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
         )}

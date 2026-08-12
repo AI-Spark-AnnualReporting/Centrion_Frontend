@@ -47,6 +47,7 @@ import type {
   OutlineLockResponse,
   ProducedSection,
   ProducedSectionResponse,
+  SectionAnalysis,
   ProduceAllHandle,
   CompanyType,
   Voice,
@@ -1603,6 +1604,20 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/refine`,
       { method: "POST", body: { instruction } },
     ).then(unwrapProducedSection),
+
+  // Read this section's figures and write a short analysis. Never touches the
+  // section's content — the result is shown on screen only. `signal` matters:
+  // request() has no timeout of its own and this is a live LLM call.
+  analyseSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
 
   // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
   // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive

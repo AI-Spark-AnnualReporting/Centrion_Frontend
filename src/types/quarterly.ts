@@ -540,6 +540,25 @@ export interface ProducedSection {
   // False when re-producing yields nothing fresh (Template/External, or content
   // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
   regeneratable?: boolean;
+  // The Analyse button's last result, replayed by GET .../sections/{code} so it
+  // survives a reload. Null/absent for a section never analysed.
+  analysis?: SectionAnalysis | null;
+}
+
+// POST .../sections/{code}/analyse — an on-screen read of the section's figures.
+// Deliberately not part of the report: it never reaches the DOCX/PDF exporters.
+export interface SectionAnalysis {
+  section_code?: string;
+  text: string;
+  generated_at: string;
+  model: string;
+  // Covers the table, the model AND the prompt text — so a stored analysis whose
+  // fingerprint no longer matches was written about different numbers.
+  fingerprint: string;
+  warnings?: string[];
+  line_count?: number;
+  cached?: boolean;
+  persisted?: boolean;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.

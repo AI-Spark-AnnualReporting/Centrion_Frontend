@@ -144,6 +144,27 @@ export function sectionState(s: ProducedSection): SectionState {
 export const isProducing = (sections: ProducedSection[]): boolean =>
   sections.some((s) => sectionState(s) === 'pending');
 
+// Does this section hold a table of figures the user can ask for an analysis of?
+//
+// The array check has to come FIRST. tableRowCount() falls back to counting an
+// object's keys, so {heading, content} — a plain AI-written prose section — reads
+// as two rows and would have got an Analyse button. Same guard, and same reason,
+// as SectionContent's hasTableShape.
+export function isFinancialTable(s: ProducedSection): boolean {
+  if (sectionState(s) !== 'produced') return false;
+  if ((s.section_code || '').toLowerCase() === 'cover') return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(s.content ?? '');
+  } catch {
+    return false; // a table-mode section can hold plain prose the user typed
+  }
+  if (parsed == null || typeof parsed !== 'object') return false;
+  const o = parsed as { rows?: unknown; tables?: unknown };
+  if (!Array.isArray(o.rows) && !Array.isArray(o.tables)) return false;
+  return tableRowCount(parsed) > 0;
+}
+
 // Friendly source-type label (how the section is generated).
 export function sourceTypeLabel(s: ProducedSection): string {
   const st = (s.source_type || '').toLowerCase();
