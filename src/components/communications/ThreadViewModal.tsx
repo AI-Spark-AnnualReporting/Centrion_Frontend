@@ -1,17 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
   communications,
   ApiError,
   type CommunicationMember,
+  type ThreadAttachment,
   type ThreadDetail,
   type ThreadDetailResponse,
   type ThreadMessage,
 } from '@/lib/api';
 import { MentionComposer } from './MentionComposer';
 import { AttachedReportCard } from './AttachedReportCard';
-import { initials, relativeTime, roleLabel, SECTION_LABEL } from './helpers';
+import { SendExternalModal } from './SendExternalModal';
+import {
+  ATTACHMENT_ACCEPT,
+  formatFileSize,
+  initials,
+  relativeTime,
+  roleLabel,
+  SECTION_LABEL,
+  validateAttachmentFile,
+} from './helpers';
 
 /* ══════════════════════════════════════════════════════════════════════
    Review thread — opens from the hub panel's Discuss button, a row's Internal
@@ -41,6 +51,13 @@ const ICON_EXTERNAL = (
   </svg>
 );
 
+const ICON_MAIL = (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+    <rect x="1.8" y="3" width="10.4" height="8" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M2.2 3.8L7 7.4l4.8-3.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const ICON_CHECK_CIRCLE = (
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
     <circle cx="10" cy="10" r="8.4" fill="#16A34A" />
@@ -48,8 +65,243 @@ const ICON_CHECK_CIRCLE = (
   </svg>
 );
 
-function MessageRow({ message }: { message: ThreadMessage }) {
-  const { sender, body, created_at, kind } = message;
+const ICON_PAPERCLIP = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const ICON_FILE = (
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+    <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M12 2v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+  </svg>
+);
+
+const ICON_DOWNLOAD = (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+    <path d="M7 1.5v7.5M3.8 6.3L7 9.5l3.2-3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M2 11.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+
+function AttachmentChip({ attachment, onPreview }: { attachment: ThreadAttachment; onPreview: (a: ThreadAttachment) => void }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onPreview(attachment)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPreview(attachment);
+        }
+      }}
+      title={`Preview ${attachment.filename}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 13px',
+        borderRadius: 10,
+        background: '#F6F7FC',
+        border: '1px solid #E2E4F0',
+        maxWidth: 320,
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          flexShrink: 0,
+          background: '#EEEEFF',
+          color: '#4040C8',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {ICON_FILE}
+      </span>
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: '#1A1D2E',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {attachment.filename}
+        </span>
+        <span style={{ display: 'block', fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
+          {formatFileSize(attachment.file_size_bytes)}
+        </span>
+      </span>
+      <a
+        href={attachment.download_url}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Download ${attachment.filename}`}
+        title="Download"
+        style={{ flexShrink: 0, color: '#4040C8', display: 'flex' }}
+      >
+        {ICON_DOWNLOAD}
+      </a>
+    </div>
+  );
+}
+
+const PREVIEWABLE_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+
+function fileExt(filename: string): string {
+  const i = filename.lastIndexOf('.');
+  return i === -1 ? '' : filename.slice(i + 1).toLowerCase();
+}
+
+function AttachmentPreviewModal({ attachment, onClose }: { attachment: ThreadAttachment; onClose: () => void }) {
+  const ext = fileExt(attachment.filename);
+  const isPdf = ext === 'pdf';
+  const isImage = PREVIEWABLE_IMAGE_EXTS.includes(ext);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-content"
+        style={{ width: 'min(880px, 92vw)', height: 'min(86vh, 900px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', borderBottom: '1px solid #ECEEF8' }}>
+          <span
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              flexShrink: 0,
+              background: '#EEEEFF',
+              color: '#4040C8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {ICON_FILE}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13.5,
+                fontWeight: 800,
+                color: '#1A1D2E',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {attachment.filename}
+            </div>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>{formatFileSize(attachment.file_size_bytes)}</div>
+          </div>
+          <a
+            href={attachment.download_url}
+            target="_blank"
+            rel="noreferrer"
+            className="btn bs"
+            style={{ gap: 6, textDecoration: 'none', flexShrink: 0 }}
+          >
+            {ICON_DOWNLOAD}
+            Download
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              flexShrink: 0,
+              width: 28,
+              height: 28,
+              border: 'none',
+              background: 'transparent',
+              color: '#9BA3C4',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 8,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, background: '#F4F5FB' }}>
+          {isPdf ? (
+            <iframe src={attachment.download_url} title={attachment.filename} style={{ width: '100%', height: '100%', border: 'none' }} />
+          ) : isImage ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 20 }}>
+              <img
+                src={attachment.download_url}
+                alt={attachment.filename}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }}
+              />
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                gap: 14,
+                padding: 20,
+                textAlign: 'center',
+              }}
+            >
+              <span
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 14,
+                  background: '#EEEEFF',
+                  color: '#4040C8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span style={{ transform: 'scale(1.8)' }}>{ICON_FILE}</span>
+              </span>
+              <div style={{ fontSize: 13, color: '#5A6080', fontWeight: 600 }}>
+                Preview isn't available for this file type.
+              </div>
+              <a href={attachment.download_url} target="_blank" rel="noreferrer" className="btn bp" style={{ textDecoration: 'none' }}>
+                Download {attachment.filename}
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageRow({ message, onPreview }: { message: ThreadMessage; onPreview: (a: ThreadAttachment) => void }) {
+  const { sender, body, created_at, kind, attachment } = message;
   const isSystem = kind === 'system';
 
   return (
@@ -105,20 +357,24 @@ function MessageRow({ message }: { message: ThreadMessage }) {
           )}
           <span style={{ fontSize: 11.5, color: '#9BA3C4' }}>{relativeTime(created_at)}</span>
         </div>
-        <div
-          style={{
-            padding: '10px 13px',
-            borderRadius: 10,
-            background: isSystem ? '#F4F4FB' : '#F6F7FC',
-            fontSize: 13,
-            color: '#3A4066',
-            lineHeight: 1.55,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {body}
-        </div>
+        {attachment ? (
+          <AttachmentChip attachment={attachment} onPreview={onPreview} />
+        ) : (
+          <div
+            style={{
+              padding: '10px 13px',
+              borderRadius: 10,
+              background: isSystem ? '#F4F4FB' : '#F6F7FC',
+              fontSize: 13,
+              color: '#3A4066',
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {body}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -154,6 +410,22 @@ export function ThreadViewModal({
   const [mentions, setMentions] = useState<CommunicationMember[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<ThreadAttachment | null>(null);
+  const [showSendExternal, setShowSendExternal] = useState(false);
+
+  // Re-pull the thread so a just-logged system message (e.g. from a
+  // send-external) shows up without the user having to close/reopen.
+  const reloadThread = () => {
+    communications
+      .getThread(threadId)
+      .then((detail) => {
+        setThread(detail.thread);
+        setMessages(detail.messages);
+      })
+      .catch(() => {});
+  };
 
   // On open → load thread + members in parallel, and fire read (idempotent).
   // With initialPayload the thread is already painted; we still refresh members
@@ -202,20 +474,57 @@ export function ThreadViewModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
-  // A reply must be addressed to at least one participant.
+  // @mention is an optional notify — every thread member can already see the
+  // message, so it's never required to send. An attachment with no text is a
+  // valid send on its own.
   const hasMessage = message.trim().length > 0;
-  const needsRecipient = hasMessage && mentions.length === 0;
-  const canSend = hasMessage && mentions.length > 0 && !sending;
+  const canSend = !sending && (!!pendingFile || hasMessage);
 
-  const sendReply = async () => {
-    const text = message.trim();
-    if (!text || sending) return;
-    if (mentions.length === 0) {
-      setSendError('Add at least one participant with @ before sending.');
+  const pickFile = (file: File) => {
+    const err = validateAttachmentFile(file);
+    if (err) {
+      setSendError(err);
       return;
     }
+    setSendError(null);
+    setPendingFile(file);
+  };
+
+  const sendReply = async () => {
+    if (sending) return;
+    const text = message.trim();
+    if (!text && !pendingFile) return;
     setSending(true);
     setSendError(null);
+
+    if (pendingFile) {
+      try {
+        const res = await communications.uploadAttachment(threadId, pendingFile);
+        setMessages((prev) => [...prev, res.message]);
+        setPendingFile(null);
+      } catch (e) {
+        setSending(false);
+        if (!(e instanceof ApiError)) {
+          setSendError('Could not attach that file. Please try again.');
+          return;
+        }
+        if (e.status === 404) {
+          toast({ title: 'That conversation is no longer available', variant: 'destructive' });
+          onClose();
+          return;
+        }
+        if (e.status === 401) return; // session-expired flow already handled by the request layer
+        // 422 (bad type / empty / too large) and anything else — surface the backend's own words.
+        setSendError(e.message);
+        return;
+      }
+    }
+
+    if (!text) {
+      setSending(false);
+      return;
+    }
+
     try {
       const res = await communications.sendMessage(threadId, {
         message: text,
@@ -259,10 +568,14 @@ export function ThreadViewModal({
     }
   };
 
-  const report = thread?.report;
+  const report = thread?.report ?? null;
+  const isAdHoc = !!thread && !report;
+  const title = report ? report.title : (thread?.subject?.trim() || 'Discussion');
   const assignment = thread?.assignment ?? null;
   const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null;
-  const openReview = onOpenReview ? () => onOpenReview(threadId) : undefined;
+  // Review actions never apply to an ad-hoc thread — the review endpoints
+  // themselves 422 on those, so don't offer a way to call them.
+  const openReview = onOpenReview && report ? () => onOpenReview(threadId) : undefined;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -289,10 +602,22 @@ export function ThreadViewModal({
             {ICON_SHARE}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16.5, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.2px' }}>
-              Review thread
+            <div
+              style={{
+                fontSize: 16.5,
+                fontWeight: 800,
+                color: '#1A1D2E',
+                letterSpacing: '-.2px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isAdHoc ? title : 'Review thread'}
             </div>
-            <div style={{ fontSize: 12.5, color: '#8890AE', marginTop: 1 }}>Shared and assigned for review</div>
+            <div style={{ fontSize: 12.5, color: '#8890AE', marginTop: 1 }}>
+              {isAdHoc ? 'General discussion' : 'Shared and assigned for review'}
+            </div>
           </div>
           <button
             type="button"
@@ -374,11 +699,65 @@ export function ThreadViewModal({
                   No messages yet.
                 </div>
               ) : (
-                messages.map((m) => <MessageRow key={m.id} message={m} />)
+                messages.map((m) => <MessageRow key={m.id} message={m} onPreview={setPreviewAttachment} />)
               )}
 
               {/* Reply composer */}
               <div style={{ marginTop: 12, paddingTop: 14, borderTop: '1px solid #ECEEF8' }}>
+                {pendingFile && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: '#F6F7FC',
+                      border: '1px solid #E2E4F0',
+                      marginBottom: 8,
+                    }}
+                  >
+                    <span style={{ flexShrink: 0, color: '#4040C8', display: 'flex' }}>{ICON_FILE}</span>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: '#1A1D2E',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {pendingFile.name}
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: 11, color: '#9BA3C4' }}>{formatFileSize(pendingFile.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingFile(null)}
+                      aria-label={`Remove ${pendingFile.name}`}
+                      title="Remove file"
+                      style={{
+                        flexShrink: 0,
+                        width: 18,
+                        height: 18,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        cursor: 'pointer',
+                        color: '#9BA3C4',
+                      }}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
                 <MentionComposer
                   members={members}
                   currentUserId={user?.user_id}
@@ -393,21 +772,54 @@ export function ThreadViewModal({
                   minHeight={70}
                 />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 600, color: sendError ? '#DC2626' : '#9BA3C4' }}>
-                    {sendError ?? (needsRecipient ? 'Add at least one participant with @ to send.' : '')}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn bp"
-                    style={{ gap: 7, opacity: canSend ? 1 : 0.55, cursor: canSend ? 'pointer' : 'not-allowed' }}
-                    disabled={!canSend}
-                    onClick={sendReply}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M12.5 1.5L6 8M12.5 1.5L8.3 12.5l-2.3-4.5L1.5 5.7 12.5 1.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-                    </svg>
-                    {sending ? 'Sending…' : 'Send'}
-                  </button>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: '#DC2626' }}>{sendError ?? ''}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ATTACHMENT_ACCEPT.join(',')}
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) pickFile(f);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={sending}
+                      title="Attach a document"
+                      aria-label="Attach a document"
+                      style={{
+                        width: 32,
+                        height: 32,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 8,
+                        border: '1px solid #E2E4F0',
+                        background: '#fff',
+                        color: '#5A6080',
+                        cursor: sending ? 'not-allowed' : 'pointer',
+                        opacity: sending ? 0.55 : 1,
+                      }}
+                    >
+                      {ICON_PAPERCLIP}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn bp"
+                      style={{ gap: 7, opacity: canSend ? 1 : 0.55, cursor: canSend ? 'pointer' : 'not-allowed' }}
+                      disabled={!canSend}
+                      onClick={sendReply}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M12.5 1.5L6 8M12.5 1.5L8.3 12.5l-2.3-4.5L1.5 5.7 12.5 1.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                      </svg>
+                      {sending ? 'Sending…' : 'Send'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -428,14 +840,35 @@ export function ThreadViewModal({
           <button type="button" className="btn bs" onClick={onClose}>
             Close
           </button>
-          {openReview && thread && !loading && !error && (
-            <button type="button" className="btn bp" style={{ gap: 8 }} onClick={openReview}>
-              {thread.can_review ? 'Open as reviewer' : 'Open review'}
-              {ICON_EXTERNAL}
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {thread && !loading && !error && (
+              <button type="button" className="btn bs" style={{ gap: 8 }} onClick={() => setShowSendExternal(true)}>
+                {ICON_MAIL}
+                Send externally
+              </button>
+            )}
+            {openReview && thread && !loading && !error && (
+              <button type="button" className="btn bp" style={{ gap: 8 }} onClick={openReview}>
+                {thread.can_review ? 'Open as reviewer' : 'Open review'}
+                {ICON_EXTERNAL}
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {previewAttachment && (
+        <AttachmentPreviewModal attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
+      )}
+
+      {showSendExternal && thread && (
+        <SendExternalModal
+          threadId={threadId}
+          defaultSubject={title}
+          onClose={() => setShowSendExternal(false)}
+          onSent={reloadThread}
+        />
+      )}
     </div>
   );
 }

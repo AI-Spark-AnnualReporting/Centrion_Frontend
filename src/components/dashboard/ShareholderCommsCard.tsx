@@ -43,7 +43,7 @@ function leadLine(t: ThreadSummary): string {
     return t.last_message.is_you ? 'You replied' : `${abbreviateName(t.last_message.sender_full_name)} replied`;
   }
   if (t.owner) return `Started by ${t.owner.is_you ? 'you' : abbreviateName(t.owner.full_name)}`;
-  return t.report.type_label;
+  return t.report ? t.report.type_label : 'Discussion';
 }
 
 export function ShareholderCommsCard() {
@@ -91,7 +91,7 @@ export function ShareholderCommsCard() {
         </div>
       ) : (
         rows.map((t, i) => {
-          const pill = statusPill(t.report.status, t.report.status_label);
+          const pill = t.report ? statusPill(t.report.status, t.report.status_label) : null;
           const when = relativeTime(t.updated_at);
           return (
             <div
@@ -102,14 +102,16 @@ export function ShareholderCommsCard() {
               tabIndex={0}
               style={{ cursor: 'pointer', display: 'flex', gap: 11, alignItems: 'center', padding: '11px 0', borderTop: i ? '1px solid #F4F5FA' : 'none' }}
             >
-              <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)' }}>{initialsFor(t.report.report_type)}</span>
+              <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: ACCENT, background: 'rgba(64,64,200,.1)' }}>{t.report ? initialsFor(t.report.report_type) : 'DS'}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.report.title}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.report ? t.report.title : (t.subject?.trim() || 'Discussion')}</div>
                 <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {leadLine(t)}{when ? ` · ${when}` : ''}
                 </div>
               </div>
-              <span style={{ fontSize: 9, fontWeight: 800, color: pill.color, background: pill.bg, padding: '3px 8px', borderRadius: 999, letterSpacing: '.4px', flexShrink: 0 }}>{pill.text}</span>
+              {pill && (
+                <span style={{ fontSize: 9, fontWeight: 800, color: pill.color, background: pill.bg, padding: '3px 8px', borderRadius: 999, letterSpacing: '.4px', flexShrink: 0 }}>{pill.text}</span>
+              )}
             </div>
           );
         })

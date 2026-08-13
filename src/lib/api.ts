@@ -3087,8 +3087,12 @@ export interface CommunicationMembersResponse {
   members: CommunicationMember[];
 }
 
+// A thread is either on a report (report_id set) or ad-hoc (subject set
+// instead) — 422 if neither is given. Omit report_id entirely for an ad-hoc
+// thread rather than sending null.
 export interface StartThreadBody {
-  report_id: string;
+  report_id?: string;
+  subject?: string;
   message: string;
   // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
   mentioned_user_ids: string[];
@@ -3097,7 +3101,8 @@ export interface StartThreadBody {
 export interface CommunicationThread {
   id: string;
   company_id: string;
-  report_id: string;
+  report_id: string | null;
+  subject: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -3115,6 +3120,13 @@ export interface CommunicationMessage {
 export interface StartThreadResponse {
   thread: CommunicationThread;
   message: CommunicationMessage;
+}
+
+// POST /ad-hoc/draft — stateless; nothing is saved. Call again to regenerate
+// before the user commits. The resulting text becomes StartThreadBody.message
+// verbatim (edited or not) when the user posts the ad-hoc thread.
+export interface GenerateAdHocDraftResponse {
+  draft: string;
 }
 
 // ── Communication Hub list (Communication tab) ────────────────────────────
@@ -3144,12 +3156,17 @@ export interface ThreadLastMessage {
 }
 
 // One row in the Communication tab. Rows arrive pre-sorted (updated_at desc) —
-// don't re-sort. `owner` and `last_message` can both be null.
+// don't re-sort. `owner` and `last_message` can both be null. Exactly one of
+// `report` / `subject` is set — null report + non-null subject means an
+// ad-hoc thread; render `subject` as the title and skip report-only UI
+// (status pill, review actions) in that case.
 export interface ThreadSummary {
   thread_id: string;
-  report: ThreadReport;
+  report: ThreadReport | null;
+  subject: string | null;
   owner: ThreadOwner | null;
-  // Added alongside the review flow; null when the report isn't out for review.
+  // Added alongside the review flow; null when the report isn't out for review
+  // (always null for ad-hoc threads — review doesn't apply to them).
   assignment: ReviewAssignment | null;
   updated_at: string;
   last_message: ThreadLastMessage | null;
@@ -3176,8 +3193,19 @@ export interface MessageSender {
 }
 
 // `kind` drives the bubble: "system" renders with the Communication Hub avatar
-// and label (ignore `sender` for the display name); "user" renders as a person.
-export type ThreadMessageKind = 'system' | 'user';
+// and label (ignore `sender` for the display name); "user" renders as a person;
+// "attachment" also renders as a person (the uploader) but with `attachment`
+// rendered as a file chip instead of `body` as plain text.
+export type ThreadMessageKind = 'system' | 'user' | 'attachment';
+
+// download_url is short-lived/signed, same convention as documents.list etc.
+export interface ThreadAttachment {
+  id: string;
+  filename: string;
+  file_size_bytes: number;
+  content_type?: string | null;
+  download_url: string;
+}
 
 export interface ThreadMessage {
   id: string;
@@ -3186,6 +3214,8 @@ export interface ThreadMessage {
   body: string;
   mentioned_user_ids: string[];
   created_at: string;
+  // Only present on kind === "attachment" messages.
+  attachment?: ThreadAttachment | null;
 }
 
 // Who the report is currently out for review with. `label` is the snapshotted
@@ -3201,10 +3231,13 @@ export interface ReviewAssignment {
 
 export interface ThreadDetail {
   thread_id: string;
-  report: ThreadReport;
+  report: ThreadReport | null;
+  subject: string | null;
   owner: ThreadOwner | null;
   assignment: ReviewAssignment | null;
-  // True only for the assigned reviewer — gates "Open as reviewer".
+  // True only for the assigned reviewer — gates "Open as reviewer". Always
+  // false for ad-hoc threads (report === null) — the review endpoints
+  // themselves 422 on those, so don't surface any review UI when report is null.
   can_review: boolean;
   created_at: string;
   updated_at: string;
@@ -3224,6 +3257,25 @@ export interface SendMessageBody {
 
 export interface SendMessageResponse {
   message: ThreadMessage;
+}
+
+export interface UploadAttachmentResponse {
+  message: ThreadMessage;
+}
+
+// POST .../send-external — works on any thread (ad-hoc or report-based).
+// `body` omitted defaults server-side to the thread's latest message.
+export interface SendExternalBody {
+  subject: string;
+  recipients: ComposeRecipient[];
+  audience_label?: string;
+  body?: string | null;
+}
+
+export interface SendExternalResponse {
+  send: EmailSend;
+  recipient_count: number;
+  delivery_status: 'sent' | 'failed' | 'skipped' | null;
 }
 
 // ── History tab: email sends + publications ────────────────────────────────
@@ -3518,6 +3570,32 @@ export const communications = {
       { method: "POST", body },
     ),
 
+  // Attach a document to a thread. Returns the kind:"attachment" message the
+  // backend created for it — append it to the message list the same way as
+  // sendMessage's response, no refetch needed. 422 → bad file type / empty /
+  // too large. 404 → thread gone / not accessible.
+  uploadAttachment: (threadId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<UploadAttachmentResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/attachments`,
+      form,
+    );
+  },
+
+  // Stateless draft generation for the "Draft with AI" ad-hoc flow — nothing
+  // is saved server-side, so call again to regenerate. document, if given,
+  // must be PDF/DOCX (other types 422 here but can still be attached to the
+  // thread afterwards via uploadAttachment). 422 → blank instructions,
+  // unsupported/empty file, or a document the AI couldn't extract text from.
+  generateAdHocDraft: (params: { instructions: string; sourceText?: string; document?: File }) => {
+    const form = new FormData();
+    form.append("instructions", params.instructions);
+    if (params.sourceText) form.append("source_text", params.sourceText);
+    if (params.document) form.append("document", params.document);
+    return postForm<GenerateAdHocDraftResponse>("/api/v1/communications/ad-hoc/draft", form);
+  },
+
   // All threadless reports + the type pills. `type` narrows only the reports
   // list; the pills always reflect the full unfiltered set.
   threadlessReports: (type?: string) =>
@@ -3536,6 +3614,15 @@ export const communications = {
       method: "POST",
       body,
     }),
+
+  // Works on any thread (ad-hoc or report-based). 422 → blank subject or no
+  // recipients. 404 → thread gone / not in your company. Logs a system
+  // message onto the thread — refetch getThread() to show it.
+  sendExternal: (threadId: string, body: SendExternalBody) =>
+    request<SendExternalResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-external`,
+      { method: "POST", body },
+    ),
 
   // ── History tab ──────────────────────────────────────────────────────────
   // Email sends + header stats. `audience` filters the list only; stats always

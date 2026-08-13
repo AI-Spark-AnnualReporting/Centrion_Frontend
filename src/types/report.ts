@@ -131,6 +131,11 @@ export interface BankDocument {
 export interface ReportGroup {
   report_id: string | null;     // null for cycle nodes and the Unassigned node
   cycle_id: string | null;      // set when this node is a reporting cycle
+  // Set only for a "communication" category node — a Communication Hub thread
+  // whose paperclip attachments are grouped here. null for report/cycle/
+  // Unassigned nodes. `report_name` is the thread's subject (ad-hoc) or
+  // "Review: {report title}" (a review thread, which has no subject of its own).
+  thread_id: string | null;
   report_name: string;
   report_type: string | null;
   period: string | number | null; // report period string, or cycle fiscal_year
