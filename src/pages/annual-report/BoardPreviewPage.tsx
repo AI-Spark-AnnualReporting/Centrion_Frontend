@@ -461,14 +461,18 @@ export default function BoardPreviewPage() {
             )
           }
         >
-          {/* The report is the assembled document — it can't be assembled from
-              sections that have no content, so this is the gate. */}
+          {/* Not gated on every section being filled — the Report step already
+              renders whatever's ready and shows exactly what's still missing
+              on anything that isn't (see ReportSection in BoardReportPage),
+              so there's no reason to block getting there. Approval and export
+              are the real gates further down, and those are enforced by the
+              server's own /completion check, not this button. */}
           <button
             className="btn bp"
-            disabled={loading || visible.length === 0 || unfilled.length > 0}
+            disabled={loading || visible.length === 0}
             title={
               unfilled.length > 0
-                ? 'Every section needs content before the report can be assembled.'
+                ? `${unfilled.length} section${unfilled.length === 1 ? '' : 's'} still empty — the report will show only what's ready.`
                 : undefined
             }
             onClick={() => navigate(`/board-report/${reportId}/report`)}
@@ -703,6 +707,7 @@ function SectionPanel({
   /** What is happening to this section right now — reading, or writing. */
   working: string | null;
 }) {
+  const [showMarkdownHelp, setShowMarkdownHelp] = useState(false);
   const feeder = s.feeder ?? null;
   const produced = s.status === 'produced' || s.status === 'locked';
   const carried = s.provenance === 'carried_forward' && !s.confirmed;
@@ -801,8 +806,11 @@ function SectionPanel({
         </div>
       )}
 
-      {/* The safeguard against last year's board list going out as this year's. */}
-      {carried && produced && (
+      {/* The safeguard against last year's board list going out as this year's.
+          Hidden once editing starts — opening the editor is itself the "I'm
+          addressing this" signal, so the banner and the editor don't both
+          compete for attention at once. */}
+      {carried && produced && !editing && (
         <div
           style={{
             display: 'flex',
@@ -837,6 +845,41 @@ function SectionPanel({
         // Dim the text while a rewrite is in flight, with the state named over
         // it — the content is about to change under the reader.
         <div style={{ position: 'relative' }}>
+          {/* The editor works on raw Markdown, not the rendered preview — a
+              small trigger rather than a permanent banner, so it doesn't
+              compete with the content on every section that's ever edited. */}
+          {editing && (
+            <button
+              type="button"
+              // The editor saves-or-cancels on blur (see ProseEditor), so a
+              // plain click here would steal focus from the textarea first
+              // and read as "cancel" before the click even registers —
+              // exactly like the Save/Cancel buttons below guard against.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowMarkdownHelp(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: 10,
+                padding: '5px 11px',
+                borderRadius: 999,
+                background: 'rgba(64,64,200,.06)',
+                border: '1px solid rgba(64,64,200,.2)',
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: '#3A3F8C',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M8 7.2v4M8 5.2v.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              You&rsquo;re editing raw Markdown — what do the symbols mean?
+            </button>
+          )}
           <div style={{ opacity: refining ? 0.5 : 1, pointerEvents: refining ? 'none' : undefined }}>
             <EditableSectionContent
               section={toBoardProduced(s)}
@@ -912,6 +955,114 @@ function SectionPanel({
           onRefine={(instruction) => onRefine(s.section_code, instruction)}
         />
       )}
+
+      {showMarkdownHelp && <MarkdownHelpModal onClose={() => setShowMarkdownHelp(false)} />}
+    </div>
+  );
+}
+
+// ─── Markdown cheat sheet (popup) ───────────────────────────────────────────
+//
+// The editor works on raw Markdown source, not the rendered preview, so the
+// symbols a reviewer might casually delete (a leading #, a pair of **) carry
+// real meaning. One reference, opened on demand rather than shown inline on
+// every edit, so it doesn't turn into another permanent banner.
+const MARKDOWN_CHEATSHEET: { syntax: string; meaning: string; example: string }[] = [
+  { syntax: '# text', meaning: 'Heading', example: '# Overview' },
+  { syntax: '## text', meaning: 'Sub-heading', example: '## Key risks' },
+  { syntax: '**text**', meaning: 'Bold', example: '**material risk**' },
+  { syntax: '*text*', meaning: 'Italic', example: '*subject to change*' },
+  { syntax: '- text', meaning: 'Bullet list item', example: '- Commodity price risk' },
+  { syntax: '1. text', meaning: 'Numbered list item', example: '1. Safety' },
+];
+
+function MarkdownHelpModal({ onClose }: { onClose: () => void }) {
+  // The section editor underneath saves-or-cancels the moment it loses focus
+  // (see ProseEditor), and it never gets a chance to regain focus while this
+  // modal is open — so closing this modal, by any route, must not be the
+  // click that steals that focus, or the reviewer's edit gets silently
+  // cancelled the instant they dismiss a help popup.
+  const keepEditorFocused = (e: React.MouseEvent) => e.preventDefault();
+  return (
+    <div className="modal-overlay" onMouseDown={keepEditorFocused} onClick={onClose}>
+      <div
+        className="modal-content"
+        style={{ width: 460 }}
+        onMouseDown={keepEditorFocused}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '20px 22px 4px' }}>
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 9,
+              flexShrink: 0,
+              background: 'rgba(64,64,200,.1)',
+              color: ACCENT,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.4" />
+              <path d="M8 7.2v4M8 5.2v.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: INK }}>You&rsquo;re editing raw Markdown</div>
+            <div style={{ fontSize: 12, color: MUTED, marginTop: 3, lineHeight: 1.5 }}>
+              The box below is the source text, not the formatted preview. These symbols control how it
+              renders — remove one by accident and that line loses its formatting once saved.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: '14px 22px 6px' }}>
+          {MARKDOWN_CHEATSHEET.map((row) => (
+            <div
+              key={row.syntax}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '9px 0',
+                borderTop: `1px solid ${BORDER_SOFT}`,
+              }}
+            >
+              <code
+                style={{
+                  flexShrink: 0,
+                  width: 92,
+                  fontFamily: MONO,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: ACCENT,
+                  background: 'rgba(64,64,200,.08)',
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  textAlign: 'center',
+                }}
+              >
+                {row.syntax}
+              </code>
+              <span style={{ flexShrink: 0, width: 110, fontSize: 12.5, fontWeight: 700, color: INK }}>
+                {row.meaning}
+              </span>
+              <code style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 11.5, color: MUTED, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {row.example}
+              </code>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 22px 20px' }}>
+          <button type="button" className="btn bp" onClick={onClose} style={{ padding: '9px 20px', fontSize: 13 }}>
+            Got it
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
