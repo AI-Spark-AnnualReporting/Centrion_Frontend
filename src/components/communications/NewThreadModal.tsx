@@ -5,10 +5,12 @@ import {
   communications,
   ApiError,
   type CommunicationMember,
+  type ComposeRecipient,
   type ThreadlessReport,
   type ThreadlessReportType,
 } from '@/lib/api';
 import { MentionComposer } from './MentionComposer';
+import { RecipientChip } from './RecipientChip';
 import { ALL_FILTER, SECTION_LABEL } from './helpers';
 
 /* "Start a communication" modal — three ways in:
@@ -120,6 +122,13 @@ export function NewThreadModal({
   const [draftError, setDraftError] = useState<string | null>(null);
   const [aiDraftGenerated, setAiDraftGenerated] = useState(false);
 
+  // Announcement-only: who this goes to. "Both" also sends a tracked external
+  // email in the same submit — no separate trip to "Send externally" after.
+  const [shareExternally, setShareExternally] = useState(false);
+  const [externalRecipients, setExternalRecipients] = useState<{ id: string; name: string; email: string | null }[]>([]);
+  const [externalDraft, setExternalDraft] = useState('');
+  const [externalAdding, setExternalAdding] = useState(false);
+
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -184,11 +193,16 @@ export function NewThreadModal({
 
   const messageEmpty = message.trim().length === 0;
   const subjectEmpty = subject.trim().length === 0;
+  // At least one of pasted text / an attached document is required to draft
+  // from — "optional" invited a blank draft attempt with nothing to work off.
+  const hasSource = sourceText.trim().length > 0 || !!aiDocument;
+  const needsExternalRecipient =
+    mode === 'ai' && shareExternally && externalRecipients.length === 0 && !externalDraft.trim();
   // @mention is an optional notify, not a requirement to start a thread.
   const canSubmit =
     mode === 'report'
       ? !!reportId && !messageEmpty && !submitting
-      : !subjectEmpty && !messageEmpty && !submitting;
+      : !subjectEmpty && !messageEmpty && !submitting && !needsExternalRecipient;
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -243,8 +257,40 @@ export function NewThreadModal({
     }
   };
 
+  const makeExternalRecipient = (value: string) => ({
+    id: `r-${externalRecipients.length}-${value}`,
+    name: value,
+    email: value.includes('@') ? value : null,
+  });
+  const addExternalRecipient = () => {
+    const value = externalDraft.trim();
+    if (!value) {
+      setExternalAdding(false);
+      return;
+    }
+    setExternalRecipients((prev) => [...prev, makeExternalRecipient(value)]);
+    setExternalDraft('');
+  };
+  // Flushes a typed-but-uncommitted address so it isn't silently dropped when
+  // the user goes straight for "Start thread" instead of pressing Enter.
+  const commitPendingExternalRecipient = () => {
+    const value = externalDraft.trim();
+    if (!value) return externalRecipients;
+    const next = [...externalRecipients, makeExternalRecipient(value)];
+    setExternalRecipients(next);
+    setExternalDraft('');
+    setExternalAdding(false);
+    return next;
+  };
+  const removeExternalRecipient = (id: string) =>
+    setExternalRecipients((prev) => prev.filter((r) => r.id !== id));
+
   const submitAdHoc = async () => {
     if (subjectEmpty || messageEmpty) return;
+    if (needsExternalRecipient) {
+      setFormError('Add at least one external recipient, or switch to Internally only.');
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -253,7 +299,30 @@ export function NewThreadModal({
         message: message.trim(),
         mentioned_user_ids: mentions.map((m) => m.id),
       });
-      toast({ title: 'Thread started', description: 'Your team has been briefed.' });
+
+      let description = 'Your team has been briefed.';
+      if (mode === 'ai' && shareExternally) {
+        const finalRecipients = commitPendingExternalRecipient();
+        if (finalRecipients.length > 0) {
+          try {
+            const sendRes = await communications.sendExternal(res.thread.id, {
+              subject: subject.trim(),
+              recipients: finalRecipients.map(
+                (r): ComposeRecipient => ({ name: r.name, org: null, contact: null, email: r.email }),
+              ),
+              audience_label: 'Investors',
+            });
+            description =
+              sendRes.delivery_status === 'failed'
+                ? 'Your team has been briefed, but the external email could not be delivered.'
+                : `Your team has been briefed and ${finalRecipients.length} external recipient${finalRecipients.length === 1 ? '' : 's'} emailed.`;
+          } catch {
+            description = 'Your team has been briefed, but the external email failed to send.';
+          }
+        }
+      }
+
+      toast({ title: 'Thread started', description });
       onCreated?.(res.thread.id);
       onClose();
     } catch (e) {
@@ -282,7 +351,7 @@ export function NewThreadModal({
 
   const generateDraft = async () => {
     const trimmed = instructions.trim();
-    if (!trimmed || draftLoading) return;
+    if (!trimmed || !hasSource || draftLoading) return;
     setDraftLoading(true);
     setDraftError(null);
     try {
@@ -594,7 +663,10 @@ export function NewThreadModal({
                 style={{ minHeight: 64, resize: 'vertical', lineHeight: 1.5, marginBottom: 14 }}
               />
 
-              <div style={SECTION_LABEL}>SOURCE MATERIAL (OPTIONAL)</div>
+              <div style={SECTION_LABEL}>SOURCE MATERIAL</div>
+              <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: -6, marginBottom: 8 }}>
+                Paste text or attach a document — at least one is required to draft from.
+              </div>
               <textarea
                 className="inp"
                 value={sourceText}
@@ -669,10 +741,10 @@ export function NewThreadModal({
                 style={{
                   gap: 7,
                   marginBottom: 22,
-                  opacity: instructions.trim() && !draftLoading ? 1 : 0.55,
-                  cursor: instructions.trim() && !draftLoading ? 'pointer' : 'not-allowed',
+                  opacity: instructions.trim() && hasSource && !draftLoading ? 1 : 0.55,
+                  cursor: instructions.trim() && hasSource && !draftLoading ? 'pointer' : 'not-allowed',
                 }}
-                disabled={!instructions.trim() || draftLoading}
+                disabled={!instructions.trim() || !hasSource || draftLoading}
                 onClick={generateDraft}
               >
                 {ICON_SPARKLE}
@@ -695,6 +767,97 @@ export function NewThreadModal({
                     placeholder="Edit the draft…  (type @ to mention)"
                     minHeight={140}
                   />
+
+                  <div style={{ ...SECTION_LABEL, marginTop: 20 }}>SHARE THIS ANNOUNCEMENT</div>
+                  <div style={{ display: 'flex', gap: 9, marginBottom: shareExternally ? 12 : 4 }}>
+                    {([
+                      { value: false, label: 'Internally only' },
+                      { value: true, label: 'Internally and externally' },
+                    ] as const).map((opt) => {
+                      const active = shareExternally === opt.value;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          onClick={() => {
+                            setShareExternally(opt.value);
+                            if (formError) setFormError(null);
+                          }}
+                          style={{
+                            padding: '7px 15px',
+                            borderRadius: 20,
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            transition: '.15s',
+                            border: active ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
+                            background: active ? '#4040C8' : '#fff',
+                            color: active ? '#fff' : '#5A6080',
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {shareExternally && (
+                    <>
+                      <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 8 }}>
+                        Sent as a tracked email once the thread is created, using this same subject and message.
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                        {externalRecipients.map((r) => (
+                          <RecipientChip
+                            key={r.id}
+                            label={r.email ?? r.name}
+                            onRemove={() => removeExternalRecipient(r.id)}
+                          />
+                        ))}
+                        {externalAdding ? (
+                          <input
+                            className="inp"
+                            autoFocus
+                            value={externalDraft}
+                            onChange={(e) => setExternalDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addExternalRecipient();
+                              } else if (e.key === 'Escape') {
+                                setExternalDraft('');
+                                setExternalAdding(false);
+                              }
+                            }}
+                            onBlur={addExternalRecipient}
+                            placeholder="name@investor.com"
+                            style={{ width: 200, padding: '6px 12px', fontSize: 12.5 }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setExternalAdding(true)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '6px 12px',
+                              borderRadius: 20,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#16A34A',
+                              fontSize: 12.5,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                          >
+                            + Add recipients
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
 
                   {formError && (
                     <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#DC2626' }}>{formError}</div>
