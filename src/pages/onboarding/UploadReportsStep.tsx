@@ -156,11 +156,17 @@ export default function UploadReportsStep({
   // there, the user chose to open it.
   onSkip,
   submitLabel,
+  docTypes,
 }: {
   onProcess: (files: UploadedReportFile[]) => void;
   onSkip?: () => void;
   submitLabel?: string;
+  // Which slots to render. Omitted (onboarding) => all four. The in-app page passes
+  // ['annual','esg'] because the ingest only ever reads those two — the other slots
+  // just bank a file nothing downstream looks at.
+  docTypes?: ReportDocType[];
 }) {
+  const rows = docTypes ? ROWS.filter((r) => docTypes.includes(r.docType)) : ROWS;
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const [picked, setPicked] = useState<Record<string, File | null>>({});
@@ -193,12 +199,12 @@ export default function UploadReportsStep({
   const anyValidating = Object.values(states).some((s) => s?.status === 'validating');
   // A rejected file still blocks — "Use it anyway" is the way past a classifier
   // false negative. Nothing else is required.
-  const blockingInvalid = ROWS.some(
+  const blockingInvalid = rows.some(
     (r) => states[r.title]?.status === 'invalid' && !overridden[r.title],
   );
   const canProcess = !!companyId && !anyValidating && !blockingInvalid;
 
-  const collected: UploadedReportFile[] = ROWS
+  const collected: UploadedReportFile[] = rows
     .map((r) => {
       const st = states[r.title];
       const f = picked[r.title];
@@ -224,7 +230,7 @@ export default function UploadReportsStep({
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-        {ROWS.map((r) => (
+        {rows.map((r) => (
           <UploadRow
             key={r.title}
             row={r}
