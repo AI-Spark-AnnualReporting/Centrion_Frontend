@@ -3,6 +3,9 @@ import type { ProducedSection } from '@/types/quarterly';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
 import { deriveUnits, gridValue, unitsCaption } from './figureUnits';
+// Likewise for the Analyse button's commentary: bullets or legacy paragraphs, one
+// rule, mirrored in section_analysis.py and report_export.py.
+import { splitAnalysis } from './analysisText';
 
 // ─── colours (match Coverage / Gaps / Preview conventions) ────────────────────
 const GREEN = '#10B981';
@@ -37,7 +40,7 @@ export function SectionContent({
   return (
     <>
       {body}
-      <Prose text={analysis} />
+      <AnalysisText text={analysis} />
     </>
   );
 }
@@ -144,6 +147,20 @@ export function Prose({ text }: { text: string }) {
 
 // A discrete list of points (e.g. a hybrid table section's per-point
 // analysis) — one bullet per item, not justified paragraph blocks.
+// The Analyse button's commentary, in whichever shape it was written: the bullet
+// list it writes now, or the blank-line paragraphs it wrote before the format
+// changed (and that a hand-edit can still produce). Those were never migrated, so
+// one report can hold both — see analysisText.ts for the rule, which the two
+// exporters mirror so the download cannot disagree with the screen.
+//
+// Deliberately hands `Prose` the RAW text rather than the split items, so the
+// legacy path keeps Prose's own paragraph splitting and pre-wrap behaviour exactly
+// as it was.
+export function AnalysisText({ text }: { text: string }) {
+  const { kind, items } = splitAnalysis(text);
+  return kind === 'bullets' ? <Bullets items={items} /> : <Prose text={text} />;
+}
+
 function Bullets({ items }: { items: string[] }) {
   return (
     <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>

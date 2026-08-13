@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { quarterlyReports } from '@/lib/api';
 import type { ProducedSection, SectionAnalysis as Analysis } from '@/types/quarterly';
-import { Prose } from './SectionContent';
+import { AnalysisText } from './SectionContent';
 import { tableRowCount } from './sectionState';
 
 const ACCENT = '#4040C8';
@@ -110,8 +110,8 @@ function ConfirmDialog({
           </p>
           <p style={{ margin: '8px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             {redo
-              ? 'The paragraphs below will be replaced, including any edits you have made.'
-              : 'The two paragraphs it writes are printed under this table in the report you export.'}
+              ? 'The points below will be replaced, including any edits you have made.'
+              : 'The points it writes are printed under this table in the report you export.'}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '18px 22px' }}>
@@ -368,7 +368,7 @@ export default function SectionAnalysis({
             className={beat('analysis-rise', 300).className}
             style={beat('analysis-rise', 300).delay}
           >
-            <Prose text={analysis.text} />
+            <AnalysisText text={analysis.text} />
           </div>
 
           {!!analysis.warnings?.length && (
@@ -406,7 +406,8 @@ export default function SectionAnalysis({
               Cancel
             </button>
             <span style={{ fontSize: 11.5, color: MUTED }}>
-              Clearing the box removes these paragraphs from the report.
+              One point per line, starting with “- ”. Clearing the box removes this
+              analysis from the report.
             </span>
           </div>
         </>
@@ -426,7 +427,7 @@ export default function SectionAnalysis({
             Analyse
           </button>
           <span style={{ fontSize: 11.5, color: MUTED }}>
-            Sends this section’s figures to AI. The two paragraphs it writes go into your report.
+            Sends this section’s figures to AI. The points it writes go into your report.
           </span>
         </div>
       )}

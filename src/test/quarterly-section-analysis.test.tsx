@@ -48,10 +48,17 @@ const confirm = () =>
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Analyse' }));
 
 const RESULT: Analysis = {
-  text: 'Revenue was SAR 424,095 for the quarter.\n\nNet income was SAR 122,188.',
+  text: '- Revenue was SAR 424,095 for the quarter.\n- Net income was SAR 122,188.',
   generated_at: '2026-08-12T10:00:00Z',
   model: 'gpt-4.1',
   fingerprint: 'abc123',
+};
+
+// Written before the format changed and never migrated. It is still in the database
+// and still exported, so both shapes have to render for as long as it exists.
+const RESULT_LEGACY: Analysis = {
+  ...RESULT,
+  text: 'Revenue was SAR 424,095 for the quarter.\n\nNet income was SAR 122,188.',
 };
 
 const saveSectionAnalysis = vi.fn();
@@ -261,7 +268,7 @@ describe('waiting and the result', () => {
 
 // ── 4. Editing, because it is going into a published report ──────────────────
 
-describe('editing the paragraphs', () => {
+describe('editing the analysis', () => {
   beforeEach(() => {
     analyseSection.mockReset();
     saveSectionAnalysis.mockReset();
@@ -297,7 +304,7 @@ describe('editing the paragraphs', () => {
 
   it('says what clearing the box does, since that removes it from the report', () => {
     openEditor();
-    expect(screen.getByText(/removes these paragraphs from the report/)).toBeInTheDocument();
+    expect(screen.getByText(/removes this analysis from the report/)).toBeInTheDocument();
   });
 
   it('emptying the box drops the analysis entirely', async () => {
@@ -324,10 +331,20 @@ describe('the analysis as part of the section', () => {
     expect(screen.getByText(/Net income was SAR 122,188\./)).toBeInTheDocument();
   });
 
-  it('splits on blank lines into real paragraphs, not one block', async () => {
+  it('prints one bullet per point, never a literal dash', async () => {
     const { SectionContent } = await import('@/components/quarterly/SectionContent');
     const { container } = render(<SectionContent section={withAnalysis} showAnalysis />);
+    expect(container.querySelectorAll('li').length).toBe(2);
+    // The marker is the list, not a character in the text of a published report.
+    expect(container.textContent).not.toContain('- Revenue');
+  });
+
+  it('still renders an analysis written before the format changed as paragraphs', async () => {
+    const { SectionContent } = await import('@/components/quarterly/SectionContent');
+    const { container } = render(
+      <SectionContent section={section({ analysis: RESULT_LEGACY })} showAnalysis />);
     expect(container.querySelectorAll('p').length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll('li').length).toBe(0);
   });
 
   it('is left out where the controls render it instead', async () => {
@@ -341,6 +358,7 @@ describe('the analysis as part of the section', () => {
     const { container } = render(<SectionContent section={section()} showAnalysis />);
     expect(container.querySelector('table')).toBeInTheDocument();
     expect(container.querySelectorAll('p').length).toBe(0);
+    expect(container.querySelectorAll('li').length).toBe(0);
   });
 });
 
