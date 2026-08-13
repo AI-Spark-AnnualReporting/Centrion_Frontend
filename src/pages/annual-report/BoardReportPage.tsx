@@ -8,7 +8,7 @@
 // /assemble still supplies the cover and brand — it's what the exporter renders,
 // so the preview and the PDF can't drift.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { boardReports } from '@/lib/api';
@@ -74,6 +74,12 @@ export default function BoardReportPage() {
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [approvedNow, setApprovedNow] = useState(false);
+
+  // Sections with nothing in them yet — excluded from the document itself
+  // (see `readyBody` below) and surfaced once via this popup instead, so the
+  // "finished document" doesn't fill up with "Awaiting figures…" placeholders.
+  const [showMissingNotice, setShowMissingNotice] = useState(false);
+  const missingNoticeShownRef = useRef(false);
 
   const isLocked = locked || approvedNow;
   const brand = assembled?.brand ?? assembled?.cover?.brand ?? null;
@@ -205,6 +211,28 @@ export default function BoardReportPage() {
     .slice()
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
 
+  // Only sections with real content — or a confirmed "nothing to report" —
+  // belong in the finished document. Anything still awaiting data is left
+  // out rather than rendered as an "Awaiting figures…" placeholder in what's
+  // meant to be the actual report; `missingBody` tracks what got left out so
+  // the notice below (and the reopenable pill) can say so.
+  const isSectionReady = (s: BoardSection) =>
+    s.status === 'produced' || s.status === 'locked' || s.status === 'empty';
+  const readyBody = body.filter(isSectionReady);
+  const missingBody = body.filter((s) => !isSectionReady(s));
+
+  // Surface it once per visit, not on every re-render (a save/refetch
+  // shouldn't reopen a popup the user already dismissed) — and not at all
+  // once locked, since there's nothing left to do about it by then.
+  useEffect(() => {
+    if (loading || isLocked || missingNoticeShownRef.current) return;
+    if (missingBody.length > 0) {
+      setShowMissingNotice(true);
+      missingNoticeShownRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, isLocked]);
+
   const values = (assembled?.cover?.values ?? {}) as Record<string, unknown>;
   const str = (k: string): string | null => (typeof values[k] === 'string' ? (values[k] as string) : null);
 
@@ -240,7 +268,10 @@ export default function BoardReportPage() {
             marginBottom: 14,
           }}
         >
-          {completion && (
+          {/* Readiness is a work-in-progress signal — once the report is
+              approved & locked, nothing about it can change anymore, so
+              these pills have nothing left to act on. */}
+          {!isLocked && completion && (
             // Its own pill, because it is legible over whatever scrolls beneath.
             <span
               style={{
@@ -258,8 +289,32 @@ export default function BoardReportPage() {
               }}
             >
               {completion.ready} of {completion.total} sections ready
-              <BlockerChips completion={completion} />
+              <BlockerChips completion={completion} reportId={reportId} />
             </span>
+          )}
+
+          {!isLocked && missingBody.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowMissingNotice(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '7px 13px',
+                borderRadius: 999,
+                background: '#fff',
+                border: '1px solid rgba(245,158,11,.35)',
+                boxShadow: '0 2px 10px rgba(26,29,46,.06)',
+                fontSize: 12,
+                fontWeight: 700,
+                color: AMBER,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {missingBody.length} section{missingBody.length === 1 ? '' : 's'} not included
+            </button>
           )}
 
           {/* Only an approved report exports: the file is the deliverable, and a
@@ -279,14 +334,10 @@ export default function BoardReportPage() {
           {!isLocked && (
             <button
               className="btn bp"
-              // Gated on the server's own readiness flag; the pill beside it
-              // says what is outstanding and each chip jumps to it.
-              disabled={!completion?.can_approve}
-              title={
-                completion?.can_approve
-                  ? undefined
-                  : 'Every section must be ready — see what is outstanding beside this.'
-              }
+              // Not gated on readiness — approving with gaps is allowed. The
+              // confirm dialog itself is where an incomplete report gets
+              // called out, listing exactly what has no data before the
+              // operator commits to a one-way lock.
               onClick={() => {
                 setApproveError(null);
                 setApproveOpen(true);
@@ -304,11 +355,19 @@ export default function BoardReportPage() {
           <div className="card">
             <Spinner pad={80} />
           </div>
-        ) : sections.length === 0 ? (
+        ) : readyBody.length === 0 ? (
           <div className="card" style={{ padding: 40, textAlign: 'center' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: INK }}>Nothing produced yet</div>
             <div style={{ fontSize: 12, color: FAINT, marginTop: 4 }}>
-              Go back to <b>Sections</b> and choose <b>Generate report</b>.
+              {sections.length === 0 ? (
+                <>
+                  Go back to <b>Sections</b> and choose <b>Generate report</b>.
+                </>
+              ) : (
+                <>
+                  None of the included sections have content yet. Go back to <b>Review</b> to add some.
+                </>
+              )}
             </div>
             <button
               className="btn bs bsm"
@@ -347,7 +406,7 @@ export default function BoardReportPage() {
               />
 
               <div className="card" style={{ padding: '32px 40px', maxWidth: DOC_WIDTH }}>
-                {body.map((s) => (
+                {readyBody.map((s) => (
                   <ReportSection
                     key={s.section_code}
                     section={s}
@@ -395,9 +454,23 @@ export default function BoardReportPage() {
             onClose={() => setApproveOpen(false)}
           >
             {completion && !completion.can_approve && (
-              <BlockerList completion={completion} titleByCode={titleByCode} />
+              <>
+                <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: AMBER }}>
+                  You haven&rsquo;t added any data for some sections — they&rsquo;ll be left out of the
+                  exported report. Are you sure you want to approve and lock it as-is?
+                </div>
+                <BlockerList completion={completion} titleByCode={titleByCode} />
+              </>
             )}
           </ApproveConfirmDialog>
+        )}
+
+        {showMissingNotice && missingBody.length > 0 && (
+          <MissingSectionsModal
+            sections={missingBody}
+            onClose={() => setShowMissingNotice(false)}
+            onReview={() => navigate(`/board-report/${reportId}/preview`)}
+          />
         )}
       </div>
     </BoardStepShell>
@@ -406,10 +479,18 @@ export default function BoardReportPage() {
 
 // ─── approval blockers ────────────────────────────────────────────────────────
 
-function BlockerChips({ completion }: { completion: BoardCompletion }) {
+function BlockerChips({ completion, reportId }: { completion: BoardCompletion; reportId: string }) {
+  const navigate = useNavigate();
   const jump = (code?: string) => {
     if (!code) return;
-    document.getElementById(`sec-${code}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = document.getElementById(`sec-${code}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    // Sections without content no longer render on this page at all — send
+    // the reviewer to where they're actually edited instead of doing nothing.
+    navigate(`/board-report/${reportId}/preview`);
   };
   const groups: [string, string[]][] = [
     ['awaiting data', completion.awaiting_data],
@@ -486,6 +567,83 @@ function BlockerList({
   );
 }
 
+// ─── sections left out of the finished document ────────────────────────────
+//
+// Shown once, the first time a visit finds sections with no content — and
+// reopenable afterwards via the pill next to the readiness chip.
+
+function MissingSectionsModal({
+  sections,
+  onClose,
+  onReview,
+}: {
+  sections: BoardSection[];
+  onClose: () => void;
+  onReview: () => void;
+}) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '20px 22px 4px' }}>
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 9,
+              flexShrink: 0,
+              background: 'rgba(245,158,11,.12)',
+              color: AMBER,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 1.5v5m0 2.2v.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.4" />
+            </svg>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: INK }}>
+              {sections.length} section{sections.length === 1 ? '' : 's'} not included below
+            </div>
+            <div style={{ fontSize: 12, color: MUTED, marginTop: 3, lineHeight: 1.5 }}>
+              These are still waiting on data, so they&rsquo;re left out of the document rather than shown
+              empty. Add their content on the Review step to bring them in.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding: '14px 22px 6px', maxHeight: 220, overflowY: 'auto' }}>
+          {sections.map((s) => (
+            <div
+              key={s.section_code}
+              style={{
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: INK,
+                padding: '8px 0',
+                borderTop: `1px solid ${BORDER_SOFT}`,
+              }}
+            >
+              {s.title}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '14px 22px 20px' }}>
+          <button type="button" className="btn bs" onClick={onReview} style={{ padding: '9px 18px', fontSize: 13 }}>
+            Go to Review →
+          </button>
+          <button type="button" className="btn bp" onClick={onClose} style={{ padding: '9px 20px', fontSize: 13 }}>
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── one section of the finished document ─────────────────────────────────────
 //
 // Read-only until the pencil is clicked, exactly as on the quarterly assembled
@@ -521,7 +679,6 @@ function ReportSection({
 }) {
   const feeder = s.feeder ?? null;
   const produced = s.status === 'produced' || s.status === 'locked';
-  const carried = s.provenance === 'carried_forward' && !s.confirmed;
   const statusMeta = STATUS_LABEL[s.status] ?? { label: s.status, color: FAINT };
 
   return (
@@ -603,27 +760,11 @@ function ReportSection({
         )}
       </div>
 
-      {/* Still flagged here, because the report can't be approved until it's
-          cleared — but confirming it is a Review-step action. */}
-      {carried && produced && !locked && (
-        <div
-          className="print-hide"
-          style={{
-            marginBottom: 12,
-            padding: '10px 13px',
-            borderRadius: 9,
-            background: 'rgba(245,158,11,.12)',
-            border: '1px solid rgba(245,158,11,.45)',
-            fontSize: 12,
-            fontWeight: 600,
-            color: AMBER,
-            flexWrap: 'wrap',
-          }}
-        >
-          Carried forward{feeder?.carried_forward_from ? ` from ${feeder.carried_forward_from}` : ''} —
-          not yet confirmed.
-        </div>
-      )}
+      {/* Carried-forward confirmation is a Review-step concern (see
+          BoardPreviewPage) — the finished-document preview just shows the
+          content, not that banner. Still gated on completion.can_approve /
+          pending_confirmation there, so an unconfirmed section still blocks
+          approval; it's just not repeated here. */}
 
       {produced ? (
         // Numbered for reading, raw for editing — the numbers are display-only
