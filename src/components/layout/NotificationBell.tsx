@@ -72,7 +72,7 @@ function buildThreadNotifications(threads: ThreadSummary[]): AppNotification[] {
       return {
         id: `thread:${t.thread_id}`,
         type: 'thread_message' as const,
-        title: t.report.title,
+        title: t.report ? t.report.title : (t.subject?.trim() || 'Discussion'),
         body: `${sender}: ${lm.preview}`,
         meta: plural,
         timestamp: t.updated_at,
