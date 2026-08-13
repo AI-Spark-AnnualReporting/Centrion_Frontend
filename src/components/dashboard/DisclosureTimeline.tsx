@@ -51,12 +51,12 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, fye, user?.role]);
 
-  // Everything still owed, soonest first — the three standing milestones plus any
-  // upcoming meetings — then exactly ONE completed report pinned at the bottom.
-  // Pinned rather than sorted: it is the only backward-looking row on the card, so
-  // it belongs last no matter how its date compares to the deadlines above it.
-  const { upcoming, filed } = splitEvents(events ?? []);
-  const rows = [...upcoming, ...filed.slice(0, 1)];
+  // Forward-looking only: the three standing milestones plus any upcoming meetings,
+  // soonest first. Filed reports are dropped here rather than at the source — the
+  // Board & Meetings grid still places them as history markers, so deriveEvents
+  // keeps producing them.
+  const { upcoming } = splitEvents(events ?? []);
+  const rows = upcoming;
 
   return (
     <div className="card" style={{ padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -123,9 +123,6 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
                     <span style={{ fontSize: 9, fontWeight: 800, color: '#E5484D', background: 'rgba(229,72,77,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>
                       {e.overdue ? 'OVERDUE' : 'URGENT'}
                     </span>
-                  )}
-                  {e.kind === 'filed' && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#0F9D6B', background: 'rgba(15,157,107,.12)', padding: '2px 7px', borderRadius: 999, letterSpacing: '.4px' }}>COMPLETED</span>
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{e.subtitle}</div>
