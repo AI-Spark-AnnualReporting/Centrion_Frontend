@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { documents as documentsApi, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
@@ -208,9 +209,9 @@ export default function DocsPage() {
 
           {/* Active category's reports */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {activeCategory.reports.map((report) => (
+            {activeCategory.reports.map((report, i) => (
               <ReportCard
-                key={report.cycle_id ?? report.report_id ?? 'unassigned'}
+                key={report.cycle_id ?? report.report_id ?? report.thread_id ?? `unassigned-${i}`}
                 report={report}
               />
             ))}
@@ -228,6 +229,8 @@ function categoryKey(category: ReportCategory): string {
 
 function ReportCard({ report }: { report: ReportGroup }) {
   const [expanded, setExpanded] = useState(false);
+  const navigate = useNavigate();
+  const threadId = report.thread_id;
 
   return (
     <div
@@ -238,10 +241,19 @@ function ReportCard({ report }: { report: ReportGroup }) {
         overflow: 'hidden',
       }}
     >
-      {/* Report header — click to expand its documents */}
-      <button
-        type="button"
+      {/* Report header — click to expand its documents. A div with role="button",
+          not a real <button>, because it needs to contain the nested "Open
+          thread" button below — a <button> can't legally contain one. */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
         aria-expanded={expanded}
         style={{
           display: 'flex',
@@ -255,6 +267,7 @@ function ReportCard({ report }: { report: ReportGroup }) {
           background: '#F8F9FE',
           border: 'none',
           cursor: 'pointer',
+          boxSizing: 'border-box',
         }}
       >
         <div style={{ minWidth: 0 }}>
@@ -282,6 +295,39 @@ function ReportCard({ report }: { report: ReportGroup }) {
           <span style={{ fontSize: 11, fontWeight: 700, color: '#9BA3C4' }}>
             {report.document_count} {report.document_count === 1 ? 'document' : 'documents'}
           </span>
+          {/* Thread-attached documents also link back to the live conversation
+              they were attached in — the card itself still expands normally
+              so the documents stay browsable/downloadable here too. */}
+          {threadId && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/communications/threads/${threadId}`);
+              }}
+              title="Open this thread in Communication Hub"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#4040C8',
+                background: 'rgba(64,64,200,.08)',
+                border: 'none',
+                borderRadius: 999,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Open thread
+              <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
           {/* Chevron in a circular outline */}
           <span
             style={{
@@ -309,7 +355,7 @@ function ReportCard({ report }: { report: ReportGroup }) {
             </svg>
           </span>
         </div>
-      </button>
+      </div>
 
       {/* Documents — revealed on expand */}
       {expanded &&
