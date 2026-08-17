@@ -574,7 +574,7 @@ export interface RegisterParams {
   email: string;
   password: string;
   full_name: string;
-  role?: string; // default "department_user"
+  company_id?: string | null;
 }
 
 export interface LoginParams {
@@ -591,17 +591,39 @@ export interface ChangePasswordResponse {
 }
 
 export const auth = {
+  // JSON body, not query params — registration no longer logs the user in;
+  // it only creates the (unverified) account and queues a verification email.
   register: <T = unknown>(params: RegisterParams) =>
     request<T>("/api/v1/auth/register", {
+      method: "POST",
+      body: params,
+      auth: false,
+    }),
+
+  // Login stays query-param based, unlike register above — that's still what
+  // the backend reads here.
+  login: <T = unknown>(params: LoginParams) =>
+    request<T>("/api/v1/auth/login", {
       method: "POST",
       query: params,
       auth: false,
     }),
 
-  login: <T = unknown>(params: LoginParams) =>
-    request<T>("/api/v1/auth/login", {
+  // Body carries `code` as a string on purpose — it may have leading zeros,
+  // which a number would silently drop.
+  verifyEmail: (email: string, code: string) =>
+    request<{ verified: boolean }>("/api/v1/auth/verify-email", {
       method: "POST",
-      query: params,
+      body: { email, code },
+      auth: false,
+    }),
+
+  // Always resolves `{ sent: true }` regardless of whether the email is known
+  // or already verified — same anti-enumeration shape as forgotPassword.
+  resendVerification: (email: string) =>
+    request<{ sent: boolean }>("/api/v1/auth/resend-verification", {
+      method: "POST",
+      body: { email },
       auth: false,
     }),
 
@@ -4355,52 +4377,25 @@ export async function fetchWithAuth(
   return res;
 }
 
-// Spec-named register() — raw fetch with res.text() + JSON.parse fallback per
-// .claude/specs/2step_register.md. Role is always "admin"; callers cannot override.
-// Typed auth.register() namespace remains for other future callers.
+// Spec-named register() — consumed by SignupPage. JSON body only; the backend
+// no longer logs the caller in here, it only creates the unverified account
+// and queues a verification email (see VerifyEmailPage). Throws ApiError, so
+// callers can branch on .status: 409 "Email already registered", 403 "This
+// company already has members" (only reachable if a non-fresh company_id is
+// ever passed in), 422 validation.
 export async function register(
   params: RegisterRequest,
 ): Promise<RegisterResponse> {
-  const query = new URLSearchParams({
-    email: params.email,
-    password: params.password,
-    full_name: params.full_name,
-    role: "admin",
+  return request<RegisterResponse>("/api/v1/auth/register", {
+    method: "POST",
+    body: {
+      email: params.email,
+      password: params.password,
+      full_name: params.full_name,
+      company_id: params.company_id ?? null,
+    },
+    auth: false,
   });
-  if (params.company_id) query.append("company_id", params.company_id);
-
-  let res: Response;
-  try {
-    res = await fetch(
-      `${API_BASE_URL}/api/v1/auth/register?${query.toString()}`,
-      {
-        method: "POST",
-        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
-      },
-    );
-  } catch {
-    throw new Error("Unable to connect. Check your connection.");
-  }
-
-  if (res.ok) {
-    const text = await res.text();
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (parsed && typeof parsed === "object") return parsed as RegisterResponse;
-      return { message: String(parsed) };
-    } catch {
-      return { message: text };
-    }
-  }
-
-  if (res.status === 422) {
-    const err = (await res.json().catch(() => null)) as
-      | { detail?: Array<{ msg?: string }> }
-      | null;
-    throw new Error(err?.detail?.[0]?.msg ?? "Validation error");
-  }
-
-  throw new Error("Registration failed. Please try again.");
 }
 
 // Spec-named getSectors() — raw fetch per .claude/specs/2step_register.md.

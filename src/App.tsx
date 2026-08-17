@@ -15,6 +15,7 @@ import {
   ForgotPasswordPage,
   ResetPasswordPage,
 } from "./components/auth/PasswordResetPages";
+import { VerifyEmailPage } from "./components/auth/VerifyEmailPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -124,6 +125,8 @@ const App = () => (
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      {/* Post-register OTP step — a fresh account has no session yet either. */}
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       {/* Public — an auditor or regulator holding a printed certificate must be
           able to check it without an account. /verify takes a pasted code;
           /verify/:code checks on arrival, for a shared link or a QR scan. */}
