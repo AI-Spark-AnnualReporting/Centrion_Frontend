@@ -461,7 +461,7 @@ export default function OnboardingPage() {
                   <input className="inp" placeholder="e.g. Riyadh" value={headquarterCity} onChange={(e) => setHeadquarterCity(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai>Fiscal year</FieldLabel>
+                  <FieldLabel required>Fiscal year</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.fiscalYearEndMonth ? ' inp-error' : ''}`}
                     value={fiscalYearEndMonth}
