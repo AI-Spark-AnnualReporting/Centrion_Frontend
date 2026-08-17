@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { auth, ApiError } from '@/lib/api';
+import { auth, ApiError, rateLimitDetailOf } from '@/lib/api';
 import { AuthAside } from './PasswordResetPages';
 
 const CODE_TTL_SECONDS = 10 * 60;
-const RESEND_COOLDOWN_SECONDS = 45;
+// Mirrors the backend's own default cooldown — the real, authoritative value
+// (from a 429's retry_after_seconds, or a fresh code's own resend) always
+// overrides this on arrival, it's just the starting guess.
+const RESEND_COOLDOWN_SECONDS = 60;
 
 const errText = { fontSize: '11px', color: '#E5484D', marginTop: 6 } as const;
+const warnText = { fontSize: '11px', color: '#B4730B', marginBottom: '10px' } as const;
 
 function formatMMSS(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
@@ -22,15 +26,28 @@ export function VerifyEmailPage() {
   const location = useLocation();
   const [params] = useSearchParams();
 
-  const stateEmail = (location.state as { email?: string } | null)?.email;
-  const email = (stateEmail || params.get('email') || '').trim();
+  const navState = location.state as {
+    email?: string;
+    emailSent?: boolean;
+    emailMessage?: string;
+    notice?: string;
+    retryAfterSeconds?: number;
+  } | null;
+  const email = (navState?.email || params.get('email') || '').trim();
 
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(navState?.notice ?? null);
+  // Non-blocking — the account exists regardless; this only means an email
+  // delivery attempt (register's or a resend's) itself failed.
+  const [warning, setWarning] = useState<string | null>(
+    navState?.emailSent === false
+      ? navState?.emailMessage || "We had trouble sending that email — use Resend below."
+      : null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(CODE_TTL_SECONDS);
-  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendCooldown, setResendCooldown] = useState(navState?.retryAfterSeconds ?? 0);
   const codeExpired = secondsLeft <= 0;
 
   useEffect(() => {
@@ -44,16 +61,26 @@ export function VerifyEmailPage() {
   const handleResend = async () => {
     if (resendCooldown > 0 || !email) return;
     setError(null);
-    // Always resolves { sent: true } — a thrown error here means the request
-    // itself failed (network/5xx), not that the email was invalid.
+    setWarning(null);
     try {
-      await auth.resendVerification(email);
-    } catch {
-      /* best-effort */
+      const res = await auth.resendVerification(email);
+      if (res.sent) {
+        setNotice(res.message || "If that email needs a new code, we've just sent one.");
+        setSecondsLeft(CODE_TTL_SECONDS);
+      } else {
+        // A real send was attempted (this is a known, unverified email) but
+        // delivery itself failed — Resend is still the recovery path.
+        setWarning(res.message || 'We had trouble sending that email. Try Resend again shortly.');
+      }
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    } catch (err) {
+      const rateLimit = rateLimitDetailOf(err);
+      if (rateLimit) {
+        setResendCooldown(rateLimit.retryAfterSeconds);
+        setError(rateLimit.message);
+      }
+      // Anything else (network/5xx) is best-effort — nothing useful to show.
     }
-    setNotice("If that email needs a new code, we've just sent one.");
-    setSecondsLeft(CODE_TTL_SECONDS);
-    setResendCooldown(RESEND_COOLDOWN_SECONDS);
   };
 
   const handleSubmit = async () => {
@@ -120,6 +147,12 @@ export function VerifyEmailPage() {
               {notice && (
                 <div style={{ fontSize: '11px', color: '#30A46C', marginBottom: '10px' }} role="status">
                   {notice}
+                </div>
+              )}
+
+              {warning && (
+                <div style={warnText} role="status">
+                  {warning}
                 </div>
               )}
 

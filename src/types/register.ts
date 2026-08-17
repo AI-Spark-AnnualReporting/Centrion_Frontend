@@ -21,9 +21,13 @@ export interface RegisterRequest {
 }
 
 // Registration no longer logs the user in — it only queues a verification
-// email. `user_id` is the account created in an unverified state.
+// email. `user_id` is the account created in an unverified state. The account
+// is created either way, even when `email_sent` is false — that only means
+// the delivery attempt itself failed, not that signup failed.
 export interface RegisterResponse {
   message: string;
   email: string;
   user_id: string;
+  email_sent: boolean;
+  email_message: string;
 }
