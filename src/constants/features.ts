@@ -64,6 +64,9 @@ export interface GrantableFeature {
   key: string;
   label: string;
   actions: FeatureAction[];
+  // Shown but never togglable — the admin UI still lists it (so its state
+  // is visible) but no one can grant or revoke it from here.
+  alwaysDisabled?: boolean;
 }
 
 export const GRANTABLE_FEATURES: GrantableFeature[] = [
@@ -75,6 +78,6 @@ export const GRANTABLE_FEATURES: GrantableFeature[] = [
   { key: "compliance_validation", label: "Compliance Validation", actions: ["read", "create"] },
   { key: "board_meetings", label: "Board & Meetings", actions: ["read", "create"] },
   { key: "leadership", label: "Leadership", actions: ["read", "create"] },
-  { key: "app:centriton_dashboard", label: "Centriton Dashboard access", actions: ["access"] },
-  { key: "app:spark_studio", label: "Spark Studio access", actions: ["access"] },
+  { key: "app:centriton_dashboard", label: "Centriyon access", actions: ["access"] },
+  { key: "app:spark_studio", label: "Annual Report Dashboard access", actions: ["access"], alwaysDisabled: true },
 ];

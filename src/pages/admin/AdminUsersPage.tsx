@@ -1234,11 +1234,22 @@ function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
     try {
       if (nextChecked) {
         await adminUserPermissions.grant(user.user_id, featureKey, action);
-        setData((prev) =>
-          prev
-            ? { ...prev, extra_grants: [...prev.extra_grants, { feature_key: featureKey, action }] }
-            : prev,
-        );
+        setData((prev) => {
+          if (!prev) return prev;
+          const additions = [{ feature_key: featureKey, action }];
+          // The backend implies "read" whenever "create" is granted, but
+          // only reflects that in its own response on the next fetch —
+          // mirror it here so the read tick appears immediately instead of
+          // waiting for a reload.
+          if (
+            action === 'create' &&
+            !prev.role_defaults?.[featureKey]?.read &&
+            !prev.extra_grants.some((g) => g.feature_key === featureKey && g.action === 'read')
+          ) {
+            additions.push({ feature_key: featureKey, action: 'read' });
+          }
+          return { ...prev, extra_grants: [...prev.extra_grants, ...additions] };
+        });
       } else {
         await adminUserPermissions.revoke(user.user_id, featureKey, action);
         setData((prev) =>
@@ -1332,14 +1343,20 @@ function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
                     const granted = Boolean(extraGrant(feature.key, action));
                     const checked = locked || granted;
                     const cellKey = `${feature.key}:${action}`;
-                    const disabled = locked || busyCell === cellKey;
+                    const disabled = locked || feature.alwaysDisabled || busyCell === cellKey;
                     return (
                       <td key={action} style={{ padding: '8px 10px', textAlign: 'center' }}>
                         <span
                           role="checkbox"
                           aria-checked={checked}
                           aria-disabled={disabled}
-                          title={locked ? 'Included in this role by default' : undefined}
+                          title={
+                            feature.alwaysDisabled
+                              ? 'Not available to grant'
+                              : locked
+                                ? 'Included in this role by default'
+                                : undefined
+                          }
                           onClick={() => !disabled && toggle(feature.key, action, !checked)}
                           style={{
                             display: 'inline-flex',
