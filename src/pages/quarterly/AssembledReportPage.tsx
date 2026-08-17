@@ -368,7 +368,7 @@ export default function AssembledReportPage() {
                           Saved
                         </span>
                       )}
-                      {!approved && !isEditing && (
+                      {!approved && !isEditing && s.mode !== 'attach' && (
                         <button
                           type="button"
                           onClick={() => { setEditError(null); setEditingCode(s.section_code); }}
@@ -391,6 +391,7 @@ export default function AssembledReportPage() {
                       onSave={(content) => handleSave(s.section_code, content)}
                       onCancel={() => { setEditError(null); setEditingCode(null); }}
                       showAnalysis
+                      companyId={companyId}
                     />
                   </section>
                 );

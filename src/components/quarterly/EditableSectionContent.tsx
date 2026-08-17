@@ -21,6 +21,7 @@ export function EditableSectionContent({
   onSave,
   onCancel,
   showAnalysis = false,
+  companyId,
 }: {
   section: ProducedSection;
   editing: boolean;
@@ -34,10 +35,17 @@ export function EditableSectionContent({
   // sets this; Preview leaves it off because SectionAnalysis renders them there
   // along with the controls to rewrite or edit them.
   showAnalysis?: boolean;
+  // Forwarded to SectionContent — resolves the "View PDF" link on an
+  // attach-mode section. See SectionContent for details.
+  companyId?: string | null;
 }) {
   // The editor always works on the raw source, Markdown and all — that is what
-  // gets saved, so it is what the reviewer must see while editing.
-  if (!editing) return <SectionContent section={section} markdown={markdown} showAnalysis={showAnalysis} />;
+  // gets saved, so it is what the reviewer must see while editing. Attach-mode
+  // content (`{document_id}`) has no text form to edit — the file IS the
+  // content — so it always renders read-only regardless of `editing`.
+  if (!editing || section.mode === 'attach') {
+    return <SectionContent section={section} markdown={markdown} showAnalysis={showAnalysis} companyId={companyId} />;
+  }
 
   // Detect a tabular shape from the content itself (not just `mode`) — hybrid
   // sections (table + analysis JSON) report mode 'generate', not 'table'/'kpi'.

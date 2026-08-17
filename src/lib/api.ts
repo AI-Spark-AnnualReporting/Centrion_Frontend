@@ -2049,6 +2049,18 @@ export const quarterlyReports = {
     ).then(unwrapProducedSection);
   },
 
+  // attach-mode sections (e.g. auditor_report): the file is embedded verbatim
+  // as-is, never turned into editable text — one-step save like upload above,
+  // no preview-then-commit. PDF only; the backend 422s on anything else.
+  attachSectionDocument: (companyId: string, reportId: string, code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/attach`,
+      { method: "POST", form: fd },
+    ).then(unwrapProducedSection);
+  },
+
   // needs_input / no-data document: EXTRACT-ONLY. The backend parses the file to
   // plain text (pdfplumber/python-docx/decode) and returns it WITHOUT producing or
   // saving the section, so the extracted text can be shown in the input field for

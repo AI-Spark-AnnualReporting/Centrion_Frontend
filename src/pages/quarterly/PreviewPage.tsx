@@ -475,6 +475,8 @@ export default function PreviewPage() {
   //   • Financial (table/kpi) sections: one-step /upload — the backend structures
   //     the document's tables into the standard section table (no textarea review,
   //     the table IS the content), so it patches straight to the produced section.
+  //   • Attach-mode sections (e.g. auditor_report): one-step /attach — the PDF is
+  //     embedded verbatim, same "patch straight to produced" flow as upload above.
   //   • Other sections: extract-only — pull the document's text into the input
   //     field for the user to review/edit, then Save persists it as content.
   const handleExtract = useCallback(
@@ -488,6 +490,10 @@ export default function PreviewPage() {
       try {
         if (section.mode === 'table' || section.mode === 'kpi') {
           const res = await quarterlyReports.uploadSectionDocument(companyId, reportId, code, file);
+          patchSection(code, res);
+          setInputText((m) => ({ ...m, [code]: '' }));
+        } else if (section.mode === 'attach') {
+          const res = await quarterlyReports.attachSectionDocument(companyId, reportId, code, file);
           patchSection(code, res);
           setInputText((m) => ({ ...m, [code]: '' }));
         } else {
@@ -723,7 +729,17 @@ export default function PreviewPage() {
 }
 
 // Per-section supporting-document picker (label-wrapped input; no ref needed).
-function FileField({ file, onFileChange, disabled }: { file: File | null; onFileChange: (f: File | null) => void; disabled?: boolean }) {
+function FileField({
+  file,
+  onFileChange,
+  disabled,
+  accept,
+}: {
+  file: File | null;
+  onFileChange: (f: File | null) => void;
+  disabled?: boolean;
+  accept?: string;
+}) {
   if (file) {
     return (
       <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid #D1D5EF', background: 'rgba(64,64,200,.04)' }}>
@@ -748,6 +764,7 @@ function FileField({ file, onFileChange, disabled }: { file: File | null; onFile
     >
       <input
         type="file"
+        accept={accept}
         style={{ display: 'none' }}
         disabled={disabled}
         onChange={(e) => { onFileChange(e.target.files?.[0] ?? null); e.currentTarget.value = ''; }}
@@ -850,7 +867,7 @@ function SectionPanel({
               Saved
             </span>
           )}
-          {!editing && (
+          {!editing && section.mode !== 'attach' && (
             <button
               type="button"
               onClick={onStartEdit}
@@ -862,6 +879,31 @@ function SectionPanel({
                 <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
               </svg>
             </button>
+          )}
+          {/* Attach-mode has no text to edit in place — replacing the file (via
+              the same one-step /attach flow) is the only way to change it. */}
+          {section.mode === 'attach' && (
+            <label
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px',
+                borderRadius: 7, border: '1px solid #E4E6F1', background: '#fff', color: MUTED,
+                fontSize: 12, fontWeight: 600, cursor: extracting ? 'not-allowed' : 'pointer',
+                opacity: extracting ? 0.6 : 1,
+              }}
+            >
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                style={{ display: 'none' }}
+                disabled={extracting}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.currentTarget.value = '';
+                  if (f) onFileChange(f);
+                }}
+              />
+              {extracting ? 'Replacing…' : 'Replace PDF'}
+            </label>
           )}
         </div>
         {/* The reading band travels over the table while the analyser works, so it
@@ -876,10 +918,14 @@ function SectionPanel({
               error={editing ? editError : null}
               onSave={onSaveContent}
               onCancel={onCancelEdit}
+              companyId={companyId}
             />
           </div>
           {analysing && <ReadingBand />}
         </div>
+        {section.mode === 'attach' && error && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#DC2626' }}>{error}</div>
+        )}
         {!editing && companyId && reportId && isFinancialTable(section) && (
           <SectionAnalysis
             key={section.section_code}
@@ -901,11 +947,15 @@ function SectionPanel({
     );
   }
 
-  // 3) Needs input OR no-data (empty) → both let the user supply content: a text
-  //    field + a document upload (whose text is extracted into the field). Upload
-  //    → extract → review/edit → Save.
+  // 3) Needs input OR no-data (empty) → both let the user supply content.
+  //    Attach-mode sections (e.g. auditor_report) only take a PDF — it's embedded
+  //    verbatim, with no text steer and no edit-then-commit step, so there's no
+  //    textarea or Save button, just the file picker (handleExtract saves it in
+  //    one step). Everything else: a text field + a document upload (whose text
+  //    is extracted into the field). Upload → extract → review/edit → Save.
   const need = neededInput(section);
   const isEmpty = state === 'empty';
+  const isAttach = section.mode === 'attach';
   const canProduce = !busy && !extracting && !!inputValue.trim();
   return (
     <div>
@@ -914,29 +964,42 @@ function SectionPanel({
           {isEmpty ? 'No data found for this section' : 'This section needs your input'}
         </div>
         <div style={{ fontSize: 13, color: '#92610A' }}>
-          {isEmpty ? 'Add content below — type it in, or upload a document to pull its text.' : `Needs: ${need}`}
+          {isAttach
+            ? 'Attach the PDF for this section — it is embedded as-is, not turned into editable text.'
+            : isEmpty
+              ? 'Add content below — type it in, or upload a document to pull its text.'
+              : `Needs: ${need}`}
         </div>
       </div>
 
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
-        {isEmpty ? 'Section content' : need}
-      </label>
-      <textarea
-        value={inputValue}
-        onChange={(e) => onInputChange(e.target.value)}
-        placeholder={`Type or paste ${isEmpty ? 'the section content' : need.toLowerCase()}…`}
-        rows={5}
-        disabled={extracting}
-        style={{
-          width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
-          fontSize: 13, lineHeight: 1.6, color: DARK, background: extracting ? '#F8F9FC' : '#fff', resize: 'vertical',
-          outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
-        }}
-        onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
-        onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
-      />
+      {!isAttach && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
+            {isEmpty ? 'Section content' : need}
+          </label>
+          <textarea
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
+            placeholder={`Type or paste ${isEmpty ? 'the section content' : need.toLowerCase()}…`}
+            rows={5}
+            disabled={extracting}
+            style={{
+              width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
+              fontSize: 13, lineHeight: 1.6, color: DARK, background: extracting ? '#F8F9FC' : '#fff', resize: 'vertical',
+              outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
+            }}
+            onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
+            onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
+          />
+        </>
+      )}
 
-      <FileField file={file} onFileChange={onFileChange} disabled={busy || extracting} />
+      <FileField
+        file={file}
+        onFileChange={onFileChange}
+        disabled={busy || extracting}
+        accept={isAttach ? 'application/pdf,.pdf' : undefined}
+      />
 
       {extracting && (
         <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: ACCENT }}>
@@ -944,7 +1007,7 @@ function SectionPanel({
             <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
           </svg>
-          Extracting text from document…
+          {isAttach ? 'Attaching document…' : 'Extracting text from document…'}
         </div>
       )}
 
@@ -957,14 +1020,16 @@ function SectionPanel({
         >
           {skipped ? 'Skipped — will be flagged' : 'Skip for now'}
         </button>
-        <button
-          className="btn bp"
-          onClick={onProduce}
-          disabled={!canProduce}
-          style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+        {!isAttach && (
+          <button
+            className="btn bp"
+            onClick={onProduce}
+            disabled={!canProduce}
+            style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        )}
       </div>
     </div>
   );

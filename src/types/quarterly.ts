@@ -517,6 +517,8 @@ export interface OutlineLockResponse {
 //   - mode 'table' | 'kpi'  → a JSON string; parse and render a real table/block.
 //   - mode 'generate'       → analytical prose text.
 //   - mode 'template'       → filled boilerplate text.
+//   - mode 'attach'         → a PDF embedded verbatim (e.g. auditor_report) —
+//                             saved one-step via /attach, never /extract or /upload.
 //   - null                  → not produced yet.
 // quarterly_report_sections.status, as the DB's own CHECK constraint defines it.
 // This used to read "pending" | "drafting" | "done", and "done" is a value the
@@ -758,7 +760,7 @@ export interface AssembledSection {
   title: string;
   display_order: number;
   source_type?: string;
-  mode: string; // table | kpi | generate | template
+  mode: string; // table | kpi | generate | template | attach
   content: string | null; // same keying as ProducedSection.content
   // The Analyse button's commentary, printed under this section's table(s). Part of
   // the report — the exporters render it from the same field.
