@@ -1627,6 +1627,23 @@ export const quarterlyReports = {
       { method: "POST" },
     ),
 
+  // Rename one section for this report — the name then appears everywhere,
+  // including the exported PDF's heading and table of contents. An empty title
+  // clears the rename and puts the blueprint name back. Works after the outline is
+  // locked (a rename can't regenerate anything), and returns the rebuilt outline
+  // like saveOutline does.
+  renameSection: (
+    companyId: string,
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
+    ),
+
   // ── Produced sections (step 7 — Part 5 Preview) ──
   // The section-by-section producer. getSection reads one section's status +
   // content; produceSection composes it (optionally with supplied user_input for
