@@ -64,6 +64,16 @@ interface FileLangInfo {
   detected?: string;
 }
 
+// Same idea for the financial lane, where the question is "can we read any figures
+// out of this". A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+// file to us and the report would come out with every number blank.
+type FinTableStatus = 'checking' | 'ok' | 'none';
+interface FinTableInfo {
+  status: FinTableStatus;
+  tableCount?: number;
+  message?: string;
+}
+
 const fileKey = (f: File) => `${f.name}:${f.size}`;
 const langName = (l: string) => (l === 'arabic' ? 'Arabic' : 'English');
 
@@ -701,6 +711,25 @@ export default function QuarterlyReportForm({
   const languageRef = useRef(language);
   const filesRef = useRef(files);
 
+  // The financial lane's equivalent, keyed the same way. Unlike the language check
+  // this doesn't depend on any other form choice, so a file is checked once when it
+  // is added and never re-checked.
+  const [finTables, setFinTables] = useState<Record<string, FinTableInfo>>({});
+  // Mirrored in a ref because an in-flight check has to know, the moment its answer
+  // lands, whether the file is still attached — and state read from a closure is
+  // whatever it was when the check started. A key is present here from the instant
+  // the file is added until the instant it is removed, so `id in ref` IS the
+  // question "is this file still on the form".
+  const finTablesRef = useRef<Record<string, FinTableInfo>>({});
+  const writeFinTables = (next: Record<string, FinTableInfo>) => {
+    finTablesRef.current = next;
+    setFinTables(next);
+  };
+  // The popup itself — set when a check comes back with nothing readable in the file.
+  const [noTablesPopup, setNoTablesPopup] = useState<
+    { key: string; name: string; message: string } | null
+  >(null);
+
   const [genError, setGenError] = useState<string | null>(null);
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
@@ -964,6 +993,42 @@ export default function QuarterlyReportForm({
     });
   };
 
+  // Ask the backend whether each financial file holds anything we can read figures
+  // from, and pop the answer when it doesn't. Fail-open on a network error, same as
+  // the language check — the submit-time gate is the real backstop.
+  const runTablesCheck = (list: File[]) => {
+    list.forEach((file) => {
+      const id = fileKey(file);
+      writeFinTables({ ...finTablesRef.current, [id]: { status: 'checking' } });
+      reportsApi
+        .checkTables(file)
+        .then((res) => {
+          // Removed while the check was in flight — the file is gone, so its answer
+          // is too.
+          if (!(id in finTablesRef.current)) return;
+          writeFinTables({
+            ...finTablesRef.current,
+            [id]: res.has_tables
+              ? { status: 'ok', tableCount: res.table_count }
+              : { status: 'none', message: res.message ?? undefined },
+          });
+          if (!res.has_tables) {
+            setNoTablesPopup({
+              key: id,
+              name: file.name,
+              message:
+                res.message ??
+                `We couldn't find anything to read in "${file.name}".`,
+            });
+          }
+        })
+        .catch(() => {
+          if (!(id in finTablesRef.current)) return;
+          writeFinTables({ ...finTablesRef.current, [id]: { status: 'ok' } });
+        });
+    });
+  };
+
   // Re-check every selected file whenever the report language toggles, since a
   // file's correctness depends on the chosen language.
   useEffect(() => {
@@ -1088,6 +1153,9 @@ export default function QuarterlyReportForm({
       setGenError(null);
     }
     if (accepted.length === 0) return;
+    // Genuinely-new files (not already in the list) get the tables check.
+    const existing = new Set(financialFiles.map(fileKey));
+    const fresh = accepted.filter((f) => !existing.has(fileKey(f)));
     setFinancialFiles((prev) => {
       const seen = new Set(prev.map(fileKey));
       const merged = [...prev];
@@ -1107,6 +1175,7 @@ export default function QuarterlyReportForm({
       }
       return merged;
     });
+    if (fresh.length > 0) runTablesCheck(fresh);
   };
 
   const handleFinInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1122,8 +1191,18 @@ export default function QuarterlyReportForm({
     }
   };
 
+  const forgetFinancialFile = (key: string) => {
+    setFinancialFiles((prev) => prev.filter((f) => fileKey(f) !== key));
+    const next = { ...finTablesRef.current };
+    delete next[key];
+    writeFinTables(next);
+    // Dropping the offending file is the fix, so the popup about it goes with it.
+    setNoTablesPopup((prev) => (prev?.key === key ? null : prev));
+  };
+
   const removeFinancialFile = (index: number) => {
-    setFinancialFiles((prev) => prev.filter((_, i) => i !== index));
+    const removed = financialFiles[index];
+    if (removed) forgetFinancialFile(fileKey(removed));
   };
 
   const openFinPicker = () => financialInputRef.current?.click();
@@ -1156,6 +1235,12 @@ export default function QuarterlyReportForm({
   // figures one statement at a time on the Financial Data screen that follows, so
   // here it asks for narrative documents and nothing else.
   const hasFinancialFiles = financialFiles.length > 0;
+  // A financial file with nothing readable in it blocks Generate for the same reason
+  // a wrong-language narrative does: this field is the report's only figure source,
+  // so letting it through produces a report with every number blank.
+  const finChecking = financialFiles.some((f) => finTables[fileKey(f)]?.status === 'checking');
+  const finBadFiles = financialFiles.filter((f) => finTables[fileKey(f)]?.status === 'none');
+  const tablesBlocked = finChecking || finBadFiles.length > 0;
   // Both System and User take every figure from this field, so both require it.
   // Custom takes its figures per section on the next screen instead.
   const needsFinancialUpload = !isUploadMode && metricsMode !== 'custom';
@@ -1179,7 +1264,7 @@ export default function QuarterlyReportForm({
         customYear != null &&
         quarter != null &&
         hasFiles &&
-        (!needsFinancialUpload || (hasFinancialFiles && !!financialScale)) &&
+        (!needsFinancialUpload || (hasFinancialFiles && !!financialScale && !tablesBlocked)) &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
@@ -1204,13 +1289,17 @@ export default function QuarterlyReportForm({
                 ? 'Remove the wrong-language document to continue'
                 : needsFinancialUpload && !hasFinancialFiles
                   ? 'Upload the financial statements (Excel, CSV or Word) to continue'
-                  : needsFinancialUpload && !financialScale
-                    ? 'Tell us what scale the financial figures are in to continue'
-                    : companyType == null
-                      ? 'Select the company type to continue'
-                      : comparisonCheck === 'checking'
-                        ? 'Checking comparison data…'
-                        : undefined;
+                  : needsFinancialUpload && finChecking
+                    ? 'Checking the financial file…'
+                    : needsFinancialUpload && finBadFiles.length > 0
+                      ? 'Remove the financial file with no tables in it to continue'
+                      : needsFinancialUpload && !financialScale
+                        ? 'Tell us what scale the financial figures are in to continue'
+                        : companyType == null
+                          ? 'Select the company type to continue'
+                          : comparisonCheck === 'checking'
+                            ? 'Checking comparison data…'
+                            : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
@@ -2177,21 +2266,65 @@ export default function QuarterlyReportForm({
 
             {financialFiles.length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
-                {financialFiles.map((file, index) => (
+                {financialFiles.map((file, index) => {
+                  const info = finTables[fileKey(file)];
+                  const isChecking = info?.status === 'checking';
+                  const isBad = info?.status === 'none';
+                  const found = info?.tableCount ?? 0;
+                  return (
                   <div
                     key={`${file.name}:${file.size}:${index}`}
                     style={{
                       position: 'relative', display: 'flex', flexDirection: 'column', gap: 6,
                       padding: '10px 10px 8px', borderRadius: 8,
-                      border: '1px solid #2E9B57', background: 'rgba(46,155,87,.05)',
+                      border: `1px solid ${isBad ? 'rgba(229,72,77,.45)' : '#2E9B57'}`,
+                      background: isBad ? 'rgba(229,72,77,.06)' : 'rgba(46,155,87,.05)',
                     }}
                   >
                     <div style={{ minWidth: 0, paddingRight: 16 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {file.name}
                       </div>
-                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(file.size)}</div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: isBad ? '#B33A3E' : '#9BA3C4',
+                          fontWeight: isBad ? 700 : 400,
+                          marginTop: 2,
+                        }}
+                      >
+                        {isChecking
+                          ? 'Checking for tables…'
+                          : isBad
+                            ? 'No tables found'
+                            : info?.status === 'ok' && found > 0
+                              ? `${found} table${found === 1 ? '' : 's'} found`
+                              : formatBytes(file.size)}
+                      </div>
                     </div>
+                    {info && (
+                      <span
+                        aria-hidden
+                        title={
+                          isChecking
+                            ? 'Checking for tables'
+                            : isBad
+                              ? 'No tables found'
+                              : 'Tables found'
+                        }
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 22,
+                          fontSize: 11,
+                          fontWeight: 800,
+                          lineHeight: 1,
+                          color: isChecking ? '#9BA3C4' : isBad ? '#E5484D' : '#2E9B57',
+                        }}
+                      >
+                        {isChecking ? '⋯' : isBad ? '⚠' : '✓'}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeFinancialFile(index)}
@@ -2208,7 +2341,8 @@ export default function QuarterlyReportForm({
                       </svg>
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2669,6 +2803,115 @@ export default function QuarterlyReportForm({
                   </>
                 )}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* "No tables in this file" — the financial upload is the report's only figure
+          source, and a .docx is read as TABLES ONLY. A user testing the app blind
+          dropped a plain Word document here expecting the narrative to be read out of
+          it, and the report generated with every figure blank and no explanation.
+          Generate stays disabled while the file is attached. */}
+      {noTablesPopup && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="No tables found in the financial file"
+          onClick={() => setNoTablesPopup(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                No tables found
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                {noTablesPopup.message}
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button
+                  type="button"
+                  onClick={() => setNoTablesPopup(null)}
+                  style={{
+                    padding: '10px 18px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#3A3F5C',
+                    background: '#fff',
+                    border: '1px solid #DDE0F2',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Got it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => forgetFinancialFile(noTablesPopup.key)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Remove file
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1529,6 +1529,24 @@ export const reports = {
     return postForm("/api/v1/reports/quarterly/check-language", fd);
   },
 
+  // Can we read any figures out of this financial upload? Called the moment a file
+  // is picked. A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+  // file to us — has_tables=false, and `message` is the sentence to show.
+  checkTables: (
+    file: File,
+  ): Promise<{
+    success: boolean;
+    has_tables: boolean;
+    table_count: number;
+    table_names: string[];
+    reason: "no_tables" | "no_figures" | null;
+    message: string | null;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return postForm("/api/v1/reports/quarterly/check-tables", fd);
+  },
+
   getCoverage: <T = unknown>(
     companyId: string,
     reportId: string,
