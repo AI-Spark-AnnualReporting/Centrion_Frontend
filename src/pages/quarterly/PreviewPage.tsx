@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
@@ -6,24 +6,21 @@ import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
+import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type {
-  ProducedSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
+  isProducing,
   wantsInput,
   neededInput,
   sourceTypeLabel,
   seedFromOutline,
   byDisplayOrder,
   isTableOfContentsSection,
+  isFinancialTable,
 } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Outline conventions) ────────────────────
@@ -62,7 +59,17 @@ function SourceTypeBadge({ section }: { section: ProducedSection }) {
 }
 
 // ─── page shell ───────────────────────────────────────────────────────────────
-function Shell({ reportId, children }: { reportId?: string; children: React.ReactNode }) {
+function Shell({
+  reportId,
+  metricsMode,
+  children,
+}: {
+  reportId?: string;
+  // Custom reports have an extra Financial Data step in the indicator. Unknown
+  // until the outline loads, which is why it's nullable rather than defaulted.
+  metricsMode?: MetricsMode | null;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
@@ -75,7 +82,9 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={4} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="preview" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -94,11 +103,13 @@ function RailItem({
   onClick: () => void;
 }) {
   const state = sectionState(section);
-  const drafting = section.status === 'drafting';
+  // A section still in the production queue spins like one being drafted, because
+  // that is what it is — waiting, not missing.
+  const drafting = section.status === 'drafting' || state === 'pending';
   const produced = state === 'produced';
   const needs = wantsInput(state); // needs_input + no-data both want the user's input
 
-  // dot: green produced · amber needs-input · accent(spin) drafting · grey empty
+  // dot: green produced · amber needs-input · accent(spin) waiting/drafting · grey empty
   const dotBg = produced ? GREEN_LIGHT : needs ? AMBER_LIGHT : drafting ? ACCENT : '#F1F2F6';
   const dotColor = produced ? GREEN : needs ? AMBER : drafting ? '#fff' : MUTED;
   const dotBorder = produced ? '#A7F3D0' : needs ? '#FDE68A' : drafting ? ACCENT : '#E5E7EF';
@@ -175,7 +186,9 @@ function RailItem({
 function StatusPill({ section }: { section: ProducedSection }) {
   const state = sectionState(section);
   const drafting = section.status === 'drafting';
-  const cfg = drafting
+  const cfg = state === 'pending'
+    ? { label: 'Waiting…', color: ACCENT, bg: '#EEEEFF', tick: false }
+    : drafting
     ? { label: 'Composing…', color: ACCENT, bg: '#EEEEFF', tick: false }
     : state === 'produced'
       ? { label: 'Produced', color: GREEN, bg: GREEN_LIGHT, tick: true }
@@ -209,6 +222,16 @@ export default function PreviewPage() {
   const companyId = user?.company_id ?? null;
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
+  // Read by the production poll. A ref rather than the state itself so patching one
+  // section does not tear down and restart the interval on every tick.
+  const sectionsRef = useRef<ProducedSection[]>([]);
+  sectionsRef.current = sections;
+  // Batch production runs in the background after the outline is locked and takes
+  // minutes on a large report, so Preview is routinely opened while it is still
+  // working. Declared here because the poll effect below reads it.
+  const producing = isProducing(sections);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -338,6 +361,7 @@ export default function PreviewPage() {
           .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);
+        setMetricsMode(res.metrics_mode ?? null);
         setCurrentIndex(0);
         setLoading(false);
 
@@ -360,6 +384,35 @@ export default function PreviewPage() {
       cancelled = true;
     };
   }, [companyId, reportId, retryKey, patchSection]);
+
+  // ── while batch production is still running, re-read the sections it hasn't
+  // reached yet. Production is kicked from the Outline and runs in the background;
+  // on a 49-section report it takes minutes, so Preview is routinely opened partway
+  // through. Without this the page shows whatever was true at load and never moves.
+  //
+  // Only the pending ones are re-fetched — a produced section will not change under
+  // us, and re-reading forty of them every few seconds to learn nothing is waste.
+  useEffect(() => {
+    if (!companyId || !reportId || !producing) return;
+    let cancelled = false;
+
+    const id = window.setInterval(async () => {
+      const waiting = sectionsRef.current.filter((s) => sectionState(s) === 'pending');
+      if (!waiting.length) return;
+      const results = await Promise.allSettled(
+        waiting.map((s) => quarterlyReports.getSection(companyId, reportId, s.section_code)),
+      );
+      if (cancelled) return;
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') patchSection(waiting[i].section_code, r.value);
+      });
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [companyId, reportId, producing, patchSection]);
 
   // ── produce a single section (manual): needs_input / no-data (empty) sections
   // let the user PROVIDE the content as text (a document is extracted into the
@@ -468,20 +521,21 @@ export default function PreviewPage() {
   // i.e. nothing is still waiting on the user (needs_input, unfilled).
   const allResolved =
     total > 0 &&
+    !producing &&
     sections.every((s) => sectionState(s) !== 'needs_input' || skipped.has(s.section_code));
   const doneCount = sections.filter((s) => sectionState(s) === 'produced').length;
 
   // ── loading / error / empty ──
   if (loading) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <Spinner pad={80} />
       </Shell>
     );
   }
   if (fetchError) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ padding: '24px 28px' }}>
           <div style={{ padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
             <span style={{ fontSize: 13, color: '#DC2626' }}>{fetchError}</span>
@@ -495,7 +549,7 @@ export default function PreviewPage() {
   }
   if (total === 0) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' }}>
           <h2 style={{ fontSize: 17, fontWeight: 800, color: DARK, margin: '0 0 8px' }}>No sections to produce</h2>
           <p style={{ fontSize: 13, color: MUTED, marginBottom: 22 }}>Lock an outline first to generate the report.</p>
@@ -508,7 +562,7 @@ export default function PreviewPage() {
   }
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode={metricsMode}>
       {/* Header */}
       <div style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: '0 0 4px', lineHeight: 1.2 }}>Report preview</h1>
@@ -612,6 +666,7 @@ export default function PreviewPage() {
                   companyId={companyId}
                   reportId={reportId ?? null}
                   onRefined={handleRefined}
+                  onAnalysed={(a) => patchSection(section.section_code, { analysis: a })}
                   editing={editingCode === section.section_code}
                   saving={savingCode === section.section_code}
                   saved={savedCode === section.section_code}
@@ -644,8 +699,13 @@ export default function PreviewPage() {
         <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
           ← Back
         </button>
-        <span style={{ fontSize: 13, color: allResolved ? GREEN : MUTED, fontWeight: 600 }}>
-          {doneCount} of {total} produced
+        <span
+          style={{ fontSize: 13, color: allResolved ? GREEN : producing ? ACCENT : MUTED, fontWeight: 600 }}
+          aria-live="polite"
+        >
+          {producing
+            ? `Producing sections… ${doneCount} of ${total} done`
+            : `${doneCount} of ${total} produced`}
         </span>
         <button
           className="bp"
@@ -717,6 +777,7 @@ function SectionPanel({
   companyId,
   reportId,
   onRefined,
+  onAnalysed,
   editing,
   saving,
   saved,
@@ -739,6 +800,7 @@ function SectionPanel({
   companyId: string | null;
   reportId: string | null;
   onRefined: (s: ProducedSection) => void;
+  onAnalysed: (a: Analysis | null) => void;
   editing: boolean;
   saving: boolean;
   saved: boolean;
@@ -748,10 +810,13 @@ function SectionPanel({
   onSaveContent: (content: string) => void;
 }) {
   const state = sectionState(section);
+  const [analysing, setAnalysing] = useState(false);
   // Input-seeking states (needs_input / empty) stay in their own panel while
   // saving (button shows "Saving…") — only a fresh produce shows the full
   // "Composing…" spinner.
-  const drafting = (section.status === 'drafting' || busy) && state !== 'produced' && !wantsInput(state);
+  const drafting =
+    (section.status === 'drafting' || busy || state === 'pending')
+    && state !== 'produced' && !wantsInput(state);
   const canRefine = state === 'produced' && section.mode === 'generate';
 
   // 1) Composing (produce in-flight)
@@ -762,7 +827,11 @@ function SectionPanel({
           <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
           <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Composing this section…</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {state === 'pending' && !busy
+            ? 'Waiting to be produced — this section has not been reached yet.'
+            : 'Composing this section…'}
+        </span>
       </div>
     );
   }
@@ -795,14 +864,36 @@ function SectionPanel({
             </button>
           )}
         </div>
-        <EditableSectionContent
-          section={section}
-          editing={editing}
-          saving={saving}
-          error={editing ? editError : null}
-          onSave={onSaveContent}
-          onCancel={onCancelEdit}
-        />
+        {/* The reading band travels over the table while the analyser works, so it
+            wraps the content — and sits OUTSIDE the table's own overflow-x
+            scroller, which would otherwise clip a vertically-moving band. */}
+        <div style={{ position: 'relative', overflow: analysing ? 'hidden' : undefined }}>
+          <div className={analysing ? 'analysis-reading' : undefined}>
+            <EditableSectionContent
+              section={section}
+              editing={editing}
+              saving={saving}
+              error={editing ? editError : null}
+              onSave={onSaveContent}
+              onCancel={onCancelEdit}
+            />
+          </div>
+          {analysing && <ReadingBand />}
+        </div>
+        {!editing && companyId && reportId && isFinancialTable(section) && (
+          <SectionAnalysis
+            key={section.section_code}
+            companyId={companyId}
+            reportId={reportId}
+            section={section}
+            onBusyChange={setAnalysing}
+            // The key above remounts this on every rail switch (deliberately — it is
+            // what stops one section's in-flight request and open dialog leaking onto
+            // the next), and a remount re-seeds from section.analysis. So a fresh
+            // result has to land HERE or switching away loses it until a reload.
+            onAnalysis={onAnalysed}
+          />
+        )}
         {canRefine && !editing && companyId && reportId && (
           <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
         )}

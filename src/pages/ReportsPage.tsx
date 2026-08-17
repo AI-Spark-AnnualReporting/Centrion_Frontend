@@ -27,8 +27,8 @@ interface ReportGenerationConfig {
   regulator_ids?: string[];
   framework_codes?: string[];
   gri_scope?: 'standard' | 'full' | string | null;
-  // Quarterly only — 'system' | 'custom'. Absent on reports created before the
-  // custom-metrics lane existed.
+  // Quarterly only — 'system' | 'custom' | 'user'. Absent on reports created
+  // before the custom-metrics lane existed.
   metrics_mode?: string;
 }
 
@@ -88,7 +88,10 @@ function formatPeriod(period: string): string {
 // lane existed carry no metrics_mode — those were all system, which is also how
 // the backend reads them (gen_cfg.get("metrics_mode") or "system").
 function metricsModeLabel(r: ReportSummary): string {
-  return r.generation_config?.metrics_mode === 'custom' ? 'Custom metrics' : 'System metrics';
+  const mode = r.generation_config?.metrics_mode;
+  if (mode === 'custom') return 'Custom metrics';
+  if (mode === 'user') return 'Sections from files';
+  return 'System metrics';
 }
 
 // Earnings Reports are a separate feature (its own /earnings/* pages) that

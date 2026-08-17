@@ -12,14 +12,7 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
-import type {
-  ProducedSection,
-  AssembledSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -76,7 +69,9 @@ function readApprovalStatus(res: unknown): { approved: boolean; approvedAt: stri
 
 // The assemble endpoint returns produced sections only. Map to a ProducedSection
 // shape so the shared renderers/editor work unchanged.
-function toProduced(s: AssembledSection): ProducedSection {
+// Exported for its own test: it builds the object field-by-field, so a field added
+// anywhere upstream is silently dropped here unless someone remembers to list it.
+export function toProduced(s: AssembledSection): ProducedSection {
   // /assemble may return table content as a parsed object; normalise to a string
   // so the renderers/editor (which expect a JSON string or prose) work.
   const raw = s.content as unknown;
@@ -87,9 +82,15 @@ function toProduced(s: AssembledSection): ProducedSection {
     display_order: s.display_order ?? 0,
     source_type: s.source_type ?? '',
     mode: s.mode,
-    status: 'done',
+    // /assemble only ever returns sections that were produced, and this shape is
+    // synthesised rather than read — "done" was a value the backend has never sent.
+    status: 'produced',
     content,
     feeder_status: 'ready',
+    // Built field-by-field, so anything new has to be listed here or it is silently
+    // dropped — which is exactly what happened to the analysis: the backend sent it,
+    // showAnalysis asked for it, and this mapper threw it away.
+    analysis: s.analysis ?? null,
   };
 }
 
@@ -127,6 +128,8 @@ export default function AssembledReportPage() {
   // approve & lock
   const [approved, setApproved] = useState(false);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -149,6 +152,7 @@ export default function AssembledReportPage() {
           .sort(byDisplayOrder)
           .map(toProduced);
         setSections(list);
+        setMetricsMode(res.metrics_mode ?? null);
         const { key, brand: coverBrand } = readCoverSelection(res);
         if (coverBrand) setBrand(coverBrand);
         if (key) setCoverTemplateKey(key);
@@ -264,7 +268,14 @@ export default function AssembledReportPage() {
   return (
     // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-      {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} locked={approved} />}
+      {reportId && (
+        <QuarterlyReportStepper
+          step="report"
+          reportId={reportId}
+          metricsMode={metricsMode}
+          locked={approved}
+        />
+      )}
 
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 28px 14px', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -379,6 +390,7 @@ export default function AssembledReportPage() {
                       error={isEditing ? editError : null}
                       onSave={(content) => handleSave(s.section_code, content)}
                       onCancel={() => { setEditError(null); setEditingCode(null); }}
+                      showAnalysis
                     />
                   </section>
                 );

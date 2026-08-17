@@ -63,3 +63,17 @@ export function formatCountdown(target: Date, from: Date): string {
   const remMonths = Math.round((days - years * 365) / 30);
   return remMonths > 0 ? `in ${years}y ${remMonths}mo` : `in ${years} year${years === 1 ? '' : 's'}`;
 }
+
+// Countdown for a DEADLINE rather than an appointment. Forward it reads exactly like
+// formatCountdown; backward it reads as a debt ("overdue by 3 months") instead of a
+// memory ("3 mo ago"), which is the only sensible way to word a filing that is late.
+export function formatDue(target: Date, from: Date): string {
+  const days = diffDays(target, from);
+  if (days >= 0) return formatCountdown(target, from);
+  const past = Math.abs(days);
+  if (past < 45) return `overdue by ${past} day${past === 1 ? '' : 's'}`;
+  const months = Math.round(past / 30);
+  if (months < 12) return `overdue by ${months} month${months === 1 ? '' : 's'}`;
+  const years = Math.round(past / 365);
+  return `overdue by ${years} year${years === 1 ? '' : 's'}`;
+}

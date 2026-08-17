@@ -1,7 +1,14 @@
+import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
 import { asStringArray } from '@/components/quarterly/sectionState';
+// One shared rule for reading a figure's units, also used by the extraction screen
+// and mirrored in report_export.py — the screen and the download must agree.
+import { deriveUnits, gridValue, unitsCaption } from './figureUnits';
+// Likewise for the Analyse button's commentary: bullets or legacy paragraphs, one
+// rule, mirrored in section_analysis.py and report_export.py.
+import { splitAnalysis } from './analysisText';
 
 // ─── colours (match Coverage / Gaps / Preview conventions) ────────────────────
 const GREEN = '#10B981';
@@ -19,16 +26,39 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 //   generate     → analytical prose
 //   template     → filled boilerplate prose
 // This renderer branches on mode and NEVER prints a raw JSON blob.
-//
-// Typed on the two fields it actually reads, so the reviewer view can pass the
-// same section it holds for the earnings renderer without a cast.
 export function SectionContent({
   section,
   markdown = false,
+  showAnalysis = false,
 }: {
-  section: Pick<ProducedSection, 'mode' | 'content'>;
+  section: ProducedSection;
   /** Render prose as Markdown — see MarkdownProse. */
   markdown?: boolean;
+  // The Analyse button's commentary, printed under the table(s) — it is part of
+  // the report. Off by default because on Preview the SectionAnalysis control
+  // renders it instead, so it can own the edit state; the read-only report view
+  // turns it on.
+  showAnalysis?: boolean;
+}) {
+  const analysis = showAnalysis ? (section.analysis?.text ?? '').trim() : '';
+  const body = <SectionBody section={section} markdown={markdown} />;
+  if (!analysis) return body;
+  return (
+    <>
+      {body}
+      <AnalysisText text={analysis} />
+    </>
+  );
+}
+
+// Typed on the two fields it actually reads, so the reviewer view can pass the
+// same section it holds for the earnings renderer without a cast.
+function SectionBody({
+  section,
+  markdown,
+}: {
+  section: Pick<ProducedSection, 'mode' | 'content'>;
+  markdown: boolean;
 }) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
@@ -149,7 +179,10 @@ function expandInlineBullets(text: string): string {
     .join('\n');
 }
 
-function Prose({ text }: { text: string }) {
+// Exported so the Preview's SectionAnalysis prints its paragraphs in exactly the
+// same type as the report page does — the same prose must not shift between the
+// two screens.
+export function Prose({ text }: { text: string }) {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const blocks = paragraphs.length ? paragraphs : [text];
   return (
@@ -168,6 +201,20 @@ function Prose({ text }: { text: string }) {
 
 // A discrete list of points (e.g. a hybrid table section's per-point
 // analysis) — one bullet per item, not justified paragraph blocks.
+// The Analyse button's commentary, in whichever shape it was written: the bullet
+// list it writes now, or the blank-line paragraphs it wrote before the format
+// changed (and that a hand-edit can still produce). Those were never migrated, so
+// one report can hold both — see analysisText.ts for the rule, which the two
+// exporters mirror so the download cannot disagree with the screen.
+//
+// Deliberately hands `Prose` the RAW text rather than the split items, so the
+// legacy path keeps Prose's own paragraph splitting and pre-wrap behaviour exactly
+// as it was.
+export function AnalysisText({ text }: { text: string }) {
+  const { kind, items } = splitAnalysis(text);
+  return kind === 'bullets' ? <Bullets items={items} /> : <Prose text={text} />;
+}
+
 function Bullets({ items }: { items: string[] }) {
   return (
     <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
@@ -205,6 +252,10 @@ interface NormTable {
   columns?: string[];
   comparePeriods?: ComparePeriod[]; // present → render one value+change column per period
   currentLabel?: string | null; // header for the current column, e.g. "Q3 2025"
+  // present → the source printed this section as a GRID (a note schedule: line items
+  // down the side, categories across the top). One column per category, read from
+  // each row's `cells`, and no change column — categories aren't comparable.
+  matrixColumns?: ComparePeriod[];
 }
 
 function normalizeComparePeriods(v: unknown): ComparePeriod[] | undefined {
@@ -243,6 +294,12 @@ function normalizeTables(parsed: unknown): NormTable[] {
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
         columns: asStringArray(t.columns),
+        // Per table, not per section: a sheet that stacked a grid and a list gives
+        // them different columns, and dropping these rendered the grid as a bare
+        // label/value pair with its categories gone.
+        comparePeriods: normalizeComparePeriods(t.compare_periods),
+        currentLabel: asString(t.current_label) ?? null,
+        matrixColumns: normalizeComparePeriods(t.matrix_columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {
@@ -252,6 +309,7 @@ function normalizeTables(parsed: unknown): NormTable[] {
         columns: asStringArray(parsed.columns),
         comparePeriods: normalizeComparePeriods(parsed.compare_periods),
         currentLabel: asString(parsed.current_label) ?? null,
+        matrixColumns: normalizeComparePeriods(parsed.matrix_columns),
       }];
     }
     // Plain object → key/value pairs as a 2-column table.
@@ -262,6 +320,24 @@ function normalizeTables(parsed: unknown): NormTable[] {
 
 function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean }) {
   const rows = table.rows;
+
+  // A grid states its currency once above the table and drops it from every cell —
+  // eight categories all repeating "SAR …M" is what made a note schedule unreadable
+  // (and, in the PDF, too wide to fit the page). Grids only: a flat statement keeps
+  // its per-row currency. deriveUnits returns null when the cells don't agree, and
+  // then nothing is stripped and no claim is made.
+  const units = useMemo(() => {
+    if (!table.matrixColumns?.length) return null;
+    return deriveUnits(
+      rows.flatMap((r) => {
+        const cells = cell(r, 'cells');
+        return Array.isArray(cells)
+          ? (cells as unknown[]).map((c) => (isRecord(c) ? asString(c.display) : null))
+          : [];
+      }),
+    );
+  }, [rows, table.matrixColumns]);
+
   if (rows.length === 0) return null;
 
   // Financial shape (label + current_display[/prior/change]) vs generic object rows.
@@ -275,11 +351,16 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
       {showTitle && table.title && (
         <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{table.title}</h3>
       )}
+      {units && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: MUTED }}>{unitsCaption(units)}</p>
+      )}
       {financial ? (
         <FinancialTable
           rows={rows}
           comparePeriods={table.comparePeriods}
           currentLabel={table.currentLabel}
+          matrixColumns={table.matrixColumns}
+          currency={units?.currency}
         />
       ) : (
         <GenericTable rows={rows} columns={table.columns} />
@@ -310,24 +391,43 @@ function compFor(r: LooseRow, key: string): LooseRow | undefined {
   return (arr as unknown[]).find((c) => isRecord(c) && c.key === key) as LooseRow | undefined;
 }
 
+// A row's grid cell for a category key (from the row's `cells`).
+function cellFor(r: LooseRow, key: string): string {
+  const arr = cell(r, 'cells');
+  if (!Array.isArray(arr)) return '';
+  const hit = (arr as unknown[]).find((c) => isRecord(c) && c.key === key);
+  return (isRecord(hit) ? asString(hit.display) : '') ?? '';
+}
+
 function FinancialTable({
   rows,
   comparePeriods,
   currentLabel,
+  matrixColumns,
+  currency,
 }: {
   rows: LooseRow[];
   comparePeriods?: ComparePeriod[];
   currentLabel?: string | null;
+  matrixColumns?: ComparePeriod[];
+  // Set only for a grid whose cells agree on one currency — the caption above the
+  // table then states it, and each cell drops it.
+  currency?: string;
 }) {
-  const compare = comparePeriods ?? [];
+  // A grid wins over a comparison: eight categories times two periods is not a table
+  // anyone can read, and a section printed as a grid is not comparing.
+  const matrix = matrixColumns ?? [];
+  const compare = matrix.length ? [] : comparePeriods ?? [];
   const hasCompare = compare.length > 0;
   // Legacy single-prior columns only when there's no per-period comparison data
   // (older produced content / sections that don't compare) — unchanged behavior.
   const showPrior = !hasCompare && rows.some((r) => cell(r, 'prior_display', 'prior') != null);
   const showChange = !hasCompare && rows.some((r) => cell(r, 'change_pct', 'change') != null);
   const currentHeader = currentLabel || 'Current';
-  const colCount =
-    2 + (hasCompare ? compare.length * 2 : (showPrior ? 1 : 0) + (showChange ? 1 : 0));
+  // A grid has no "Current" column of its own — every column is a category.
+  const colCount = matrix.length
+    ? 1 + matrix.length
+    : 2 + (hasCompare ? compare.length * 2 : (showPrior ? 1 : 0) + (showChange ? 1 : 0));
 
   const cellPad = { padding: '9px 10px' } as const;
   return (
@@ -335,7 +435,11 @@ function FinancialTable({
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
           <th style={{ ...TH, textAlign: 'left' }}>Metric</th>
-          <th style={{ ...TH, textAlign: 'right' }}>{currentHeader}</th>
+          {!matrix.length && <th style={{ ...TH, textAlign: 'right' }}>{currentHeader}</th>}
+          {matrix.length > 0 &&
+            matrix.map((c) => (
+              <th key={`m-${c.key}`} style={{ ...TH, textAlign: 'right' }}>{c.label}</th>
+            ))}
           {hasCompare
             ? compare.flatMap((p) => [
                 <th key={`v-${p.key}`} style={{ ...TH, textAlign: 'right' }}>{p.label}</th>,
@@ -382,12 +486,23 @@ function FinancialTable({
               }}>
                 {stringifyCell(cell(r, 'label', 'metric', 'name'))}
               </td>
-              <td style={{
-                ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
-                fontWeight: 700, borderTop: topBorder,
-              }}>
-                {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
-              </td>
+              {!matrix.length && (
+                <td style={{
+                  ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
+                  fontWeight: 700, borderTop: topBorder,
+                }}>
+                  {stringifyCell(cell(r, 'current_display', 'current', 'value'))}
+                </td>
+              )}
+              {matrix.length > 0 &&
+                matrix.map((c) => (
+                  <td key={`m-${c.key}`} style={{
+                    ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
+                    fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
+                  }}>
+                    {gridValue(cellFor(r, c.key), currency)}
+                  </td>
+                ))}
               {hasCompare
                 ? compare.flatMap((p) => {
                     const c = compFor(r, p.key);

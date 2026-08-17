@@ -16,6 +16,7 @@ import type {
   OnboardingResponse,
 } from "@/types/auth";
 import type { DetectedBrandColors } from "@/types/brand";
+import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
@@ -47,6 +48,7 @@ import type {
   OutlineLockResponse,
   ProducedSection,
   ProducedSectionResponse,
+  SectionAnalysis,
   ProduceAllHandle,
   CompanyType,
   Voice,
@@ -476,7 +478,7 @@ export interface GenerateQuarterlyBody {
   financial_scale?: string;    // actual | thousands | millions | billions
   // system = map the sheet to our standard metrics + template (default).
   // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
-  metrics_mode?: "system" | "custom";
+  metrics_mode?: MetricsMode;
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -486,7 +488,7 @@ export interface ComparisonAvailability {
   comparison: Comparison;
   // The mode the answer was computed for — read this rather than the live radio,
   // which may have moved on since the request went out.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
   target_period: string; // e.g. "Q3-2025"
   specs: {
     key: string;
@@ -1623,6 +1625,32 @@ export const quarterlyReports = {
       { method: "POST", body: { instruction } },
     ).then(unwrapProducedSection),
 
+  // Read this section's figures and write a short analysis. Never touches the
+  // section's content — the result is shown on screen only. `signal` matters:
+  // request() has no timeout of its own and this is a live LLM call.
+  analyseSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
+
+  // Replace the analysis prose by hand. An empty string removes it from the report.
+  saveSectionAnalysis: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    text: string,
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
   // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
   // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive
   // the returned handle with usePipelinePoll and refresh getSection per tick.
@@ -1647,7 +1675,7 @@ export const quarterlyReports = {
   // "no data" dialog when a required period is missing.
   checkComparisonAvailability: (
     companyId: string,
-    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: MetricsMode },
   ) =>
     request<ComparisonAvailability>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
@@ -1749,6 +1777,143 @@ export const quarterlyReports = {
     request(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
       { method: "POST", body: { decisions } },
+    ),
+
+  // Company-scoped, not report-scoped: an exclusion applies to every future
+  // upload, so it has to be findable from whichever report the user is on.
+  listExclusions: (
+    companyId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExclusionsResponse> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      signal,
+    }),
+
+  undoExclusions: (
+    companyId: string,
+    labels: string[],
+  ): Promise<{ company_id: string; restored: number }> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      method: "DELETE",
+      body: { labels },
+    }),
+
+  // Custom mode only: rename or delete lines read from the per-section uploads.
+  // There is no yes/no here — the section was settled at upload time, so what's
+  // left is tidying a databook's spacer rows and awkward labels.
+  editCustomFigures: (
+    companyId: string,
+    reportId: string,
+    edits: import("@/types/quarterly").CustomFigureEdit[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/custom-figures`,
+      { method: "POST", body: { edits } },
+    ),
+
+  // ── Financial Data (Custom mode, the step before Extraction) ──
+  // One statement per section, so nothing has to guess where a figure belongs.
+  getFinancials: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials`,
+      { signal },
+    ),
+
+  // Report-wide currency + scale. Every figure is printed in this scale.
+  saveFinancialsSettings: (
+    companyId: string,
+    reportId: string,
+    body: { currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/settings`,
+      { method: "PATCH", body },
+    ),
+
+  // Read one statement into one section. Re-uploading replaces it. currency/scale
+  // are the user correcting our reading for THIS section — omit them and the
+  // file's own units decide.
+  //
+  // Two possible responses: the screen payload (stored), or a confirmation request
+  // (nothing stored) when it isn't obvious which table/columns to read. Send the
+  // SAME file back with `structure` filled in to commit the user's answer — the
+  // file is re-posted rather than parked server-side, so there is no temp copy to
+  // expire, clean up, or get out of step with what they're looking at.
+  uploadFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    file: File,
+    units?: { currency?: string; scale?: string },
+    structure?: import("@/types/quarterly").SheetStructureChoice,
+  ): Promise<
+    | import("@/types/quarterly").FinancialsResponse
+    | import("@/types/quarterly").FinancialsConfirmation
+  > => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (units?.currency) fd.append("currency", units.currency);
+    if (units?.scale) fd.append("scale", units.scale);
+    if (structure) {
+      fd.append("table_key", structure.table_key);
+      fd.append("header_row", String(structure.header_row));
+      fd.append("label_col", String(structure.label_col));
+      fd.append("value_col", String(structure.value_col));
+    }
+    return request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    );
+  },
+
+  deleteFinancialsSectionUpload: (
+    companyId: string,
+    reportId: string,
+    code: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "DELETE" },
+    ),
+
+  // Include/exclude a section, or correct the units we read for it. A units change
+  // reinterprets the stored numbers — it never re-reads the file.
+  patchFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body: { included?: boolean; currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}`,
+      { method: "PATCH", body },
+    ),
+
+  // A section of the company's own — saved against the COMPANY, so it comes back
+  // next quarter and prior-period comparison lines up against it.
+  addFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    title: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections`,
+      { method: "POST", body: { title } },
+    ),
+
+  // 422 with the section titles still missing a file — the gate that stops an
+  // empty table reaching the report.
+  completeFinancials: (
+    companyId: string,
+    reportId: string,
+  ): Promise<import("@/types/quarterly").FinancialsCompleteResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/complete`,
+      { method: "POST" },
     ),
 
   addDriver: (

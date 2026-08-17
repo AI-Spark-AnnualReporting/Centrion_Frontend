@@ -601,9 +601,13 @@ export default function MeetingsPage() {
       ...decorated.map((m): CalItem => ({
         kind: 'meeting', id: `mtg-${m.id}`, date: m._date, color: MEETING_COLOR, meeting: m,
       })),
-      ...(disclosure ?? []).map((e): CalItem => ({
-        kind: 'disclosure', id: e.id, date: e.date, color: e.dotColor, event: e,
-      })),
+      // A dateless milestone — a report type this company has never filed — has no
+      // square to sit on. The dashboard card still lists it; a calendar grid can't.
+      ...(disclosure ?? [])
+        .filter((e): e is TimelineEvent & { date: Date } => e.date != null)
+        .map((e): CalItem => ({
+          kind: 'disclosure', id: e.id, date: e.date, color: e.dotColor, event: e,
+        })),
     ];
     return merged.sort((a, b) => a.date.getTime() - b.date.getTime());
   }, [decorated, disclosure]);

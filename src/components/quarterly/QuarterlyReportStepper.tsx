@@ -1,8 +1,23 @@
 import { useNavigate } from 'react-router-dom';
+import type { MetricsMode } from '@/types/quarterly';
+
+// A step is named, not numbered. Custom-metrics reports have one more of them
+// (Financial Data), so an index would mean every page doing its own arithmetic to
+// stay correct in both lanes — and getting it wrong the first time the list moves.
+export type QuarterlyStep =
+  | 'period'
+  | 'financials'
+  | 'extraction'
+  | 'outline'
+  | 'preview'
+  | 'report';
 
 interface QuarterlyReportStepperProps {
-  activeStep: number; // 1-based
+  step: QuarterlyStep;
   reportId: string;
+  // Custom reports upload one statement per section on a Financial Data step between
+  // Period and Extraction (6 steps). System and User both have 5.
+  metricsMode?: MetricsMode | null;
   // Once the report is approved & locked, no step should be navigable away
   // from the read-only Report screen.
   locked?: boolean;
@@ -10,12 +25,13 @@ interface QuarterlyReportStepperProps {
 
 // Period has no dedicated per-report screen — it's chosen once in the New
 // Report setup on the reports list — so it routes back there.
-const STEPS = [
-  { label: 'Period', path: () => `/reports/quarterly` },
-  { label: 'Extraction', path: (id: string) => `/quarterly-report/${id}/extraction` },
-  { label: 'Outline', path: (id: string) => `/quarterly-report/${id}/outline` },
-  { label: 'Preview', path: (id: string) => `/quarterly-report/${id}/preview` },
-  { label: 'Report', path: (id: string) => `/quarterly-report/${id}/report` },
+const ALL_STEPS: { key: QuarterlyStep; label: string; path: (id: string) => string }[] = [
+  { key: 'period', label: 'Period', path: () => `/reports/quarterly` },
+  { key: 'financials', label: 'Financial Data', path: (id) => `/quarterly-report/${id}/financials` },
+  { key: 'extraction', label: 'Extraction', path: (id) => `/quarterly-report/${id}/extraction` },
+  { key: 'outline', label: 'Outline', path: (id) => `/quarterly-report/${id}/outline` },
+  { key: 'preview', label: 'Preview', path: (id) => `/quarterly-report/${id}/preview` },
+  { key: 'report', label: 'Report', path: (id) => `/quarterly-report/${id}/report` },
 ];
 
 const ACCENT = '#4040C8';
@@ -73,9 +89,21 @@ function StepCircle({
   );
 }
 
-export function QuarterlyReportStepper({ activeStep, reportId, locked = false }: QuarterlyReportStepperProps) {
-  const activeIndex = activeStep - 1; // convert to 0-based
+export function QuarterlyReportStepper({
+  step,
+  reportId,
+  metricsMode,
+  locked = false,
+}: QuarterlyReportStepperProps) {
   const navigate = useNavigate();
+  // Custom uploads per section, so it keeps Financial Data. User uploads once, so it
+  // does not — but it still has an Extraction step: nothing to answer there, only the
+  // tables we read and the ones we could not.
+  const skip: QuarterlyStep[] = metricsMode === 'custom' ? [] : ['financials'];
+  const steps = ALL_STEPS.filter((s) => !skip.includes(s.key));
+  // An unknown key (e.g. 'financials' before the mode has loaded) would light up
+  // nothing; fall back to the first step rather than rendering a dead indicator.
+  const activeIndex = Math.max(0, steps.findIndex((s) => s.key === step));
 
   return (
     <div
@@ -86,17 +114,17 @@ export function QuarterlyReportStepper({ activeStep, reportId, locked = false }:
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-        {STEPS.map((step, i) => {
+        {steps.map((s, i) => {
           const state: 'done' | 'active' | 'inactive' =
             i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'inactive';
           // Only steps already reached (done/active) are navigable — jumping
           // ahead to a step not yet reached could land on a screen whose
           // prerequisite data isn't there yet. Locked (approved report): no
           // step is navigable, since nothing upstream is editable anymore.
-          const dest = !locked && state !== 'inactive' ? step.path(reportId) : null;
+          const dest = !locked && state !== 'inactive' ? s.path(reportId) : null;
 
           return (
-            <div key={step.label} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : 'none' }}>
+            <div key={s.key} style={{ display: 'flex', alignItems: 'center', flex: i < steps.length - 1 ? 1 : 'none' }}>
               <div
                 role={dest ? 'button' : undefined}
                 tabIndex={dest ? 0 : undefined}
@@ -131,12 +159,12 @@ export function QuarterlyReportStepper({ activeStep, reportId, locked = false }:
                     letterSpacing: '0.01em',
                   }}
                 >
-                  {state === 'done' ? '✓ ' : ''}{step.label}
+                  {state === 'done' ? '✓ ' : ''}{s.label}
                 </span>
               </div>
 
               {/* Connector line */}
-              {i < STEPS.length - 1 && (
+              {i < steps.length - 1 && (
                 <div
                   style={{
                     flex: 1,

@@ -26,6 +26,9 @@ const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+// TODO: fold into REPORTING_CURRENCIES (@/constants/currency) once the backend
+// widens OnboardingPayload['reporting_currency'] — that union is missing EUR/GBP,
+// so importing the shared 9-item list here is a type error today.
 const CURRENCIES: OnboardingPayload['reporting_currency'][] = [
   'SAR', 'AED', 'BHD', 'KWD', 'OMR', 'QAR', 'USD',
 ];
