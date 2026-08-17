@@ -128,7 +128,9 @@ export interface ProcessingPageState {
   // Where a completed quarterly run hands off. Extraction → "extraction" (default),
   // the review screen where the user confirms which figures are which metric;
   // section-production (produceAll, kicked from the Outline) → "preview".
-  quarterlyNext?: "extraction" | "outline" | "preview";
+  // Custom-metrics reports → "financials": this run only read their narrative
+  // documents, and their figures come from the per-section uploads on that screen.
+  quarterlyNext?: "extraction" | "financials" | "outline" | "preview";
   // Set when the caller navigated BEFORE a run existed, so the user reaches the
   // loader on the click instead of watching a dead button. Locking an outline takes
   // a few seconds and produceAll can only be kicked after it, so the Outline page
@@ -158,6 +160,9 @@ export default function ProcessingPage() {
   // loader is already on screen, which is the whole point — these calls take several
   // seconds and used to happen while the user stared at a disabled button.
   const bootstrappedRef = useRef(false);
+  // Tells a "already locked" 409 apart from a "your save was rejected" 409.
+  const lockAttempted = useRef(false);
+  const [bootError, setBootError] = useState<string | null>(null);
   useEffect(() => {
     const boot = state?.bootstrap;
     if (!boot || !state?.companyId || !state?.reportId) return;
@@ -187,6 +192,9 @@ export default function ProcessingPage() {
         }
 
         await quarterlyReports.saveOutline(companyId, reportId, boot.outlinePayload);
+        // Only a 409 from HERE on means "already locked"; a 409 from the save above
+        // means the save was REJECTED, which is a different thing entirely.
+        lockAttempted.current = true;
         await quarterlyReports.lockOutline(companyId, reportId);
         const handle = await quarterlyReports.produceAll(companyId, reportId);
         if (handle?.run_id && handle?.poll_url) {
@@ -197,13 +205,27 @@ export default function ProcessingPage() {
         // each section individually, so hand off there rather than stranding the user.
         navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
       } catch (err: unknown) {
-        // 409 = already locked elsewhere; sections are (being) produced. Don't
-        // re-kick production, just go look at them. Same rule the Outline page used.
-        if (err instanceof ApiError && err.status === 409) {
+        // A 409 from LOCK means the outline is already locked elsewhere and sections
+        // are (being) produced — going to look at them is right.
+        //
+        // Anything else is a refusal, and this used to navigate to Preview for those
+        // too. That is how a backend rejection became a permanent spinner: the save
+        // 409'd, so the outline was never locked and not one section row was ever
+        // created, and Preview — which infers "producing" purely from rows sitting at
+        // pending — showed "0 of 27" forever with nothing running. Half an hour of
+        // waiting for a request that failed in the first second.
+        //
+        // Never swallow it again: a failure that leaves the outline unlocked has to
+        // say so, because Preview cannot tell "not started" from "still going".
+        if (err instanceof ApiError && err.status === 409 && lockAttempted.current) {
           navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
           return;
         }
-        navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+        setBootError(
+          err instanceof Error
+            ? err.message
+            : 'The report outline could not be saved, so production never started.',
+        );
       }
     })();
   }, [state, navigate]);
@@ -327,6 +349,25 @@ export default function ProcessingPage() {
         phase="failed"
         errorMessage="This page tracks a report-generation run. Start a new report from Reports to get here."
         onCancel={() => navigate("/reports", { replace: true })}
+      />
+    );
+  }
+
+  // Saving or locking the outline was refused, so production never started. Shown
+  // here rather than handing off to Preview: Preview infers "producing" from rows
+  // still at pending, so with no rows at all it spins forever on a run that does not
+  // exist. Retry re-runs the bootstrap rather than pretending it worked.
+  if (bootError) {
+    return (
+      <GeneratingScreen
+        phase="failed"
+        errorMessage={`${bootError} — nothing is being generated. Go back to the outline and try again.`}
+        onCancel={() => navigate("/reports", { replace: true })}
+        onRetry={() => {
+          setBootError(null);
+          bootstrappedRef.current = false;
+          lockAttempted.current = false;
+        }}
       />
     );
   }

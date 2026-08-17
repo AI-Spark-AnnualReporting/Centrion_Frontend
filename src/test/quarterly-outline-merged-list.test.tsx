@@ -221,3 +221,69 @@ describe("quarterly outline — single merged section list", () => {
     expect(rows().map((r) => r.title)[0]).toBe("Seasonality");
   });
 });
+
+// ── folded blueprint tables (user-metrics mode) ───────────────────────────────
+// In that lane the sections ARE the tables in the user's workbook, so the
+// blueprint's own table sections are slots nothing will ever fill. They fold away
+// behind one line — off the screen, still in every payload, still holding their
+// place — which is the same treatment the Table of Contents already gets.
+
+const WITH_HIDDEN: OutlineSection[] = [
+  section({ section_code: "cover", title: "Cover / Title Page", display_order: 0 }),
+  section({ section_code: "ceo_statement", title: "CEO Statement", display_order: 1 }),
+  section({ section_code: "income_statement", title: "Statement of Income",
+            mode: "table", requirement: "optional", included: false,
+            hidden_default: true, display_order: 2 }),
+  section({ section_code: "working_capital", title: "Working Capital",
+            mode: "table", requirement: "optional", included: false,
+            hidden_default: true, display_order: 3 }),
+  section({ section_code: "c_x_cash_flows", title: "Cash Flows",
+            mode: "table", requirement: "optional", display_order: 4 }),
+  section({ section_code: "disclaimer_notice", title: "Disclaimer", display_order: 5 }),
+];
+
+describe("outline — sections the user's files do not fill", () => {
+  beforeEach(() => {
+    getOutline.mockResolvedValue({
+      report_id: "rpt-1", company_id: "co-1", outline_locked: false,
+      metrics_mode: "user", sections: WITH_HIDDEN,
+    } as unknown as OutlineResponse);
+    saveOutline.mockResolvedValue({});
+  });
+
+  it("keeps them off the screen behind one line", async () => {
+    await renderPage();
+    const titles = rows().map((r) => r.title);
+    expect(titles).not.toContain("Statement of Income");
+    expect(titles).not.toContain("Working Capital");
+    // What the user's own workbook produced is never folded away.
+    expect(titles).toContain("Cash Flows");
+    expect(screen.getByText(/Show 2 sections your files do not fill/)).toBeInTheDocument();
+  });
+
+  it("brings them back on request, and puts them away again", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByText(/Show 2 sections your files do not fill/));
+    expect(rows().map((r) => r.title)).toContain("Statement of Income");
+
+    fireEvent.click(screen.getByText(/Hide the sections your files do not fill/));
+    expect(rows().map((r) => r.title)).not.toContain("Statement of Income");
+  });
+
+  it("still saves every section, folded or not — nothing is dropped", async () => {
+    await renderPage();
+    dragTo("Cash Flows", "CEO Statement");
+    await waitFor(() => expect(saveOutline).toHaveBeenCalled());
+    const payload = saveOutline.mock.calls.at(-1)![2];
+    const codes = payload.sections.map((s) => s.section_code);
+    expect(codes).toContain("income_statement");
+    expect(codes).toContain("working_capital");
+    expect(codes).toContain("disclaimer_notice");
+  });
+
+  it("does not count folded sections in the included tally", async () => {
+    await renderPage();
+    // cover + CEO statement + Cash Flows are visible; the two folded ones are not.
+    expect(screen.getByText(/of 4 included/)).toBeInTheDocument();
+  });
+});

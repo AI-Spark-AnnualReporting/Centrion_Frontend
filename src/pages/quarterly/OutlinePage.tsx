@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { GripVertical, Lock } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Lock } from 'lucide-react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports, ApiError } from '@/lib/api';
-import type { OutlineSection, OutlineResponse } from '@/types/quarterly';
+import type { OutlineSection, OutlineResponse, MetricsMode } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { byDisplayOrder, isTableOfContentsSection } from '@/components/quarterly/sectionState';
@@ -73,11 +73,14 @@ function CheckBox({
   disabled,
   onToggle,
   label,
+  title,
 }: {
   checked: boolean;
   disabled?: boolean;
   onToggle?: () => void;
   label: string;
+  // Why it's disabled, when "you can't tick this" needs an explanation.
+  title?: string;
 }) {
   return (
     <button
@@ -86,6 +89,7 @@ function CheckBox({
       aria-checked={checked}
       aria-disabled={disabled || undefined}
       aria-label={label}
+      title={title}
       onClick={
         disabled
           ? undefined
@@ -127,9 +131,13 @@ function CheckBox({
 // ─── Page shell (stepper + bounded flex column) ───────────────────────────────
 function Shell({
   reportId,
+  metricsMode,
   children,
 }: {
   reportId?: string;
+  // Custom reports have an extra Financial Data step in the indicator. Unknown
+  // until the outline loads, which is why it's nullable rather than defaulted.
+  metricsMode?: MetricsMode | null;
   children: React.ReactNode;
 }) {
   return (
@@ -145,7 +153,9 @@ function Shell({
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={3} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="outline" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -214,14 +224,23 @@ function SectionRow({
         <GripVertical size={16} aria-hidden />
       </span>
 
+      {/* financials_excluded: a Custom report's financial section the user unticked
+          on the Financial Data step. It has no figures, so re-ticking it here would
+          only add an empty table — and that decision has one home. The backend
+          rejects it too, so this isn't the only thing holding the rule up. */}
       <CheckBox
         checked={section.included}
-        disabled={locked || isRequired || ingesting}
+        disabled={locked || isRequired || ingesting || section.financials_excluded === true}
         onToggle={onToggle}
         label={
           section.included
             ? `Exclude ${section.title}`
             : `Include ${section.title}`
+        }
+        title={
+          section.financials_excluded
+            ? 'Excluded on the Financial Data step — upload a file for it there to bring it back'
+            : undefined
         }
       />
 
@@ -254,6 +273,11 @@ function SectionRow({
         </div>
         <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
           {section.part_label}
+          {section.financials_excluded && (
+            <span style={{ color: '#B45309' }}>
+              {' · '}excluded on Financial Data
+            </span>
+          )}
         </div>
       </div>
 
@@ -288,6 +312,9 @@ export default function OutlinePage() {
   // in a bin at the bottom), and any row can be dragged anywhere.
   const [sections, setSections] = useState<OutlineSection[]>([]);
   const [totalCatalogue, setTotalCatalogue] = useState(0);
+  // Custom reports have an extra Financial Data step, and their financial sections
+  // were already decided there — see the greyed rows below.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [isLocked, setIsLocked] = useState(false);
   // Ingest worker still writing figures — badges are provisional until it clears.
   const [ingesting, setIngesting] = useState(false);
@@ -310,6 +337,8 @@ export default function OutlinePage() {
   // Drag state — one flat list, so a single index is enough.
   const dragIndexRef = useRef<number | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Folded blueprint tables, off by default — see the rowNumbers loop.
+  const [showHidden, setShowHidden] = useState(false);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -350,8 +379,15 @@ export default function OutlinePage() {
       .sort(byDisplayOrder)
       // Force required rows included: a stale included:false would render an
       // un-untickable empty box and then PUT as false, which the backend 409s.
-      .map((s) => (s.requirement === 'required' ? { ...s, included: true } : s));
+      // EXCEPT one the user unticked on the Financial Data step — 12 of the 18
+      // financial sections are mandatory in the blueprint, so forcing those back on
+      // would undo that decision on load and then PUT included:true, which the
+      // backend now 409s in the other direction. There, exclusion wins.
+      .map((s) =>
+        s.requirement === 'required' && !s.financials_excluded ? { ...s, included: true } : s,
+      );
     setSections(all);
+    setMetricsMode(res.metrics_mode ?? null);
     setTotalCatalogue(res.total_catalogue ?? res.sections.length);
     // Whole-outline freeze: explicit flag, or every section locked.
     // (api.ts normalises the backend's `outline_locked` onto `locked`.)
@@ -427,11 +463,22 @@ export default function OutlinePage() {
   // a row shows is its actual position in the generated report. Excluded rows get
   // null (rendered as a dash): they aren't in the report, so they have no position.
   // Drag handlers keep using the real array index, so reordering is unaffected.
+  //
+  // In user-metrics mode the blueprint's table sections are slots nothing will ever
+  // fill (the sections come from the user's own workbook), so they fold away behind
+  // one line. Same treatment as the ToC: off the screen, still in every payload,
+  // still holding their place in the order.
   const rowNumbers: (number | null)[] = [];
   let includedCount = 0;
   let visibleTotal = 0;
+  let hiddenCount = 0;
   for (const s of sections) {
     if (isTableOfContentsSection(s.section_code)) {
+      rowNumbers.push(null);
+      continue;
+    }
+    if (s.hidden_default && !showHidden) {
+      hiddenCount++;
       rowNumbers.push(null);
       continue;
     }
@@ -681,7 +728,7 @@ export default function OutlinePage() {
   // ── Loading / error ───────────────────────────────────────────────────────
   if (loading) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <Spinner pad={80} />
       </Shell>
     );
@@ -689,7 +736,7 @@ export default function OutlinePage() {
 
   if (fetchError) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ padding: '24px 28px' }}>
           <div
             style={{
@@ -722,7 +769,7 @@ export default function OutlinePage() {
 
   if (sections.length === 0) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div
           style={{
             flex: 1,
@@ -767,7 +814,7 @@ export default function OutlinePage() {
   ];
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode={metricsMode}>
       {/* Header */}
       <div
         style={{
@@ -900,7 +947,7 @@ export default function OutlinePage() {
             style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
           >
             {sections.map((s, i) =>
-              isTableOfContentsSection(s.section_code) ? null : (
+              isTableOfContentsSection(s.section_code) || (s.hidden_default && !showHidden) ? null : (
                 <div
                   key={s.section_code}
                   onDragOver={onDragOver(i)}
@@ -924,6 +971,24 @@ export default function OutlinePage() {
                   />
                 </div>
               ),
+            )}
+
+            {(hiddenCount > 0 || (showHidden && sections.some((s) => s.hidden_default))) && (
+              <button
+                type="button"
+                onClick={() => setShowHidden((v) => !v)}
+                style={{
+                  alignSelf: 'flex-start', marginTop: 4, border: 'none', background: 'none',
+                  padding: '6px 0', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                  color: '#6B7280', cursor: 'pointer', display: 'inline-flex',
+                  alignItems: 'center', gap: 6,
+                }}
+              >
+                {showHidden ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                {showHidden
+                  ? 'Hide the sections your files do not fill'
+                  : `Show ${hiddenCount} section${hiddenCount === 1 ? '' : 's'} your files do not fill`}
+              </button>
             )}
           </div>
         </div>

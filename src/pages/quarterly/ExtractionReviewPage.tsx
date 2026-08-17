@@ -15,51 +15,113 @@ import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
+import { CustomExtractionReview } from '@/components/quarterly/CustomExtractionReview';
+import { SectionPicker, flattenSections } from '@/components/quarterly/SectionPicker';
+import { ExcludedLines } from '@/components/quarterly/ExcludedLines';
+import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
 import type {
   ExtractionReviewFigure,
   ExtractionReviewResponse,
+  ExtractionReviewDecision,
+  ExtractionReviewSource,
+  MetricUnitType,
+  MetricsMode,
 } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const MUTED = '#6B7280';
 const DARK = '#1F2340';
 
-type Answer = 'yes' | 'no';
+// What the user can change about one unmatched line. Every row starts INCLUDED
+// with the guess filled in, so a run where the guesses are right is a single
+// Continue — the work is correcting, not answering.
+interface RowState {
+  included: boolean;
+  label: string;
+  sectionCode: string;
+  unitType: MetricUnitType;
+}
 
-// Display order + titles for the statement groups. Anything the backend sends that
-// isn't listed still gets a group, titled from the raw value.
-const STATEMENT_TITLES: Record<string, string> = {
-  income_statement: 'Income Statement',
-  balance_sheet: 'Balance Sheet',
-  cash_flow: 'Cash Flow',
-  ratio: 'Ratios',
-  segment: 'Segments',
+// The row's own unit already tells us what kind of quantity this is, so the field
+// is a confirmation rather than a question.
+function unitTypeFromUnit(unit: string | null): MetricUnitType {
+  const u = (unit ?? '').toLowerCase();
+  if (u.includes('percent')) return 'percent';
+  if (u === 'count' || u === 'volume') return 'count';
+  return 'currency';
+}
+
+// The backend composes `unit` as "<CURRENCY>_<scale>" for money and a bare word
+// ("percent", "ratio", "count") for everything else. Both singular and plural
+// scale spellings reach us, since the parser and the document lane disagree.
+const UNIT_SCALE_LABELS: Record<string, string> = {
+  actual: 'actual',
+  units: 'actual',
+  ones: 'actual',
+  absolute: 'actual',
+  thousand: 'thousands',
+  thousands: 'thousands',
+  million: 'millions',
+  millions: 'millions',
+  billion: 'billions',
+  billions: 'billions',
 };
-const STATEMENT_ORDER = ['income_statement', 'balance_sheet', 'cash_flow', 'ratio', 'segment'];
 
-function humanise(code: string | null): string {
-  if (!code) return 'Other';
-  return STATEMENT_TITLES[code] ?? code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+// "SAR_million" → "SAR · millions". Anything unrecognised is passed through
+// rather than swallowed — an odd-looking unit is the signal that something
+// upstream went wrong, which is the whole reason this column exists.
+export function formatUnit(unit: string | null): string | null {
+  const raw = (unit ?? '').trim();
+  if (!raw) return null;
+  const [head, ...rest] = raw.split('_');
+  const scale = UNIT_SCALE_LABELS[rest.join('_').toLowerCase()];
+  if (scale) return `${head.toUpperCase()} · ${scale}`;
+  return raw.replace(/_/g, ' ');
 }
 
-function groupByStatement(rows: ExtractionReviewFigure[]) {
-  const byCode = new Map<string, ExtractionReviewFigure[]>();
+// The currency half of a unit, or null for the non-monetary units (percent,
+// ratio, count, volume) which legitimately carry none.
+function currencyOf(unit: string | null): string | null {
+  const head = (unit ?? '').split('_')[0]?.trim().toUpperCase();
+  return head && /^[A-Z]{3}$/.test(head) ? head : null;
+}
+
+// Grouped by where the lines came from — one card per (file, sheet), rows in the
+// order they sat in the file. Grouping by statement type is gone with the mapper
+// that produced it: an unmatched line has no metric, so it has no statement.
+//
+// A sheet the server did not list still gets a card, keyed off the row itself, so
+// a figure can never fall out of the UI just because its group was missing.
+function groupBySource(rows: ExtractionReviewFigure[], sources: ExtractionReviewSource[]) {
+  const key = (d?: string | null, t?: string | null) => `${d ?? ''}\u0000${t ?? ''}`;
+  const meta = new Map(sources.map((s) => [key(s.document_id, s.source_table), s]));
+  const byKey = new Map<string, ExtractionReviewFigure[]>();
   for (const r of rows) {
-    const code = r.statement ?? 'other';
-    if (!byCode.has(code)) byCode.set(code, []);
-    byCode.get(code)!.push(r);
+    const k = key(r.document_id, r.source_table);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(r);
   }
-  const known = STATEMENT_ORDER.filter((c) => byCode.has(c));
-  const rest = [...byCode.keys()].filter((c) => !STATEMENT_ORDER.includes(c)).sort();
-  return [...known, ...rest].map((code) => ({
-    code,
-    title: humanise(code),
-    // Least certain first — the rows most in need of a human eye lead.
-    rows: byCode.get(code)!.slice().sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0)),
-  }));
+  return [...byKey.entries()].map(([k, group]) => {
+    const s = meta.get(k);
+    return {
+      key: k,
+      filename: s?.filename ?? group[0]?.source_table ?? 'Uploaded file',
+      sheet: s?.source_table ?? group[0]?.source_table ?? null,
+      guess: s?.guessed_section ?? '',
+      rows: group.slice().sort((a, b) => (a.source_page ?? 0) - (b.source_page ?? 0)),
+    };
+  });
 }
 
-function Shell({ reportId, children }: { reportId?: string; children: React.ReactNode }) {
+function Shell({
+  reportId,
+  metricsMode,
+  children,
+}: {
+  reportId?: string;
+  metricsMode?: MetricsMode | null;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
@@ -71,76 +133,11 @@ function Shell({ reportId, children }: { reportId?: string; children: React.Reac
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={2} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="extraction" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
-  );
-}
-
-// Yes / No segmented control. Deliberately starts UNSET: an unanswered row is
-// excluded, so a default of "yes" would quietly re-create the problem this screen
-// exists to solve.
-function YesNo({
-  value,
-  onChange,
-  label,
-}: {
-  value: Answer | undefined;
-  onChange: (a: Answer) => void;
-  label: string;
-}) {
-  const btn = (a: Answer, text: string, activeBg: string, activeFg: string) => {
-    const active = value === a;
-    return (
-      <button
-        type="button"
-        role="radio"
-        aria-checked={active}
-        aria-label={`${text} — ${label}`}
-        onClick={() => onChange(a)}
-        style={{
-          padding: '5px 16px',
-          fontSize: 12,
-          fontWeight: 700,
-          fontFamily: 'inherit',
-          border: `1px solid ${active ? activeBg : '#D9DCEC'}`,
-          background: active ? activeBg : '#fff',
-          color: active ? activeFg : '#6B7280',
-          cursor: 'pointer',
-          transition: 'background .12s, border-color .12s, color .12s',
-        }}
-      >
-        {text}
-      </button>
-    );
-  };
-  return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      style={{ display: 'inline-flex', borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}
-    >
-      {btn('yes', 'Yes', '#10B981', '#fff')}
-      {btn('no', 'No', '#EF4444', '#fff')}
-    </div>
-  );
-}
-
-function ConfidencePill({ value }: { value: number | null }) {
-  if (value == null) return null;
-  // Everything on this list is in the uncertain band by definition, so the scale is
-  // amber→green within it rather than a pass/fail signal.
-  const strong = value >= 80;
-  return (
-    <span
-      className="badge"
-      style={{
-        background: strong ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.14)',
-        color: strong ? '#16A34A' : '#B45309',
-      }}
-    >
-      {value}% match
-    </span>
   );
 }
 
@@ -151,12 +148,11 @@ export default function ExtractionReviewPage() {
   const companyId = user?.company_id ?? null;
 
   const [data, setData] = useState<ExtractionReviewResponse | null>(null);
-  const [answers, setAnswers] = useState<Record<string, Answer>>({});
+  const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [matchedOpen, setMatchedOpen] = useState(false);
 
   useEffect(() => {
@@ -183,24 +179,108 @@ export default function ExtractionReviewPage() {
   }, [companyId, reportId, retryKey]);
 
   const pending = useMemo(() => data?.pending ?? [], [data]);
-  const groups = useMemo(() => groupByStatement(pending), [pending]);
-  const answered = pending.filter((f) => answers[f.id]).length;
-  const accepted = pending.filter((f) => answers[f.id] === 'yes').length;
-  const unanswered = pending.length - answered;
+  const sources = useMemo(() => data?.sources ?? [], [data]);
+  const groups = useMemo(() => groupBySource(pending, sources), [pending, sources]);
+  const sections = useMemo(() => flattenSections(data?.metric_sections ?? []), [data]);
+
+  // Seed one entry per row the moment the payload lands: included, named as the
+  // document named it, filed under its sheet's guess. Everything the user does
+  // from here is a correction to that, which is what makes a run where the
+  // guesses are right a single click.
+  useEffect(() => {
+    if (!data) return;
+    const guessFor = new Map(
+      groups.flatMap((g) => g.rows.map((r) => [r.id, g.guess] as const)),
+    );
+    setRowState(
+      Object.fromEntries(
+        pending.map((f) => [
+          f.id,
+          {
+            included: true,
+            label: f.source_label ?? '',
+            sectionCode: guessFor.get(f.id) ?? '',
+            unitType: unitTypeFromUnit(f.unit),
+          },
+        ]),
+      ),
+    );
+    // groups derives from data; keying on data alone avoids reseeding (and wiping
+    // the user's edits) on every unrelated re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const patch = (id: string, next: Partial<RowState>) => {
+    setError(null);
+    setRowState((prev) => ({ ...prev, [id]: { ...prev[id], ...next } }));
+  };
+
+  // A sheet carrying two currency columns yields the same metric twice, once per
+  // currency, and the report prints both. Detected here rather than by comparing
+  // against the currency chosen on the setup form — that choice doesn't survive the
+  // route, and mixed units are diagnostic on their own.
+  //
+  // ONLY mixed currency. This used to also warn that "N metrics appear more than
+  // once, so the report may print each of them twice", which was wrong twice over:
+  // qr_figures is unique per DOCUMENT, so uploading an income statement and a cash
+  // flow separately legitimately writes the same metric from each — and the render
+  // layer already collapses those to one row per metric. It warned about normal
+  // input and then advised reselecting a currency that was never wrong. The
+  // already-matched badge on each row covers the useful half of that, in context
+  // and per figure.
+  const unitWarning = useMemo(() => {
+    const rows = [...(data?.confirmed ?? []), ...(data?.pending ?? [])];
+    if (rows.length === 0) return null;
+    const currencies = [...new Set(rows.map((r) => currencyOf(r.unit)).filter(Boolean))] as string[];
+    return currencies.length > 1 ? { currencies } : null;
+  }, [data]);
+  const included = pending.filter((f) => rowState[f.id]?.included);
+  const excludedCount = pending.length - included.length;
+
+  // Blocking problems, computed once and reused by both the footer text and the
+  // Continue handler so the message and the block can never disagree.
+  const problems = useMemo(() => {
+    const noSection = included.filter((f) => !rowState[f.id]?.sectionCode.trim());
+    const noLabel = included.filter((f) => !rowState[f.id]?.label.trim());
+    // Two kept lines under one name in the SAME file and period would upsert onto
+    // one row server-side and the second would silently overwrite the first. The
+    // server refuses it; catching it here means the user finds out while they can
+    // still see which two rows are involved.
+    const seen = new Map<string, ExtractionReviewFigure>();
+    const clash: ExtractionReviewFigure[] = [];
+    for (const f of included) {
+      const name = (rowState[f.id]?.label ?? '').trim().toLowerCase();
+      if (!name) continue;
+      const k = `${f.document_id ?? ''} ${f.period ?? ''} ${name}`;
+      if (seen.has(k)) clash.push(f);
+      else seen.set(k, f);
+    }
+    return { noSection, noLabel, clash };
+  }, [included, rowState]);
 
   const goOutline = () => navigate(`/quarterly-report/${reportId}/outline`);
 
   const submit = async () => {
     if (!companyId || !reportId) return;
-    setConfirmOpen(false);
     setSubmitting(true);
     try {
       await quarterlyReports.submitExtractionReview(
         companyId,
         reportId,
-        // Unanswered rows are sent as an explicit no, so the server's record of what
-        // was rejected matches what the user actually saw.
-        pending.map((f) => ({ id: f.id, accept: answers[f.id] === 'yes' })),
+        // Every row gets an explicit decision. The server refuses a partial batch
+        // now — a row with no answer carries no label and no section, so it can be
+        // honoured neither way, and dropping it would lose a figure silently.
+        pending.map((f): ExtractionReviewDecision => {
+          const s = rowState[f.id];
+          if (!s?.included) return { id: f.id, action: 'exclude' };
+          return {
+            id: f.id,
+            action: 'keep',
+            label: s.label.trim(),
+            section_code: s.sectionCode,
+            unit_type: s.unitType,
+          };
+        }),
       );
       goOutline();
     } catch (err: unknown) {
@@ -210,25 +290,33 @@ export default function ExtractionReviewPage() {
   };
 
   const onContinue = () => {
+    setError(null);
     if (pending.length === 0) {
       goOutline();
       return;
     }
-    if (unanswered > 0) {
-      setConfirmOpen(true);
+    if (problems.noLabel.length > 0) {
+      setError(`${problems.noLabel.length} line${problems.noLabel.length === 1 ? ' has' : 's have'} no name. Name it, or exclude it.`);
       return;
     }
+    if (problems.noSection.length > 0) {
+      setError(
+        `Pick a section for ${problems.noSection.length} figure` +
+          `${problems.noSection.length === 1 ? '' : 's'} — that is where the line goes in your report.`,
+      );
+      return;
+    }
+    if (problems.clash.length > 0) {
+      const f = problems.clash[0];
+      setError(
+        `Two lines in the same file are both called “${rowState[f.id]?.label.trim()}”. ` +
+          'One would overwrite the other, so give them different names or exclude one.',
+      );
+      return;
+    }
+    // No confirmation dialog. Nothing here is destructive and nothing is implicit:
+    // an excluded row was excluded on purpose, and it says so on the row.
     void submit();
-  };
-
-  const setAll = (code: string, a: Answer) => {
-    const group = groups.find((g) => g.code === code);
-    if (!group) return;
-    setAnswers((prev) => {
-      const next = { ...prev };
-      for (const row of group.rows) next[row.id] = a;
-      return next;
-    });
   };
 
   if (loading) {
@@ -269,11 +357,39 @@ export default function ExtractionReviewPage() {
     );
   }
 
+  // Custom mode is a different screen entirely. There is nothing to confirm: the
+  // user settled each figure's section when they chose which file to upload to it,
+  // on the step before this one. What is left is tidying — a databook carries
+  // spacer rows and repeated subtotals, and a label can read badly out of its
+  // sheet. So the rows are editable rather than answerable.
+  // Neither own-label lane has a mapping to confirm — only the lines we read. They
+  // differ in what there is to say about them: Custom lets you tidy a label, User
+  // shows which TABLE each section came from and which tables produced nothing.
+  if (data?.metrics_mode === 'user' && reportId) {
+    return (
+      <Shell reportId={reportId} metricsMode="user">
+        <UserExtractionReview reportId={reportId} data={data} />
+      </Shell>
+    );
+  }
+  if (data?.metrics_mode === 'custom' && companyId && reportId) {
+    return (
+      <Shell reportId={reportId} metricsMode="custom">
+        <CustomExtractionReview
+          companyId={companyId}
+          reportId={reportId}
+          data={data}
+          onData={setData}
+        />
+      </Shell>
+    );
+  }
+
   const confirmed = data?.confirmed ?? [];
   const summary = data?.summary;
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode="system">
       {/* Header */}
       <div
         style={{
@@ -287,12 +403,12 @@ export default function ExtractionReviewPage() {
       >
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: '0 0 4px', lineHeight: 1.2 }}>
-            Check the figures we found
+            Add these to your metrics
           </h1>
-          <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 620 }}>
-            We read the figures out of your documents, then matched them to our standard
-            metrics. The ones we're sure about are saved already. Please confirm the rest —
-            only figures you say Yes to go into the report.
+          <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 640 }}>
+            These lines are yours, not ours — so we've listed them rather than guessed at
+            them. Check the name and the section, and we'll add each one to your metrics.
+            Once filed, we'll match them on every future report.
           </p>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -300,13 +416,53 @@ export default function ExtractionReviewPage() {
             {summary?.confirmed_count ?? 0} matched
           </div>
           <div style={{ fontSize: 13, color: ACCENT, fontWeight: 800, marginTop: 2 }}>
-            {pending.length} to check
+            {pending.length} to file
           </div>
         </div>
       </div>
 
       {/* Scrollable body */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 28px 20px' }}>
+        {unitWarning && (
+          <div
+            role="note"
+            aria-label="Mixed units warning"
+            style={{
+              display: 'flex',
+              gap: 10,
+              padding: '11px 13px',
+              marginBottom: 16,
+              borderRadius: 12,
+              border: '1px solid rgba(245,158,11,.35)',
+              background: 'rgba(245,158,11,.08)',
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              color: '#8A6520',
+            }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+              style={{ flexShrink: 0, marginTop: 1 }}
+            >
+              <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+            </svg>
+            <div>
+              <div style={{ fontWeight: 700, color: '#B45309', marginBottom: 3 }}>
+                Figures were read in more than one currency (
+                {unitWarning.currencies.join(', ')})
+              </div>
+              Your report is denominated in one currency, so the figures in the others will
+              be left out. If that is the wrong way round, regenerate with the currency you
+              want selected on the upload step.
+            </div>
+          </div>
+        )}
+
         {/* Matched — a record, nothing to do. Collapsed so it never buries the work. */}
         <div className="card" style={{ marginBottom: 16 }}>
           <button
@@ -345,6 +501,9 @@ export default function ExtractionReviewPage() {
                       <th style={{ padding: '10px 18px', fontWeight: 700 }}>System metric</th>
                       <th style={{ padding: '10px 18px', fontWeight: 700 }}>In your document</th>
                       <th style={{ padding: '10px 18px', fontWeight: 700, textAlign: 'right' }}>Value</th>
+                      {/* Its own column, not a suffix on the value — the point is
+                          to make an odd one out scannable down the list. */}
+                      <th style={{ padding: '10px 18px', fontWeight: 700 }}>Unit</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -364,6 +523,9 @@ export default function ExtractionReviewPage() {
                         >
                           {f.value_display ?? f.value ?? '—'}
                         </td>
+                        <td style={{ padding: '9px 18px', color: MUTED, whiteSpace: 'nowrap' }}>
+                          {formatUnit(f.unit) ?? '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -373,90 +535,157 @@ export default function ExtractionReviewPage() {
           )}
         </div>
 
-        {/* Needs confirmation — the actual work */}
+        {/* Excluding is the one decision here that outlives this report, so the way
+            back has to live here too. Rendered even with nothing left to file — a
+            user who excluded everything sees an empty screen, which is precisely
+            when they need to get back in. */}
+        {companyId && <ExcludedLines companyId={companyId} />}
+
+        {/* The lines to file — the actual work */}
         {pending.length === 0 ? (
           <div className="card">
             <div className="cb" style={{ padding: '28px 18px', textAlign: 'center' }}>
               <div style={{ fontSize: 30, marginBottom: 10 }}>✅</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: DARK, marginBottom: 4 }}>
-                Nothing needs checking
+                Nothing left to file
               </div>
               <div style={{ fontSize: 12, color: MUTED }}>
-                Every figure we found matched one of our metrics exactly.
+                Every figure we found matched a metric you already have.
               </div>
             </div>
           </div>
         ) : (
           groups.map((group) => (
-            <div className="card" key={group.code} style={{ marginBottom: 16 }}>
+            <div className="card" key={group.key} style={{ marginBottom: 16 }}>
               <div className="ch">
-                <span className="ct">{group.title}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#9BA3C4' }}>
-                    {group.rows.length} to check
-                  </span>
-                  <button
-                    type="button"
-                    className="btn bs"
-                    style={{ fontSize: 11, padding: '4px 10px' }}
-                    onClick={() => setAll(group.code, 'yes')}
-                  >
-                    Yes to all
-                  </button>
-                  <button
-                    type="button"
-                    className="btn bs"
-                    style={{ fontSize: 11, padding: '4px 10px' }}
-                    onClick={() => setAll(group.code, 'no')}
-                  >
-                    No to all
-                  </button>
+                <span className="ct" style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                  {group.filename}
+                  {/* The sheet only when it adds something — a one-tab file repeating
+                      its own name in smaller type is noise. */}
+                  {group.sheet && group.sheet !== group.filename && (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#9BA3C4' }}>
+                      {group.sheet}
+                    </span>
+                  )}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#9BA3C4' }}>
+                  {group.rows.length} line{group.rows.length === 1 ? '' : 's'}
                 </span>
               </div>
               <div className="cb" style={{ padding: 0 }}>
-                {group.rows.map((f) => (
-                  <div
-                    key={f.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 14,
-                      padding: '12px 18px',
-                      borderTop: '1px solid #F1F2F8',
-                      background: answers[f.id] === 'no' ? '#FCFCFD' : '#fff',
-                      opacity: answers[f.id] === 'no' ? 0.6 : 1,
-                      transition: 'background .12s, opacity .12s',
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: DARK, lineHeight: 1.45 }}>
-                        Is <strong>“{f.source_label ?? 'this figure'}”</strong> in your document the
-                        same as <strong>{f.metric_label ?? f.metric_key}</strong>?
-                      </div>
-                      <div
+                {group.rows.map((f) => {
+                  const s = rowState[f.id];
+                  if (!s) return null;
+                  const original = f.source_label ?? '';
+                  return (
+                    <div
+                      key={f.id}
+                      data-testid={`row-${f.id}`}
+                      style={{
+                        borderTop: '1px solid #F1F2F8',
+                        // Excluded rows dim but KEEP THEIR PLACE. A list that
+                        // reorders under the cursor is unusable at sixty rows.
+                        background: s.included ? '#fff' : '#FCFCFD',
+                        opacity: s.included ? 1 : 0.55,
+                        transition: 'background .12s, opacity .12s',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 10,
+                        padding: '10px 18px',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={!s.included}
+                        aria-label={`${s.included ? 'Exclude' : 'Include'} ${original || 'this figure'}`}
+                        onClick={() => patch(f.id, { included: !s.included })}
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          marginTop: 4,
+                          marginTop: 18,
+                          padding: '5px 11px',
                           fontSize: 11,
-                          color: '#9BA3C4',
+                          fontWeight: 700,
+                          fontFamily: 'inherit',
+                          borderRadius: 7,
+                          border: `1px solid ${s.included ? '#D9DCEC' : ACCENT}`,
+                          background: s.included ? '#fff' : ACCENT,
+                          color: s.included ? '#6B7280' : '#fff',
+                          cursor: 'pointer',
+                          flexShrink: 0,
                         }}
                       >
-                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {f.value_display ?? f.value ?? '—'}
-                        </span>
-                        {f.source_page != null && <span>page {f.source_page}</span>}
-                        <ConfidencePill value={f.confidence} />
+                        {s.included ? 'Exclude' : 'Excluded'}
+                      </button>
+
+                      <div style={{ flex: '2 1 210px', minWidth: 160 }}>
+                        <label className="fl-label" htmlFor={`lbl-${f.id}`}>Name</label>
+                        <input
+                          id={`lbl-${f.id}`}
+                          className="inp"
+                          value={s.label}
+                          disabled={!s.included}
+                          onChange={(e) => patch(f.id, { label: e.target.value })}
+                          style={{ width: '100%', fontSize: 12.5 }}
+                        />
+                        {/* Only once it differs — the document's wording becomes a
+                            synonym server-side, so a rename still matches next
+                            quarter, and saying so is what makes editing feel safe. */}
+                        {s.label.trim() !== original && original && (
+                          <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 3 }}>
+                            was “{original}” — we'll still match that
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          flex: '0 1 130px',
+                          minWidth: 100,
+                          marginTop: 18,
+                          textAlign: 'right',
+                          fontSize: 12.5,
+                          color: DARK,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {f.value_display ?? f.value ?? '—'}
+                        <div style={{ fontSize: 10.5, color: '#9BA3C4' }}>
+                          {formatUnit(f.unit) ?? ''}
+                        </div>
+                      </div>
+
+                      <div style={{ flex: '2 1 190px', minWidth: 160 }}>
+                        <label className="fl-label" htmlFor={`sec-${f.id}`}>Section</label>
+                        {s.included ? (
+                          <SectionPicker
+                            sections={sections}
+                            value={s.sectionCode}
+                            onChange={(code) => patch(f.id, { sectionCode: code })}
+                            ariaLabel={`Section for ${s.label || original || 'this figure'}`}
+                            invalid={!s.sectionCode}
+                          />
+                        ) : (
+                          <input id={`sec-${f.id}`} className="inp" disabled value="" style={{ width: '100%' }} />
+                        )}
+                      </div>
+
+                      <div style={{ flex: '0 1 130px', minWidth: 110 }}>
+                        <label className="fl-label" htmlFor={`unit-${f.id}`}>This figure is</label>
+                        <select
+                          id={`unit-${f.id}`}
+                          className="inp sel"
+                          disabled={!s.included}
+                          value={s.unitType}
+                          onChange={(e) => patch(f.id, { unitType: e.target.value as MetricUnitType })}
+                        >
+                          <option value="currency">Money</option>
+                          <option value="percent">A percentage</option>
+                          <option value="count">A count</option>
+                        </select>
                       </div>
                     </div>
-                    <YesNo
-                      value={answers[f.id]}
-                      onChange={(a) => setAnswers((prev) => ({ ...prev, [f.id]: a }))}
-                      label={`${f.source_label ?? 'figure'} is ${f.metric_label ?? f.metric_key}`}
-                    />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))
@@ -464,10 +693,10 @@ export default function ExtractionReviewPage() {
 
         {pending.length > 0 && (
           <p style={{ fontSize: 11.5, color: MUTED, margin: '0 2px', lineHeight: 1.5 }}>
-            Saying <strong>Yes</strong> files that figure under the system metric — a line your
-            document calls “COGS-S” will appear in the report as “Cost of Goods Sold”. Its original
-            name is kept on record. Saying <strong>No</strong>, or leaving a row unanswered, leaves
-            the figure out of the report entirely.
+            Every line here is <strong>included</strong> unless you exclude it. We add each one to
+            your metrics under the name you give it, in the section you pick.{' '}
+            <strong>This takes a few minutes the first quarter — next quarter these match
+            automatically</strong>, and anything you exclude is never asked about again.
             {summary && summary.discarded_count > 0 && (
               <>
                 {' '}We also read {summary.discarded_count} other line
@@ -495,61 +724,32 @@ export default function ExtractionReviewPage() {
         <button className="btn bs" onClick={() => navigate('/reports/quarterly')}>
           ← Back
         </button>
-        <span style={{ fontSize: 12, color: MUTED }}>
-          {pending.length === 0
-            ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
-            : `${answered} of ${pending.length} answered · ${accepted} will be added`}
+        {/* Doubles as the validation line. The error block at the top only renders
+            when the page failed to load at all, so without this a blocked Continue
+            would look like a dead button. */}
+        <span
+          aria-live="polite"
+          style={{ fontSize: 12, color: error ? '#B45309' : MUTED, textAlign: 'center' }}
+        >
+          {error
+            ? error
+            : pending.length === 0
+              ? `${confirmed.length} figure${confirmed.length === 1 ? '' : 's'} ready`
+              : `${included.length} to add` +
+                (excludedCount > 0 ? ` · ${excludedCount} excluded` : '')}
         </span>
-        <button className="btn bp" onClick={onContinue} disabled={submitting}>
+        {/* .btn's base size (7px 14px / 12px) is the utility size — every primary
+            page action in the app overrides it to this. Without the override the
+            page's main CTA renders the same size as the Back button beside it. */}
+        <button
+          className="btn bp"
+          onClick={onContinue}
+          disabled={submitting}
+          style={{ padding: '11px 24px', fontSize: 13 }}
+        >
           {submitting ? 'Saving…' : 'Continue to outline →'}
         </button>
       </div>
-
-      {/* Soft gate — unanswered rows are excluded, so say so plainly before moving on. */}
-      {confirmOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Some figures are unanswered"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(20,22,40,.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1500,
-            padding: 20,
-          }}
-        >
-          <div
-            style={{
-              background: '#fff',
-              borderRadius: 14,
-              padding: '22px 24px',
-              maxWidth: 440,
-              width: '100%',
-              boxShadow: '0 20px 60px rgba(20,22,40,.25)',
-            }}
-          >
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: DARK, margin: '0 0 8px' }}>
-              {unanswered} figure{unanswered === 1 ? '' : 's'} still unanswered
-            </h2>
-            <p style={{ fontSize: 13, color: MUTED, margin: '0 0 18px', lineHeight: 1.5 }}>
-              Anything you haven't confirmed is left out of the report. You can go back and
-              answer them, or continue with the {accepted} you've said Yes to.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button className="btn bs" onClick={() => setConfirmOpen(false)}>
-                Keep checking
-              </button>
-              <button className="btn bp" onClick={() => void submit()}>
-                Continue anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </Shell>
   );
 }

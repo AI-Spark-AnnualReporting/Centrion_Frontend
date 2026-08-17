@@ -25,6 +25,13 @@ export type ReportTone =
 // (no reportId; runs at form time). The backend derives the company type from
 // the company's sector so the setup form can pre-select the pill + show a
 // DETECTED badge. NOT part of the creation flow — purely a UI hint.
+// Where a quarterly report's figures come from, and who decides what each one is
+// called. Absent on reports created before the custom lane — those read as 'system'.
+//   system → mapped onto the standard metric catalogue, printed into our sections
+//   custom → the user's own lines, into a section they picked per upload
+//   user   → the user's own lines, into sections taken from their files' own tables
+export type MetricsMode = 'system' | 'custom' | 'user';
+
 export interface DetectCompanyTypeResponse {
   detected_company_type: CompanyType | null;
 }
@@ -129,8 +136,8 @@ export interface GapsResponse {
 // ─── Extraction review (step 2) ─────────────────────────────────────────────
 // Extraction reports what a document SAYS; a separate mapping pass decides which
 // of our metrics each line IS, with a 0-100 confidence. Exact matches and anything
-// at 90+ are already stored. The uncertain middle band is listed in `pending` for a
-// yes/no — nothing there reaches the report until the user confirms it.
+// at 95+ are already stored. The uncertain middle band (50-94) is listed in
+// `pending` — nothing there reaches the report until the user answers.
 export interface ExtractionReviewFigure {
   id: string;
   metric_key: string | null;
@@ -148,7 +155,24 @@ export interface ExtractionReviewFigure {
   // right metric", not "did we read the number correctly".
   confidence: number | null;
   source: string | null;
+  // Where the line sat: which file, which sheet, and its position in the file.
+  // The review screen groups on the first two and orders on the third — and
+  // (document_id, source_page) is the row's identity, so "Total" on two sheets
+  // stays two rows instead of collapsing into one.
   source_page: number | null;
+  document_id?: string | null;
+  source_table?: string | null;
+}
+
+// One (file, sheet) that carries lines the user has to file. `guessed_section` is
+// derived from the metrics that DID match on that sheet, and is null when the
+// sheet matched nothing — an empty picker that blocks Continue beats a confident
+// wrong guess filed silently.
+export interface ExtractionReviewSource {
+  document_id: string | null;
+  source_table: string | null;
+  filename: string;
+  guessed_section: string | null;
 }
 
 export interface ExtractionReviewResponse {
@@ -165,17 +189,245 @@ export interface ExtractionReviewResponse {
     // visible rather than silent.
     discarded_count: number;
   };
+  // Where a figure can be placed when the user says "no, that's our own line".
+  // Sent with the figures so the screen needs no second request.
+  metric_sections?: MetricSectionGroup[];
+  // One entry per (file, sheet) with pending lines: the filename to head the
+  // group, and the section guess to pre-fill its rows.
+  sources?: ExtractionReviewSource[];
+  // Present (and 'custom') on a Custom-metrics report, where this screen is a
+  // different thing entirely: nothing to confirm, because the user already chose
+  // each figure's section by choosing which file to upload to it. `sections` holds
+  // the lines to tidy; `confirmed`/`pending` are always empty.
+  metrics_mode?: MetricsMode;
+  editable?: boolean;
+  sections?: CustomExtractionSection[];
+  // User mode only: one record per table found, extracted or not, plus the quarter
+  // we were looking for. `summary` carries the extra counts alongside its own.
+  tables?: UserExtractionTable[];
+  period?: string | null;
 }
+
+// ─── Custom-mode extraction (rename / delete, no yes-no) ────────────────────
+export interface CustomExtractionRow {
+  id: string;
+  label: string | null;
+  value: number | null;
+  value_display: string | null;
+  unit: string | null;
+  // The tab of the workbook this line came from, when there was more than one.
+  sheet: string | null;
+  // Where the line sat in its own table: the heading above it, the column it was read
+  // from, and which table when the sheet held several. Null for every flat, ungrouped
+  // line and for everything the other lanes write.
+  group?: string | null;
+  column?: string | null;
+  table?: string | null;
+}
+
+export interface CustomExtractionSection {
+  section_code: string;
+  title: string;
+  is_custom: boolean;
+  rows: CustomExtractionRow[];
+}
+
+// ─── User-mode extraction (read-only: one record per TABLE found) ───────────
+// The rows are the same CustomExtractionSection shape; this is the part the custom
+// payload cannot carry, because a table that produced NOTHING leaves no figure row
+// to infer it from — and in this lane that is a missing section.
+export interface UserExtractionTable {
+  file: string;
+  table: string;
+  status: 'extracted' | 'skipped';
+  // A sentence, not a code — it is read by a person.
+  reason: string | null;
+  rows: number;
+  section_code: string | null;
+  section_title: string | null;
+  currency: string | null;
+  scale: string | null;
+  header_row: number | null;
+  label_col: number | null;
+  value_col: number | null;
+  value_col_header: string | null;
+  // How we knew this was the report's quarter: a column named it, a heading above
+  // the table named it, or nothing did and we assumed.
+  period_source: 'column' | 'declared' | 'assumed' | null;
+  // Other tables merged into the same section as this one.
+  grouped_with: string[];
+  // 'matrix' = the source printed it as a grid (line items down, categories across),
+  // so `rows` counts CELLS rather than lines.
+  shape?: 'flat' | 'matrix';
+  column_count?: number;
+  // The headings found inside the table ("Cost", "Accumulated depreciation").
+  groups?: string[];
+}
+
+export interface UserExtractionSummary {
+  file_count: number;
+  table_count: number;
+  extracted_count: number;
+  skipped_count: number;
+  section_count: number;
+  assumed_count: number;
+  confirmed_count: number;
+}
+
+// One edit per row: a new label, or gone. Renaming is not cosmetic — the
+// cross-quarter comparison matches custom rows by (section, label).
+export interface CustomFigureEdit {
+  id: string;
+  label?: string;
+  deleted?: boolean;
+}
+
+export interface MetricSectionGroup {
+  group: string;
+  sections: { section_code: string; title: string }[];
+}
+
+export type MetricUnitType = 'currency' | 'percent' | 'count';
+
+// keep    — file this line: add it to the company's catalogue under `label` and put
+//           the figure in this report's `section_code`.
+// exclude — leave it out, and stop asking about this wording in future quarters.
+//
+// `accept`, `create` and `ignore` were the previous vocabulary, from when the
+// server proposed a metric and the user agreed or not. The server still honours
+// them so a browser holding the old bundle can answer a report parked before this
+// shipped; nothing here emits them.
+export type ExtractionReviewAction = 'keep' | 'exclude';
 
 export interface ExtractionReviewDecision {
   id: string;
-  accept: boolean;
+  action: ExtractionReviewAction;
+  // Required for `keep` only. `label` is what the user chose to call the line —
+  // the document's own wording is kept server-side as a synonym, so renaming it
+  // does not opt the line out of matching next quarter.
+  label?: string;
+  section_code?: string;
+  unit_type?: MetricUnitType;
+}
+
+// A wording the company told us to stop asking about. One entry per distinct
+// label however many quarters it was excluded in — it is one thing to undo.
+export interface ExclusionEntry {
+  source_label: string;
+  excluded_at: string | null;
+}
+
+export interface ExclusionsResponse {
+  company_id: string;
+  exclusions: ExclusionEntry[];
 }
 
 export interface ExtractionReviewResult {
   report_id: string;
   accepted: number;
+  created: number;
+  ignored: number;
   rejected: number;
+  next: string;
+}
+
+// ─── Financial Data (Custom mode only, the step before Extraction) ──────────
+// Custom mode takes one statement per section, so the section a figure belongs to
+// is decided by which upload field it went into — not by a model reading the label.
+
+export interface FinancialSectionUpload {
+  document_id: string | null;
+  filename: string;
+  row_count: number;
+  currency: string;
+  // Parser token: 'actual' | 'thousand' | 'million' | 'billion' (singular).
+  scale: string;
+  // How the scale was decided — 'user_section' (the user said so), 'units_llm' /
+  // 'units_text' (the file said so), 'prior', 'llm_fallback', or 'default' (a
+  // guess). Surfaced so a guess is visible rather than silent.
+  scale_source: string;
+  uploaded_at: string;
+}
+
+export interface FinancialSection {
+  section_code: string;
+  title: string;
+  section_group: string;
+  // A section this company created, rather than one of ours.
+  is_custom: boolean;
+  included: boolean;
+  file: FinancialSectionUpload | null;
+}
+
+export interface FinancialsResponse {
+  report_id: string;
+  company_id: string;
+  period: string | null;
+  currency: string;
+  // UI vocabulary ('millions'), not the parser token — this is what every figure
+  // in the report is printed in.
+  scale: string;
+  sections: FinancialSection[];
+  can_continue: boolean;
+  // Titles of sections still ticked with no file. Named, not counted, so the user
+  // doesn't have to hunt for them.
+  blocking: string[];
+}
+
+// ─── "Is this how we should read your file?" ────────────────────────────────
+// A confident read is stored straight away. When it isn't obvious which table or
+// which columns to use, NOTHING is written and this comes back instead — the user
+// answers, and the same file is re-sent with their answer attached.
+
+export interface SheetColumn {
+  index: number;
+  name: string;
+}
+
+export interface SheetTable {
+  // "<sheet index>:<table index>" — opaque, sent back as-is.
+  key: string;
+  sheet: string;
+  columns: SheetColumn[];
+  header_row: number;
+  label_col: number;
+  value_col: number;
+  row_count: number;
+  preview: { label: string; value: number }[];
+  // Rows the header could plausibly be, for the picker — a merged banner often
+  // sits above the real header.
+  header_options: number[];
+}
+
+export interface FinancialsConfirmation {
+  needs_confirmation: true;
+  section_code: string;
+  section_title: string;
+  filename: string;
+  // Plain sentences explaining why we stopped, shown at the top of the dialog.
+  reasons: string[];
+  tables: SheetTable[];
+  currency: string;
+  scale: string;
+}
+
+// What the user chose in the dialog, sent back with the same file.
+export interface SheetStructureChoice {
+  table_key: string;
+  header_row: number;
+  label_col: number;
+  value_col: number;
+}
+
+export function needsConfirmation(
+  res: FinancialsResponse | FinancialsConfirmation,
+): res is FinancialsConfirmation {
+  return (res as FinancialsConfirmation).needs_confirmation === true;
+}
+
+export interface FinancialsCompleteResult {
+  report_id: string;
+  sections: FinancialSection[];
   next: string;
 }
 
@@ -213,12 +465,24 @@ export interface OutlineSection {
   // True when this section's produced data duplicates an earlier section's — the
   // Preview hides these (keep the first, hide the rest). Computed server-side.
   hidden_duplicate?: boolean;
+  // User-metrics mode: a blueprint TABLE section, which in this lane is a slot
+  // nothing will ever fill — the sections come from the user's own workbook. Folded
+  // behind "Show N hidden" rather than removed: it keeps its place in the list and
+  // in the save payload, and one click brings it back.
+  hidden_default?: boolean;
+  // Custom mode only: a financial section the user unticked on the Financial Data
+  // step. Shown here but not re-tickable — that decision has one home, and the
+  // section has no figures to render anyway. The backend rejects re-including it.
+  financials_excluded?: boolean;
 }
 
 export interface OutlineResponse {
   report_id: string;
   company_id: string;
   total_catalogue?: number;
+  // Which lane built this report. Drives the step indicator (Custom has an extra
+  // Financial Data step) and the greyed-out financial sections.
+  metrics_mode?: MetricsMode;
   // Whole-outline freeze — true once the outline is locked (read-only).
   locked?: boolean;
   // True while the ingest worker is still writing figures. Until it flips false a
@@ -254,7 +518,18 @@ export interface OutlineLockResponse {
 //   - mode 'generate'       → analytical prose text.
 //   - mode 'template'       → filled boilerplate text.
 //   - null                  → not produced yet.
-export type SectionStatus = "pending" | "drafting" | "done";
+// quarterly_report_sections.status, as the DB's own CHECK constraint defines it.
+// This used to read "pending" | "drafting" | "done", and "done" is a value the
+// backend has never sent — which is why sectionState() had to cast to string to
+// compare against "needs_input". A type that lies about the values it holds hides
+// exactly the comparison you most want checked.
+export type SectionStatus =
+  | "pending"      // in the outline, not produced yet
+  | "drafting"     // being produced right now
+  | "locked"
+  | "produced"
+  | "needs_input"  // produced, and it needs something from the user
+  | "empty";       // produced, and there was nothing to put in it
 
 export interface ProducedSection {
   section_code: string;
@@ -270,6 +545,30 @@ export interface ProducedSection {
   // False when re-producing yields nothing fresh (Template/External, or content
   // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
   regeneratable?: boolean;
+  // The Analyse button's last result, replayed by GET .../sections/{code} so it
+  // survives a reload. Null/absent for a section never analysed.
+  analysis?: SectionAnalysis | null;
+}
+
+// POST .../sections/{code}/analyse — the commentary printed under a section's
+// table(s). Part of the report: stored on quarterly_report_sections.analysis and
+// rendered by both exporters.
+export interface SectionAnalysis {
+  section_code?: string;
+  text: string;
+  generated_at: string;
+  model: string | null;
+  // Covers the table, the model, the prompt text, the tone and the language — so a
+  // stored analysis whose fingerprint no longer matches was written about
+  // different numbers, or in a different voice.
+  fingerprint: string | null;
+  warnings?: string[];
+  line_count?: number;
+  cached?: boolean;
+  // True once a human has rewritten the prose, so it is never attributed to the
+  // model afterwards and a later Analyse click cannot overwrite it from cache.
+  edited?: boolean;
+  edited_at?: string | null;
 }
 
 // GET/POST .../sections/{code}, .../sections/{code}/produce, .../sections/{code}/refine.
@@ -461,6 +760,9 @@ export interface AssembledSection {
   source_type?: string;
   mode: string; // table | kpi | generate | template
   content: string | null; // same keying as ProducedSection.content
+  // The Analyse button's commentary, printed under this section's table(s). Part of
+  // the report — the exporters render it from the same field.
+  analysis?: SectionAnalysis | null;
 }
 
 export interface AssembledReportResponse {
@@ -484,6 +786,9 @@ export interface AssembledReportResponse {
   approved_at?: string | null;
   approvedAt?: string | null;
   locked_at?: string | null;
+  // Which lane built this report — for the step indicator, which has an extra
+  // Financial Data step in Custom mode.
+  metrics_mode?: MetricsMode;
 }
 
 // POST .../quarterly/{reportId}/approve response — approve & lock the

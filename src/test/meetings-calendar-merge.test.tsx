@@ -47,8 +47,10 @@ describe('Board & Meetings — merged calendar', () => {
       }],
     });
     // Latest annual report is FY-2025 → next annual due Dec 2026 (FYE 12).
+    // `status: approved` is load-bearing: only a signed-off report is placed as a
+    // completed marker, so a fixture without it renders no filed event at all.
     listReports.mockResolvedValue({
-      reports: [{ id: 'r1', period: 'FY-2025', report_type: 'annual', generated_at: '2026-01-10T00:00:00Z', title: 'Annual FY-2025' }],
+      reports: [{ id: 'r1', period: 'FY-2025', report_type: 'annual', status: 'approved', generated_at: '2026-01-10T00:00:00Z', title: 'Annual FY-2025' }],
     });
     getMyCompany.mockResolvedValue({ id: 'co-1', fiscal_year_end_month: 12 });
     listCycles.mockResolvedValue([]);
