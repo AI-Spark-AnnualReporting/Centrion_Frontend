@@ -83,11 +83,10 @@ export function SeverityChip({ severity }: { severity: Severity }) {
 }
 
 // All four statuses occur, and each means something different — so each gets an
-// explicit branch and none of them share a fallback. The two grey ones in
-// particular are not interchangeable:
+// explicit branch and none of them share a fallback:
 //   na      — the rule doesn't govern this company at all.
-//   no_data — it does, but the answer lives in a filing or register outside
-//             this report. Grey, never red, and never scored.
+//   no_data — it does, and we have no verdict. Two unrelated causes, split by
+//             the row's `unreachable` flag; see UNREACHABLE below.
 const STATUS: Record<CheckStatus, { glyph: string; color: string; label: string; hint: string }> = {
   pass: {
     glyph: '✓',
@@ -107,12 +106,28 @@ const STATUS: Record<CheckStatus, { glyph: string; color: string; label: string;
     label: 'Not applicable',
     hint: "This rule doesn't govern this company.",
   },
+  // The `unreachable: false` half of no_data: our validator dropped the rule or
+  // the call failed. Amber, not grey — this is our gap, and a re-run may clear
+  // it. It still counts against the score.
   no_data: {
-    glyph: '◦',
-    color: MUTED,
-    label: 'Not in this report',
-    hint: 'Answered by a filing or register outside this report.',
+    glyph: '⟳',
+    color: AMBER,
+    label: 'Couldn’t check',
+    hint: 'The validator returned no verdict for this rule. Re-validate to try again.',
   },
+};
+
+// The `unreachable: true` half of no_data: the answer lives in a filing record
+// or external register, so no version of the report could ever satisfy it.
+// Nobody's gap, and excluded from the score's denominator. Telling a user a
+// validator outage is a filing they need to go find — or the reverse — is the
+// whole reason this split exists, so it branches here, once, rather than at
+// every call site of StatusIcon / statusLabel / statusHint.
+const UNREACHABLE = {
+  glyph: '◦',
+  color: MUTED,
+  label: 'Answered elsewhere',
+  hint: 'Answered by a filing or register outside this report. Not counted in the score.',
 };
 
 // A fail whose finding opens "Partially evidenced." is a softer thing than a
@@ -125,7 +140,8 @@ export function isPartiallyEvidenced(finding: string | undefined): boolean {
 
 // `finding` is only carried on gap rows, so rule-detail rows pass nothing and
 // get the plain fail treatment.
-function statusStyle(status: CheckStatus, finding?: string) {
+function statusStyle(status: CheckStatus, finding?: string, unreachable?: boolean) {
+  if (status === 'no_data' && unreachable) return UNREACHABLE;
   const base = STATUS[status];
   if (status === 'fail' && isPartiallyEvidenced(finding)) {
     return {
@@ -138,8 +154,16 @@ function statusStyle(status: CheckStatus, finding?: string) {
   return base;
 }
 
-export function StatusIcon({ status, finding }: { status: CheckStatus; finding?: string }) {
-  const s = statusStyle(status, finding);
+export function StatusIcon({
+  status,
+  finding,
+  unreachable,
+}: {
+  status: CheckStatus;
+  finding?: string;
+  unreachable?: boolean;
+}) {
+  const s = statusStyle(status, finding, unreachable);
   // An unrecognised status is a backend change we haven't caught up with —
   // render it visibly neutral rather than silently mislabelling it.
   if (!s) {
@@ -160,16 +184,16 @@ export function StatusIcon({ status, finding }: { status: CheckStatus; finding?:
   );
 }
 
-export function statusLabel(status: CheckStatus, finding?: string): string {
-  return statusStyle(status, finding)?.label ?? String(status);
+export function statusLabel(status: CheckStatus, finding?: string, unreachable?: boolean): string {
+  return statusStyle(status, finding, unreachable)?.label ?? String(status);
 }
 
-export function statusColor(status: CheckStatus, finding?: string): string {
-  return statusStyle(status, finding)?.color ?? MUTED;
+export function statusColor(status: CheckStatus, finding?: string, unreachable?: boolean): string {
+  return statusStyle(status, finding, unreachable)?.color ?? MUTED;
 }
 
-export function statusHint(status: CheckStatus, finding?: string): string {
-  return statusStyle(status, finding)?.hint ?? '';
+export function statusHint(status: CheckStatus, finding?: string, unreachable?: boolean): string {
+  return statusStyle(status, finding, unreachable)?.hint ?? '';
 }
 
 // Score colour ramp: ≥80 green, 50–79 amber, <50 red. A null score means
@@ -235,14 +259,26 @@ export function frameworkGates(detail: RuleDetailGroup[] | undefined): Map<strin
 }
 
 // rule_detail carries no per-group totals, so derive them from the rule rows.
-// Only pass + fail are scoreable; na and no_data are excluded.
+// `checkable` mirrors the backend's own denominator — pass + fail + no_data,
+// excluding na and unreachable — so the group header can't contradict the
+// framework card above it. A rule nothing could ever answer is not a rule you
+// failed, so it stays out of the fraction and is reported on its own.
 export function groupCounts(group: RuleDetailGroup) {
   const rules = group.rules ?? [];
   const passed = rules.filter((r) => r.status === 'pass').length;
   const failed = rules.filter((r) => r.status === 'fail').length;
-  const noData = rules.filter((r) => r.status === 'no_data').length;
+  const unreachable = rules.filter((r) => r.status === 'no_data' && r.unreachable).length;
+  const noData = rules.filter((r) => r.status === 'no_data' && !r.unreachable).length;
   const na = rules.filter((r) => r.status === 'na').length;
-  return { passed, failed, noData, na, scoreable: passed + failed, total: rules.length };
+  return {
+    passed,
+    failed,
+    noData,
+    unreachable,
+    na,
+    checkable: passed + failed + noData,
+    total: rules.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
