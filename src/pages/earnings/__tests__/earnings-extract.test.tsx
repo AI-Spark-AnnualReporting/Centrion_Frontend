@@ -29,8 +29,8 @@ const h = vi.hoisted(() => {
   }
   return {
     navigateMock: vi.fn(),
-    getEarningsFigures: vi.fn(),
-    patchEarningsFigure: vi.fn(),
+    getEarningsSourceLines: vi.fn(),
+    selectEarningsLines: vi.fn(),
     userRef: { current: { company_id: 'co-1', company_name: 'Acme' } as unknown },
     MockApiError,
   };
@@ -43,8 +43,8 @@ vi.mock('react-router-dom', async () => {
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: h.userRef.current }) }));
 vi.mock('@/lib/api', () => ({
   earnings: {
-    getEarningsFigures: (...a: unknown[]) => h.getEarningsFigures(...a),
-    patchEarningsFigure: (...a: unknown[]) => h.patchEarningsFigure(...a),
+    getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
+    selectEarningsLines: (...a: unknown[]) => h.selectEarningsLines(...a),
   },
   ApiError: h.MockApiError,
 }));
@@ -122,10 +122,6 @@ const renderPage = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
-  h.getEarningsFigures.mockResolvedValue(FIGS);
-  h.patchEarningsFigure.mockResolvedValue(
-    fig({ id: 'f-rev', label: 'Revenue', value: 5000, confidence: null, flag: null, edited: true }),
-  );
 });
 
 // ── Unit ────────────────────────────────────────────────────────────────────
@@ -191,204 +187,65 @@ describe('deltaTone', () => {
 
 // ── Route/behaviour ─────────────────────────────────────────────────────────
 describe('EarningsExtractPage', () => {
-  it('the stepper only lets you jump to Setup/Extraction — Outline and Preview stay disabled until Continue is clicked', async () => {
-    renderPage();
-    await screen.findByText('Revenue');
-    expect(screen.getByRole('button', { name: /STEP 1 Setup/ })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: /STEP 2 Extraction/ })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: /STEP 3 Outline/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /STEP 4 Preview/ })).toBeDisabled();
+  // Step 2 is now ONE thing: a checklist of the source quarterly report's own
+  // lines, with a model's picks pre-ticked. No auto-matched figures table, no
+  // typed values — ticking is the only way a figure gets into the report.
+  const line = (over: Record<string, unknown>) => ({
+    id: 'l1', label: 'Revenue', column: null, group: null, display_label: 'Revenue',
+    value: 424095, unit: 'SAR_million', table: 'Income & Comprehensive Income',
+    source_ref: 'p.1', source_report_id: 'rpt_q1', selected: false, suggested: false,
+    ...over,
   });
 
-  it('renders the table incl. a Derived row and a <90 flagged row', async () => {
-    renderPage();
-    expect(await screen.findByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('Free Cash Flow')).toBeInTheDocument();
-    expect(screen.getByText(/OCF - CapEx/)).toBeInTheDocument();
-    // flagged row surfaces its confidence; a healthy row too
-    expect(screen.getByText('84%')).toBeInTheDocument();
-    expect(screen.getByText('96%')).toBeInTheDocument();
-  });
-
-  it('editing a value calls patchEarningsFigure and clears the flag', async () => {
-    renderPage();
-    const valueBtn = await screen.findByRole('button', { name: /4,182\.6/ });
-    fireEvent.click(valueBtn);
-    const input = screen.getByRole('textbox');
-    fireEvent.change(input, { target: { value: '5000' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() =>
-      expect(h.patchEarningsFigure).toHaveBeenCalledWith('rep-1', 'f-rev', { value: 5000, unit: 'SAR M' }),
+  const renderPage = () =>
+    render(
+      <MemoryRouter initialEntries={['/earnings/rpt-1/extract']}>
+        <Routes>
+          <Route path="/earnings/:reportId/extract" element={<EarningsExtractPage />} />
+        </Routes>
+      </MemoryRouter>,
     );
-    // 84% flag gone; the edited row now reads "Manual"
-    await waitFor(() => expect(screen.queryByText('84%')).not.toBeInTheDocument());
-    expect(screen.getByText('Manual')).toBeInTheDocument();
-  });
 
-  it('Continue with a remaining flag shows the confirm, then navigates on confirm', async () => {
-    renderPage();
-    await screen.findByText('Revenue');
-    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    expect(await screen.findByText(/Continue with figures needing review\?/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Continue anyway/ }));
-    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
-  });
-
-  it('Continue with no flags navigates directly', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({
-      figures: [fig({ id: 'f-ni', label: 'Net Income', confidence: 96 })],
-      sources: [],
-    });
-    renderPage();
-    await screen.findByText('Net Income');
-    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    expect(screen.queryByText(/Continue with flagged figures\?/)).not.toBeInTheDocument();
-    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
-  });
-
-  it('null companyId is guarded (no crash)', async () => {
-    h.userRef.current = null;
-    renderPage();
-    expect(await screen.findByText('Extract earnings data')).toBeInTheDocument();
-    expect(await screen.findByText('Revenue')).toBeInTheDocument();
-  });
-
-  it('a needs_input row badges "Needs input", not "Manual", and drives the footer + confirm', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({
-      figures: [
-        fig({ id: 'f-manual', label: 'Manual Metric', confidence: null, flag: 'ok', edited: true }),
-        fig({ id: 'f-needs', label: 'Needs Input Metric', confidence: null, flag: 'needs_input' }),
+  beforeEach(() => {
+    h.navigateMock.mockReset();
+    h.getEarningsSourceLines.mockReset().mockResolvedValue({
+      report_id: 'rpt-1',
+      lines: [
+        line({ id: 'l1', selected: true, suggested: true }),
+        line({ id: 'l2', label: 'Total assets', display_label: 'Total assets',
+               value: 2515523, table: 'Balance Sheet' }),
       ],
-      sources: [source({})],
+      suggested_count: 1,
     });
-    renderPage();
-    expect(await screen.findByText('Needs input')).toBeInTheDocument();
-    expect(screen.getByText('Manual')).toBeInTheDocument();
-    expect(screen.getByText('1 figure needs review')).toBeInTheDocument();
-    expect(screen.queryByText('All figures reviewed')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    expect(await screen.findByText(/Continue with figures needing review\?/)).toBeInTheDocument();
+    h.selectEarningsLines.mockReset().mockResolvedValue({});
   });
 
-  it('header shows the real source count even when every figure row is derived', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({
-      figures: [
-        fig({
-          id: 'f-d1',
-          label: 'Derived A',
-          is_derived: true,
-          derivation: 'X + Y',
-          source_document_id: null,
-          source_report_id: null,
-          source_label: null,
-          source_ref: null,
-        }),
-        fig({
-          id: 'f-d2',
-          label: 'Derived B',
-          is_derived: true,
-          derivation: 'X - Y',
-          source_document_id: null,
-          source_report_id: null,
-          source_label: null,
-          source_ref: null,
-        }),
-      ],
-      sources: [
-        source({ report_id: 'rep-d1', label: 'Shell — Quarterly Report Q3-2025' }),
-        source({ report_id: 'rep-d2', label: 'Shell — Prior Guidance', report_type: 'quarterly', coverage: 'partial' }),
-      ],
-    });
+  it('renders the checklist with the model picks already ticked', async () => {
     renderPage();
-    expect(await screen.findByText('Derived A')).toBeInTheDocument();
-    expect(screen.getByText('2 sources')).toBeInTheDocument();
-    expect(screen.queryByText('0 sources')).not.toBeInTheDocument();
-    // SelectedSourcesHeader renders report labels, never a filename.
-    expect(screen.getByText('Shell — Quarterly Report Q3-2025')).toBeInTheDocument();
-    expect(screen.getByText('Shell — Prior Guidance')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Revenue')).toBeChecked();
+    expect(screen.getByLabelText('Total assets')).not.toBeChecked();
+    expect(screen.getByText('1 of 2 selected')).toBeInTheDocument();
   });
 
-  it('renders the empty-state message and no table when figures is empty', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({ figures: [], sources: [] });
+  it('saves the ticked set in one call', async () => {
     renderPage();
-    expect(
-      await screen.findByText('No figures found for this period from the selected sources.'),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByLabelText('Total assets'));
+    fireEvent.click(screen.getByRole('button', { name: /save selection/i }));
+
+    await waitFor(() => expect(h.selectEarningsLines).toHaveBeenCalledTimes(1));
+    expect(new Set(h.selectEarningsLines.mock.calls[0][1])).toEqual(new Set(['l1', 'l2']));
   });
 
-  it('renders "Sources" (not "Selected system reports") with two labelled groups, both shown even when one is empty', async () => {
-    renderPage(); // FIGS has one official source, no narrative
-    await screen.findByText('Revenue');
-    expect(screen.getByText('Sources')).toBeInTheDocument();
-    expect(screen.queryByText('Selected system reports')).not.toBeInTheDocument();
-    expect(screen.getByText('From your system — official figures')).toBeInTheDocument();
-    expect(screen.getByText('Uploaded — narrative context')).toBeInTheDocument();
-    expect(screen.getByText('No uploaded documents recorded for this report.')).toBeInTheDocument();
+  it('Continue goes straight on — there is nothing left to review', async () => {
+    renderPage();
+    await screen.findByLabelText('Revenue');
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rpt-1/outline');
   });
 
-  it('a mixed report (one official + one uploaded release) shows both in their own labelled groups', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({
-      figures: [fig({ id: 'f-rev', label: 'Revenue' })],
-      sources: [
-        source({ report_id: 'rep-official', label: 'Aramco PVT — Quarterly Report Q3-2024', track: 'official' }),
-        source({
-          report_id: null,
-          document_id: 'doc-1',
-          label: 'Q3 2024 Press Release',
-          report_type: null,
-          period: null,
-          coverage: 'partial',
-          track: 'narrative_adjusted',
-          type: 'release',
-          extraction_status: 'completed', // the live backend's terminal value
-        }),
-      ],
-    });
+  it('a failed load is surfaced, with a retry', async () => {
+    h.getEarningsSourceLines.mockRejectedValue(new h.MockApiError(500, null));
     renderPage();
-    await screen.findByText('Revenue');
-
-    const officialGroup = screen.getByText('From your system — official figures').closest('div')!.parentElement!;
-    expect(within(officialGroup).getByText('Aramco PVT — Quarterly Report Q3-2024')).toBeInTheDocument();
-
-    const uploadedGroup = screen.getByText('Uploaded — narrative context').closest('div')!.parentElement!;
-    expect(within(uploadedGroup).getByText(/Q3 2024 Press Release/)).toBeInTheDocument();
-    // 'completed' (the real backend value) reads as Ready, not stuck on Extracting…
-    expect(within(uploadedGroup).getByText('Ready')).toBeInTheDocument();
-    // Never shown with an official coverage badge (D-19).
-    expect(within(uploadedGroup).queryByText('Full')).not.toBeInTheDocument();
-    expect(within(uploadedGroup).queryByText('Partial')).not.toBeInTheDocument();
-
-    expect(screen.getByText('2 sources')).toBeInTheDocument();
-  });
-
-  it('shows — for both Prior and Δ when comparative_status is none (Shell = no deltas)', async () => {
-    renderPage();
-    await screen.findByText('Revenue');
-    // All three fixture rows have comparative_status: 'none' — every Prior/Δ
-    // cell must show '—', never a computed number.
-    const dashCells = screen.getAllByText('—');
-    expect(dashCells.length).toBeGreaterThanOrEqual(6); // 3 rows × (Prior + Δ)
-  });
-
-  it('renders a real delta when comparative_status carries one', async () => {
-    h.getEarningsFigures.mockResolvedValueOnce({
-      figures: [
-        fig({
-          id: 'f-rev',
-          label: 'Revenue',
-          value: 4182.6,
-          prior_value: 3754.0,
-          change_pct: 0.114,
-          comparative_status: 'yoy',
-        }),
-      ],
-      sources: [source({})],
-    });
-    renderPage();
-    expect(await screen.findByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('+11.4%')).toBeInTheDocument();
-    expect(screen.getByText(/3,754/)).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
 });

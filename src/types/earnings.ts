@@ -137,6 +137,55 @@ export interface EditEarningsFigurePayload {
   unit?: string | null;
 }
 
+// One line of the source quarterly report, offered in the step-2 picker. Only
+// primary-statement tables are offered — a figure bound from a note schedule is
+// exactly the mistake the auto-matcher refuses to make on its own.
+export interface EarningsSourceLine {
+  id: string;
+  label: string | null;
+  // The line's own column in a multi-column table. A changes-in-equity statement
+  // repeats one label down every column, so seven rows read "Balance at September
+  // 30, 2023" with seven different values — this is what tells them apart.
+  column: string | null;
+  group: string | null;
+  display_label: string; // label + column; also what the figure is keyed on
+  value: number | null;
+  unit: string | null;
+  table: string | null; // the source table's own name, e.g. "Balance Sheet"
+  source_ref: string | null;
+  source_report_id: string | null;
+  selected: boolean; // ticked now — a saved selection, else the model's pick
+  suggested: boolean; // the model thought this belongs in an earnings release
+}
+
+// A registry metric with no figure yet. Scoped server-side to the sections this
+// report includes, so an oil company is not asked about casa_ratio.
+export interface EarningsUnfilledMetric {
+  metric_key: string;
+  label: string | null;
+  section_code: string | null;
+  unit_format: string | null;
+}
+
+export interface EarningsSourceLinesResponse {
+  report_id: string;
+  lines: EarningsSourceLine[];
+  unfilled: EarningsUnfilledMetric[];
+  suggested_count: number;
+}
+
+// POST body — fill a metric the auto-matcher could not, either by picking one of
+// the source lines above (send its label + source_ref so the figure stays
+// traceable) or by typing the number, which is the only way to fill the ratio,
+// per-share and guidance metrics.
+export interface BindEarningsFigurePayload {
+  metric_key: string;
+  value: number;
+  unit?: string | null;
+  label?: string | null;
+  source_ref?: string | null;
+}
+
 // ─── Part 3 — Arrange Outline ─────────────────────────────────────────────────
 // Contracts from OpenAPI are UNTYPED (200 → {}), and the PUT body is undocumented,
 // so field names below follow the spec and are read defensively at the api layer.
