@@ -2,9 +2,13 @@
 // scores, the gaps table, and the rule-level trace accordion.
 //
 // Three rules drive most of the styling here:
-//   · `no_data` is not a failure. It means the rule is answered by a filing or
-//     register outside this report — grey, never red, never scored.
-//   · A null score means nothing was scoreable, not zero.
+//   · `no_data` is not a failure, and it is not one thing. `unreachable: true`
+//     means a filing or register outside this report answers it — grey, nobody's
+//     gap, outside the score's denominator. `unreachable: false` means our own
+//     validator returned no verdict — amber, ours, and it does count against the
+//     score. Branch on the flag, never on the status alone.
+//   · A null score means nothing was scoreable, not zero. And `total` is already
+//     net of unreachable rules, so never print it as "of N applicable".
 //   · A null publication gate means the gate hasn't been decided, which is NOT
 //     the same as "open". It gets its own branch everywhere it's rendered.
 
@@ -18,6 +22,7 @@ import type {
   Gap,
   Gate,
   RuleDetailGroup,
+  RuleTrace,
 } from '@/types/compliance';
 import { ComplianceStepper } from './ComplianceStepper';
 import { ResolveGapDialog } from './ResolveGapDialog';
@@ -126,12 +131,9 @@ const DIMENSIONS: {
   subtitle: string;
   verdict: (run: ComplianceRun) => Verdict | null;
 }[] = [
-  {
-    key: 'cma',
-    title: 'CMA',
-    subtitle: 'Periodic filing & disclosure',
-    verdict: (run) => verdictFor(run, (r) => r === 'CMA'),
-  },
+  // No per-regulator row: the framework score cards beside this rail already
+  // name every regulator and carry their own gate chip, so a CMA row here was
+  // the same verdict twice.
   {
     key: 'completeness',
     title: 'Disclosure completeness',
@@ -181,6 +183,67 @@ function DimensionRow({
   );
 }
 
+// A thermometer for the score: three bands, the one the score lands in lit and
+// the other two faded back. No needle — the lit band IS the reading, and a
+// marker on top of it only competes with the number above. Widths are the real
+// spans (0–50, 50–80, 80–100), so the lit segment's size says how wide the
+// verdict's range is, not just which one it is.
+//
+// Thresholds are the same numbers `scoreColor` uses; keeping a second copy is
+// how you get a lit green band over an amber score.
+const YELLOW = '#FFD500';
+
+const BANDS = [
+  { label: 'NOT READY', color: RED, span: 50, upto: 50 },
+  { label: 'PARTIAL', color: YELLOW, span: 30, upto: 80 },
+  { label: 'READY', color: GREEN, span: 20, upto: 101 },
+];
+
+function ReadinessGauge({ score }: { score: number }) {
+  const lit = BANDS.findIndex((b) => score < b.upto);
+
+  return (
+    <div style={{ marginTop: 14 }} role="img" aria-label={`${score} of 100 — ${BANDS[lit].label}`}>
+      <div style={{ display: 'flex', gap: 3, height: 10 }}>
+        {BANDS.map((b, i) => (
+          <span
+            key={b.label}
+            style={{
+              flex: b.span,
+              borderRadius: 5,
+              background: b.color,
+              opacity: i === lit ? 1 : 0.16,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 3, marginTop: 6 }}>
+        {BANDS.map((b, i) => (
+          <span
+            key={b.label}
+            style={{
+              flex: b.span,
+              minWidth: 0,
+              textAlign: 'center',
+              fontSize: 9,
+              fontWeight: 800,
+              fontFamily: MONO,
+              letterSpacing: '.3px',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              color: i === lit ? b.color : MUTED,
+              opacity: i === lit ? 1 : 0.55,
+            }}
+          >
+            {b.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReadinessRail({ run }: { run: ComplianceRun }) {
   const score = safeScore(run.overall_readiness);
   const rows = DIMENSIONS.map((d) => ({ ...d, verdict: d.verdict(run) })).filter(
@@ -206,20 +269,34 @@ function ReadinessRail({ run }: { run: ComplianceRun }) {
       ) : (
         // Deliberately not on the score ramp: this is the run's headline figure,
         // and the gate banner directly under it already carries the verdict.
+        // A bare number invites "out of what?". The unit answers it on the same
+        // line, sized down so the figure still leads.
         <div
           style={{
-            fontSize: 46,
-            fontWeight: 800,
-            fontFamily: MONO,
-            lineHeight: 1.05,
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 7,
+            flexWrap: 'wrap',
             marginTop: 4,
-            color: PRIMARY,
           }}
         >
-          {score}
-          <span style={{ fontSize: 18, fontWeight: 700, color: MUTED }}>/100</span>
+          <span
+            style={{
+              fontSize: 46,
+              fontWeight: 800,
+              fontFamily: MONO,
+              lineHeight: 1.05,
+              color: PRIMARY,
+            }}
+          >
+            {score}
+            <span style={{ fontSize: 22 }}>%</span>
+          </span>
+          <span style={{ fontSize: 11.5, color: MUTED }}>of total metrics</span>
         </div>
       )}
+
+      {score != null && <ReadinessGauge score={score} />}
 
       <GateBanner gate={run.publication_gate} />
 
@@ -291,13 +368,15 @@ function FrameworkCard({ f, gate }: { f: FrameworkScore; gate?: Gate }) {
             Not scored
           </div>
           <div style={{ fontSize: 11, color: MUTED, marginTop: 8, lineHeight: 1.5 }}>
-            {f.no_data > 0
-              ? `${f.no_data} ${f.no_data === 1 ? 'rule is' : 'rules are'} answered outside this report`
+            {f.unreachable > 0
+              ? `${f.unreachable} ${f.unreachable === 1 ? 'rule is' : 'rules are'} answered outside this report`
               : 'Nothing here was scoreable'}
           </div>
         </>
       ) : (
         <>
+          {/* A bare "100" reads as a grade out of nothing. The unit says what
+              was measured: how much of what this report could answer, it did. */}
           <div
             style={{
               fontSize: 34,
@@ -309,16 +388,32 @@ function FrameworkCard({ f, gate }: { f: FrameworkScore; gate?: Gate }) {
             }}
           >
             {score}
+            <span style={{ fontSize: 13, fontWeight: 700, marginLeft: 2 }}>%</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: MUTED, marginLeft: 6 }}>
+              covered
+            </span>
           </div>
+          {/* "checkable", not "checks": `total` already excludes the rules
+              answered elsewhere, so calling it checks and then listing them
+              again below is the double-count this migration removed. */}
           <div style={{ fontSize: 11, color: MUTED, marginTop: 8, lineHeight: 1.5 }}>
-            {f.passed}/{f.total} checks · {frameworkLabel(f.regulator)}
+            {f.passed} of {f.total} checkable · {frameworkLabel(f.regulator)}
           </div>
-          {f.no_data > 0 && (
+          {f.unreachable > 0 && (
             <div
               style={{ fontSize: 10.5, color: MUTED, marginTop: 3 }}
-              title="Answered by a filing or register outside this report."
+              title="Answered by a filing or register outside this report. Not counted in the score."
             >
-              {f.no_data} not in this report
+              {f.unreachable} answered elsewhere
+            </div>
+          )}
+          {/* Ours, not theirs, so it doesn't get the grey treatment. */}
+          {f.no_data > 0 && (
+            <div
+              style={{ fontSize: 10.5, color: AMBER, marginTop: 3 }}
+              title="The validator returned no verdict for these. Re-validate to try again."
+            >
+              {f.no_data} couldn’t be checked
             </div>
           )}
           <div
@@ -344,7 +439,7 @@ function FrameworkScores({ run }: { run: ComplianceRun }) {
   // checks" adds up — so the header and the cards agree by construction.
   const checks = run.frameworks.reduce((n, f) => n + f.total, 0);
   // Rules answered somewhere other than this report. A handful, not a wall.
-  const outsideReport = run.frameworks.reduce((n, f) => n + (f.no_data ?? 0), 0);
+  const outsideReport = run.frameworks.reduce((n, f) => n + (f.unreachable ?? 0), 0);
   const count = run.frameworks.length;
 
   return (
@@ -365,7 +460,7 @@ function FrameworkScores({ run }: { run: ComplianceRun }) {
         <span style={{ fontSize: 11.5, color: MUTED }}>
           {count} {count === 1 ? 'framework' : 'frameworks'} · {checks}{' '}
           {checks === 1 ? 'check' : 'checks'}
-          {outsideReport > 0 && ` · ${outsideReport} not in this report`}
+          {outsideReport > 0 && ` · ${outsideReport} answered elsewhere`}
         </span>
       </div>
 
@@ -382,6 +477,13 @@ function FrameworkScores({ run }: { run: ComplianceRun }) {
       </div>
     </div>
   );
+}
+
+// The label already carries the meaning; this only stops a grey "answered
+// elsewhere" and an amber "couldn't check" from sharing one colour.
+function statusRowColor(r: RuleTrace): string {
+  if (r.status === 'no_data') return r.unreachable ? MUTED : AMBER;
+  return r.status === 'na' ? MUTED : '#5A6080';
 }
 
 // ── gaps table ───────────────────────────────────────────────────────────────
@@ -564,8 +666,9 @@ function RuleAccordion({ detail }: { detail: RuleDetailGroup[] }) {
               <span style={{ fontSize: 12.5, fontWeight: 700, color: DARK }}>{d.regulator}</span>
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 11, color: MUTED, fontFamily: MONO }}>
-                {c.scoreable > 0 ? `${c.passed}/${c.scoreable} pass` : 'nothing scoreable'}
-                {c.noData > 0 && ` · ${c.noData} elsewhere`}
+                {c.checkable > 0 ? `${c.passed}/${c.checkable} pass` : 'nothing checkable'}
+                {c.unreachable > 0 && ` · ${c.unreachable} elsewhere`}
+                {c.noData > 0 && ` · ${c.noData} unchecked`}
                 {c.na > 0 && ` · ${c.na} n/a`}
               </span>
             </button>
@@ -575,20 +678,19 @@ function RuleAccordion({ detail }: { detail: RuleDetailGroup[] }) {
                 {d.rules.map((r) => (
                   <div key={r.rule_id} style={{ padding: '10px 0', borderTop: '1px solid #F4F5FB' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-                      <StatusIcon status={r.status} />
+                      <StatusIcon status={r.status} unreachable={r.unreachable} />
                       <span style={{ fontSize: 11.5, fontFamily: MONO, color: PRIMARY }}>
                         {r.rule_id}
                       </span>
                       <span
-                        title={statusHint(r.status)}
+                        title={statusHint(r.status, undefined, r.unreachable)}
                         style={{
                           fontSize: 11,
-                          color:
-                            r.status === 'no_data' || r.status === 'na' ? MUTED : '#5A6080',
+                          color: statusRowColor(r),
                           fontWeight: 600,
                         }}
                       >
-                        {statusLabel(r.status)}
+                        {statusLabel(r.status, undefined, r.unreachable)}
                       </span>
                       <ConfidenceMark evidence={r.evidence} />
                       <GateChip gate={r.gate} />
@@ -601,13 +703,15 @@ function RuleAccordion({ detail }: { detail: RuleDetailGroup[] }) {
                       <EvidenceProof evidence={r.evidence} />
                     </div>
 
-                    {/* Only on `no_data`, where the source IS the answer — it
-                        names the filing or register that governs the rule
-                        instead of this report. On a fail it just describes
-                        where the checker looked, which tells the author
-                        nothing they can act on. And only when there was no
-                        quote to hang it under; the pull-quote carries its own. */}
+                    {/* Only on an unreachable `no_data`, where the source IS
+                        the answer — it names the filing or register that
+                        governs the rule instead of this report. On a fail, or
+                        on a rule we simply failed to check, it just describes
+                        where the checker looked, which tells the author nothing
+                        they can act on. And only when there was no quote to
+                        hang it under; the pull-quote carries its own. */}
                     {r.status === 'no_data' &&
+                      r.unreachable &&
                       !r.evidence?.quote &&
                       (r.evidence?.evidence_source || r.evidence_source) && (
                       <div

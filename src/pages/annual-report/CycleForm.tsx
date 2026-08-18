@@ -38,7 +38,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
 
   const [name, setName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
-  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('en');
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('english');
   const [projectManagerId, setProjectManagerId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -85,7 +85,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const reset = () => {
     setName('');
     setFiscalYear('');
-    setContentLanguage('en');
+    setContentLanguage('english');
     setProjectManagerId('');
     setStartDate('');
     setEndDate('');
@@ -113,6 +113,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
+        content_language: contentLanguage,
       };
       const cycle = await sarCycles.create(payload);
       reset();
@@ -189,8 +190,8 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Content Language *</label>
               <div className="tabs" style={{ marginBottom: 0 }}>
-                <button type="button" className={`tab ${contentLanguage === 'en' ? 'act' : ''}`} onClick={() => setContentLanguage('en')}>English</button>
-                <button type="button" className={`tab ${contentLanguage === 'ar' ? 'act' : ''}`} onClick={() => setContentLanguage('ar')}>العربية</button>
+                <button type="button" className={`tab ${contentLanguage === 'english' ? 'act' : ''}`} onClick={() => setContentLanguage('english')}>English</button>
+                <button type="button" className={`tab ${contentLanguage === 'arabic' ? 'act' : ''}`} onClick={() => setContentLanguage('arabic')}>العربية</button>
               </div>
             </div>
           </div>

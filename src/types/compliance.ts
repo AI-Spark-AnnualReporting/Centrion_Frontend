@@ -33,8 +33,10 @@ export type Severity = "high" | "medium" | "low";
 //   fail    — it doesn't, or only partially (see `Gap.finding`, which then
 //             starts "Partially evidenced." and still carries evidence.quote).
 //   na      — the rule doesn't govern this company.
-//   no_data — answered by a filing or register outside this report. A small
-//             minority. Grey, never red, and excluded from scoring.
+//   no_data — no verdict. Either answered by a filing outside this report
+//             (`unreachable: true`, grey, unscored) or the validator failed to
+//             return one (`unreachable: false`, amber, scored against us).
+//             Never red either way; branch on the flag, not the status.
 export type CheckStatus = "pass" | "fail" | "na" | "no_data";
 
 export type PublicationGate = "open" | "blocked";
@@ -159,14 +161,29 @@ export const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 
 // `score` is null when nothing in the framework was scoreable. Render text, not
-// 0%. `total` counts only the scoreable rules (pass + fail); `no_data` counts
-// the rules answered outside this report.
+// 0%.
+//
+// The denominator is `total`, and `total` is NOT the number of rules that
+// apply — it's pass + fail + no_data, excluding `na` and `unreachable`. A rule
+// no version of this report could ever satisfy is outside the score entirely,
+// which is why a flawless CMA quarterly is 3/3 and not 3/5. Never print a score
+// as "/100" without also reading `unreachable`.
 export interface FrameworkScore {
   regulator: string;
   score: number | null;
   passed: number;
+  // pass + fail + no_data. Excludes na and unreachable.
   total: number;
+  // total − passed. Rules answered elsewhere are not counted as missing.
+  missing: number;
+  // Only the rules the validator failed to return a verdict for. Scored
+  // against, but transient — a re-run may clear it. NOT the same thing as
+  // "answered outside this report"; see `unreachable`.
   no_data: number;
+  not_applicable: number;
+  // Answered by a filing record or external register, so no report could ever
+  // satisfy them. Excluded from `total` — nobody's gap.
+  unreachable: number;
 }
 
 // What the checker read, and what it concluded from it. Every key is OPTIONAL
@@ -228,6 +245,11 @@ export interface RuleTrace {
   rule_id: string;
   status: CheckStatus;
   gate: Gate;
+  // The only way to tell the two kinds of `no_data` apart: true means the
+  // answer lives in a filing or register outside this report (grey, nobody's
+  // fault, unscored), false means our validator returned no verdict (amber,
+  // ours, re-validate). Never branch on `status` alone for a no_data row.
+  unreachable?: boolean;
   evidence_source?: string;
   evidence?: CheckEvidence | null;
   // ── flat wire fields (see above) ──
@@ -238,7 +260,7 @@ export interface RuleTrace {
   source_file?: string | null;
 }
 
-// Full per-regulator breakdown, including no_data rows.
+// Full per-regulator breakdown, including no_data and unreachable rows.
 export interface RuleDetailGroup {
   regulator: string;
   rules: RuleTrace[];
