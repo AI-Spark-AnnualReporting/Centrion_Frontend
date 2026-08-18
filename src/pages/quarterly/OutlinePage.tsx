@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronRight, GripVertical, Lock } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Lock, Pencil } from 'lucide-react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -173,6 +173,7 @@ function SectionRow({
   dragging,
   dragOver,
   onToggle,
+  onRename,
   dragHandleProps,
 }: {
   section: OutlineSection;
@@ -187,10 +188,36 @@ function SectionRow({
   dragging?: boolean;
   dragOver?: boolean;
   onToggle?: () => void;
+  // Save a new name for this section, or '' to put the blueprint name back.
+  onRename?: (title: string) => void;
   dragHandleProps?: React.HTMLAttributes<HTMLSpanElement> & {
     draggable?: boolean;
   };
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(section.title);
+  // Enter commits and unmounts the input, which fires onBlur — and Escape does the
+  // same. Without this, one edit would save twice, or a cancel would save anyway.
+  const settled = useRef(false);
+
+  const startEdit = () => {
+    setDraft(section.title);
+    settled.current = false;
+    setEditing(true);
+  };
+  const finish = (save: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    setEditing(false);
+    const next = draft.trim();
+    if (save && next && next !== section.title) onRename?.(next);
+  };
+
+  // A rename is per-report, so the blueprint name is always still there to go back
+  // to. Only offered when they actually differ.
+  const renamed =
+    !!section.title_original && section.title !== section.title_original;
+
   return (
     <div
       style={{
@@ -261,18 +288,105 @@ function SectionRow({
       {/* Excluded sections stay in the list (so they can be ticked or moved) but
           read as "not in the report" at a glance, alongside the dashed number. */}
       <div style={{ flex: 1, minWidth: 0, opacity: section.included ? 1 : 0.55 }}>
-        <div
-          style={{
-            fontSize: 13.5,
-            fontWeight: 700,
-            color: DARK,
-            lineHeight: 1.35,
-          }}
-        >
-          {section.title}
-        </div>
+        {/* Renaming stays available on a LOCKED outline — that is where the user
+            actually notices a section still carrying its source sheet's name, and a
+            rename cannot regenerate anything (the title is not part of the
+            produce content hash). Frozen during ingest like every other control. */}
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            maxLength={120}
+            aria-label={`Section name for ${section.title_original || section.title}`}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => finish(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                finish(true);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                finish(false);
+              }
+            }}
+            style={{
+              width: '100%',
+              font: 'inherit',
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: DARK,
+              lineHeight: 1.35,
+              padding: '2px 6px',
+              margin: '-3px -7px',
+              borderRadius: 6,
+              border: `1px solid ${ACCENT}`,
+              background: '#fff',
+              outline: 'none',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: DARK,
+              lineHeight: 1.35,
+            }}
+          >
+            <span
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {section.title}
+            </span>
+            {onRename && !ingesting && (
+              <button
+                type="button"
+                onClick={startEdit}
+                aria-label={`Rename ${section.title}`}
+                title="Rename this section"
+                style={{
+                  display: 'inline-flex',
+                  flexShrink: 0,
+                  padding: 2,
+                  border: 'none',
+                  background: 'none',
+                  color: '#9BA3C4',
+                  cursor: 'pointer',
+                }}
+              >
+                <Pencil size={12} aria-hidden />
+              </button>
+            )}
+          </div>
+        )}
         <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>
           {section.part_label}
+          {renamed && (
+            <>
+              {' · '}renamed
+              {onRename && !ingesting && (
+                <button
+                  type="button"
+                  onClick={() => onRename('')}
+                  title={`Back to "${section.title_original}"`}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    padding: '0 0 0 4px',
+                    font: 'inherit',
+                    color: ACCENT,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Reset
+                </button>
+              )}
+            </>
+          )}
           {section.financials_excluded && (
             <span style={{ color: '#B45309' }}>
               {' · '}excluded on Financial Data
@@ -325,6 +439,10 @@ export default function OutlinePage() {
 
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [submitting, setSubmitting] = useState(false);
+  // A rename that didn't stick. Its own message rather than the autosave indicator:
+  // renaming is a separate request, and "Saved" next to a name that wasn't would be
+  // a lie about which name the report will print.
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   // Snapshot of the backend's per-section `recommended` flags (for the Recommended preset).
   const defaultIncludedRef = useRef<Record<string, boolean>>({});
@@ -571,6 +689,50 @@ export default function OutlinePage() {
   );
 
   // ── Mutations ─────────────────────────────────────────────────────────────
+
+  // Rename one section for this report. '' clears the rename and puts the blueprint
+  // name back — that is what the Reset link sends.
+  //
+  // Optimistic, then merged field-by-field rather than adopting the whole response:
+  // a rename is its own request, and applyResponse would clear userTouchedRef and
+  // silently undo any drag or tick still sitting in the 700ms autosave debounce.
+  // Same reasoning as the ingest poll above.
+  const renameSection = (code: string, title: string) => {
+    if (!companyId || !reportId) return;
+    const before = sections;
+    setRenameError(null);
+    setSections((prev) =>
+      prev.map((s) =>
+        s.section_code === code
+          ? { ...s, title: title || s.title_original || s.title }
+          : s,
+      ),
+    );
+    quarterlyReports
+      .renameSection(companyId, reportId, code, title)
+      .then((res) => {
+        const byCode = new Map(res.sections.map((s) => [s.section_code, s]));
+        setSections((prev) =>
+          prev.map((s) => {
+            const fresh = byCode.get(s.section_code);
+            return fresh
+              ? { ...s, title: fresh.title, title_original: fresh.title_original }
+              : s;
+          }),
+        );
+      })
+      .catch((err: unknown) => {
+        // Put the old name back rather than leaving a name on screen that isn't
+        // the one the report will print.
+        setSections(before);
+        setRenameError(
+          err instanceof ApiError && err.status === 422
+            ? 'That name is too long — 120 characters at most.'
+            : "Couldn't save that name. Try again.",
+        );
+      });
+  };
+
   const toggleSection = (code: string) => {
     if (isLocked) return;
     userTouchedRef.current = true;
@@ -946,6 +1108,22 @@ export default function OutlinePage() {
             className="cb"
             style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
           >
+            {renameError && (
+              <div
+                role="alert"
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  background: 'rgba(229,72,77,.08)',
+                  border: '1px solid rgba(229,72,77,.25)',
+                  color: '#B33A3E',
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {renameError}
+              </div>
+            )}
             {sections.map((s, i) =>
               isTableOfContentsSection(s.section_code) || (s.hidden_default && !showHidden) ? null : (
                 <div
@@ -962,6 +1140,7 @@ export default function OutlinePage() {
                     dragging={dragIndex === i}
                     dragOver={overIndex === i && dragIndex !== i}
                     onToggle={() => toggleSection(s.section_code)}
+                    onRename={(title) => renameSection(s.section_code, title)}
                     dragHandleProps={{
                       draggable: true,
                       onDragStart: onDragStart(i),

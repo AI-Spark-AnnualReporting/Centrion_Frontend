@@ -186,6 +186,7 @@ export function sourceTypeLabel(s: ProducedSection): string {
   if (s.mode === 'generate') return 'AI-written';
   if (s.mode === 'table' || s.mode === 'kpi') return 'Extraction';
   if (s.mode === 'template') return 'Template';
+  if (s.mode === 'attach') return 'Attachment';
   return s.source_type || 'Section';
 }
 

@@ -1,7 +1,9 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
+import type { DocumentBankResponse } from '@/types/report';
+import { documents } from '@/lib/api';
 import { asStringArray } from '@/components/quarterly/sectionState';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
@@ -30,6 +32,7 @@ export function SectionContent({
   section,
   markdown = false,
   showAnalysis = false,
+  companyId,
 }: {
   section: ProducedSection;
   /** Render prose as Markdown — see MarkdownProse. */
@@ -39,9 +42,13 @@ export function SectionContent({
   // renders it instead, so it can own the edit state; the read-only report view
   // turns it on.
   showAnalysis?: boolean;
+  // Needed only for mode 'attach' sections, to resolve a fresh signed download
+  // URL for the "View PDF" button on demand. Omit where unavailable — the
+  // section still renders, just without a way to open the file.
+  companyId?: string | null;
 }) {
   const analysis = showAnalysis ? (section.analysis?.text ?? '').trim() : '';
-  const body = <SectionBody section={section} markdown={markdown} />;
+  const body = <SectionBody section={section} markdown={markdown} companyId={companyId} />;
   if (!analysis) return body;
   return (
     <>
@@ -56,9 +63,11 @@ export function SectionContent({
 function SectionBody({
   section,
   markdown,
+  companyId,
 }: {
   section: Pick<ProducedSection, 'mode' | 'content'>;
   markdown: boolean;
+  companyId?: string | null;
 }) {
   const { mode } = section;
   // Some endpoints (e.g. /assemble) return table content as a parsed object/array
@@ -71,6 +80,16 @@ function SectionBody({
   }
 
   const parsed = tryParseJson(content);
+
+  // Attach-mode content is never text — `{document_id}` embedding a PDF
+  // verbatim. Branch before any of the prose/table shape-detection below,
+  // which would otherwise print the raw JSON as a blob.
+  if (mode === 'attach') {
+    const documentId = isRecord(parsed) ? asString(parsed.document_id) : undefined;
+    // Keyed on documentId so replacing the file resets any stale error/loading
+    // state left over from viewing the one it replaced.
+    return documentId ? <AttachedPdf key={documentId} documentId={documentId} companyId={companyId} /> : <NoData />;
+  }
 
   // Structured sections (a table and/or a narrative in one JSON payload —
   // {rows, analysis} for hybrid table+analysis, {heading, content} for a
@@ -135,6 +154,74 @@ function SectionBody({
 function NoData() {
   return (
     <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>
+  );
+}
+
+// Attach-mode content — a PDF embedded verbatim, identified only by
+// document_id. Looks up its filename + signed download_url once on mount
+// (documents.byReport is the same proven source the Document Bank reads
+// download_url from — a plain GET-by-id endpoint for a single document isn't
+// confirmed to exist, so this asks the source that's known to work).
+function AttachedPdf({ documentId, companyId }: { documentId: string; companyId?: string | null }) {
+  const [doc, setDoc] = useState<{ filename?: string; download_url?: string | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    documents
+      .byReport<DocumentBankResponse>(companyId)
+      .then((res) => {
+        if (cancelled) return;
+        const found = res.reports.flatMap((r) => r.documents).find((d) => d.id === documentId);
+        if (found) setDoc(found);
+        else setError('This file is no longer available.');
+      })
+      .catch(() => {
+        if (!cancelled) setError('Could not load this file.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, documentId]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, border: '1px solid #E4E6F1', background: '#FAFAFD' }}>
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
+          <path d="M12 2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6z" stroke={BRAND} strokeWidth="1.5" strokeLinejoin="round" />
+          <path d="M12 2v4h4" stroke={BRAND} strokeWidth="1.5" strokeLinejoin="round" />
+        </svg>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {loading ? 'Loading…' : doc?.filename || 'PDF attached'}
+          </div>
+          <div style={{ fontSize: 11.5, color: MUTED }}>Embedded as-is for this section.</div>
+        </div>
+        {companyId && (
+          <button
+            type="button"
+            onClick={() => doc?.download_url && window.open(doc.download_url, '_blank', 'noopener,noreferrer')}
+            disabled={loading || !doc?.download_url}
+            style={{
+              fontSize: 12.5, fontWeight: 700, padding: '7px 14px', borderRadius: 7,
+              color: '#fff', background: BRAND, border: 'none',
+              cursor: loading || !doc?.download_url ? 'default' : 'pointer',
+              opacity: loading || !doc?.download_url ? 0.6 : 1, flexShrink: 0,
+            }}
+          >
+            View PDF
+          </button>
+        )}
+      </div>
+      {error && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
+    </div>
   );
 }
 

@@ -285,6 +285,37 @@ export class ApiError<TBody = unknown> extends Error {
   }
 }
 
+// A handful of endpoints (register, resend-verification) use 429 deliberately
+// — a per-email cooldown, not infra rate limiting — and carry a structured
+// `detail: {message, retry_after_seconds}` instead of the plain-string shape
+// `detailOf()` expects. ApiError's own `.message` collapses every 429 into
+// the generic SERVICE_UNAVAILABLE_MESSAGE above (right call for genuine infra
+// limits), so callers that need the real reason and countdown read it here
+// off `.body` instead.
+export interface RateLimitDetail {
+  message: string;
+  retryAfterSeconds: number;
+}
+
+export function rateLimitDetailOf(err: unknown): RateLimitDetail | null {
+  if (!(err instanceof ApiError) || err.status !== 429) return null;
+  const body = err.body as { detail?: unknown } | null;
+  const detail =
+    body && typeof body === "object" ? (body as { detail?: unknown }).detail : null;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    typeof (detail as { retry_after_seconds?: unknown }).retry_after_seconds === "number"
+  ) {
+    const d = detail as { message?: unknown; retry_after_seconds: number };
+    return {
+      message: typeof d.message === "string" ? d.message : "Please wait before trying again.",
+      retryAfterSeconds: d.retry_after_seconds,
+    };
+  }
+  return null;
+}
+
 type QueryParams = object;
 
 function buildQuery(params?: QueryParams): string {
@@ -602,12 +633,12 @@ export const auth = {
       auth: false,
     }),
 
-  // Login stays query-param based, unlike register above — that's still what
-  // the backend reads here.
+  // JSON body, same as register — the request moved off query params, but
+  // the response shape (access_token, user, ...) is unchanged.
   login: <T = unknown>(params: LoginParams) =>
     request<T>("/api/v1/auth/login", {
       method: "POST",
-      query: params,
+      body: params,
       auth: false,
     }),
 
@@ -620,10 +651,14 @@ export const auth = {
       auth: false,
     }),
 
-  // Always resolves `{ sent: true }` regardless of whether the email is known
-  // or already verified — same anti-enumeration shape as forgotPassword.
+  // Unknown / already-verified email always resolves { sent: true } with no
+  // message — same anti-enumeration shape as forgotPassword, deliberately
+  // indistinguishable from a real send. A known, unverified email outside the
+  // cooldown attempts a real send and returns its actual outcome (sent may be
+  // false — a created-but-undelivered case, not a client error). Within the
+  // cooldown this throws ApiError(429) instead — read it with rateLimitDetailOf().
   resendVerification: (email: string) =>
-    request<{ sent: boolean }>("/api/v1/auth/resend-verification", {
+    request<{ sent: boolean; message?: string }>("/api/v1/auth/resend-verification", {
       method: "POST",
       body: { email },
       auth: false,
@@ -1529,6 +1564,24 @@ export const reports = {
     return postForm("/api/v1/reports/quarterly/check-language", fd);
   },
 
+  // Can we read any figures out of this financial upload? Called the moment a file
+  // is picked. A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+  // file to us — has_tables=false, and `message` is the sentence to show.
+  checkTables: (
+    file: File,
+  ): Promise<{
+    success: boolean;
+    has_tables: boolean;
+    table_count: number;
+    table_names: string[];
+    reason: "no_tables" | "no_figures" | null;
+    message: string | null;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return postForm("/api/v1/reports/quarterly/check-tables", fd);
+  },
+
   getCoverage: <T = unknown>(
     companyId: string,
     reportId: string,
@@ -1607,6 +1660,23 @@ export const quarterlyReports = {
     request<OutlineLockResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline/lock`,
       { method: "POST" },
+    ),
+
+  // Rename one section for this report — the name then appears everywhere,
+  // including the exported PDF's heading and table of contents. An empty title
+  // clears the rename and puts the blueprint name back. Works after the outline is
+  // locked (a rename can't regenerate anything), and returns the rebuilt outline
+  // like saveOutline does.
+  renameSection: (
+    companyId: string,
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
     ),
 
   // ── Produced sections (step 7 — Part 5 Preview) ──
@@ -2010,6 +2080,18 @@ export const quarterlyReports = {
     fd.append("file", file);
     return request<ProducedSectionResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    ).then(unwrapProducedSection);
+  },
+
+  // attach-mode sections (e.g. auditor_report): the file is embedded verbatim
+  // as-is, never turned into editable text — one-step save like upload above,
+  // no preview-then-commit. PDF only; the backend 422s on anything else.
+  attachSectionDocument: (companyId: string, reportId: string, code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/attach`,
       { method: "POST", form: fd },
     ).then(unwrapProducedSection);
   },

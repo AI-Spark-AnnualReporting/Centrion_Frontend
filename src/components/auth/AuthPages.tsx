@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { auth, createCompany, extractProfileAtSignup, register, ApiError } from '@/lib/api';
+import { auth, createCompany, extractProfileAtSignup, register, ApiError, rateLimitDetailOf } from '@/lib/api';
 import { redirectToApp, shouldStayInCentriton } from '@/lib/appRouting';
 import type { StepOneState, StepTwoState } from '@/types/register';
 import { StepIndicator } from '@/components/registration/StepIndicator';
@@ -309,20 +309,32 @@ export function SignupPage() {
         /* extraction is best-effort; onboarding falls back to manual */
       }
 
-      await register({
+      const res = await register({
         email: stepOne.email,
         password: stepOne.password,
         full_name: stepOne.full_name,
         company_id: companyId,
       });
 
-      navigate('/verify-email', { state: { email: stepOne.email } });
+      navigate('/verify-email', {
+        state: { email: stepOne.email, emailSent: res.email_sent, emailMessage: res.email_message },
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Email already registered — resubmitting the same unverified email
         // is fine (backend silently reissues the code), so send them to the
         // code screen instead of a dead-end error.
         navigate('/verify-email', { state: { email: stepOne.email } });
+        return;
+      }
+      const rateLimit = rateLimitDetailOf(err);
+      if (rateLimit) {
+        // A code was already sent moments ago (e.g. a double-submit) — the
+        // account exists either way, so this isn't a failure, just a reason
+        // to go straight to the code screen instead of asking again.
+        navigate('/verify-email', {
+          state: { email: stepOne.email, notice: rateLimit.message, retryAfterSeconds: rateLimit.retryAfterSeconds },
+        });
         return;
       }
       if (err instanceof ApiError && err.status === 403) {
