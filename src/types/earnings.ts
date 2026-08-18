@@ -154,36 +154,23 @@ export interface EarningsSourceLine {
   table: string | null; // the source table's own name, e.g. "Balance Sheet"
   source_ref: string | null;
   source_report_id: string | null;
-  selected: boolean; // ticked now — a saved selection, else the model's pick
+  selected: boolean; // ticked now — a saved selection, else remembered, else the model's pick
   suggested: boolean; // the model thought this belongs in an earnings release
-}
-
-// A registry metric with no figure yet. Scoped server-side to the sections this
-// report includes, so an oil company is not asked about casa_ratio.
-export interface EarningsUnfilledMetric {
-  metric_key: string;
-  label: string | null;
-  section_code: string | null;
-  unit_format: string | null;
+  remembered: boolean; // the user ticked the same line on their last earnings report
+  memory_key: string; // stable across quarters; qr_figures ids are not
+  section_code: string | null; // which earnings section it is filed under
 }
 
 export interface EarningsSourceLinesResponse {
   report_id: string;
+  section_code: string | null; // null = every line in the report, unscoped
   lines: EarningsSourceLine[];
-  unfilled: EarningsUnfilledMetric[];
+  // Where the pre-ticking came from, so the UI can say so rather than leaving the
+  // user guessing why anything is ticked at all.
+  preticked_from: 'saved' | 'remembered' | 'suggested' | (string & {});
   suggested_count: number;
-}
-
-// POST body — fill a metric the auto-matcher could not, either by picking one of
-// the source lines above (send its label + source_ref so the figure stays
-// traceable) or by typing the number, which is the only way to fill the ratio,
-// per-share and guidance metrics.
-export interface BindEarningsFigurePayload {
-  metric_key: string;
-  value: number;
-  unit?: string | null;
-  label?: string | null;
-  source_ref?: string | null;
+  remembered_count: number;
+  selected_count: number;
 }
 
 // ─── Part 3 — Arrange Outline ─────────────────────────────────────────────────

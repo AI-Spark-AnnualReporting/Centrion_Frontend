@@ -1,4 +1,4 @@
-import type { DragEvent, KeyboardEvent } from 'react';
+import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 import type { EarningsOutlineSection } from '@/types/earnings';
 import { OutlineSectionCard } from './OutlineSectionCard';
 import { MUTED } from './tokens';
@@ -25,6 +25,7 @@ export function OutlineGroup({
   emptyText,
   onToggle,
   drag,
+  renderFigures,
 }: {
   title: string;
   subtitle?: string;
@@ -34,6 +35,13 @@ export function OutlineGroup({
   emptyText?: string;
   onToggle: (code: string) => void;
   drag?: OutlineDragHandlers;
+  // Supplied by the page for sections that carry figures. Returning null keeps
+  // the row exactly as it was, so prose sections show no affordance at all.
+  renderFigures?: (section: EarningsOutlineSection) => {
+    open: boolean;
+    onToggle: () => void;
+    panel: ReactNode;
+  } | null;
 }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -51,7 +59,9 @@ export function OutlineGroup({
             {emptyText ?? 'Nothing here.'}
           </div>
         ) : (
-          sections.map((s, i) => (
+          sections.map((s, i) => {
+            const figures = renderFigures?.(s) ?? null;
+            return (
             <div
               key={s.section_code}
               onDragOver={drag ? drag.dragOver(i) : undefined}
@@ -72,9 +82,13 @@ export function OutlineGroup({
                       }
                     : undefined
                 }
+                figuresOpen={figures?.open}
+                onToggleFigures={figures?.onToggle}
+                figuresPanel={figures?.panel}
               />
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

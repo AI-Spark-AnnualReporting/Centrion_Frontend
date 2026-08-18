@@ -4,7 +4,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
-import type { EarningsOutlineSection, EarningsOutlineResponse } from '@/types/earnings';
+import type {
+  EarningsOutlineSection,
+  EarningsOutlineResponse,
+  EarningsSourceLine,
+} from '@/types/earnings';
+import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
 import { isTableOfContentsSection } from './helpers';
 import { OutlineGroup } from '@/components/earnings/OutlineGroup';
@@ -77,6 +82,46 @@ export default function EarningsOutlinePage() {
 
   // Drag state — only the included group reorders. The active index lives in a ref
   // (no re-render needed); native HTML5 drag drives the move.
+  // Which section's figure checklist is open, and that section's lines.
+  // Loaded on expand rather than up front: a report can carry a thousand lines
+  // and the user only ever looks at one section at a time.
+  const [openFigures, setOpenFigures] = useState<string | null>(null);
+  const [figureLines, setFigureLines] = useState<Record<string, EarningsSourceLine[]>>({});
+  const [figuresBusy, setFiguresBusy] = useState(false);
+
+  const loadFigures = useCallback(
+    async (code: string) => {
+      if (!reportId) return;
+      setFiguresBusy(true);
+      try {
+        const res = await earnings.getEarningsSourceLines(reportId, code);
+        setFigureLines((prev) => ({ ...prev, [code]: res.lines ?? [] }));
+      } catch {
+        setFigureLines((prev) => ({ ...prev, [code]: [] }));
+      } finally {
+        setFiguresBusy(false);
+      }
+    },
+    [reportId],
+  );
+
+  const toggleFigures = useCallback(
+    (code: string) => {
+      setOpenFigures((prev) => (prev === code ? null : code));
+      if (!figureLines[code]) void loadFigures(code);
+    },
+    [figureLines, loadFigures],
+  );
+
+  const saveFigures = useCallback(
+    async (code: string, lineIds: string[]) => {
+      if (!reportId) return;
+      await earnings.selectEarningsLines(reportId, lineIds, code);
+      await loadFigures(code);
+    },
+    [reportId, loadFigures],
+  );
+
   const dragIndexRef = useRef<number | null>(null);
 
   // Split a response into the ordered included set + the available-to-add set.
@@ -352,6 +397,23 @@ export default function EarningsOutlinePage() {
             emptyText="No sections included yet — add some from below."
             onToggle={toggleSection}
             drag={drag}
+            renderFigures={(sec) =>
+              sec.mode === 'table' || sec.mode === 'kpi'
+                ? {
+                    open: openFigures === sec.section_code,
+                    onToggle: () => toggleFigures(sec.section_code),
+                    panel: (
+                      <div style={{ padding: '0 14px 14px' }}>
+                        <FigureChecklist
+                          lines={figureLines[sec.section_code] ?? []}
+                          busy={figuresBusy}
+                          onSaveSelection={(ids) => saveFigures(sec.section_code, ids)}
+                        />
+                      </div>
+                    ),
+                  }
+                : null
+            }
           />
           <OutlineGroup
             title="Available to add"

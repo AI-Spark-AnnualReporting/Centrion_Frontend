@@ -42,7 +42,6 @@ import OutlinePage from "./pages/quarterly/OutlinePage";
 import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
 import EarningsSetupPage from "./pages/earnings/EarningsSetupPage";
-import EarningsExtractPage from "./pages/earnings/EarningsExtractPage";
 import EarningsOutlinePage from "./pages/earnings/EarningsOutlinePage";
 import EarningsPreviewPage from "./pages/earnings/EarningsPreviewPage";
 
@@ -176,7 +175,6 @@ const App = () => (
               before the /earnings/:reportId param route so it outranks it. */}
           <Route element={<ProtectedRoute requiredFeature="earnings_report" />}>
             <Route path="/earnings/setup" element={<EarningsSetupPage />} />
-            <Route path="/earnings/:reportId/extract" element={<EarningsExtractPage />} />
             <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
             <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
           </Route>

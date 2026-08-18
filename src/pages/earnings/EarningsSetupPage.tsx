@@ -186,7 +186,7 @@ export default function EarningsSetupPage() {
         await earnings.uploadEarningsSources(reportId, uploadFiles);
         setUploadFiles([]);
       }
-      navigate(`/earnings/${reportId}/extract`);
+      navigate(`/earnings/${reportId}/outline`);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         setConflict(readConflict(err));
@@ -329,7 +329,7 @@ export default function EarningsSetupPage() {
               <button
                 type="button"
                 className="btn bs bsm"
-                onClick={() => navigate(`/earnings/${conflict.reportId}/extract`)}
+                onClick={() => navigate(`/earnings/${conflict.reportId}/outline`)}
               >
                 Open existing draft
               </button>

@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 import { GripVertical } from 'lucide-react';
 import type { EarningsOutlineSection } from '@/types/earnings';
 import { INK, MUTED, FAINT, ACCENT } from './tokens';
@@ -72,12 +72,21 @@ export function OutlineSectionCard({
   group,
   onToggle,
   dragHandleProps,
+  figuresOpen,
+  onToggleFigures,
+  figuresPanel,
 }: {
   section: EarningsOutlineSection;
   number: number;
   group: 'included' | 'available';
   onToggle?: () => void;
   dragHandleProps?: HTMLAttributes<HTMLSpanElement> & { draggable?: boolean };
+  // A table section owns a set of the company's own lines. The panel opens
+  // underneath the row so choosing figures happens where the user is already
+  // deciding what the report contains, rather than on a screen of its own.
+  figuresOpen?: boolean;
+  onToggleFigures?: () => void;
+  figuresPanel?: ReactNode;
 }) {
   const isRequired = section.requirement === 'required';
   const unavailable = group === 'available' && !section.available;
@@ -108,14 +117,18 @@ export function OutlineSectionCard({
   return (
     <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '11px 14px',
         borderRadius: 12,
         border: '1px solid #E8EAF3',
         background: isRequired ? '#FAFBFE' : '#fff',
         opacity: unavailable ? 0.55 : 1,
+      }}
+    >
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '11px 14px',
       }}
     >
       {/* Lead: grip handle (only for the reorderable included group). */}
@@ -186,7 +199,19 @@ export function OutlineSectionCard({
         ))}
         {isRequired && <span className="badge b-gy">REQUIRED</span>}
         {section.requirement === 'recommended' && dataReady && <span className="badge b-gn">RECOMMENDED</span>}
+        {onToggleFigures && (
+          <button
+            type="button"
+            className="btn bs bsm"
+            aria-expanded={!!figuresOpen}
+            onClick={onToggleFigures}
+          >
+            {figuresOpen ? 'Hide figures' : 'Figures'}
+          </button>
+        )}
       </div>
+    </div>
+      {figuresOpen && figuresPanel}
     </div>
   );
 }

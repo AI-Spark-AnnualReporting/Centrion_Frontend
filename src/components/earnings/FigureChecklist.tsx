@@ -12,7 +12,7 @@
 // Every row shows `label — column`, because the column is the only thing telling
 // those seven equity balances apart.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { EarningsSourceLine } from '@/types/earnings';
 import { INK, MUTED } from './tokens';
 
@@ -24,11 +24,24 @@ interface Props {
 }
 
 export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelection }: Props) {
-  // Seeded from the server's `selected` (a saved selection, else the model's
-  // picks) and owned locally from then on, so ticking is instant.
+  // Seeded from the server's `selected` (a saved selection, else remembered,
+  // else the model's picks) and owned locally from then on, so ticking is
+  // instant.
   const [ticked, setTicked] = useState<Set<string>>(
     () => new Set(lines.filter((l) => l.selected).map((l) => l.id)),
   );
+
+  // The initializer above only runs on the first render, so a caller that mounts
+  // this before its lines have loaded — which is what the outline does, one
+  // section at a time — would show every row unticked no matter what the server
+  // said. Re-seed when a genuinely different set of lines arrives (first load,
+  // switching section, refetch after save) and NOT on an incidental re-render,
+  // which would throw away ticks the user just made.
+  const lineIdentity = useMemo(() => lines.map((l) => l.id).join('|'), [lines]);
+  useEffect(() => {
+    setTicked(new Set(lines.filter((l) => l.selected).map((l) => l.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineIdentity]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 

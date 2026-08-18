@@ -355,7 +355,7 @@ describe('EarningsSetupPage', () => {
         }),
       ),
     );
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-99/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-99/outline'));
   });
 
   it('a 409 surfaces the "active report exists" message with an open-existing link', async () => {
@@ -372,7 +372,7 @@ describe('EarningsSetupPage', () => {
     expect(await screen.findByText('Active report exists')).toBeInTheDocument();
     const link = screen.getByRole('button', { name: /Open existing draft/i });
     fireEvent.click(link);
-    expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
+    expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/outline');
   });
 
   it('has no tab control — both groups are labelled and visible with no prior click', async () => {
@@ -500,7 +500,7 @@ describe('EarningsSetupPage', () => {
     expect(await screen.findByText('Uploading and reading your documents…')).toBeInTheDocument();
 
     // 3) Navigates on success; exactly one draft was ever created.
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/outline'));
     expect(createEarningsReport).toHaveBeenCalledTimes(1);
   });
 
@@ -527,7 +527,7 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(continueBtn());
     await waitFor(() => expect(uploadEarningsSources).toHaveBeenCalledTimes(2));
     expect(createEarningsReport).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/outline'));
   });
 
   it('an extracting/failed narrative source cannot be selected', async () => {

@@ -80,6 +80,7 @@ import type {
   EditEarningsFigurePayload,
   EarningsOutlineSection,
   EarningsOutlineResponse,
+  EarningsSourceLinesResponse,
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
@@ -2784,6 +2785,38 @@ export const earnings = {
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
       { method: "PUT", body: payload },
     ).then(normalizeEarningsOutline),
+
+  // ── The figure checklist (user-metrics lane) ──
+  // A user-metrics quarterly report is built from the company's own workbook, so
+  // its lines carry the workbook's labels and nothing canonical. There is exactly
+  // one way a figure gets into an earnings report: the user ticks it here.
+  //
+  // sectionCode scopes both calls to one section of the outline. Omit it and the
+  // GET returns every line and the POST replaces the whole report's selection —
+  // which is why the outline always passes it.
+  getEarningsSourceLines: (
+    reportId: string,
+    sectionCode?: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsSourceLinesResponse> => {
+    const qs = sectionCode ? `?section_code=${encodeURIComponent(sectionCode)}` : "";
+    return request<EarningsSourceLinesResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines${qs}`,
+      { signal },
+    );
+  },
+
+  // Sets this section's selection rather than adding to it: a line the user
+  // unticked has its figure removed, which is what unticking has to mean.
+  selectEarningsLines: (
+    reportId: string,
+    lineIds: string[],
+    sectionCode?: string,
+  ): Promise<{ report_id: string; selected: number; removed: number }> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/from-lines`,
+      { method: "POST", body: { line_ids: lineIds, section_code: sectionCode ?? null } },
+    ),
 
   // ── Cover template + brand colors ──
   // Same contract style as the quarterly picker, but earnings splits the current

@@ -31,6 +31,8 @@ const h = vi.hoisted(() => {
     navigateMock: vi.fn(),
     getEarningsOutline: vi.fn(),
     saveEarningsOutline: vi.fn(),
+    getEarningsSourceLines: vi.fn(),
+    selectEarningsLines: vi.fn(),
     produceEarningsReport: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
@@ -48,6 +50,8 @@ vi.mock('@/lib/api', () => ({
   earnings: {
     getEarningsOutline: (...a: unknown[]) => h.getEarningsOutline(...a),
     saveEarningsOutline: (...a: unknown[]) => h.saveEarningsOutline(...a),
+    getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
+    selectEarningsLines: (...a: unknown[]) => h.selectEarningsLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
   },
   agentRuns: {
@@ -119,6 +123,31 @@ beforeEach(() => {
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
   h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'completed', error_message: null });
   h.getNodes.mockResolvedValue({ nodes: [] });
+  h.getEarningsSourceLines.mockResolvedValue({
+    report_id: 'rep-1',
+    section_code: 'financial_highlights',
+    lines: [
+      {
+        id: 'qf_1', label: 'Revenue', column: null, group: null,
+        display_label: 'Revenue', value: 424095, unit: 'SAR_million',
+        table: 'Income & Comprehensive Income', source_ref: 'p.1',
+        source_report_id: 'rpt_q1', selected: true, suggested: true,
+        remembered: false, memory_key: 'custom__k1', section_code: 'financial_highlights',
+      },
+      {
+        id: 'qf_2', label: 'Total assets', column: null, group: null,
+        display_label: 'Total assets', value: 1000, unit: 'SAR_million',
+        table: 'Balance Sheet', source_ref: 'p.2',
+        source_report_id: 'rpt_q1', selected: false, suggested: false,
+        remembered: false, memory_key: 'custom__k2', section_code: null,
+      },
+    ],
+    preticked_from: 'suggested',
+    suggested_count: 1,
+    remembered_count: 0,
+    selected_count: 1,
+  });
+  h.selectEarningsLines.mockResolvedValue({ report_id: 'rep-1', selected: 1, removed: 0 });
 });
 
 describe('EarningsOutlinePage', () => {
@@ -420,5 +449,73 @@ describe('EarningsOutlinePage', () => {
         .map((c) => c.getAttribute('aria-label'));
       expect(order).toEqual(['Include Market Context', 'Include Outlook']);
     });
+  });
+});
+
+
+// ── The figure checklist lives here now, not on a screen of its own ──────────
+
+describe('EarningsOutlinePage figure checklist', () => {
+  const TABLE_OUTLINE = {
+    sections: [
+      sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
+            requirement: 'required', included: true, display_order: 0, mode: 'table' }),
+      sec({ section_code: 'ceo_commentary', title: 'CEO Commentary',
+            included: true, display_order: 1, mode: 'quote' }),
+    ],
+  };
+
+  it('offers figures on a table section and not on a prose one', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('Financial Highlights');
+
+    // one Figures button, and it belongs to the table section
+    const buttons = screen.getAllByRole('button', { name: 'Figures' });
+    expect(buttons).toHaveLength(1);
+  });
+
+  it('opening a section loads that section\'s lines, scoped to it', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('Financial Highlights');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
+    await waitFor(() =>
+      expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1', 'financial_highlights'),
+    );
+    expect(await screen.findByLabelText('Revenue')).toBeChecked();
+    expect(screen.getByLabelText('Total assets')).not.toBeChecked();
+  });
+
+  it('saving sends the ticked ids AND the section, so other sections survive', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('Financial Highlights');
+    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
+
+    fireEvent.click(await screen.findByLabelText('Total assets'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save selection' }));
+
+    await waitFor(() =>
+      expect(h.selectEarningsLines).toHaveBeenCalledWith(
+        'rep-1', ['qf_1', 'qf_2'], 'financial_highlights',
+      ),
+    );
+  });
+
+  it('the panel closes again without re-fetching', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('Financial Highlights');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
+    await screen.findByLabelText('Revenue');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide figures' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Revenue')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
+    await screen.findByLabelText('Revenue');
+    expect(h.getEarningsSourceLines).toHaveBeenCalledTimes(1);
   });
 });
