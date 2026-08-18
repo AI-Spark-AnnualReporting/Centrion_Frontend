@@ -233,6 +233,12 @@ export default function OnboardingPage() {
   }, []);
 
   // Apply LLM-extracted fields onto the Review form (onboarding doc-upload path).
+  //
+  // The backend now saves these and returns the MERGED result, so this is applying
+  // what the company row actually holds: a re-upload from step 1 overwrites what the
+  // new document answers and leaves the rest alone. Setting only truthy values is
+  // the same rule on the form side — a field the document is silent about keeps
+  // whatever is already in the box.
   const applyExtracted = (d: ExtractedCompanyProfile) => {
     if (d.description) setDescription(d.description);
     if (d.sector_id) setSectorId(d.sector_id);
@@ -243,6 +249,11 @@ export default function OnboardingPage() {
     if (d.reporting_currency) setReportingCurrency(d.reporting_currency as OnboardingPayload['reporting_currency']);
     if (d.primary_language) setPrimaryLanguage(d.primary_language as OnboardingPayload['primary_language']);
     if (d.listed_exchange) setListedExchange(d.listed_exchange);
+    // website_url is deliberately NOT applied, and sector_name has no field. The
+    // Review step has no website input, so taking the document's URL would silently
+    // replace the one the user gave at signup — in a value they can neither see nor
+    // correct before it is submitted. Same rule the backend follows by leaving
+    // website_url out of PERSISTED_PROFILE_FIELDS.
   };
 
   // "Analyse" on step 1 — upload a document and extract from it (single LLM call).
