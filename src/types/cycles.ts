@@ -2,7 +2,7 @@
 // service (a separate backend from Centriyon; see `sarRequest` in lib/api.ts).
 // Field names mirror the SAR API exactly so payloads round-trip without mapping.
 
-export type ContentLanguage = "en" | "ar";
+export type ContentLanguage = "english" | "arabic";
 
 export type CycleStatus =
   | "draft"
@@ -52,7 +52,7 @@ export interface Cycle {
 }
 
 // Exact request body for POST/PUT /api/v1/admin/cycles. Do NOT add company_id
-// (derived from JWT) or content_language. The reporting sector AND the
+// (derived from JWT). The reporting sector AND the
 // company-profile attributes (listed/private, Shariah, subsidiaries, sukuk) are
 // set at onboarding and the cycle inherits them from the company — NOT sent here.
 export interface CreateCyclePayload {
@@ -62,6 +62,7 @@ export interface CreateCyclePayload {
   start_date: string;
   end_date: string;
   submission_deadline: string;
+  content_language?: ContentLanguage; // optional; backend defaults to "english"
   kickoff_brief?: string;
 }
 
