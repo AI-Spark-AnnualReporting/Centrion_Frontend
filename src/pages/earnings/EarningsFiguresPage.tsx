@@ -7,19 +7,23 @@
 // So the user says what they want in a section, in their own words, and the model
 // is asked FOR THAT SECTION with those words in the call. Nothing runs until they
 // ask — a section they never touch stays empty and costs nothing.
+//
+// The figures themselves render as a statement extract rather than a list: the
+// form these numbers take in the document they came from. See FigureLedger.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { earnings, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
-import type {
-  EarningsFigureSection,
-  EarningsSourceLine,
-} from '@/types/earnings';
+import type { EarningsFigureSection, EarningsSourceLine } from '@/types/earnings';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { FigureDialog } from '@/components/earnings/FigureDialog';
-import { INK, MUTED, FAINT } from '@/components/earnings/tokens';
+import { FigureLedger } from '@/components/earnings/FigureLedger';
+import { FiguresRail } from '@/components/earnings/FiguresRail';
+import { SectionBrief } from '@/components/earnings/SectionBrief';
+import { FigureSearchState, FigureSearchSweep } from '@/components/earnings/FigureSearchState';
+import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
@@ -45,8 +49,18 @@ export default function EarningsFiguresPage() {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [searching, setSearching] = useState<string | null>(null);
   const [sectionError, setSectionError] = useState<Record<string, string>>({});
+  // Which sections just landed, so the ledger staggers in once and not on every
+  // unrelated re-render.
+  const [justLanded, setJustLanded] = useState<Record<string, boolean>>({});
+  const [editingBrief, setEditingBrief] = useState<Record<string, boolean>>({});
 
-  // The Add-figure picker, and the lines it offers.
+  // The report's own line labels, used as the material for the reading state.
+  const [scanLabels, setScanLabels] = useState<string[]>([]);
+  const [lineCount, setLineCount] = useState(0);
+
+  const [activeCode, setActiveCode] = useState<string | null>(null);
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+
   const [picking, setPicking] = useState<EarningsFigureSection | null>(null);
   const [pickLines, setPickLines] = useState<EarningsSourceLine[] | null>(null);
   const [pickBusy, setPickBusy] = useState(false);
@@ -63,18 +77,56 @@ export default function EarningsFiguresPage() {
     try {
       const res = await earnings.getEarningsFigureSections(reportId);
       setSections(res.sections);
-      setPrompts(
-        Object.fromEntries(res.sections.map((s) => [s.section_code, s.prompt ?? ''])),
-      );
+      setPrompts(Object.fromEntries(res.sections.map((s) => [s.section_code, s.prompt ?? ''])));
+      setActiveCode((prev) => prev ?? res.sections[0]?.section_code ?? null);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Couldn't load your figures.");
+      setLoadError(
+        e instanceof ApiError ? e.message : "Couldn't load this report's sections. Try reloading.",
+      );
     }
   }, [reportId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Fetched once, quietly, purely so the reading state can stream real labels
+  // rather than a generic busy string. Failure costs nothing visible.
+  useEffect(() => {
+    if (!reportId) return;
+    let alive = true;
+    earnings
+      .getEarningsSourceLines(reportId)
+      .then((res) => {
+        if (!alive) return;
+        setLineCount(res.lines.length);
+        setScanLabels(res.lines.map((l) => l.display_label).filter(Boolean));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [reportId]);
+
+  // Which section the reader is on, for the rail. Purely an enhancement — where
+  // IntersectionObserver is missing (jsdom, older browsers) the rail still works,
+  // it just stops following the scroll.
+  useEffect(() => {
+    if (!sections?.length || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const seen = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        const code = seen?.target.getAttribute('data-code');
+        if (code) setActiveCode(code);
+      },
+      { rootMargin: '-96px 0px -60% 0px' },
+    );
+    Object.values(cardRefs.current).forEach((el) => el && io.observe(el));
+    return () => io.disconnect();
+  }, [sections]);
 
   const replaceSection = (code: string, figures: EarningsFigureSection['figures']) =>
     setSections((prev) =>
@@ -90,10 +142,15 @@ export default function EarningsFiguresPage() {
     try {
       const res = await earnings.searchSectionFigures(reportId, code, prompts[code] ?? '');
       replaceSection(code, res.figures);
+      setJustLanded((p) => ({ ...p, [code]: true }));
+      setEditingBrief((p) => ({ ...p, [code]: false }));
     } catch (e) {
       setSectionError((p) => ({
         ...p,
-        [code]: e instanceof ApiError ? e.message : "Couldn't search that section.",
+        [code]:
+          e instanceof ApiError
+            ? e.message
+            : "That search didn't reach the server. Check your connection and try again.",
       }));
     } finally {
       setSearching(null);
@@ -102,14 +159,19 @@ export default function EarningsFiguresPage() {
 
   const removeFigure = async (section: EarningsFigureSection, figureId: string) => {
     if (!reportId) return;
-    const keep = section.figures.filter((f) => f.id !== figureId).map((f) => f.id);
     const before = section.figures;
-    replaceSection(section.section_code, section.figures.filter((f) => f.id !== figureId));
+    const keep = before.filter((f) => f.id !== figureId);
+    replaceSection(section.section_code, keep);
+    setJustLanded((p) => ({ ...p, [section.section_code]: false }));
     try {
-      const res = await earnings.setSectionFigures(reportId, section.section_code, keep);
+      const res = await earnings.setSectionFigures(
+        reportId,
+        section.section_code,
+        keep.map((f) => f.id),
+      );
       replaceSection(section.section_code, res.figures);
     } catch {
-      replaceSection(section.section_code, before);   // put it back rather than lie
+      replaceSection(section.section_code, before); // put it back rather than lie
     }
   };
 
@@ -131,6 +193,7 @@ export default function EarningsFiguresPage() {
     try {
       const res = await earnings.setSectionFigures(reportId, picking.section_code, lineIds);
       replaceSection(picking.section_code, res.figures);
+      setJustLanded((p) => ({ ...p, [picking.section_code]: false }));
       setPicking(null);
     } finally {
       setPickBusy(false);
@@ -144,9 +207,21 @@ export default function EarningsFiguresPage() {
       const handle = await earnings.produceEarningsReport(reportId);
       setProduceRun({ run_id: handle.run_id, poll_url: handle.poll_url });
     } catch (e) {
-      setContinueError(e instanceof ApiError ? e.message : "Couldn't generate the report.");
+      setContinueError(
+        e instanceof ApiError ? e.message : "Couldn't start generating. Try again in a moment.",
+      );
     }
   };
+
+  const jumpTo = (code: string) => {
+    setActiveCode(code);
+    cardRefs.current[code]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const emptyCount = useMemo(
+    () => (sections ?? []).filter((s) => s.total === 0).length,
+    [sections],
+  );
 
   // Producing takes over the page, the same handoff the outline used to own.
   if (produceRun) {
@@ -173,7 +248,8 @@ export default function EarningsFiguresPage() {
           milestones={PRODUCE_MILESTONES}
           tips={PRODUCE_TIPS}
           controlledProgress={computeProgress(
-            phase === 'completed' ? 'completed' : 'running', producePoll.nodes,
+            phase === 'completed' ? 'completed' : 'running',
+            producePoll.nodes,
           )}
           done={phase === 'completed'}
           onDone={() => navigate(`/earnings/${reportId}/preview`)}
@@ -182,126 +258,195 @@ export default function EarningsFiguresPage() {
     );
   }
 
-  const totalFigures = (sections ?? []).reduce((n, s) => n + s.total, 0);
-  const emptyCount = (sections ?? []).filter((s) => s.total === 0).length;
-
   return (
-    <div style={{ padding: '18px 22px 40px' }}>
+    <div style={{ padding: '18px 22px 44px' }}>
       <EarningsStepper activeStep={3} reportId={reportId} />
 
-      <div style={{ margin: '18px 0 14px' }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: 0 }}>
+      <header style={{ margin: '20px 0 18px', maxWidth: 640 }}>
+        <h1 style={{ fontSize: 21, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>
           Choose your figures
         </h1>
-        <p style={{ fontSize: 13, color: MUTED, margin: '4px 0 0', maxWidth: 720 }}>
-          For each section, say what kind of figures you want in it — in your own words —
-          then search. We read your report's own lines and pick the ones that match.
+        <p style={{ fontSize: 13, color: MUTED, margin: '5px 0 0', lineHeight: 1.55 }}>
+          Tell each section what belongs in it, in your own words. We read your report's own
+          lines and bring back the ones that match.
         </p>
-      </div>
+      </header>
 
       {loadError && (
-        <div role="alert" style={{ color: '#B33A3E', fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+        <div
+          role="alert"
+          style={{ color: DANGER, fontSize: 13, fontWeight: 700, marginBottom: 14 }}
+        >
           {loadError}
         </div>
       )}
 
       {sections === null && !loadError ? (
-        <div style={{ padding: '40px 0', textAlign: 'center' }}>
+        <div style={{ padding: '60px 0', textAlign: 'center' }}>
           <Spinner />
         </div>
       ) : (
-        (sections ?? []).map((s) => (
-          <div key={s.section_code} className="card" style={{ marginBottom: 14, padding: '14px 18px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{s.title}</div>
-              <div style={{ fontSize: 12, color: s.total ? INK : FAINT, fontVariantNumeric: 'tabular-nums' }}>
-                {s.total} {s.total === 1 ? 'figure' : 'figures'}
-              </div>
-            </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            gap: 18,
+            alignItems: 'start',
+          }}
+          className="fig-grid"
+        >
+          <div className="fig-rail">
+            <FiguresRail
+              sections={sections ?? []}
+              activeCode={activeCode}
+              onSelect={jumpTo}
+            />
+          </div>
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '10px 0 0' }}>
-              <textarea
-                className="inp"
-                aria-label={`What figures belong in ${s.title}`}
-                placeholder="e.g. revenue, margins and anything by segment"
-                value={prompts[s.section_code] ?? ''}
-                onChange={(e) => setPrompts((p) => ({ ...p, [s.section_code]: e.target.value }))}
-                rows={2}
-                style={{ flex: 1, resize: 'vertical', fontSize: 12.5 }}
-              />
-              <button
-                type="button"
-                className="btn bp bsm"
-                disabled={searching === s.section_code}
-                onClick={() => void search(s.section_code)}
-                style={{ flexShrink: 0, minWidth: 130 }}
-              >
-                {searching === s.section_code ? 'Searching…' : 'Search figures'}
-              </button>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+            {(sections ?? []).map((s) => {
+              const isSearching = searching === s.section_code;
+              const has = s.total > 0;
+              const collapsed = has && !editingBrief[s.section_code] && !isSearching;
+              return (
+                <section
+                  key={s.section_code}
+                  data-code={s.section_code}
+                  ref={(el) => {
+                    cardRefs.current[s.section_code] = el;
+                  }}
+                  className="card"
+                  style={{
+                    padding: '15px 18px 16px',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    scrollMarginTop: 14,
+                  }}
+                >
+                  {isSearching && <FigureSearchSweep />}
 
-            {searching === s.section_code && (
-              <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>
-                Reading your report's lines for this section…
-              </div>
-            )}
-            {sectionError[s.section_code] && (
-              <div role="alert" style={{ fontSize: 12, color: '#B33A3E', fontWeight: 700, marginTop: 8 }}>
-                {sectionError[s.section_code]}
-              </div>
-            )}
-
-            {s.figures.length > 0 && (
-              <div style={{ marginTop: 12, border: '1px solid #E8EAF3', borderRadius: 8 }}>
-                {s.figures.map((f) => (
                   <div
-                    key={f.id}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px',
-                      borderTop: '1px solid #F0F1F7', fontSize: 12, color: INK,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      marginBottom: 10,
                     }}
                   >
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {f.display_label}
-                    </span>
-                    <span style={{ flexShrink: 0, color: MUTED, fontVariantNumeric: 'tabular-nums' }}>
-                      {f.value?.toLocaleString()} {f.unit}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${f.display_label}`}
-                      onClick={() => void removeFigure(s, f.id)}
+                    <h2
                       style={{
-                        border: 'none', background: 'none', cursor: 'pointer',
-                        color: MUTED, fontSize: 15, lineHeight: 1, padding: '0 2px',
+                        fontSize: 14,
+                        fontWeight: 800,
+                        color: INK,
+                        margin: 0,
+                        letterSpacing: '-.1px',
                       }}
                     >
-                      ×
+                      {s.title}
+                    </h2>
+                    {has ? (
+                      <span
+                        className={justLanded[s.section_code] ? 'analysis-pop' : undefined}
+                        style={{
+                          flexShrink: 0,
+                          padding: '2px 9px',
+                          borderRadius: 20,
+                          background: '#EEEEFF',
+                          color: ACCENT,
+                          fontFamily: "'DM Mono', monospace",
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {s.total}
+                      </span>
+                    ) : (
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: FAINT }}>
+                        Tell us what belongs here
+                      </span>
+                    )}
+                  </div>
+
+                  <SectionBrief
+                    sectionTitle={s.title}
+                    value={prompts[s.section_code] ?? ''}
+                    onChange={(v) => setPrompts((p) => ({ ...p, [s.section_code]: v }))}
+                    onSearch={() => void search(s.section_code)}
+                    searching={isSearching}
+                    collapsed={collapsed}
+                    onExpand={() =>
+                      setEditingBrief((p) => ({ ...p, [s.section_code]: true }))
+                    }
+                  />
+
+                  {isSearching && (
+                    <FigureSearchState lineCount={lineCount} labels={scanLabels} />
+                  )}
+
+                  {sectionError[s.section_code] && (
+                    <div
+                      role="alert"
+                      style={{
+                        fontSize: 12,
+                        color: DANGER,
+                        fontWeight: 700,
+                        marginTop: 10,
+                      }}
+                    >
+                      {sectionError[s.section_code]}
+                    </div>
+                  )}
+
+                  {!isSearching && (
+                    <div className={justLanded[s.section_code] ? 'analysis-reading' : undefined}>
+                      {justLanded[s.section_code] && has && (
+                        <div className="analysis-rule" style={{ marginTop: 14, maxWidth: 64 }} />
+                      )}
+                      <FigureLedger
+                        figures={s.figures}
+                        onRemove={(id) => void removeFigure(s, id)}
+                        animate={!!justLanded[s.section_code]}
+                      />
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                    <button
+                      type="button"
+                      className="btn bs bsm"
+                      onClick={() => void openPicker(s)}
+                    >
+                      Add figure
                     </button>
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-              <button type="button" className="btn bs bsm" onClick={() => void openPicker(s)}>
-                Add figure
-              </button>
-            </div>
+                </section>
+              );
+            })}
           </div>
-        ))
+        </div>
       )}
 
       <div
         style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, marginTop: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 14,
+          marginTop: 20,
+          paddingTop: 16,
+          borderTop: `1px solid ${BORDER_SOFT}`,
+          flexWrap: 'wrap',
         }}
       >
-        <button type="button" className="btn bs" onClick={() => navigate(`/earnings/${reportId}/outline`)}>
+        <button
+          type="button"
+          className="btn bs"
+          onClick={() => navigate(`/earnings/${reportId}/outline`)}
+        >
           ← Back
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {emptyCount > 0 && (
             <span style={{ fontSize: 12, color: MUTED }}>
               {emptyCount} {emptyCount === 1 ? 'section has' : 'sections have'} no figures and
@@ -309,7 +454,7 @@ export default function EarningsFiguresPage() {
             </span>
           )}
           {continueError && (
-            <span role="alert" style={{ fontSize: 12, color: '#B33A3E', fontWeight: 700 }}>
+            <span role="alert" style={{ fontSize: 12, color: DANGER, fontWeight: 700 }}>
               {continueError}
             </span>
           )}
@@ -322,7 +467,7 @@ export default function EarningsFiguresPage() {
       {picking && (
         <FigureDialog title={`Add a figure to ${picking.title}`} onClose={() => setPicking(null)}>
           {pickLines === null ? (
-            <div style={{ padding: 40, textAlign: 'center' }}>
+            <div style={{ padding: 60, textAlign: 'center' }}>
               <Spinner />
             </div>
           ) : (
@@ -335,10 +480,6 @@ export default function EarningsFiguresPage() {
           )}
         </FigureDialog>
       )}
-
-      <div style={{ fontSize: 11, color: FAINT, marginTop: 10 }}>
-        {totalFigures} {totalFigures === 1 ? 'figure' : 'figures'} across your report
-      </div>
     </div>
   );
 }

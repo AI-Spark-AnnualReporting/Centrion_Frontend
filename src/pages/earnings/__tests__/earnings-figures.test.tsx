@@ -109,15 +109,15 @@ beforeEach(() => {
 describe('EarningsFiguresPage', () => {
   it('opens with every section empty and no model call', async () => {
     renderPage();
-    expect(await screen.findByText('Financial Highlights')).toBeInTheDocument();
-    expect(screen.getByText('Cash Flow Highlights')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Financial Highlights' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Cash Flow Highlights' })).toBeInTheDocument();
     expect(h.searchSectionFigures).not.toHaveBeenCalled();
-    expect(screen.getAllByText('0 figures')).toHaveLength(2);
+    expect(screen.getAllByText('Tell us what belongs here')).toHaveLength(2);
   });
 
   it("sends the user's words for that one section", async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
 
     fireEvent.change(
       screen.getByLabelText('What figures belong in Financial Highlights'),
@@ -132,37 +132,41 @@ describe('EarningsFiguresPage', () => {
 
   it('shows what came back, under that section', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
 
+    // Wait for the search itself to land before reading the ledger — the rows
+    // are rendered by the state it sets, not by the click.
+    await waitFor(() => expect(h.searchSectionFigures).toHaveBeenCalled());
     expect(await screen.findByText('Revenue')).toBeInTheDocument();
     expect(screen.getByText('Gross margin')).toBeInTheDocument();
-    expect(screen.getByText('2 figures')).toBeInTheDocument();
+    expect(screen.getByText('2 lines')).toBeInTheDocument();
   });
 
   it('searching one section leaves the others alone', async () => {
     renderPage();
-    await screen.findByText('Cash Flow Highlights');
+    await screen.findByRole('heading', { name: 'Cash Flow Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
 
     await screen.findByText('Revenue');
     expect(h.searchSectionFigures).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('0 figures')).toBeInTheDocument();   // cash flow, untouched
+    // cash flow, untouched — still inviting a brief
+    expect(screen.getByText('Tell us what belongs here')).toBeInTheDocument();
   });
 
   it('a failed search says so and keeps the section as it was', async () => {
     h.searchSectionFigures.mockRejectedValue(new h.MockApiError(500, 'Model unavailable'));
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Model unavailable');
-    expect(screen.getAllByText('0 figures')).toHaveLength(2);
+    expect(screen.getAllByText('Tell us what belongs here')).toHaveLength(2);
   });
 
   it('removing a figure saves the rest of the section', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
     await screen.findByText('Gross margin');
 
@@ -174,7 +178,7 @@ describe('EarningsFiguresPage', () => {
 
   it('Add figure opens the picker for that section', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Add figure' })[0]);
 
     await waitFor(() =>
@@ -188,7 +192,7 @@ describe('EarningsFiguresPage', () => {
 
   it('the picker saves the whole tick set for that section', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Add figure' })[0]);
     await screen.findByRole('checkbox', { name: 'Inventories' });
 
@@ -203,7 +207,7 @@ describe('EarningsFiguresPage', () => {
 
   it('warns about empty sections rather than blocking Continue', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     expect(screen.getByText(/2 sections have no figures/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
@@ -212,7 +216,7 @@ describe('EarningsFiguresPage', () => {
 
   it('Continue produces here, and only then goes to Preview', async () => {
     renderPage();
-    await screen.findByText('Financial Highlights');
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
 
     expect(await screen.findByText('Composing your report')).toBeInTheDocument();
