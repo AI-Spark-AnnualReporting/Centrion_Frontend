@@ -227,28 +227,73 @@ describe('EarningsFiguresPage', () => {
     );
   });
 
-  it('a section that has figures offers no second search', async () => {
-    // One search per section: after it lands, the brief is a record of what was
-    // asked for and the section is curated by hand.
-    h.getEarningsFigureSections.mockResolvedValue({
-      ...SECTIONS,
-      sections: [
-        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
-          prompt: 'revenue and margins', figures: [fig('qf_1', 'Revenue')], total: 1 },
-        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
-          prompt: null, figures: [], total: 0 },
-      ],
-    });
+  const FILLED = {
+    ...SECTIONS,
+    sections: [
+      { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+        prompt: 'revenue and margins', figures: [fig('qf_1', 'Revenue')], total: 1 },
+      { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
+        prompt: null, figures: [], total: 0 },
+    ],
+  };
+
+  it('quotes the brief of a section that has figures, until you ask again', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED);
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
 
-    // only the empty section still offers it
-    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(1);
-    // and the filled one shows what was asked for, as text
+    // quoted, not an input — the empty section is the one still asking
     expect(screen.getByText('“revenue and margins”')).toBeInTheDocument();
     expect(
       screen.queryByLabelText('What figures belong in Financial Highlights'),
     ).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
+
+    // reopened with what was asked last time, ready to be changed
+    const box = await screen.findByLabelText('What figures belong in Financial Highlights');
+    expect(box).toHaveValue('revenue and margins');
+    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(2);
+  });
+
+  it('a second ask sends the new words and reports what it added', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED);
+    h.searchSectionFigures.mockResolvedValue({
+      report_id: 'rep-1', section_code: 's04_financial_highlights',
+      prompt: 'and the segment splits', found: 2, total: 3,
+      figures: [fig('qf_1', 'Revenue'), fig('qf_4', 'Upstream'), fig('qf_5', 'Downstream')],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
+
+    const box = await screen.findByLabelText('What figures belong in Financial Highlights');
+    fireEvent.change(box, { target: { value: 'and the segment splits' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+
+    await waitFor(() =>
+      expect(h.searchSectionFigures).toHaveBeenCalledWith(
+        'rep-1', 's04_financial_highlights', 'and the segment splits'));
+    // the one it already had is still there, with the two new ones
+    expect(await screen.findByText('Upstream')).toBeInTheDocument();
+    expect(screen.getByText('Revenue')).toBeInTheDocument();
+    expect(await screen.findByText('Added 2 more.')).toBeInTheDocument();
+  });
+
+  it('an ask that finds nothing new says so rather than looking broken', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED);
+    h.searchSectionFigures.mockResolvedValue({
+      report_id: 'rep-1', section_code: 's04_financial_highlights',
+      prompt: 'x', found: 0, total: 1, figures: [fig('qf_1', 'Revenue')],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
+    await screen.findByLabelText('What figures belong in Financial Highlights');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+
+    expect(await screen.findByText(/Nothing new for those words/)).toBeInTheDocument();
   });
 
   it('a section keeps Add figure whether or not it has any', async () => {

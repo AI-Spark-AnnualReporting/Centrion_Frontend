@@ -5,12 +5,13 @@
 // steps back to a quoted line and the figures take the weight, because they are
 // the content.
 //
-// The search runs ONCE per section. After it has figures the brief is a record of
-// what was asked for, not an input: the section is curated by hand from there,
-// through Add figure.
+// Asking again ADDS. The model never sees a line that is already in a section, so
+// a second brief picks up where the first left off rather than handing back what
+// is on screen. Three lines from a brief that undersold what you wanted should be
+// a re-prompt, not a dead end -- so the quoted brief is a door, not a receipt.
 
 import { useEffect, useRef } from 'react';
-import { INK, MUTED, FAINT, BORDER } from './tokens';
+import { INK, MUTED, FAINT, BORDER, ACCENT } from './tokens';
 
 // A worked example teaches the shape of a good brief better than instructions do:
 // a kind of figure, not a list of exact labels.
@@ -22,19 +23,23 @@ export function SectionBrief({
   onSearch,
   searching,
   collapsed,
+  onExpand,
   sectionTitle,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSearch: () => void;
   searching: boolean;
-  /** Read-only once the section has figures — the search runs once. */
+  /** Quoted rather than editable — the section already has figures. */
   collapsed: boolean;
+  /** Reopen it to ask again, in different words. */
+  onExpand: () => void;
   sectionTitle: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Grows with the text instead of scrolling inside a fixed box.
+  // Grows with the text instead of scrolling inside a fixed box. Reopening focuses
+  // at the end of what was asked last time — this is an edit, not a blank page.
   useEffect(() => {
     const el = ref.current;
     if (!el || collapsed) return;
@@ -45,10 +50,19 @@ export function SectionBrief({
   if (collapsed) {
     return (
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 2 }}>
-        <span
+        <button
+          type="button"
+          onClick={onExpand}
+          title="Ask again, in different words"
           style={{
             flex: 1,
             minWidth: 0,
+            textAlign: 'left',
+            border: 'none',
+            background: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
             fontSize: 12,
             color: value.trim() ? MUTED : FAINT,
             fontStyle: value.trim() ? 'italic' : 'normal',
@@ -58,7 +72,24 @@ export function SectionBrief({
           }}
         >
           {value.trim() ? `“${value.trim()}”` : 'No brief — these were picked for you'}
-        </span>
+        </button>
+        <button
+          type="button"
+          onClick={onExpand}
+          style={{
+            flexShrink: 0,
+            border: 'none',
+            background: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 11.5,
+            fontWeight: 700,
+            color: ACCENT,
+          }}
+        >
+          Ask again
+        </button>
       </div>
     );
   }

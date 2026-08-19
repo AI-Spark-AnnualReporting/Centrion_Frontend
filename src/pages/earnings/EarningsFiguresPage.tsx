@@ -52,6 +52,10 @@ export default function EarningsFiguresPage() {
   // Which sections just landed, so the ledger staggers in once and not on every
   // unrelated re-render.
   const [justLanded, setJustLanded] = useState<Record<string, boolean>>({});
+  // Reopened briefs — a section with figures quotes its brief until you ask again.
+  const [editingBrief, setEditingBrief] = useState<Record<string, boolean>>({});
+  // What the last ask actually added, so "it did nothing" is never the impression.
+  const [searchNote, setSearchNote] = useState<Record<string, string>>({});
 
   // The report's own line labels, used as the material for the reading state.
   const [scanLabels, setScanLabels] = useState<string[]>([]);
@@ -138,10 +142,25 @@ export default function EarningsFiguresPage() {
     if (!reportId) return;
     setSearching(code);
     setSectionError((p) => ({ ...p, [code]: '' }));
+    setSearchNote((p) => ({ ...p, [code]: '' }));
     try {
+      const before = sections?.find((s) => s.section_code === code)?.total ?? 0;
       const res = await earnings.searchSectionFigures(reportId, code, prompts[code] ?? '');
       replaceSection(code, res.figures);
       setJustLanded((p) => ({ ...p, [code]: true }));
+      setEditingBrief((p) => ({ ...p, [code]: false }));
+      // Asking again adds, so nothing new looks identical to nothing happening.
+      setSearchNote((p) => ({
+        ...p,
+        [code]: res.found
+          ? before
+            ? `Added ${res.found} more.`
+            : ''
+          : res.note ??
+            (before
+              ? 'Nothing new for those words — everything else is already in a section.'
+              : 'No lines matched. Try describing the figures differently.'),
+      }));
     } catch (e) {
       setSectionError((p) => ({
         ...p,
@@ -265,10 +284,10 @@ export default function EarningsFiguresPage() {
           Choose your figures
         </h1>
         <p style={{ fontSize: 13, color: MUTED, margin: '5px 0 0', lineHeight: 1.55 }}>
-          Tell each section what belongs in it, in your own words, and search once. We
-          read your report's own lines and bring back the ones that match — then you add
-          or remove any of them by hand. A line only goes to one section, unless you put
-          it in another yourself.
+          Tell each section what belongs in it, in your own words. We read your report's
+          own lines and bring back the ones that match. Ask again in different words and
+          it adds to what is there, never repeating a line you already have — or add and
+          remove any of them by hand.
         </p>
       </header>
 
@@ -309,7 +328,7 @@ export default function EarningsFiguresPage() {
               const has = s.total > 0;
               // The brief is an input while the section is empty and a record of
               // what was asked for once it is not. One search per section.
-              const collapsed = has && !isSearching;
+              const collapsed = has && !isSearching && !editingBrief[s.section_code];
               return (
                 <section
                   key={s.section_code}
@@ -377,10 +396,26 @@ export default function EarningsFiguresPage() {
                     onSearch={() => void search(s.section_code)}
                     searching={isSearching}
                     collapsed={collapsed}
+                    onExpand={() =>
+                      setEditingBrief((p) => ({ ...p, [s.section_code]: true }))
+                    }
                   />
 
                   {isSearching && (
                     <FigureSearchState lineCount={lineCount} labels={scanLabels} />
+                  )}
+
+                  {!isSearching && !sectionError[s.section_code]
+                    && searchNote[s.section_code] && (
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: MUTED,
+                        marginTop: 9,
+                      }}
+                    >
+                      {searchNote[s.section_code]}
+                    </div>
                   )}
 
                   {sectionError[s.section_code] && (

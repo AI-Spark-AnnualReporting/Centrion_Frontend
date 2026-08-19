@@ -198,7 +198,9 @@ export interface EarningsSectionFiguresResponse {
   report_id: string;
   section_code: string;
   prompt?: string | null;
-  found?: number; // search only: how many the model returned this time
+  found?: number; // search only: how many are NEW this time, not the section's total
+  /** Search only: why nothing came back, when the model was never asked. */
+  note?: string;
   figures: EarningsSectionFigure[];
   total: number;
   removed?: number; // set only
