@@ -2796,26 +2796,23 @@ export const earnings = {
   // which is why the outline always passes it.
   getEarningsSourceLines: (
     reportId: string,
-    sectionCode?: string,
     signal?: AbortSignal,
-  ): Promise<EarningsSourceLinesResponse> => {
-    const qs = sectionCode ? `?section_code=${encodeURIComponent(sectionCode)}` : "";
-    return request<EarningsSourceLinesResponse>(
-      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines${qs}`,
+  ): Promise<EarningsSourceLinesResponse> =>
+    request<EarningsSourceLinesResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines`,
       { signal },
-    );
-  },
+    ),
 
-  // Sets this section's selection rather than adding to it: a line the user
-  // unticked has its figure removed, which is what unticking has to mean.
+  // Sets the report's whole selection rather than adding to it: a line the user
+  // unticked has its figure removed, which is what unticking has to mean. Each
+  // entry carries the section its dropdown is on.
   selectEarningsLines: (
     reportId: string,
-    lineIds: string[],
-    sectionCode?: string,
+    selections: { line_id: string; section_code: string }[],
   ): Promise<{ report_id: string; selected: number; removed: number }> =>
     request(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/from-lines`,
-      { method: "POST", body: { line_ids: lineIds, section_code: sectionCode ?? null } },
+      { method: "POST", body: { selections } },
     ),
 
   // ── Cover template + brand colors ──

@@ -125,7 +125,11 @@ beforeEach(() => {
   h.getNodes.mockResolvedValue({ nodes: [] });
   h.getEarningsSourceLines.mockResolvedValue({
     report_id: 'rep-1',
-    section_code: 'financial_highlights',
+    sections: [
+      { section_code: 'financial_highlights', title: 'Financial Highlights' },
+      { section_code: 'balance_sheet', title: 'Balance Sheet' },
+    ],
+    counts_by_section: { financial_highlights: 1 },
     lines: [
       {
         id: 'qf_1', label: 'Revenue', column: null, group: null,
@@ -453,69 +457,87 @@ describe('EarningsOutlinePage', () => {
 });
 
 
-// ── The figure checklist lives here now, not on a screen of its own ──────────
+// ── One checklist for the report, each line saying where it goes ────────────
+//
+// It used to open per section and hide any line filed elsewhere, so a section the
+// model skipped showed every unfiled line with nothing ticked — which read as
+// "nothing was picked" when the picks were simply filed under other sections.
 
 describe('EarningsOutlinePage figure checklist', () => {
   const TABLE_OUTLINE = {
     sections: [
       sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
             requirement: 'required', included: true, display_order: 0, mode: 'table' }),
+      sec({ section_code: 'balance_sheet', title: 'Balance Sheet',
+            included: true, display_order: 1, mode: 'table' }),
       sec({ section_code: 'ceo_commentary', title: 'CEO Commentary',
-            included: true, display_order: 1, mode: 'quote' }),
+            included: true, display_order: 2, mode: 'quote' }),
     ],
   };
 
-  it('offers figures on a table section and not on a prose one', async () => {
+  const openPanel = async () => {
     h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
     renderPage();
     await screen.findByText('Financial Highlights');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
+    return screen.findByRole('checkbox', { name: 'Revenue' });
+  };
 
-    // one Figures button, and it belongs to the table section
-    const buttons = screen.getAllByRole('button', { name: 'Figures' });
-    expect(buttons).toHaveLength(1);
+  it('there is one panel for the whole report, not one per section', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('Financial Highlights');
+    expect(screen.getAllByRole('button', { name: 'Choose figures' })).toHaveLength(1);
   });
 
-  it('opening a section loads that section\'s lines, scoped to it', async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
-    renderPage();
-    await screen.findByText('Financial Highlights');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
-    await waitFor(() =>
-      expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1', 'financial_highlights'),
-    );
-    expect(await screen.findByLabelText('Revenue')).toBeChecked();
-    expect(screen.getByLabelText('Total assets')).not.toBeChecked();
+  it('opening it fetches every line once, unscoped', async () => {
+    await openPanel();
+    expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1');
+    // both lines are offered — nothing is hidden for being filed elsewhere
+    expect(screen.getByRole('checkbox', { name: 'Revenue' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Total assets' })).toBeInTheDocument();
   });
 
-  it('saving sends the ticked ids AND the section, so other sections survive', async () => {
+  it('each section is badged with how many figures it is getting', async () => {
     h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
     renderPage();
     await screen.findByText('Financial Highlights');
-    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
 
-    fireEvent.click(await screen.findByLabelText('Total assets'));
+    // a section the model filed nothing into says 0 rather than looking broken
+    await waitFor(() => expect(screen.getByText('1 FIGURE')).toBeInTheDocument());
+    expect(screen.getByText('0 FIGURES')).toBeInTheDocument();
+  });
+
+  it('a prose section gets no figure badge at all', async () => {
+    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+    renderPage();
+    await screen.findByText('CEO Commentary');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
+    await waitFor(() => expect(screen.getByText('1 FIGURE')).toBeInTheDocument());
+    // two table sections badged, and only those two
+    expect(screen.getAllByText(/FIGURES?$/)).toHaveLength(2);
+  });
+
+  it('saving sends every ticked line with the section it is going to', async () => {
+    await openPanel();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Total assets' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save selection' }));
 
-    await waitFor(() =>
-      expect(h.selectEarningsLines).toHaveBeenCalledWith(
-        'rep-1', ['qf_1', 'qf_2'], 'financial_highlights',
-      ),
-    );
+    await waitFor(() => expect(h.selectEarningsLines).toHaveBeenCalledTimes(1));
+    const [reportId, sent] = h.selectEarningsLines.mock.calls[0];
+    expect(reportId).toBe('rep-1');
+    expect(new Set((sent as { line_id: string }[]).map((x) => x.line_id)))
+      .toEqual(new Set(['qf_1', 'qf_2']));
   });
 
-  it('the panel closes again without re-fetching', async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
-    renderPage();
-    await screen.findByText('Financial Highlights');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
-    await screen.findByLabelText('Revenue');
+  it('closing and reopening does not re-run the model', async () => {
+    await openPanel();
     fireEvent.click(screen.getByRole('button', { name: 'Hide figures' }));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Revenue' })).toBeNull());
 
-    await waitFor(() => expect(screen.queryByLabelText('Revenue')).toBeNull());
-    fireEvent.click(screen.getByRole('button', { name: 'Figures' }));
-    await screen.findByLabelText('Revenue');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
+    await screen.findByRole('checkbox', { name: 'Revenue' });
     expect(h.getEarningsSourceLines).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,7 +7,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import type {
   EarningsOutlineSection,
   EarningsOutlineResponse,
-  EarningsSourceLine,
+  EarningsSourceLinesResponse,
 } from '@/types/earnings';
 import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
@@ -85,39 +85,39 @@ export default function EarningsOutlinePage() {
   // Which section's figure checklist is open, and that section's lines.
   // Loaded on expand rather than up front: a report can carry a thousand lines
   // and the user only ever looks at one section at a time.
-  const [openFigures, setOpenFigures] = useState<string | null>(null);
-  const [figureLines, setFigureLines] = useState<Record<string, EarningsSourceLine[]>>({});
+  // ONE panel for the whole report. It used to open per section and hide any
+  // line filed elsewhere, which made a section the model skipped show every
+  // unfiled line with nothing ticked -- it read as "nothing was picked" when the
+  // picks were simply filed under other sections. Now every line is listed once,
+  // each saying where it is going.
+  const [figuresOpen, setFiguresOpen] = useState(false);
+  const [figures, setFigures] = useState<EarningsSourceLinesResponse | null>(null);
   const [figuresBusy, setFiguresBusy] = useState(false);
 
-  const loadFigures = useCallback(
-    async (code: string) => {
-      if (!reportId) return;
-      setFiguresBusy(true);
-      try {
-        const res = await earnings.getEarningsSourceLines(reportId, code);
-        setFigureLines((prev) => ({ ...prev, [code]: res.lines ?? [] }));
-      } catch {
-        setFigureLines((prev) => ({ ...prev, [code]: [] }));
-      } finally {
-        setFiguresBusy(false);
-      }
-    },
-    [reportId],
-  );
+  const loadFigures = useCallback(async () => {
+    if (!reportId) return;
+    setFiguresBusy(true);
+    try {
+      setFigures(await earnings.getEarningsSourceLines(reportId));
+    } catch {
+      setFigures(null);
+    } finally {
+      setFiguresBusy(false);
+    }
+  }, [reportId]);
 
-  const toggleFigures = useCallback(
-    (code: string) => {
-      setOpenFigures((prev) => (prev === code ? null : code));
-      if (!figureLines[code]) void loadFigures(code);
-    },
-    [figureLines, loadFigures],
-  );
+  // Loaded once, on first open: the first call may run the model over a thousand
+  // lines, and it is cached server-side afterwards.
+  const toggleFigures = useCallback(() => {
+    setFiguresOpen((prev) => !prev);
+    if (!figures) void loadFigures();
+  }, [figures, loadFigures]);
 
   const saveFigures = useCallback(
-    async (code: string, lineIds: string[]) => {
+    async (selections: { line_id: string; section_code: string }[]) => {
       if (!reportId) return;
-      await earnings.selectEarningsLines(reportId, lineIds, code);
-      await loadFigures(code);
+      await earnings.selectEarningsLines(reportId, selections);
+      await loadFigures();
     },
     [reportId, loadFigures],
   );
@@ -388,6 +388,36 @@ export default function EarningsOutlinePage() {
         </div>
       ) : (
         <>
+          <div className="card" style={{ marginBottom: 16, padding: '14px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: INK }}>
+                  Figures from your quarterly report
+                </div>
+                <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
+                  Tick the lines you want, and choose which section each one goes in.
+                </div>
+              </div>
+              <button type="button" className="btn bs bsm" aria-expanded={figuresOpen} onClick={toggleFigures}>
+                {figuresOpen ? 'Hide figures' : 'Choose figures'}
+              </button>
+            </div>
+            {figuresOpen &&
+              (figuresBusy && !figures ? (
+                <div style={{ padding: '16px 0', fontSize: 12, color: MUTED }}>
+                  Reading your report's lines…
+                </div>
+              ) : (
+                <FigureChecklist
+                  lines={figures?.lines ?? []}
+                  sections={figures?.sections ?? []}
+                  suggestedCount={figures?.suggested_count ?? 0}
+                  busy={figuresBusy}
+                  onSaveSelection={saveFigures}
+                />
+              ))}
+          </div>
+
           <OutlineGroup
             title="Report sections"
             subtitle={`${includedCount} in report · drag to reorder`}
@@ -397,23 +427,7 @@ export default function EarningsOutlinePage() {
             emptyText="No sections included yet — add some from below."
             onToggle={toggleSection}
             drag={drag}
-            renderFigures={(sec) =>
-              sec.mode === 'table' || sec.mode === 'kpi'
-                ? {
-                    open: openFigures === sec.section_code,
-                    onToggle: () => toggleFigures(sec.section_code),
-                    panel: (
-                      <div style={{ padding: '0 14px 14px' }}>
-                        <FigureChecklist
-                          lines={figureLines[sec.section_code] ?? []}
-                          busy={figuresBusy}
-                          onSaveSelection={(ids) => saveFigures(sec.section_code, ids)}
-                        />
-                      </div>
-                    ),
-                  }
-                : null
-            }
+            figureCounts={figures?.counts_by_section}
           />
           <OutlineGroup
             title="Available to add"

@@ -161,10 +161,21 @@ export interface EarningsSourceLine {
   section_code: string | null; // which earnings section it is filed under
 }
 
+// One of the sections a figure can be filed under — the table sections only.
+export interface EarningsFigureSection {
+  section_code: string;
+  title: string;
+}
+
 export interface EarningsSourceLinesResponse {
   report_id: string;
-  section_code: string | null; // null = every line in the report, unscoped
   lines: EarningsSourceLine[];
+  // Shipped with the lines so the per-row dropdown needs no second round trip.
+  sections: EarningsFigureSection[];
+  // {section_code: how many lines are currently going there} — the outline badges
+  // each section with this, so a section the model skipped reads as 0 rather than
+  // looking broken.
+  counts_by_section: Record<string, number>;
   // Where the pre-ticking came from, so the UI can say so rather than leaving the
   // user guessing why anything is ticked at all.
   preticked_from: 'saved' | 'remembered' | 'suggested' | (string & {});

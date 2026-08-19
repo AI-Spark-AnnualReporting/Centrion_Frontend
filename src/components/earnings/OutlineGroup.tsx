@@ -1,4 +1,4 @@
-import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
+import type { DragEvent, KeyboardEvent } from 'react';
 import type { EarningsOutlineSection } from '@/types/earnings';
 import { OutlineSectionCard } from './OutlineSectionCard';
 import { MUTED } from './tokens';
@@ -25,7 +25,7 @@ export function OutlineGroup({
   emptyText,
   onToggle,
   drag,
-  renderFigures,
+  figureCounts,
 }: {
   title: string;
   subtitle?: string;
@@ -35,13 +35,9 @@ export function OutlineGroup({
   emptyText?: string;
   onToggle: (code: string) => void;
   drag?: OutlineDragHandlers;
-  // Supplied by the page for sections that carry figures. Returning null keeps
-  // the row exactly as it was, so prose sections show no affordance at all.
-  renderFigures?: (section: EarningsOutlineSection) => {
-    open: boolean;
-    onToggle: () => void;
-    panel: ReactNode;
-  } | null;
+  // {section_code: figures going there}. Only table sections get a badge — a
+  // prose section reads every figure as context and owns none of them.
+  figureCounts?: Record<string, number>;
 }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -60,7 +56,7 @@ export function OutlineGroup({
           </div>
         ) : (
           sections.map((s, i) => {
-            const figures = renderFigures?.(s) ?? null;
+            const takesFigures = s.mode === 'table' || s.mode === 'kpi';
             return (
             <div
               key={s.section_code}
@@ -82,9 +78,9 @@ export function OutlineGroup({
                       }
                     : undefined
                 }
-                figuresOpen={figures?.open}
-                onToggleFigures={figures?.onToggle}
-                figuresPanel={figures?.panel}
+                figureCount={
+                  takesFigures && figureCounts ? (figureCounts[s.section_code] ?? 0) : undefined
+                }
               />
             </div>
             );

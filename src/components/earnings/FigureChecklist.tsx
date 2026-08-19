@@ -13,22 +13,35 @@
 // those seven equity balances apart.
 
 import { useEffect, useMemo, useState } from 'react';
-import type { EarningsSourceLine } from '@/types/earnings';
+import type { EarningsSourceLine, EarningsFigureSection } from '@/types/earnings';
 import { INK, MUTED } from './tokens';
 
 interface Props {
   lines: EarningsSourceLine[];
+  sections: EarningsFigureSection[];
   suggestedCount?: number;
   busy?: boolean;
-  onSaveSelection: (lineIds: string[]) => Promise<void>;
+  onSaveSelection: (
+    selections: { line_id: string; section_code: string }[],
+  ) => Promise<void>;
 }
 
-export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelection }: Props) {
+export function FigureChecklist({
+  lines,
+  sections,
+  suggestedCount = 0,
+  busy,
+  onSaveSelection,
+}: Props) {
+  const fallbackSection = sections[0]?.section_code ?? '';
+  const homeFor = (l: EarningsSourceLine) => l.section_code || fallbackSection;
   // Seeded from the server's `selected` (a saved selection, else remembered,
   // else the model's picks) and owned locally from then on, so ticking is
   // instant.
-  const [ticked, setTicked] = useState<Set<string>>(
-    () => new Set(lines.filter((l) => l.selected).map((l) => l.id)),
+  // A Map, not a Set: ticking a line and choosing where it goes are the same
+  // decision, so the section travels with the tick.
+  const [ticked, setTicked] = useState<Map<string, string>>(
+    () => new Map(lines.filter((l) => l.selected).map((l) => [l.id, homeFor(l)])),
   );
 
   // The initializer above only runs on the first render, so a caller that mounts
@@ -39,7 +52,7 @@ export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelecti
   // which would throw away ticks the user just made.
   const lineIdentity = useMemo(() => lines.map((l) => l.id).join('|'), [lines]);
   useEffect(() => {
-    setTicked(new Set(lines.filter((l) => l.selected).map((l) => l.id)));
+    setTicked(new Map(lines.filter((l) => l.selected).map((l) => [l.id, homeFor(l)])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineIdentity]);
   const [search, setSearch] = useState('');
@@ -57,25 +70,35 @@ export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelecti
     return [...out.entries()];
   }, [lines, search]);
 
-  const toggle = (id: string) =>
+  const toggle = (l: EarningsSourceLine) =>
     setTicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const next = new Map(prev);
+      if (next.has(l.id)) next.delete(l.id);
+      else next.set(l.id, homeFor(l));
+      return next;
+    });
+
+  const setSection = (id: string, sectionCode: string) =>
+    setTicked((prev) => {
+      const next = new Map(prev);
+      // Choosing a section is also a way of saying "yes, include this".
+      next.set(id, sectionCode);
       return next;
     });
 
   const setGroup = (rows: EarningsSourceLine[], on: boolean) =>
     setTicked((prev) => {
-      const next = new Set(prev);
-      rows.forEach((r) => (on ? next.add(r.id) : next.delete(r.id)));
+      const next = new Map(prev);
+      rows.forEach((r) => (on ? next.set(r.id, homeFor(r)) : next.delete(r.id)));
       return next;
     });
 
   const save = async () => {
     setError(null);
     try {
-      await onSaveSelection([...ticked]);
+      await onSaveSelection(
+        [...ticked].map(([line_id, section_code]) => ({ line_id, section_code })),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save that selection.");
     }
@@ -152,7 +175,7 @@ export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelecti
                         <input
                           type="checkbox"
                           checked={ticked.has(l.id)}
-                          onChange={() => toggle(l.id)}
+                          onChange={() => toggle(l)}
                           aria-label={l.display_label}
                         />
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -161,6 +184,24 @@ export function FigureChecklist({ lines, suggestedCount = 0, busy, onSaveSelecti
                         <span style={{ flexShrink: 0, color: MUTED, fontVariantNumeric: 'tabular-nums' }}>
                           {l.value?.toLocaleString()} {l.unit}
                         </span>
+                        {/* Where this figure goes. Disabled until the line is
+                            ticked, so the control cannot imply a figure is in the
+                            report when it is not. */}
+                        <select
+                          className="inp sel"
+                          aria-label={`Section for ${l.display_label}`}
+                          disabled={!ticked.has(l.id)}
+                          value={ticked.get(l.id) ?? homeFor(l)}
+                          onChange={(e) => setSection(l.id, e.target.value)}
+                          onClick={(e) => e.preventDefault()}
+                          style={{ flexShrink: 0, width: 200, fontSize: 11, padding: '3px 6px' }}
+                        >
+                          {sections.map((sec) => (
+                            <option key={sec.section_code} value={sec.section_code}>
+                              {sec.title}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     ))}
                   </div>
