@@ -91,7 +91,12 @@ export function AppLayout() {
   // launcher floating over its footer controls is in the way, not to hand.
   const boardBuilder = location.pathname.startsWith('/board-report');
   const reportFlow = isReportFlowRoute(location.pathname);
-  const chatbotShown = location.pathname !== '/dashboard' && !boardBuilder && !reportFlow;
+  // The AI Copilot page IS the chat the launcher opens — showing it there would
+  // just relaunch the page you're already on. The page also runs full-height,
+  // same as the report flow, so it needs the launcher's clearance freed up too.
+  const aiPage = location.pathname === '/ai';
+  const chatbotShown =
+    location.pathname !== '/dashboard' && !boardBuilder && !reportFlow && !aiPage;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched
@@ -106,7 +111,7 @@ export function AppLayout() {
               launcher — dead space on a page that doesn't scroll. */}
           <div
             className={
-              boardBuilder
+              boardBuilder || aiPage
                 ? 'content no-fab'
                 : reportFlow
                   ? 'content content--flush'
