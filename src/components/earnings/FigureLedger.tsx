@@ -80,6 +80,17 @@ export function FigureLedger({
         </span>
       </div>
 
+      {/* A generous search can return thirty lines, and nine sections of that is a
+          page nobody can navigate. The rows scroll; the header stays put above
+          them, so the unit column never scrolls out of view, and the total sits
+          below — see 11 rows against "30 lines" and you know there is more. */}
+      <div
+        style={{
+          maxHeight: 336,
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
+        }}
+      >
       {[...groups.entries()].map(([table, rows]) => (
         <div key={table}>
           {multi && (
@@ -196,6 +207,7 @@ export function FigureLedger({
           })}
         </div>
       ))}
+      </div>
 
       <div
         style={{
