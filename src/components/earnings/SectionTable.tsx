@@ -6,11 +6,62 @@ import {
   rowBlankState,
   gapReason,
   rowCitation,
+  matrixCell,
 } from '@/pages/earnings/preview-helpers';
+import type { NormTable } from '@/pages/earnings/preview-helpers';
 import { INK, MUTED, BRAND } from './tokens';
 
 // ConfidenceBadge's established amber — within-feature consistency.
 const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
+
+// A section the source printed as a GRID — line items down the side, categories
+// across the top. Flattened to Metric/Value it became "External revenue —
+// Upstream" repeated once per segment: the same table with its shape thrown away
+// and three times the rows. The columns come from the producer, which reads them
+// off each figure\'s own position in its source table.
+function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
+  const cols = table.matrixColumns ?? [];
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <thead>
+        <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
+          <th style={{ ...TH, textAlign: 'left' }}>Line item</th>
+          {cols.map((c) => (
+            <th key={c.key} style={{ ...TH, textAlign: 'right' }}>
+              {c.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {table.rows.map((r, i) => (
+          <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
+            <td style={{ padding: '9px 10px', color: INK }}>
+              {stringifyCell(cell(r, 'label', 'metric', 'name'))}
+            </td>
+            {cols.map((c) => (
+              <td
+                key={c.key}
+                style={{
+                  padding: '9px 10px',
+                  textAlign: 'right',
+                  fontFamily: "'DM Mono', 'Courier New', monospace",
+                  color: BRAND,
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {/* A blank cell is information — this line does not exist for
+                    that category — so it reads as a dash, not as missing data. */}
+                {matrixCell(r, c.key) ?? '—'}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 // Renders an earnings table/kpi envelope as Metric | Value — `label` +
 // `current_display` ONLY. No Prior/Change columns are ever rendered: earnings data
@@ -24,14 +75,20 @@ export function SectionTable({ content }: { content: string | null }) {
     return null;
   }
   const tables = normalizeTables(parsed)
-    .map((t) => ({ ...t, rows: t.rows.filter((r) => rowBlankState(r) !== 'omitted') }))
+    // A grid row has no single value to be blank, so the omitted-row filter is
+    // for line-item tables only.
+    .map((t) => (t.matrixColumns
+      ? t
+      : { ...t, rows: t.rows.filter((r) => rowBlankState(r) !== 'omitted') }))
     .filter((t) => t.rows.length > 0);
   if (tables.length === 0) {
     return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>;
   }
   // A Source column only appears when at least one row actually carries a
   // citation — existing sections with no citation fields render unchanged.
-  const showSource = tables.some((t) => t.rows.some((r) => rowCitation(r) != null));
+  const showSource = tables.some(
+    (t) => !t.matrixColumns && t.rows.some((r) => rowCitation(r) != null),
+  );
 
   const TH: React.CSSProperties = {
     padding: '8px 10px',
@@ -49,6 +106,9 @@ export function SectionTable({ content }: { content: string | null }) {
           {tables.length > 1 && t.title && (
             <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{t.title}</h3>
           )}
+          {t.matrixColumns ? (
+            <MatrixTable table={t} TH={TH} />
+          ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -107,6 +167,7 @@ export function SectionTable({ content }: { content: string | null }) {
               })}
             </tbody>
           </table>
+          )}
         </div>
       ))}
     </>

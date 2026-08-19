@@ -5,9 +5,41 @@ import type { EarningsProducedSection } from '@/types/earnings';
 // dispatch at render time — never printing a raw JSON blob, never fabricating data.
 
 export type LooseRow = Record<string, unknown>;
+/** One column of a grid: the key its cells are matched on, and its heading. */
+export interface MatrixColumn {
+  key: string;
+  label: string;
+}
+
 export interface NormTable {
   title?: string;
   rows: LooseRow[];
+  /**
+   * Set when the source printed this as a GRID — line items down the side,
+   * categories across the top (Upstream / Downstream / Corporate). Rows then
+   * carry `cells` keyed to these instead of a single value.
+   */
+  matrixColumns?: MatrixColumn[];
+}
+
+/** matrix_columns off the wire, keeping only entries that can address a cell. */
+export function asMatrixColumns(raw: unknown): MatrixColumn[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cols = raw.filter(isRecord).flatMap((c) => {
+    const key = asString(c.key);
+    return key ? [{ key, label: asString(c.label) ?? key }] : [];
+  });
+  return cols.length ? cols : undefined;
+}
+
+/** A grid row's display value for one column, or null when it has none. */
+export function matrixCell(row: LooseRow, key: string): string | null {
+  const cells = row.cells;
+  if (!Array.isArray(cells)) return null;
+  for (const c of cells) {
+    if (isRecord(c) && asString(c.key) === key) return asString(c.display) ?? null;
+  }
+  return null;
 }
 
 export function tryParseJson(s: string): unknown | undefined {
@@ -48,6 +80,7 @@ export function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        matrixColumns: asMatrixColumns(t.matrix_columns),
       }));
     }
     return [{ rows: parsed.filter(isRecord) as LooseRow[] }];
@@ -57,6 +90,7 @@ export function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed.tables as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        matrixColumns: asMatrixColumns(t.matrix_columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {
