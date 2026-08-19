@@ -18,7 +18,18 @@ const RUN = {
   certified: false,
   overall_readiness: 100,
   publication_gate: "open",
-  frameworks: [{ regulator: "CMA", score: 100, passed: 3, total: 3, no_data: 2 }],
+  frameworks: [
+    {
+      regulator: "CMA",
+      score: 100,
+      passed: 3,
+      total: 3,
+      missing: 0,
+      no_data: 0,
+      not_applicable: 0,
+      unreachable: 2,
+    },
+  ],
   gaps: [],
   rule_detail: [
     {
@@ -40,6 +51,7 @@ const RUN = {
         {
           rule_id: "CMA-FS-Q-TIMING",
           status: "no_data",
+          unreachable: true,
           gate: "SOFT",
           evidence_source: "Filing metadata (report_filings)",
           page: null,

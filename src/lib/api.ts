@@ -1564,6 +1564,24 @@ export const reports = {
     return postForm("/api/v1/reports/quarterly/check-language", fd);
   },
 
+  // Can we read any figures out of this financial upload? Called the moment a file
+  // is picked. A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+  // file to us — has_tables=false, and `message` is the sentence to show.
+  checkTables: (
+    file: File,
+  ): Promise<{
+    success: boolean;
+    has_tables: boolean;
+    table_count: number;
+    table_names: string[];
+    reason: "no_tables" | "no_figures" | null;
+    message: string | null;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return postForm("/api/v1/reports/quarterly/check-tables", fd);
+  },
+
   getCoverage: <T = unknown>(
     companyId: string,
     reportId: string,
@@ -1642,6 +1660,23 @@ export const quarterlyReports = {
     request<OutlineLockResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/outline/lock`,
       { method: "POST" },
+    ),
+
+  // Rename one section for this report — the name then appears everywhere,
+  // including the exported PDF's heading and table of contents. An empty title
+  // clears the rename and puts the blueprint name back. Works after the outline is
+  // locked (a rename can't regenerate anything), and returns the rebuilt outline
+  // like saveOutline does.
+  renameSection: (
+    companyId: string,
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
     ),
 
   // ── Produced sections (step 7 — Part 5 Preview) ──

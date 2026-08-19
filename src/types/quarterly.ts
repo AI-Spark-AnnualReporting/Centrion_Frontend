@@ -448,7 +448,12 @@ export interface OutlineFeeder {
 
 export interface OutlineSection {
   section_code: string;
+  // The name shown everywhere — the user's rename for this report when they made
+  // one, otherwise the blueprint's own title.
   title: string;
+  // The blueprint title, so the row can offer "Reset" back to it. Equal to `title`
+  // when the section has not been renamed; null for a catalogue-drift row.
+  title_original?: string | null;
   part_label: string;
   requirement: 'required' | 'optional';
   included: boolean;
