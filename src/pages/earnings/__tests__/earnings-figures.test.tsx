@@ -267,4 +267,15 @@ describe('EarningsFiguresPage', () => {
     expect(screen.getAllByRole('button', { name: 'Add figure' })).toHaveLength(2);
   });
 
+  it('figures that have landed are not left dimmed', async () => {
+    // analysis-reading means "stepping back while we think" — it belongs to the
+    // wait, not to the result. Keyed off the landing it never came back up.
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+
+    const row = await screen.findByText('Revenue');
+    expect(row.closest('.analysis-reading')).toBeNull();
+  });
+
 });

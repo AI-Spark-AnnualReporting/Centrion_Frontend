@@ -398,7 +398,7 @@ export default function EarningsFiguresPage() {
                   )}
 
                   {!isSearching && (
-                    <div className={justLanded[s.section_code] ? 'analysis-reading' : undefined}>
+                    <div>
                       {justLanded[s.section_code] && has && (
                         <div className="analysis-rule" style={{ marginTop: 14, maxWidth: 64 }} />
                       )}
