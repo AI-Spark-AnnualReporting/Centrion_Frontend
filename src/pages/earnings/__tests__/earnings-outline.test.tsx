@@ -77,6 +77,7 @@ const sec = (over: Partial<EarningsOutlineSection>): EarningsOutlineSection => (
   mode: null,
   page_hint: null,
   status: null,
+  figure_count: null,
   feeder: null,
   ...over,
 });
@@ -467,9 +468,10 @@ describe('EarningsOutlinePage figure checklist', () => {
   const TABLE_OUTLINE = {
     sections: [
       sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
-            requirement: 'required', included: true, display_order: 0, mode: 'table' }),
+            requirement: 'required', included: true, display_order: 0, mode: 'table',
+            figure_count: 1 }),
       sec({ section_code: 'balance_sheet', title: 'Balance Sheet',
-            included: true, display_order: 1, mode: 'table' }),
+            included: true, display_order: 1, mode: 'table', figure_count: 0 }),
       sec({ section_code: 'ceo_commentary', title: 'CEO Commentary',
             included: true, display_order: 2, mode: 'quote' }),
     ],
@@ -498,25 +500,42 @@ describe('EarningsOutlinePage figure checklist', () => {
     expect(screen.getByRole('checkbox', { name: 'Total assets' })).toBeInTheDocument();
   });
 
-  it('each section is badged with how many figures it is getting', async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
+  it('badges each section on first paint, before the picker is ever opened', async () => {
+    // The count rides on the outline itself. Deriving it from the picker's own
+    // response meant every section read blank until the user opened the picker,
+    // which is what made a working report look like it had done nothing.
+    h.getEarningsOutline.mockResolvedValue({
+      sections: [
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
+              requirement: 'required', included: true, display_order: 0, mode: 'table',
+              figure_count: 32 }),
+        sec({ section_code: 'balance_sheet', title: 'Balance Sheet',
+              included: true, display_order: 1, mode: 'table', figure_count: 0 }),
+      ],
+    });
     renderPage();
-    await screen.findByText('Financial Highlights');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
 
+    expect(await screen.findByText('32 FIGURES')).toBeInTheDocument();
     // a section the model filed nothing into says 0 rather than looking broken
-    await waitFor(() => expect(screen.getByText('1 FIGURE')).toBeInTheDocument());
     expect(screen.getByText('0 FIGURES')).toBeInTheDocument();
+    expect(h.getEarningsSourceLines).not.toHaveBeenCalled();
   });
 
   it('a prose section gets no figure badge at all', async () => {
     h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
     renderPage();
     await screen.findByText('CEO Commentary');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
-    await waitFor(() => expect(screen.getByText('1 FIGURE')).toBeInTheDocument());
-    // two table sections badged, and only those two
+    // three sections, two of them tables — only those two are badged
     expect(screen.getAllByText(/FIGURES?$/)).toHaveLength(2);
+  });
+
+  it('saving refetches the outline so the badges move', async () => {
+    await openPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Save selection' }));
+
+    await waitFor(() => expect(h.selectEarningsLines).toHaveBeenCalledTimes(1));
+    // once on mount, once after the save
+    await waitFor(() => expect(h.getEarningsOutline).toHaveBeenCalledTimes(2));
   });
 
   it('saving sends every ticked line with the section it is going to', async () => {

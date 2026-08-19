@@ -25,7 +25,6 @@ export function OutlineGroup({
   emptyText,
   onToggle,
   drag,
-  figureCounts,
 }: {
   title: string;
   subtitle?: string;
@@ -35,9 +34,6 @@ export function OutlineGroup({
   emptyText?: string;
   onToggle: (code: string) => void;
   drag?: OutlineDragHandlers;
-  // {section_code: figures going there}. Only table sections get a badge — a
-  // prose section reads every figure as context and owns none of them.
-  figureCounts?: Record<string, number>;
 }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -78,9 +74,7 @@ export function OutlineGroup({
                       }
                     : undefined
                 }
-                figureCount={
-                  takesFigures && figureCounts ? (figureCounts[s.section_code] ?? 0) : undefined
-                }
+                figureCount={takesFigures ? (s.figure_count ?? 0) : undefined}
               />
             </div>
             );

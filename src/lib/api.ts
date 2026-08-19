@@ -2501,6 +2501,9 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
     page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
     status: earnStr(o.status) as EarningsSectionStatus | null,
+    // How many of the user's own lines are filed under this section. On the
+    // outline response so the badge is right on first paint.
+    figure_count: earnNum(o.figure_count) ?? null,
     feeder: normalizeEarningsSectionFeeder(o.feeder),
   };
 }

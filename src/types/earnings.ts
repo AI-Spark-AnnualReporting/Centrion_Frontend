@@ -227,6 +227,11 @@ export interface EarningsOutlineSection {
   // resolved" (produced/needs_input) WITHOUT a separate GET /sections call —
   // used to skip a redundant POST /produce when nothing has changed.
   status: EarningsSectionStatus | null;
+  // How many of the user's own report lines are filed under this section. Comes
+  // on the outline itself so the section badge is right on first paint — reading
+  // it off the figure picker's response instead meant every section showed blank
+  // until the user opened the picker. null on a payload that predates the field.
+  figure_count: number | null;
   // Which real source backs this section right now, when the backend supplies
   // it — null on older payloads that predate this field (read defensively,
   // never fabricated).

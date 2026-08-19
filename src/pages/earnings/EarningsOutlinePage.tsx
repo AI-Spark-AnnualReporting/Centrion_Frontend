@@ -113,15 +113,6 @@ export default function EarningsOutlinePage() {
     if (!figures) void loadFigures();
   }, [figures, loadFigures]);
 
-  const saveFigures = useCallback(
-    async (selections: { line_id: string; section_code: string }[]) => {
-      if (!reportId) return;
-      await earnings.selectEarningsLines(reportId, selections);
-      await loadFigures();
-    },
-    [reportId, loadFigures],
-  );
-
   const dragIndexRef = useRef<number | null>(null);
 
   // Split a response into the ordered included set + the available-to-add set.
@@ -135,6 +126,18 @@ export default function EarningsOutlinePage() {
     setIncluded(inc);
     setAvailable(av);
   }, []);
+
+  const saveFigures = useCallback(
+    async (selections: { line_id: string; section_code: string }[]) => {
+      if (!reportId) return;
+      await earnings.selectEarningsLines(reportId, selections);
+      // Both, and in this order: the panel reflects what was saved, and the
+      // section badges and "N figures from your report" lines move with it.
+      await loadFigures();
+      applyResponse(await earnings.getEarningsOutline(reportId));
+    },
+    [reportId, loadFigures, applyResponse],
+  );
 
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -427,7 +430,6 @@ export default function EarningsOutlinePage() {
             emptyText="No sections included yet — add some from below."
             onToggle={toggleSection}
             drag={drag}
-            figureCounts={figures?.counts_by_section}
           />
           <OutlineGroup
             title="Available to add"
