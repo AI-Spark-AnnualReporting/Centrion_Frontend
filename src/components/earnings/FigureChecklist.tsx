@@ -13,35 +13,25 @@
 // those seven equity balances apart.
 
 import { useEffect, useMemo, useState } from 'react';
-import type { EarningsSourceLine, EarningsFigureSection } from '@/types/earnings';
+import type { EarningsSourceLine } from '@/types/earnings';
 import { INK, MUTED } from './tokens';
 
 interface Props {
   lines: EarningsSourceLine[];
-  sections: EarningsFigureSection[];
-  suggestedCount?: number;
+  // What the section is called, so the dialog says which one is being edited.
+  sectionTitle: string;
   busy?: boolean;
-  onSaveSelection: (
-    selections: { line_id: string; section_code: string }[],
-  ) => Promise<void>;
+  onSave: (lineIds: string[]) => Promise<void>;
 }
 
-export function FigureChecklist({
-  lines,
-  sections,
-  suggestedCount = 0,
-  busy,
-  onSaveSelection,
-}: Props) {
-  const fallbackSection = sections[0]?.section_code ?? '';
-  const homeFor = (l: EarningsSourceLine) => l.section_code || fallbackSection;
+export function FigureChecklist({ lines, sectionTitle, busy, onSave }: Props) {
   // Seeded from the server's `selected` (a saved selection, else remembered,
   // else the model's picks) and owned locally from then on, so ticking is
   // instant.
-  // A Map, not a Set: ticking a line and choosing where it goes are the same
-  // decision, so the section travels with the tick.
-  const [ticked, setTicked] = useState<Map<string, string>>(
-    () => new Map(lines.filter((l) => l.selected).map((l) => [l.id, homeFor(l)])),
+  // Ticked = in this section. The dialog IS the section's figure list, so
+  // unticking is how a figure is removed, not a separate delete flow.
+  const [ticked, setTicked] = useState<Set<string>>(
+    () => new Set(lines.filter((l) => l.selected).map((l) => l.id)),
   );
 
   // The initializer above only runs on the first render, so a caller that mounts
@@ -52,7 +42,7 @@ export function FigureChecklist({
   // which would throw away ticks the user just made.
   const lineIdentity = useMemo(() => lines.map((l) => l.id).join('|'), [lines]);
   useEffect(() => {
-    setTicked(new Map(lines.filter((l) => l.selected).map((l) => [l.id, homeFor(l)])));
+    setTicked(new Set(lines.filter((l) => l.selected).map((l) => l.id)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineIdentity]);
   const [search, setSearch] = useState('');
@@ -72,33 +62,23 @@ export function FigureChecklist({
 
   const toggle = (l: EarningsSourceLine) =>
     setTicked((prev) => {
-      const next = new Map(prev);
+      const next = new Set(prev);
       if (next.has(l.id)) next.delete(l.id);
-      else next.set(l.id, homeFor(l));
-      return next;
-    });
-
-  const setSection = (id: string, sectionCode: string) =>
-    setTicked((prev) => {
-      const next = new Map(prev);
-      // Choosing a section is also a way of saying "yes, include this".
-      next.set(id, sectionCode);
+      else next.add(l.id);
       return next;
     });
 
   const setGroup = (rows: EarningsSourceLine[], on: boolean) =>
     setTicked((prev) => {
-      const next = new Map(prev);
-      rows.forEach((r) => (on ? next.set(r.id, homeFor(r)) : next.delete(r.id)));
+      const next = new Set(prev);
+      rows.forEach((r) => (on ? next.add(r.id) : next.delete(r.id)));
       return next;
     });
 
   const save = async () => {
     setError(null);
     try {
-      await onSaveSelection(
-        [...ticked].map(([line_id, section_code]) => ({ line_id, section_code })),
-      );
+      await onSave([...ticked]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save that selection.");
     }
@@ -110,16 +90,14 @@ export function FigureChecklist({
     <div className="card" style={{ marginTop: 14, padding: '14px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: INK }}>
-              Figures from your quarterly report
+              {sectionTitle}
             </div>
             <div style={{ fontSize: 12, color: MUTED, fontVariantNumeric: 'tabular-nums' }}>
-              {ticked.size} of {lines.length} selected
+              {ticked.size} of {lines.length} in this section
             </div>
           </div>
           <div style={{ fontSize: 12, color: MUTED, margin: '2px 0 12px' }}>
-            {suggestedCount > 0
-              ? `We pre-selected ${suggestedCount} that belong in an earnings release. Adjust anything you like.`
-              : 'Tick the lines you want in this earnings report.'}
+            Tick a line to add it to this section. Untick to remove it.
           </div>
 
           <input
@@ -184,24 +162,6 @@ export function FigureChecklist({
                         <span style={{ flexShrink: 0, color: MUTED, fontVariantNumeric: 'tabular-nums' }}>
                           {l.value?.toLocaleString()} {l.unit}
                         </span>
-                        {/* Where this figure goes. Disabled until the line is
-                            ticked, so the control cannot imply a figure is in the
-                            report when it is not. */}
-                        <select
-                          className="inp sel"
-                          aria-label={`Section for ${l.display_label}`}
-                          disabled={!ticked.has(l.id)}
-                          value={ticked.get(l.id) ?? homeFor(l)}
-                          onChange={(e) => setSection(l.id, e.target.value)}
-                          onClick={(e) => e.preventDefault()}
-                          style={{ flexShrink: 0, width: 200, fontSize: 11, padding: '3px 6px' }}
-                        >
-                          {sections.map((sec) => (
-                            <option key={sec.section_code} value={sec.section_code}>
-                              {sec.title}
-                            </option>
-                          ))}
-                        </select>
                       </label>
                     ))}
                   </div>
@@ -212,7 +172,7 @@ export function FigureChecklist({
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
             <button type="button" className="btn bp bsm" disabled={busy} onClick={save}>
-              {busy ? 'Saving…' : 'Save selection'}
+              {busy ? 'Saving…' : 'Done'}
             </button>
           </div>
       {error && (

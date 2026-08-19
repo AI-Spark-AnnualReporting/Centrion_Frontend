@@ -154,33 +154,54 @@ export interface EarningsSourceLine {
   table: string | null; // the source table's own name, e.g. "Balance Sheet"
   source_ref: string | null;
   source_report_id: string | null;
-  selected: boolean; // ticked now — a saved selection, else remembered, else the model's pick
-  suggested: boolean; // the model thought this belongs in an earnings release
-  remembered: boolean; // the user ticked the same line on their last earnings report
+  selected: boolean; // already in the section the picker was opened for
   memory_key: string; // stable across quarters; qr_figures ids are not
-  section_code: string | null; // which earnings section it is filed under
 }
 
-// One of the sections a figure can be filed under — the table sections only.
+// One figure as it appears under a section on the Figures screen. The value is
+// read through the link to the quarterly report, never copied.
+export interface EarningsSectionFigure {
+  id: string; // the qr_figures row this points at
+  display_label: string; // label + column; the column is what tells repeated labels apart
+  value: number | null;
+  unit: string | null;
+  table: string | null; // the source table's own name, e.g. "Balance Sheet"
+  memory_key: string; // stable across quarters; source ids are not
+}
+
+// One table section on the Figures screen: what the user asked for, and what they
+// got. `prompt` is null until they write one.
 export interface EarningsFigureSection {
   section_code: string;
   title: string;
+  prompt: string | null;
+  figures: EarningsSectionFigure[];
+  total: number;
+}
+
+export interface EarningsFigureSectionsResponse {
+  report_id: string;
+  sections: EarningsFigureSection[];
+  // How many figures were brought over from the company's last earnings report on
+  // this first visit. 0 for a first-ever report, which opens empty by design.
+  carried_over: number;
+}
+
+// The response to searching or setting one section's figures.
+export interface EarningsSectionFiguresResponse {
+  report_id: string;
+  section_code: string;
+  prompt?: string | null;
+  found?: number; // search only: how many the model returned this time
+  figures: EarningsSectionFigure[];
+  total: number;
+  removed?: number; // set only
 }
 
 export interface EarningsSourceLinesResponse {
   report_id: string;
+  section_code: string | null;
   lines: EarningsSourceLine[];
-  // Shipped with the lines so the per-row dropdown needs no second round trip.
-  sections: EarningsFigureSection[];
-  // {section_code: how many lines are currently going there} — the outline badges
-  // each section with this, so a section the model skipped reads as 0 rather than
-  // looking broken.
-  counts_by_section: Record<string, number>;
-  // Where the pre-ticking came from, so the UI can say so rather than leaving the
-  // user guessing why anything is ticked at all.
-  preticked_from: 'saved' | 'remembered' | 'suggested' | (string & {});
-  suggested_count: number;
-  remembered_count: number;
   selected_count: number;
 }
 

@@ -43,6 +43,7 @@ import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
 import EarningsSetupPage from "./pages/earnings/EarningsSetupPage";
 import EarningsOutlinePage from "./pages/earnings/EarningsOutlinePage";
+import EarningsFiguresPage from "./pages/earnings/EarningsFiguresPage";
 import EarningsPreviewPage from "./pages/earnings/EarningsPreviewPage";
 
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
@@ -176,6 +177,7 @@ const App = () => (
           <Route element={<ProtectedRoute requiredFeature="earnings_report" />}>
             <Route path="/earnings/setup" element={<EarningsSetupPage />} />
             <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
+            <Route path="/earnings/:reportId/figures" element={<EarningsFiguresPage />} />
             <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
           </Route>
           <Route element={<ProtectedRoute requiredFeature="kpi_normalizer" />}>

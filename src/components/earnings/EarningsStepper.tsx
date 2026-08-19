@@ -4,19 +4,20 @@ import { INK, ACCENT, ACCENT_TINT, BORDER, FAINT } from './tokens';
 const STEPS: { label: string; path: (reportId: string) => string }[] = [
   { label: 'Setup', path: () => '/earnings/setup' },
   { label: 'Outline', path: (reportId) => `/earnings/${reportId}/outline` },
+  { label: 'Figures', path: (reportId) => `/earnings/${reportId}/figures` },
   { label: 'Preview', path: (reportId) => `/earnings/${reportId}/preview` },
 ];
 
 type StepState = 'done' | 'active' | 'upcoming';
 
-// The 3-step progress bar shown at the top of every earnings screen except
+// The 4-step progress bar shown at the top of every earnings screen except
 // Setup itself (step 1) — Setup is where the user lands, not somewhere they
 // need to be told they've arrived. Done/active steps are clickable (jump back
 // to something already reached); an upcoming step is disabled — it can only
 // be reached by actually completing the current screen's Continue action, not
 // by skipping ahead via the stepper. Once the report is approved & locked,
 // EVERY step besides the current one is disabled — an approved report is
-// final, so there's no going back to re-edit Setup/Outline either.
+// final, so there's no going back to re-edit Setup/Outline/Figures either.
 export function EarningsStepper({
   activeStep,
   reportId,

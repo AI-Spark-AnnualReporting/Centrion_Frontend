@@ -81,6 +81,8 @@ import type {
   EarningsOutlineSection,
   EarningsOutlineResponse,
   EarningsSourceLinesResponse,
+  EarningsFigureSectionsResponse,
+  EarningsSectionFiguresResponse,
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
@@ -2789,34 +2791,61 @@ export const earnings = {
       { method: "PUT", body: payload },
     ).then(normalizeEarningsOutline),
 
-  // ── The figure checklist (user-metrics lane) ──
+  // ── Figures (user-metrics lane) ──
   // A user-metrics quarterly report is built from the company's own workbook, so
-  // its lines carry the workbook's labels and nothing canonical. There is exactly
-  // one way a figure gets into an earnings report: the user ticks it here.
-  //
-  // sectionCode scopes both calls to one section of the outline. Omit it and the
-  // GET returns every line and the POST replaces the whole report's selection —
-  // which is why the outline always passes it.
-  getEarningsSourceLines: (
+  // its lines carry the workbook's labels and nothing canonical. Figures get into
+  // an earnings report one way: the user asks for them, per section, in their own
+  // words. Nothing is picked on their behalf.
+
+  // The Figures screen: every table section with its prompt and its figures.
+  getEarningsFigureSections: (
     reportId: string,
     signal?: AbortSignal,
-  ): Promise<EarningsSourceLinesResponse> =>
-    request<EarningsSourceLinesResponse>(
-      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines`,
+  ): Promise<EarningsFigureSectionsResponse> =>
+    request<EarningsFigureSectionsResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/sections`,
       { signal },
     ),
 
-  // Sets the report's whole selection rather than adding to it: a line the user
-  // unticked has its figure removed, which is what unticking has to mean. Each
-  // entry carries the section its dropdown is on.
-  selectEarningsLines: (
+  // Runs the model for ONE section with the user's prompt in the call. Results are
+  // added to what the section already has, so searching again broadens it.
+  searchSectionFigures: (
     reportId: string,
-    selections: { line_id: string; section_code: string }[],
-  ): Promise<{ report_id: string; selected: number; removed: number }> =>
+    sectionCode: string,
+    prompt: string,
+  ): Promise<EarningsSectionFiguresResponse> =>
     request(
-      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/from-lines`,
-      { method: "POST", body: { selections } },
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/search-figures`,
+      { method: "POST", body: { prompt } },
     ),
+
+  // Sets exactly which lines a section carries — what the Add-figure picker saves,
+  // and how one figure is removed. Scoped to the section.
+  setSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    lineIds: string[],
+  ): Promise<EarningsSectionFiguresResponse> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/figures`,
+      { method: "PUT", body: { line_ids: lineIds } },
+    ),
+
+  // Every line in the source report, for the Add-figure picker. A plain read —
+  // sectionCode ticks what that section already holds.
+  getEarningsSourceLines: (
+    reportId: string,
+    sectionCode?: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsSourceLinesResponse> => {
+    const qs = sectionCode ? `?section_code=${encodeURIComponent(sectionCode)}` : "";
+    return request<EarningsSourceLinesResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines${qs}`,
+      { signal },
+    );
+  },
 
   // ── Cover template + brand colors ──
   // Same contract style as the quarterly picker, but earnings splits the current

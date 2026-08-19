@@ -287,64 +287,56 @@ describe('EarningsOutlinePage', () => {
     expect(gripsAfter).toEqual(['Reorder CEO Commentary', 'Reorder Financial Highlights']);
   });
 
-  it('toggling an optional on, reordering, then Continue saves the new order + inclusion, produces every section, and only then navigates to preview', async () => {
+  it('toggling an optional on, reordering, then Continue hands over to Figures', async () => {
     renderPage();
     await screen.findByText('Report sections');
-    // Reorder: move Financial Highlights down → [CEO, FH].
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Financial Highlights' }), { key: 'ArrowDown' });
-    // Add Outlook → appended: [CEO, FH, Outlook].
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Include Outlook' }));
-    // Continue.
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Include Outlook/ }));
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+
     await waitFor(() =>
       expect(h.saveEarningsOutline).toHaveBeenCalledWith('rep-1', {
         sections: [
-          { section_code: 'ceo_commentary', included: true, display_order: 0 },
-          { section_code: 'financial_highlights', included: true, display_order: 1 },
+          { section_code: 'financial_highlights', included: true, display_order: 0 },
+          { section_code: 'ceo_commentary', included: true, display_order: 1 },
           { section_code: 'outlook', included: true, display_order: 2 },
           { section_code: 'segment_deep_dive', included: false, display_order: 0 },
         ],
       }),
     );
-    // Section production starts — the AI loader takes over, never navigating early.
-    await waitFor(() => expect(h.produceEarningsReport).toHaveBeenCalledWith('rep-1'));
-    expect(await screen.findByText('Composing your report')).toBeInTheDocument();
-    expect(h.navigateMock).not.toHaveBeenCalled();
-    // Only once the run genuinely completes does it redirect to Preview.
-    await waitFor(() => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'), { timeout: 3000 });
+    await waitFor(() =>
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
   });
 
-  it('skips production and navigates straight to Preview when every included section is already produced', async () => {
-    // The decision reads the outline AS LOADED (before this save) — PUT's own
-    // response resets status to 'pending' on every save (even a no-op), so it
-    // can't be the signal; saveEarningsOutline's resolved value is irrelevant here.
-    h.getEarningsOutline.mockResolvedValueOnce({
-      sections: [
-        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, status: 'produced' }),
-        sec({ section_code: 'ceo_commentary', title: 'CEO Commentary', included: true, status: 'needs_input' }),
-        sec({ section_code: 'outlook', title: 'Outlook', included: false, available: true, status: 'pending' }),
-      ],
-    });
+  it('never produces here — a table built before its figures exist is empty', async () => {
+    // Production moved to the Figures screen. The outline does not know what the
+    // report's figures are any more, so producing from here can only be wasted.
     renderPage();
     await screen.findByText('Report sections');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+
     await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalled());
-    // needs_input counts as already-attempted — never re-produced by Continue.
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
-    await waitFor(() => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
+    await waitFor(() =>
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
   });
 
-  it('still produces when a newly-included section has never been attempted (status: pending)', async () => {
+  it('hands over whatever state the sections are in', async () => {
     h.getEarningsOutline.mockResolvedValueOnce({
       sections: [
-        sec({ section_code: 'financial_highlights', title: 'Financial Highlights', requirement: 'required', included: true, status: 'produced' }),
-        sec({ section_code: 'outlook', title: 'Outlook', included: true, available: true, status: 'pending' }),
+        sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
+              requirement: 'required', included: true, status: 'produced' }),
+        sec({ section_code: 'outlook', title: 'Outlook', included: true,
+              available: true, status: 'pending' }),
       ],
     });
     renderPage();
     await screen.findByText('Report sections');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    await waitFor(() => expect(h.produceEarningsReport).toHaveBeenCalledWith('rep-1'));
+
+    await waitFor(() =>
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
+    expect(h.produceEarningsReport).not.toHaveBeenCalled();
   });
 
   it('a 422 on Continue surfaces the message and does not navigate or start production', async () => {
@@ -355,20 +347,6 @@ describe('EarningsOutlinePage', () => {
     expect(await screen.findByText('segment_deep_dive has no data')).toBeInTheDocument();
     expect(h.navigateMock).not.toHaveBeenCalled();
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
-  });
-
-  it('a failed production run shows the failure screen with a working retry, never navigating to preview', async () => {
-    h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'failed', error_message: 'The pipeline crashed' });
-    renderPage();
-    await screen.findByText('Report sections');
-    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    expect(await screen.findByText('Report generation failed')).toBeInTheDocument();
-    expect(screen.getByText('The pipeline crashed')).toBeInTheDocument();
-    expect(h.navigateMock).not.toHaveBeenCalled();
-
-    // Retry drops back to the outline, ready for another Continue click.
-    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
-    expect(await screen.findByText('Report sections')).toBeInTheDocument();
   });
 
   it('guards a null companyId (no crash)', async () => {
@@ -454,109 +432,5 @@ describe('EarningsOutlinePage', () => {
         .map((c) => c.getAttribute('aria-label'));
       expect(order).toEqual(['Include Market Context', 'Include Outlook']);
     });
-  });
-});
-
-
-// ── One checklist for the report, each line saying where it goes ────────────
-//
-// It used to open per section and hide any line filed elsewhere, so a section the
-// model skipped showed every unfiled line with nothing ticked — which read as
-// "nothing was picked" when the picks were simply filed under other sections.
-
-describe('EarningsOutlinePage figure checklist', () => {
-  const TABLE_OUTLINE = {
-    sections: [
-      sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
-            requirement: 'required', included: true, display_order: 0, mode: 'table',
-            figure_count: 1 }),
-      sec({ section_code: 'balance_sheet', title: 'Balance Sheet',
-            included: true, display_order: 1, mode: 'table', figure_count: 0 }),
-      sec({ section_code: 'ceo_commentary', title: 'CEO Commentary',
-            included: true, display_order: 2, mode: 'quote' }),
-    ],
-  };
-
-  const openPanel = async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
-    renderPage();
-    await screen.findByText('Financial Highlights');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
-    return screen.findByRole('checkbox', { name: 'Revenue' });
-  };
-
-  it('there is one panel for the whole report, not one per section', async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
-    renderPage();
-    await screen.findByText('Financial Highlights');
-    expect(screen.getAllByRole('button', { name: 'Choose figures' })).toHaveLength(1);
-  });
-
-  it('opening it fetches every line once, unscoped', async () => {
-    await openPanel();
-    expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1');
-    // both lines are offered — nothing is hidden for being filed elsewhere
-    expect(screen.getByRole('checkbox', { name: 'Revenue' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Total assets' })).toBeInTheDocument();
-  });
-
-  it('badges each section on first paint, before the picker is ever opened', async () => {
-    // The count rides on the outline itself. Deriving it from the picker's own
-    // response meant every section read blank until the user opened the picker,
-    // which is what made a working report look like it had done nothing.
-    h.getEarningsOutline.mockResolvedValue({
-      sections: [
-        sec({ section_code: 'financial_highlights', title: 'Financial Highlights',
-              requirement: 'required', included: true, display_order: 0, mode: 'table',
-              figure_count: 32 }),
-        sec({ section_code: 'balance_sheet', title: 'Balance Sheet',
-              included: true, display_order: 1, mode: 'table', figure_count: 0 }),
-      ],
-    });
-    renderPage();
-
-    expect(await screen.findByText('32 FIGURES')).toBeInTheDocument();
-    // a section the model filed nothing into says 0 rather than looking broken
-    expect(screen.getByText('0 FIGURES')).toBeInTheDocument();
-    expect(h.getEarningsSourceLines).not.toHaveBeenCalled();
-  });
-
-  it('a prose section gets no figure badge at all', async () => {
-    h.getEarningsOutline.mockResolvedValue(TABLE_OUTLINE);
-    renderPage();
-    await screen.findByText('CEO Commentary');
-    // three sections, two of them tables — only those two are badged
-    expect(screen.getAllByText(/FIGURES?$/)).toHaveLength(2);
-  });
-
-  it('saving refetches the outline so the badges move', async () => {
-    await openPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Save selection' }));
-
-    await waitFor(() => expect(h.selectEarningsLines).toHaveBeenCalledTimes(1));
-    // once on mount, once after the save
-    await waitFor(() => expect(h.getEarningsOutline).toHaveBeenCalledTimes(2));
-  });
-
-  it('saving sends every ticked line with the section it is going to', async () => {
-    await openPanel();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Total assets' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save selection' }));
-
-    await waitFor(() => expect(h.selectEarningsLines).toHaveBeenCalledTimes(1));
-    const [reportId, sent] = h.selectEarningsLines.mock.calls[0];
-    expect(reportId).toBe('rep-1');
-    expect(new Set((sent as { line_id: string }[]).map((x) => x.line_id)))
-      .toEqual(new Set(['qf_1', 'qf_2']));
-  });
-
-  it('closing and reopening does not re-run the model', async () => {
-    await openPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide figures' }));
-    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Revenue' })).toBeNull());
-
-    fireEvent.click(screen.getByRole('button', { name: 'Choose figures' }));
-    await screen.findByRole('checkbox', { name: 'Revenue' });
-    expect(h.getEarningsSourceLines).toHaveBeenCalledTimes(1);
   });
 });
