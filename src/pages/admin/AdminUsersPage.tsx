@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { admin, adminConsole, adminUserPermissions } from '@/lib/api';
@@ -6,23 +6,21 @@ import { useAuth } from '@/context/AuthContext';
 import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER, SHOW_CHANGE_DEPARTMENT } from './admin-flags';
 import {
   ASSIGNABLE_ROLES,
-  CAPABILITY_GROUPS,
   ROLE_DISPLAY,
   ROLE_ORDER,
   roleLabel,
   type BackendRole,
 } from '@/constants/roles';
-import { GRANTABLE_FEATURES } from '@/constants/features';
+import { GRANTABLE_FEATURES, ROLE_FEATURE_DEFAULTS } from '@/constants/features';
 import type {
   AdminUserRow,
   Department,
   InviteUserPayload,
   InviteUserResponse,
-  PermissionMatrix,
   UserPermissionsResponse,
   UserStatus,
 } from '@/types/admin';
-import type { FeaturePermissions } from '@/types/auth';
+import type { FeatureAction, FeaturePermissions } from '@/types/auth';
 import { relativeTime } from '@/lib/time';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import { downloadText } from '@/lib/utils';
@@ -802,7 +800,10 @@ export default function AdminUsersPage() {
           onChangeDepartment={changeDepartment}
         />
       ) : (
-        <PermissionMatrixView highlight={roleFilter} />
+        <>
+          <PermissionMatrixView highlight={roleFilter} />
+          <AnnualReportCapabilities highlight={roleFilter} />
+        </>
       )}
 
       {inviteOpen && (
@@ -1388,71 +1389,23 @@ function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
   );
 }
 
+const ACTION_LABEL: Record<FeatureAction, string> = {
+  read: 'View',
+  create: 'Create',
+  access: 'Access',
+};
+
 // ── Permission matrix ──────────────────────────────────────────────────────
+// A read-only, hardcoded picture of what each role can do by default —
+// sourced from the ROLE_FEATURE_DEFAULTS constant rather than fetched, so
+// every role always shows a real answer, including one with zero current
+// members. There is nothing to edit here: a role's defaults change by editing
+// that constant, and one person's access beyond their role is granted from
+// their own row in Team members, not from this page.
 function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) {
-  const [matrix, setMatrix] = useState<PermissionMatrix>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    adminConsole
-      .getPermissions()
-      .then((res) => {
-        if (alive) setMatrix(res ?? {});
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : 'Failed to load permissions.');
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const isChecked = (role: BackendRole, cap: string) =>
-    role === 'admin' ? true : !!matrix[role]?.[cap];
-
-  const toggle = (role: BackendRole, cap: string) => {
-    if (role === 'admin') return; // locked
-    const next = !isChecked(role, cap);
-    setMatrix((prev) => ({
-      ...prev,
-      [role]: { ...(prev[role] ?? {}), [cap]: next },
-    }));
-    const k = `${role}:${cap}`;
-    clearTimeout(timers.current[k]);
-    timers.current[k] = setTimeout(() => {
-      adminConsole
-        .savePermissions({ role, capability: cap, enabled: next })
-        .catch(() => {
-          /* keep optimistic state; backend remains source of truth on reload */
-        });
-    }, 500);
-  };
-
   const cols = ROLE_ORDER;
 
-  if (loading) {
-    return (
-      <div className="card">
-        <Spinner />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="card" style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>
-        {error}
-      </div>
-    );
-  }
-
-  const cellBox = (checked: boolean, locked: boolean, accent: string) => (
+  const cellBox = (value: boolean, locked: boolean) => (
     <span
       style={{
         display: 'inline-flex',
@@ -1461,19 +1414,25 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
         width: 22,
         height: 22,
         borderRadius: 6,
-        background: checked ? (locked ? '#E8EAF5' : accent) : '#fff',
-        border: checked ? 'none' : '1.5px solid #E2E4F0',
-        color: checked ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
+        background: value ? (locked ? '#E8EAF5' : PRIMARY) : '#fff',
+        border: value ? 'none' : '1.5px solid #E2E4F0',
+        color: value ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
         fontSize: 12,
-        cursor: locked ? 'default' : 'pointer',
       }}
     >
-      {checked ? '✓' : '✕'}
+      {value ? '✓' : '✕'}
     </span>
   );
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>Feature access</div>
+        <div style={{ fontSize: 11.5, color: '#5A6080', marginTop: 4, lineHeight: 1.6 }}>
+          What each role can do by default, read-only. To give one specific person more than their
+          role gets, open their row in Team members instead.
+        </div>
+      </div>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #ECEEF8' }}>
@@ -1488,7 +1447,7 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                 letterSpacing: '.5px',
               }}
             >
-              Capability
+              Feature
             </th>
             {cols.map((role) => (
               <th
@@ -1507,8 +1466,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
           </tr>
         </thead>
         <tbody>
-          {CAPABILITY_GROUPS.map((group) => (
-            <RowGroup key={group.section}>
+          {GRANTABLE_FEATURES.map((feature) => (
+            <RowGroup key={feature.key}>
               <tr>
                 <td
                   colSpan={1 + cols.length}
@@ -1522,15 +1481,17 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                     background: '#FAFBFE',
                   }}
                 >
-                  {group.section}
+                  {feature.label}
                 </td>
               </tr>
-              {group.caps.map((cap) => (
-                <tr key={cap.key} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#1A1D2E' }}>{cap.label}</td>
+              {feature.actions.map((action) => (
+                <tr key={`${feature.key}:${action}`} style={{ borderTop: '1px solid #F4F5FB' }}>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#1A1D2E' }}>
+                    {ACTION_LABEL[action]}
+                  </td>
                   {cols.map((role) => {
                     const locked = role === 'admin';
-                    const checked = isChecked(role, cap.key);
+                    const value = Boolean(ROLE_FEATURE_DEFAULTS[role]?.[feature.key]?.[action]);
                     return (
                       <td
                         key={role}
@@ -1539,9 +1500,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                           padding: '8px',
                           background: highlight === role ? 'rgba(64,64,200,.04)' : undefined,
                         }}
-                        onClick={() => !locked && toggle(role, cap.key)}
                       >
-                        {cellBox(checked, locked, ROLE_DISPLAY[role].dot === '#0D9488' ? '#0D9488' : PRIMARY)}
+                        {cellBox(value, locked)}
                       </td>
                     );
                   })}
@@ -1560,8 +1520,204 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
           background: '#FAFBFE',
         }}
       >
-        🔒 Admin retains all capabilities and can’t be restricted. Changes apply to every user with
-        that role.
+        🔒 Admin always has full access. These are platform defaults, not per-company settings — a
+        role's access changes by updating them in code, never from this screen.
+      </div>
+    </div>
+  );
+}
+
+// ── Annual Report Dashboard internal capabilities ───────────────────────────
+// The Feature Access table above only says whether a role gets into the Annual
+// Report Dashboard at all — `app:spark_studio`, a single yes/no. It can't say
+// what a role does once inside, because the Annual Report Dashboard is a
+// separate backend with its own fixed role guards, not something this app's
+// permission system exposes. So this is hardcoded reference content, not
+// fetched from anywhere — the same shape of fact as "what does this button do",
+// just documented instead of queried. Update it by hand if the Annual Report
+// Dashboard's own role guards change.
+interface AnnualReportCapabilityGroup {
+  section: string;
+  items: string[];
+}
+
+const ANNUAL_REPORT_ROLE_ORDER: BackendRole[] = ['project_manager', 'hod', 'department_user'];
+
+const ANNUAL_REPORT_CAPABILITIES: Partial<Record<BackendRole, AnnualReportCapabilityGroup[]>> = {
+  project_manager: [
+    {
+      section: 'Kickoff flow',
+      items: [
+        'Set the brief, themes and suggested themes',
+        'Save the brief + themes',
+        'Set the questions deadline',
+        'View a previous brief',
+      ],
+    },
+    {
+      section: 'Cycle dashboard',
+      items: ['View dashboard & build-readiness', "List a cycle's sessions", 'View resolved sections'],
+    },
+    {
+      section: 'Session review',
+      items: ["Approve, reject or reopen a department's submission"],
+    },
+    {
+      section: 'Report section content',
+      items: ['Draft and edit management'],
+    },
+    {
+      section: 'Final report',
+      items: ['Generate, list, get, download and render'],
+    },
+  ],
+  hod: [
+    {
+      section: 'Session visibility',
+      items: ['View sessions assigned to their department'],
+    },
+    {
+      section: 'Question curation',
+      items: ['Edit, add or delete a question', 'Approve the full question set at once'],
+    },
+    {
+      section: 'Assignment',
+      items: ['Assign the approved question set to a department user, including themselves'],
+    },
+    {
+      section: 'Session review',
+      items: ['Review a submitted session'],
+    },
+    {
+      section: 'Also reaches',
+      items: [
+        "Department User's own routes, by self-assigning then answering directly. A session's " +
+          'visibility still stays scoped to its department, not to the role alone.',
+      ],
+    },
+  ],
+  department_user: [
+    {
+      section: 'Dashboard',
+      items: ['View their assigned session dashboard'],
+    },
+    {
+      section: 'Session & questions',
+      items: ['View assigned questions'],
+    },
+    {
+      section: 'Answers',
+      items: [
+        'Submit an answer',
+        'Generate one from an uploaded document',
+        'Get AI-assist suggestions',
+        'Adjust tone',
+      ],
+    },
+    {
+      section: 'Outline & draft',
+      items: ['Generate and save a draft', 'Finalize the session'],
+    },
+    {
+      section: 'Documents',
+      items: ['Upload supporting documents'],
+    },
+  ],
+};
+
+function AnnualReportCapabilities({ highlight }: { highlight: BackendRole | null }) {
+  return (
+    <div className="card" style={{ marginTop: 14, padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
+          Annual Report Dashboard — internal capabilities
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${ANNUAL_REPORT_ROLE_ORDER.length}, 1fr)`,
+          gap: 0,
+        }}
+      >
+        {ANNUAL_REPORT_ROLE_ORDER.map((role, i) => {
+          const groups = ANNUAL_REPORT_CAPABILITIES[role] ?? [];
+          return (
+            <div
+              key={role}
+              style={{
+                borderLeft: i > 0 ? '1px solid #ECEEF8' : undefined,
+                background: highlight === role ? 'rgba(64,64,200,.04)' : undefined,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  padding: '14px 16px',
+                  borderBottom: '1px solid #ECEEF8',
+                }}
+              >
+                <span className={`badge ${ROLE_DISPLAY[role].badgeClass}`}>
+                  ● {ROLE_DISPLAY[role].label}
+                </span>
+                <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>
+                  {groups.length} {groups.length === 1 ? 'area' : 'areas'}
+                </span>
+              </div>
+              {groups.map((group, gi) => (
+                <div key={group.section}>
+                  <div
+                    style={{
+                      padding: '12px 16px 6px',
+                      borderTop: gi === 0 ? undefined : '1px solid #F4F5FB',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      color: '#9BA3C4',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.6px',
+                      background: '#FAFBFE',
+                    }}
+                  >
+                    {group.section}
+                  </div>
+                  <div style={{ padding: '6px 16px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {group.items.map((item, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                        <span
+                          style={{
+                            width: 4,
+                            height: 4,
+                            borderRadius: '50%',
+                            background: PRIMARY,
+                            marginTop: 6,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: '#1A1D2E', lineHeight: 1.5 }}>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          padding: '12px 16px',
+          borderTop: '1px solid #ECEEF8',
+          fontSize: 11,
+          color: '#9BA3C4',
+          background: '#FAFBFE',
+          lineHeight: 1.6,
+        }}
+      >
+        Once inside the Annual Report Dashboard, every authenticated user can also manage their own
+        documents, chat conversations, AI agents, and notifications — only deleting a Knowledge Base
+        document requires admin.
       </div>
     </div>
   );
