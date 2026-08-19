@@ -1,12 +1,16 @@
 // What the user wants in a section, in their own words.
 //
 // This used to be a tall empty textarea that owned the card — the loudest element
-// on screen was the one with nothing in it. Once a section has figures, the brief
+// on screen was the one with nothing in it. Once a section has figures the brief
 // steps back to a quoted line and the figures take the weight, because they are
-// the content. Editing brings the field back.
+// the content.
+//
+// The search runs ONCE per section. After it has figures the brief is a record of
+// what was asked for, not an input: the section is curated by hand from there,
+// through Add figure.
 
 import { useEffect, useRef } from 'react';
-import { INK, MUTED, FAINT, ACCENT, BORDER } from './tokens';
+import { INK, MUTED, FAINT, BORDER } from './tokens';
 
 // A worked example teaches the shape of a good brief better than instructions do:
 // a kind of figure, not a list of exact labels.
@@ -18,16 +22,14 @@ export function SectionBrief({
   onSearch,
   searching,
   collapsed,
-  onExpand,
   sectionTitle,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSearch: () => void;
   searching: boolean;
-  /** Sits quiet once the section has figures; the field returns on Edit. */
+  /** Read-only once the section has figures — the search runs once. */
   collapsed: boolean;
-  onExpand: () => void;
   sectionTitle: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -57,23 +59,6 @@ export function SectionBrief({
         >
           {value.trim() ? `“${value.trim()}”` : 'No brief — these were picked for you'}
         </span>
-        <button
-          type="button"
-          onClick={onExpand}
-          style={{
-            flexShrink: 0,
-            border: 'none',
-            background: 'none',
-            padding: 0,
-            font: 'inherit',
-            fontSize: 11,
-            fontWeight: 700,
-            color: ACCENT,
-            cursor: 'pointer',
-          }}
-        >
-          Edit brief
-        </button>
       </div>
     );
   }

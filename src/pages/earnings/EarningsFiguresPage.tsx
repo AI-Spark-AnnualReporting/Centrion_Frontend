@@ -52,7 +52,6 @@ export default function EarningsFiguresPage() {
   // Which sections just landed, so the ledger staggers in once and not on every
   // unrelated re-render.
   const [justLanded, setJustLanded] = useState<Record<string, boolean>>({});
-  const [editingBrief, setEditingBrief] = useState<Record<string, boolean>>({});
 
   // The report's own line labels, used as the material for the reading state.
   const [scanLabels, setScanLabels] = useState<string[]>([]);
@@ -143,7 +142,6 @@ export default function EarningsFiguresPage() {
       const res = await earnings.searchSectionFigures(reportId, code, prompts[code] ?? '');
       replaceSection(code, res.figures);
       setJustLanded((p) => ({ ...p, [code]: true }));
-      setEditingBrief((p) => ({ ...p, [code]: false }));
     } catch (e) {
       setSectionError((p) => ({
         ...p,
@@ -267,8 +265,10 @@ export default function EarningsFiguresPage() {
           Choose your figures
         </h1>
         <p style={{ fontSize: 13, color: MUTED, margin: '5px 0 0', lineHeight: 1.55 }}>
-          Tell each section what belongs in it, in your own words. We read your report's own
-          lines and bring back the ones that match.
+          Tell each section what belongs in it, in your own words, and search once. We
+          read your report's own lines and bring back the ones that match — then you add
+          or remove any of them by hand. A line only goes to one section, unless you put
+          it in another yourself.
         </p>
       </header>
 
@@ -307,7 +307,9 @@ export default function EarningsFiguresPage() {
             {(sections ?? []).map((s) => {
               const isSearching = searching === s.section_code;
               const has = s.total > 0;
-              const collapsed = has && !editingBrief[s.section_code] && !isSearching;
+              // The brief is an input while the section is empty and a record of
+              // what was asked for once it is not. One search per section.
+              const collapsed = has && !isSearching;
               return (
                 <section
                   key={s.section_code}
@@ -375,9 +377,6 @@ export default function EarningsFiguresPage() {
                     onSearch={() => void search(s.section_code)}
                     searching={isSearching}
                     collapsed={collapsed}
-                    onExpand={() =>
-                      setEditingBrief((p) => ({ ...p, [s.section_code]: true }))
-                    }
                   />
 
                   {isSearching && (

@@ -226,4 +226,45 @@ describe('EarningsFiguresPage', () => {
       { timeout: 3000 },
     );
   });
+
+  it('a section that has figures offers no second search', async () => {
+    // One search per section: after it lands, the brief is a record of what was
+    // asked for and the section is curated by hand.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: 'revenue and margins', figures: [fig('qf_1', 'Revenue')], total: 1 },
+        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
+          prompt: null, figures: [], total: 0 },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    // only the empty section still offers it
+    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(1);
+    // and the filled one shows what was asked for, as text
+    expect(screen.getByText('“revenue and margins”')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('What figures belong in Financial Highlights'),
+    ).toBeNull();
+  });
+
+  it('a section keeps Add figure whether or not it has any', async () => {
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: 'x', figures: [fig('qf_1', 'Revenue')], total: 1 },
+        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
+          prompt: null, figures: [], total: 0 },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    // manual curation is the way back in, so it is never withdrawn
+    expect(screen.getAllByRole('button', { name: 'Add figure' })).toHaveLength(2);
+  });
+
 });
