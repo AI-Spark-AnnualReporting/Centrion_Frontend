@@ -2490,6 +2490,9 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
   return {
     section_code: code,
     title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    // The catalogue's own name for it, so the panel can offer Reset and say what
+    // it would go back to. Null on a payload that predates renaming.
+    title_original: earnStr(o.title_original),
     description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
     section_number: earnNum(o.section_number) ?? earnNum(o.number),
     display_order: displayOrder,
@@ -2789,6 +2792,22 @@ export const earnings = {
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/outline`,
       { method: "PUT", body: payload },
+    ).then(normalizeEarningsOutline),
+
+  // Rename one FINANCIAL section for this report — the name then appears on the
+  // Outline, on Figures, and as the heading and table-of-contents entry in the
+  // exported PDF. An empty title clears the rename and puts the catalogue name
+  // back. It cannot change which figures the section gets: the picker is prompted
+  // with the catalogue name, never this one. Returns the rebuilt outline.
+  renameEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
     ).then(normalizeEarningsOutline),
 
   // ── Figures (user-metrics lane) ──

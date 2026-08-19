@@ -1,6 +1,8 @@
 import type { HTMLAttributes } from 'react';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, ChevronDown } from 'lucide-react';
 import type { EarningsOutlineSection } from '@/types/earnings';
+import { SectionFlowPanel } from './SectionFlowPanel';
+import { isFinancialSection } from './earnings-flags';
 import { INK, MUTED, FAINT, ACCENT } from './tokens';
 
 // A custom checkbox button (mirrors the quarterly outline's report-area check) so
@@ -73,18 +75,26 @@ export function OutlineSectionCard({
   onToggle,
   dragHandleProps,
   figureCount,
+  expanded,
+  onToggleExpand,
+  onRename,
 }: {
   section: EarningsOutlineSection;
   number: number;
   group: 'included' | 'available';
   onToggle?: () => void;
   dragHandleProps?: HTMLAttributes<HTMLSpanElement> & { draggable?: boolean };
+  /** Financial rows only — open shows the rename and the section's flow. */
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+  onRename?: (title: string) => Promise<void>;
   // How many of the company's own lines are currently going into this section.
   // Undefined for a section that renders no table; 0 is meaningful and shown, so
   // a section the model filed nothing into says so instead of looking broken.
   figureCount?: number;
 }) {
   const isRequired = section.requirement === 'required';
+  const openable = isFinancialSection(section) && !!onToggleExpand && !!onRename;
   const unavailable = group === 'available' && !section.available;
   const toggleDisabled = isRequired || unavailable;
   // Only render hint chips the backend actually provided — never fabricated.
@@ -171,9 +181,44 @@ export function OutlineSectionCard({
       </span>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: INK, lineHeight: 1.35 }}>
-          {section.title}
-        </div>
+        {openable ? (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            aria-expanded={!!expanded}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              border: 'none',
+              background: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: INK,
+              lineHeight: 1.35,
+              textAlign: 'left',
+            }}
+          >
+            {section.title}
+            <ChevronDown
+              size={14}
+              aria-hidden
+              style={{
+                flexShrink: 0,
+                color: FAINT,
+                transform: expanded ? 'rotate(180deg)' : 'none',
+                transition: 'transform .16s ease-out',
+              }}
+            />
+          </button>
+        ) : (
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: INK, lineHeight: 1.35 }}>
+            {section.title}
+          </div>
+        )}
         {section.description && (
           <div style={{ fontSize: 11.5, color: MUTED, marginTop: 2, lineHeight: 1.4 }}>
             {section.description}
@@ -202,6 +247,10 @@ export function OutlineSectionCard({
         )}
       </div>
     </div>
+
+      {openable && expanded && (
+        <SectionFlowPanel section={section} figureCount={figureCount} onRename={onRename} />
+      )}
     </div>
   );
 }

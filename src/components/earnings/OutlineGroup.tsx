@@ -25,6 +25,9 @@ export function OutlineGroup({
   emptyText,
   onToggle,
   drag,
+  expandedCode,
+  onToggleExpand,
+  onRename,
 }: {
   title: string;
   subtitle?: string;
@@ -34,6 +37,10 @@ export function OutlineGroup({
   emptyText?: string;
   onToggle: (code: string) => void;
   drag?: OutlineDragHandlers;
+  /** One row open at a time — a second open panel just pushes the first offscreen. */
+  expandedCode?: string | null;
+  onToggleExpand?: (code: string) => void;
+  onRename?: (code: string, title: string) => Promise<void>;
 }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -75,6 +82,13 @@ export function OutlineGroup({
                     : undefined
                 }
                 figureCount={takesFigures ? (s.figure_count ?? 0) : undefined}
+                expanded={expandedCode === s.section_code}
+                onToggleExpand={
+                  onToggleExpand ? () => onToggleExpand(s.section_code) : undefined
+                }
+                onRename={
+                  onRename ? (title) => onRename(s.section_code, title) : undefined
+                }
               />
             </div>
             );

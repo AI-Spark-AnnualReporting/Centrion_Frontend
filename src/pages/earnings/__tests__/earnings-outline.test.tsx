@@ -30,6 +30,7 @@ const h = vi.hoisted(() => {
   return {
     navigateMock: vi.fn(),
     getEarningsOutline: vi.fn(),
+    renameEarningsSection: vi.fn(),
     saveEarningsOutline: vi.fn(),
     getEarningsSourceLines: vi.fn(),
     selectEarningsLines: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock('@/lib/api', () => ({
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     selectEarningsLines: (...a: unknown[]) => h.selectEarningsLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
+    renameEarningsSection: (...a: unknown[]) => h.renameEarningsSection(...a),
   },
   agentRuns: {
     getByPollUrl: (...a: unknown[]) => h.getByPollUrl(...a),
@@ -67,6 +69,7 @@ import type { EarningsOutlineSection } from '@/types/earnings';
 const sec = (over: Partial<EarningsOutlineSection>): EarningsOutlineSection => ({
   section_code: 'code',
   title: 'Title',
+  title_original: null,
   description: 'A section',
   section_number: null,
   display_order: 0,
@@ -433,4 +436,90 @@ describe('EarningsOutlinePage', () => {
       expect(order).toEqual(['Include Market Context', 'Include Outlook']);
     });
   });
+
+  // ── Renaming a financial section ───────────────────────────────────────────
+  //
+  // The panel makes a promise -- that renaming cannot change the figures -- which
+  // the backend keeps structurally. What is testable here is that the promise is
+  // actually on screen, and that only financial sections offer it.
+
+  const financial = () => [
+    sec({ section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          title_original: 'Non-IFRS Reconciliations', mode: 'table', included: true,
+          requirement: 'required', figure_count: 13,
+          feeder: { status: 'ready', source_label: 'Q3-2023 Quarterly Report',
+                    source_report_id: null, source_document_id: null, message: null } }),
+    sec({ section_code: 's05_commentary', title: 'CEO / Management Commentary',
+          mode: 'quote', included: true, requirement: 'recommended' }),
+  ];
+
+  it('opens a financial section, and leaves a prose one alone', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: financial() });
+    renderPage();
+    await screen.findByText('Non-IFRS Reconciliations');
+
+    // the prose row has no way in
+    expect(screen.getByText('CEO / Management Commentary').tagName).not.toBe('BUTTON');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Non-IFRS Reconciliations' }));
+    expect(await screen.findByLabelText('Section name')).toHaveValue('Non-IFRS Reconciliations');
+  });
+
+  it('says the rename cannot move a figure, and shows the flow', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: financial() });
+    renderPage();
+    await screen.findByText('Non-IFRS Reconciliations');
+    fireEvent.click(screen.getByRole('button', { name: 'Non-IFRS Reconciliations' }));
+
+    expect(await screen.findByText(/the figures it collects do not change/)).toBeInTheDocument();
+    // and what the section actually does, from real backend fields
+    expect(screen.getByText(/The reconciliation working/)).toBeInTheDocument();
+    expect(screen.getByText('Q3-2023 Quarterly Report')).toBeInTheDocument();
+    expect(screen.getByText('13 chosen so far')).toBeInTheDocument();
+  });
+
+  it('saves a new name and shows it on the row', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: financial() });
+    h.renameEarningsSection.mockResolvedValue({ sections: financial() });
+    renderPage();
+    await screen.findByText('Non-IFRS Reconciliations');
+    fireEvent.click(screen.getByRole('button', { name: 'Non-IFRS Reconciliations' }));
+
+    const box = await screen.findByLabelText('Section name');
+    fireEvent.change(box, { target: { value: 'Reconciliations' } });
+    fireEvent.blur(box);
+
+    await waitFor(() =>
+      expect(h.renameEarningsSection).toHaveBeenCalledWith(
+        'rep-1', 's15_non_ifrs_recon', 'Reconciliations'));
+    expect(await screen.findByRole('button', { name: 'Reconciliations' })).toBeInTheDocument();
+  });
+
+  it('a failed rename puts the old name back rather than lying', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: financial() });
+    h.renameEarningsSection.mockRejectedValue(new h.MockApiError(500, 'nope'));
+    renderPage();
+    await screen.findByText('Non-IFRS Reconciliations');
+    fireEvent.click(screen.getByRole('button', { name: 'Non-IFRS Reconciliations' }));
+
+    const box = await screen.findByLabelText('Section name');
+    fireEvent.change(box, { target: { value: 'Reconciliations' } });
+    fireEvent.blur(box);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/didn't save/);
+    expect(screen.getByLabelText('Section name')).toHaveValue('Non-IFRS Reconciliations');
+  });
+
+  it('offers Reset only once a section has actually been renamed', async () => {
+    const renamed = financial();
+    renamed[0] = sec({ ...renamed[0], title: 'Reconciliations' });
+    h.getEarningsOutline.mockResolvedValue({ sections: renamed });
+    renderPage();
+    await screen.findByText('Reconciliations');
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliations' }));
+
+    expect(await screen.findByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    expect(screen.getByText(/Originally .Non-IFRS Reconciliations./)).toBeInTheDocument();
+  });
+
 });

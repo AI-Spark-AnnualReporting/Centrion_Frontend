@@ -65,6 +65,9 @@ export default function EarningsOutlinePage() {
   const [saveError, setSaveError] = useState<string | null>(null); // non-blocking save/422 banner
   const [retryKey, setRetryKey] = useState(0);
   const [saving, setSaving] = useState(false);
+  // Which financial section is open. One at a time — two open panels just push
+  // each other off screen.
+  const [expandedCode, setExpandedCode] = useState<string | null>(null);
 
   // Section production, kicked once the outline is saved. Non-null → the
   // full-screen AI loader takes over; navigation to Preview only happens once
@@ -126,6 +129,32 @@ export default function EarningsOutlinePage() {
   // disabled), so this only ever moves an available optional in or out. Reads
   // the current included/available snapshots directly (no nested setState-
   // inside-setState) so the move is unambiguous.
+  // Rename a financial section. Optimistic, because the name is the user's own
+  // words and waiting on a round trip to see them is the wrong feel; on failure
+  // the panel puts the old name back and says so.
+  const renameSection = useCallback(
+    async (code: string, title: string) => {
+      if (!reportId) return;
+      const apply = (list: EarningsOutlineSection[]) =>
+        list.map((s) =>
+          s.section_code === code
+            ? { ...s, title: title || (s.title_original ?? s.title) }
+            : s,
+        );
+      const before = { included, available };
+      setIncluded(apply);
+      setAvailable(apply);
+      try {
+        await earnings.renameEarningsSection(reportId, code, title);
+      } catch (e) {
+        setIncluded(before.included);
+        setAvailable(before.available);
+        throw e; // the panel restores its own input and shows the error
+      }
+    },
+    [reportId, included, available],
+  );
+
   const toggleSection = useCallback(
     (code: string) => {
       const incIdx = included.findIndex((s) => s.section_code === code);
@@ -346,6 +375,11 @@ export default function EarningsOutlinePage() {
             emptyText="No sections included yet — add some from below."
             onToggle={toggleSection}
             drag={drag}
+            expandedCode={expandedCode}
+            onToggleExpand={(code) =>
+              setExpandedCode((prev) => (prev === code ? null : code))
+            }
+            onRename={renameSection}
           />
           <OutlineGroup
             title="Available to add"
@@ -354,6 +388,11 @@ export default function EarningsOutlinePage() {
             startNumber={included.length}
             emptyText="Every available section is already in your report."
             onToggle={toggleSection}
+            expandedCode={expandedCode}
+            onToggleExpand={(code) =>
+              setExpandedCode((prev) => (prev === code ? null : code))
+            }
+            onRename={renameSection}
           />
         </>
       )}

@@ -241,7 +241,14 @@ export interface EarningsSectionFeeder {
 // silently addable (D-12). Required sections are always included regardless.
 export interface EarningsOutlineSection {
   section_code: string;
+  /** What THIS report calls it — the rename when there is one. */
   title: string;
+  /**
+   * The section catalogue's own name. What Reset puts back, and what the figure
+   * picker is prompted with — renaming a section deliberately cannot reach it.
+   * Null on a payload that predates renaming.
+   */
+  title_original: string | null;
   description: string | null;
   section_number: number | null; // display number on the card, when provided
   display_order: number; // authoritative sort key; array order on save
