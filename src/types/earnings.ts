@@ -166,6 +166,12 @@ export interface EarningsSectionFigure {
   value: number | null;
   unit: string | null;
   table: string | null; // the source table's own name, e.g. "Balance Sheet"
+  /**
+   * The sub-heading this line sits under, e.g. "MEMORANDUM — FREE CASH FLOW".
+   * Not decoration: a label is not an identity, and this is usually the only
+   * thing separating two rows that read identically.
+   */
+  group: string | null;
   memory_key: string; // stable across quarters; source ids are not
 }
 

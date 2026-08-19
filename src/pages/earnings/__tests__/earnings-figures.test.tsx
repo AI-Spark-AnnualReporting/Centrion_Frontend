@@ -52,9 +52,9 @@ vi.mock('@/lib/api', () => ({
 
 import EarningsFiguresPage from '../EarningsFiguresPage';
 
-const fig = (id: string, label: string) => ({
+const fig = (id: string, label: string, group: string | null = null) => ({
   id, display_label: label, value: 1000, unit: 'SAR_million',
-  table: 'Income', memory_key: `custom__${id}`,
+  table: 'Income', group, memory_key: `custom__${id}`,
 });
 
 const SECTIONS = {
@@ -276,6 +276,30 @@ describe('EarningsFiguresPage', () => {
 
     const row = await screen.findByText('Revenue');
     expect(row.closest('.analysis-reading')).toBeNull();
+  });
+
+  it('tells apart two rows that read the same, and stays quiet otherwise', async () => {
+    // "Free cash flow" is three different figures in one report. The label alone
+    // cannot say which; the group it sits under can.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights', prompt: 'cash',
+          total: 3, figures: [
+            fig('qf_1', 'Free cash flow', 'MEMORANDUM (non-IFRS)'),
+            fig('qf_2', 'Free cash flow', '9. HEADLINE METRICS'),
+            fig('qf_3', 'Capital expenditures', 'INVESTING ACTIVITIES'),
+          ] },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Cash Flow Highlights' });
+
+    expect(screen.getAllByText('Free cash flow')).toHaveLength(2);
+    expect(screen.getByText('MEMORANDUM (non-IFRS)')).toBeInTheDocument();
+    expect(screen.getByText('9. HEADLINE METRICS')).toBeInTheDocument();
+    // the unique label does not need it, so it does not get it
+    expect(screen.queryByText('INVESTING ACTIVITIES')).toBeNull();
   });
 
 });

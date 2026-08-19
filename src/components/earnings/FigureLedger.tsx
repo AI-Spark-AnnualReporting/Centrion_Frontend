@@ -48,6 +48,16 @@ export function FigureLedger({
   }
   const multi = groups.size > 1;
 
+  // A label is not an identity. "Free cash flow" can be three different figures in
+  // one report -- the cash flow statement's, the non-IFRS reconciliation's, and a
+  // headline-metrics one that is a different quantity entirely. When a section holds
+  // more than one row reading the same way, the sub-heading each came from is the
+  // only thing telling them apart, so it earns its space. On the common case where
+  // every label is already unique it would be noise, so it stays hidden.
+  const seen = new Map<string, number>();
+  for (const f of figures) seen.set(f.display_label, (seen.get(f.display_label) ?? 0) + 1);
+  const ambiguous = (f: EarningsSectionFigure) => (seen.get(f.display_label) ?? 0) > 1;
+
   // The unit belongs in the header when the whole section shares one, which is
   // almost always. Mixed units fall back to showing it per row.
   const units = new Set(figures.map((f) => unitLabel(f.unit)).filter(Boolean));
@@ -125,19 +135,36 @@ export function FigureLedger({
                   borderBottom: `1px solid ${BORDER_SOFT}`,
                 }}
               >
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12.5,
-                    color: INK,
-                    lineHeight: 1.4,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {f.display_label}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 12.5,
+                      color: INK,
+                      lineHeight: 1.4,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {f.display_label}
+                  </span>
+                  {ambiguous(f) && f.group && (
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 10,
+                        color: FAINT,
+                        lineHeight: 1.35,
+                        marginTop: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {f.group}
+                    </span>
+                  )}
                 </span>
 
                 {!multi && f.table && (
