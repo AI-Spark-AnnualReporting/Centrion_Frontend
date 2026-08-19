@@ -434,15 +434,18 @@ export default function BoardReportPage() {
         )}
 
         {/* Back navigation belongs at the end of the document, on its own — the
-            top bar is for what you do with the finished report. */}
+            top bar is for what you do with the finished report. A locked report
+            has nothing to go back to: the earlier steps can't be edited. */}
         <div ref={tailRef} className="print-hide" style={{ marginTop: 18 }}>
-          <button
-            className="btn bs"
-            onClick={() => navigate(`/board-report/${reportId}/preview`)}
-            style={{ padding: '10px 18px', fontSize: 13 }}
-          >
-            ← Review
-          </button>
+          {!isLocked && (
+            <button
+              className="btn bs"
+              onClick={() => navigate(`/board-report/${reportId}/preview`)}
+              style={{ padding: '10px 18px', fontSize: 13 }}
+            >
+              ← Review
+            </button>
+          )}
         </div>
 
         {approveOpen && (
