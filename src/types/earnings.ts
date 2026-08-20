@@ -172,6 +172,11 @@ export interface EarningsSectionFigure {
    * thing separating two rows that read identically.
    */
   group: string | null;
+  /**
+   * What the market expected for this line. null = no expectation, which
+   * omits the beat/miss entirely — never a zero, never a made-up verdict.
+   */
+  expected_value?: number | null;
   memory_key: string; // stable across quarters; source ids are not
 }
 

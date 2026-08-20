@@ -2931,6 +2931,22 @@ export const earnings = {
       { method: "POST", body: { search_figures: true } },
     ).then(readEarningsProduceHandle),
 
+  // Set what the market expected for one figure, or clear it with null.
+  // Only the expectation — the actual value has its own PATCH, and confusing
+  // the two would be confusing the company's number with a forecast of it.
+  setEarningsFigureExpectation: (
+    reportId: string,
+    sectionCode: string,
+    qrFigureId: string,
+    expected: number | null,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}` +
+        `/figures/${encodeURIComponent(qrFigureId)}/expected`,
+      { method: "PATCH", body: { expected } },
+    ),
+
   // Mark a section's figures as done with, or undo it. A bookmark, not a lock:
   // it hides the edit control on Preview and nothing more.
   finaliseEarningsSectionFigures: (

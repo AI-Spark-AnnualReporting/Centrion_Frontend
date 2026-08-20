@@ -20,6 +20,7 @@ import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { FigureDialog } from '@/components/earnings/FigureDialog';
 import { FigureLedger } from '@/components/earnings/FigureLedger';
+import { ConsensusLedger } from '@/components/earnings/ConsensusLedger';
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
@@ -124,6 +125,32 @@ export default function EarningsFiguresPage() {
       await earnings.finaliseEarningsSectionFigures(reportId, code, finalised);
     } catch {
       apply(!finalised);
+    }
+  };
+
+  // Optimistic: it is a number somebody just typed on their own screen, and
+  // waiting on a round trip to see the verdict would make the whole table feel
+  // dead. Put the old value back if it does not land.
+  const setExpected = async (
+    section: EarningsFigureSection,
+    figureId: string,
+    expected: number | null,
+  ) => {
+    if (!reportId) return;
+    const before = section.figures.find((f) => f.id === figureId)?.expected_value ?? null;
+    const apply = (v: number | null) =>
+      replaceSection(
+        section.section_code,
+        section.figures.map((f) =>
+          f.id === figureId ? { ...f, expected_value: v } : f,
+        ),
+      );
+    apply(expected);
+    try {
+      await earnings.setEarningsFigureExpectation(
+        reportId, section.section_code, figureId, expected);
+    } catch {
+      apply(before);
     }
   };
 
@@ -555,11 +582,22 @@ export default function EarningsFiguresPage() {
                     </div>
                   )}
 
-                  <FigureLedger
-                    figures={s.figures}
-                    onRemove={(id) => void removeFigure(s, id)}
-                    animate={false}
-                  />
+                  {s.section_code === 's12_consensus' ? (
+                    // The beat/miss section: what landed against what was
+                    // expected. Its own table because it asks a question of every
+                    // row rather than just reporting one.
+                    <ConsensusLedger
+                      figures={s.figures}
+                      onSetExpected={(id, v) => void setExpected(s, id, v)}
+                      onRemove={(id) => void removeFigure(s, id)}
+                    />
+                  ) : (
+                    <FigureLedger
+                      figures={s.figures}
+                      onRemove={(id) => void removeFigure(s, id)}
+                      animate={false}
+                    />
+                  )}
 
                   {/* Two actions, and they are different things. Edit opens the
                       full tick-list -- which is what "Add figure" always actually
