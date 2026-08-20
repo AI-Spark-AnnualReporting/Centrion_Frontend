@@ -11,9 +11,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { boardReports } from '@/lib/api';
+import { boardReports, quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
+import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
@@ -23,6 +24,7 @@ import type {
   BoardOutlineSection,
   BoardSection,
 } from '@/types/board';
+import type { BrandColors, ColorPalette, CoverSelectionPayload, CoverTemplate } from '@/types/quarterly';
 import {
   errorMessage,
   isBoardCoverSection,
@@ -81,8 +83,20 @@ export default function BoardReportPage() {
   const [showMissingNotice, setShowMissingNotice] = useState(false);
   const missingNoticeShownRef = useRef(false);
 
+  // Cover design & colours — the same picker the quarterly assembled report
+  // uses. Catalogue and palettes are company-scoped, so they're the quarterly
+  // endpoints; only the selection is saved against this board report.
+  const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [palettes, setPalettes] = useState<ColorPalette[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [coverKey, setCoverKey] = useState<string | null>(null);
+  const [coverBrand, setCoverBrand] = useState<BrandColors | null>(null);
+  const [coverApplying, setCoverApplying] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+
   const isLocked = locked || approvedNow;
-  const brand = assembled?.brand ?? assembled?.cover?.brand ?? null;
+  const brand = coverBrand ?? assembled?.brand ?? assembled?.cover?.brand ?? null;
+  const templateKey = coverKey ?? assembled?.cover?.template_key ?? null;
 
   const load = useCallback(async () => {
     const [secs, out, comp, asm] = await Promise.all([
@@ -112,6 +126,52 @@ export default function BoardReportPage() {
       cancelled = true;
     };
   }, [reportId, load]);
+
+  // The designs and palettes are company reference data, not quarterly-specific
+  // — the board report picks from the same catalogue so one company's reports
+  // can't drift apart. A failure here just leaves the picker empty.
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    quarterlyReports
+      .getCoverTemplates(companyId)
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.cover_templates ?? [];
+        setCoverTemplates(list);
+        setCoverKey((prev) => prev ?? (list.find((t) => t.is_default) ?? list[0])?.key ?? null);
+      })
+      .catch(() => {});
+    quarterlyReports
+      .getColorPalettes(companyId)
+      .then((res) => {
+        if (!cancelled) setPalettes(res.color_palettes ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const handleCoverApply = useCallback(
+    async (payload: CoverSelectionPayload) => {
+      setCoverApplying(true);
+      setCoverError(null);
+      try {
+        const res = await boardReports.selectCoverTemplate(reportId, payload);
+        // The user's pick wins over the response — as on quarterly, the PATCH
+        // may not echo the selection back, which would reset the cover.
+        setCoverKey(res?.cover_template_key ?? payload.cover_template_key);
+        setCoverBrand(res?.brand ?? payload.brand);
+        setPickerOpen(false);
+      } catch (err: unknown) {
+        setCoverError(errorMessage(err, 'Could not save the cover selection.'));
+      } finally {
+        setCoverApplying(false);
+      }
+    },
+    [reportId],
+  );
 
   const handleSave = useCallback(
     async (code: string, content: string) => {
@@ -333,6 +393,19 @@ export default function BoardReportPage() {
           </span>
           {!isLocked && (
             <button
+              type="button"
+              className="btn bs"
+              onClick={() => {
+                setCoverError(null);
+                setPickerOpen(true);
+              }}
+              style={{ padding: '9px 16px', fontSize: 12.5, fontWeight: 700 }}
+            >
+              Choose cover design &amp; colors
+            </button>
+          )}
+          {!isLocked && (
+            <button
               className="btn bp"
               // Not gated on readiness — approving with gaps is allowed. The
               // confirm dialog itself is where an incomplete report gets
@@ -401,7 +474,7 @@ export default function BoardReportPage() {
                 title={str('title') ?? 'Board of Directors’ Report'}
                 preparedOn={str('prepared_on')}
                 brand={brand}
-                templateKey={assembled?.cover?.template_key ?? null}
+                templateKey={templateKey}
                 maxWidth={DOC_WIDTH}
               />
 
@@ -447,6 +520,19 @@ export default function BoardReportPage() {
             </button>
           )}
         </div>
+
+        {pickerOpen && (
+          <CoverTemplatePicker
+            templates={coverTemplates}
+            palettes={palettes}
+            initialTemplateKey={templateKey}
+            initialBrand={brand}
+            applying={coverApplying}
+            error={coverError}
+            onApply={handleCoverApply}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
 
         {approveOpen && (
           <ApproveConfirmDialog

@@ -3085,6 +3085,15 @@ export const boardReports = {
   approve: (reportId: string) =>
     request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
 
+  // Cover design + brand colours, same payload shape as the quarterly picker
+  // (`PATCH .../cover-template`). The catalogue and palettes themselves are
+  // company-scoped, so the board step reuses quarterlyReports.getCoverTemplates.
+  selectCoverTemplate: (reportId: string, body: CoverSelectionPayload) =>
+    request<CoverSelectionResponse>(boardPath(reportId, "/cover-template"), {
+      method: "PATCH",
+      body,
+    }),
+
   // The same dict the exporter renders, so the preview and the PDF can't drift.
   getAssemble: (reportId: string, signal?: AbortSignal) =>
     request<BoardAssembleResponse>(boardPath(reportId, "/assemble"), { signal }),
