@@ -50,7 +50,7 @@ vi.mock('@/lib/api', () => ({
   ApiError: h.MockApiError,
 }));
 
-import EarningsFiguresPage from '../EarningsFiguresPage';
+import EarningsPreviewPage from '../EarningsPreviewPage';
 
 const fig = (id: string, label: string, group: string | null = null) => ({
   id, display_label: label, value: 1000, unit: 'SAR_million',
@@ -70,9 +70,9 @@ const SECTIONS = {
 
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={['/earnings/rep-1/figures']}>
+    <MemoryRouter initialEntries={['/earnings/rep-1/preview']}>
       <Routes>
-        <Route path="/earnings/:reportId/figures" element={<EarningsFiguresPage />} />
+        <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -106,7 +106,7 @@ beforeEach(() => {
   h.getNodes.mockResolvedValue({ nodes: [] });
 });
 
-describe('EarningsFiguresPage', () => {
+describe('EarningsPreviewPage', () => {
   it('opens with every section empty and no model call', async () => {
     renderPage();
     expect(await screen.findByRole('heading', { name: 'Financial Highlights' })).toBeInTheDocument();
@@ -222,7 +222,7 @@ describe('EarningsFiguresPage', () => {
     expect(await screen.findByText('Composing your report')).toBeInTheDocument();
     expect(h.navigateMock).not.toHaveBeenCalled();
     await waitFor(
-      () => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'),
+      () => expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/report'),
       { timeout: 3000 },
     );
   });

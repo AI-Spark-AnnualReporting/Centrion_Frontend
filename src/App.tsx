@@ -43,8 +43,8 @@ import PreviewPage from "./pages/quarterly/PreviewPage";
 import AssembledReportPage from "./pages/quarterly/AssembledReportPage";
 import EarningsSetupPage from "./pages/earnings/EarningsSetupPage";
 import EarningsOutlinePage from "./pages/earnings/EarningsOutlinePage";
-import EarningsFiguresPage from "./pages/earnings/EarningsFiguresPage";
 import EarningsPreviewPage from "./pages/earnings/EarningsPreviewPage";
+import EarningsReportPage from "./pages/earnings/EarningsReportPage";
 
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
 // They render inside AppLayout so the main sidebar drives navigation.
@@ -177,8 +177,15 @@ const App = () => (
           <Route element={<ProtectedRoute requiredFeature="earnings_report" />}>
             <Route path="/earnings/setup" element={<EarningsSetupPage />} />
             <Route path="/earnings/:reportId/outline" element={<EarningsOutlinePage />} />
-            <Route path="/earnings/:reportId/figures" element={<EarningsFiguresPage />} />
+            {/* /figures was renamed to /preview when the screen grew from a
+                figures list into the whole report-building workbench. An open tab
+                or a bookmark should land on the screen that now does that job. */}
+            <Route
+              path="/earnings/:reportId/figures"
+              element={<Navigate to="../preview" replace relative="path" />}
+            />
             <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
+            <Route path="/earnings/:reportId/report" element={<EarningsReportPage />} />
           </Route>
           <Route element={<ProtectedRoute requiredFeature="kpi_normalizer" />}>
             <Route path="/kpi" element={<KPIPage />} />

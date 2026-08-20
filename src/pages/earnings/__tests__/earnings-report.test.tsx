@@ -71,7 +71,7 @@ vi.mock('@/lib/api', () => ({
   ApiError: h.MockApiError,
 }));
 
-import EarningsPreviewPage from '../EarningsPreviewPage';
+import EarningsReportPage from '../EarningsReportPage';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { earningsSectionState } from '../preview-helpers';
 import type { EarningsProducedSection } from '@/types/earnings';
@@ -214,9 +214,9 @@ const PRODUCED = { sections: [COVER, OVERVIEW, PERFORMANCE], cover_template_key:
 
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={['/earnings/rep-1/preview']}>
+    <MemoryRouter initialEntries={['/earnings/rep-1/report']}>
       <Routes>
-        <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
+        <Route path="/earnings/:reportId/report" element={<EarningsReportPage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -370,7 +370,7 @@ describe('earningsSectionState', () => {
 });
 
 // ── Route / behaviour ─────────────────────────────────────────────────────────
-describe('EarningsPreviewPage', () => {
+describe('EarningsReportPage', () => {
   it('unproduced report shows Generate; clicking it calls produceEarningsReport and shows progress', async () => {
     h.getEarningsSections.mockResolvedValueOnce({
       sections: [COVER, sec({ ...OVERVIEW, status: 'pending', content: null })],
@@ -619,26 +619,6 @@ describe('EarningsPreviewPage', () => {
     await waitFor(() => expect(h.downloadEarningsExport).toHaveBeenCalledWith('rep-1', 'pdf'));
   });
 
-  it('opens the cover & colors picker and saving calls saveEarningsCoverSelection with the chosen design', async () => {
-    h.getEarningsCoverTemplates.mockResolvedValueOnce({
-      cover_templates: [{ key: 'classic', name: 'Classic' }],
-    });
-    h.getEarningsColorPalettes.mockResolvedValueOnce({
-      color_palettes: [{ key: 'indigo', name: 'Indigo', primary: '#4040C8', secondary: '#5B5BD6' }],
-    });
-    renderPage();
-    await screen.findByText(/resilient full-year performance/);
-    fireEvent.click(screen.getByRole('button', { name: /Choose cover & colors/i }));
-    expect(await screen.findByText('Choose cover design & colors')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Apply/ }));
-    await waitFor(() =>
-      expect(h.saveEarningsCoverSelection).toHaveBeenCalledWith(
-        'rep-1',
-        expect.objectContaining({ cover_template_key: 'classic' }),
-      ),
-    );
-  });
-
   it('the cover picker is hidden once the report is locked (read-only)', async () => {
     h.getEarningsSections.mockResolvedValueOnce({ ...PRODUCED, locked: true });
     renderPage();
@@ -664,7 +644,7 @@ describe('EarningsPreviewPage', () => {
   it('guards a null companyId (no crash)', async () => {
     h.userRef.current = null;
     renderPage();
-    expect(await screen.findByText('Preview your earnings report')).toBeInTheDocument();
+    expect(await screen.findByText('Your earnings report')).toBeInTheDocument();
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
   });
 

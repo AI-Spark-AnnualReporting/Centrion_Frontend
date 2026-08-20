@@ -4,8 +4,11 @@ import { INK, ACCENT, ACCENT_TINT, BORDER, FAINT } from './tokens';
 const STEPS: { label: string; path: (reportId: string) => string }[] = [
   { label: 'Setup', path: () => '/earnings/setup' },
   { label: 'Outline', path: (reportId) => `/earnings/${reportId}/outline` },
-  { label: 'Figures', path: (reportId) => `/earnings/${reportId}/figures` },
+  // Step 3 is where the report is built: every section in a rail, figures chosen
+  // per financial section, narrative prose read and edited in place. Step 4 is the
+  // finished thing, in one scroll, with approve and export beside it.
   { label: 'Preview', path: (reportId) => `/earnings/${reportId}/preview` },
+  { label: 'Report', path: (reportId) => `/earnings/${reportId}/report` },
 ];
 
 type StepState = 'done' | 'active' | 'upcoming';
@@ -17,7 +20,7 @@ type StepState = 'done' | 'active' | 'upcoming';
 // be reached by actually completing the current screen's Continue action, not
 // by skipping ahead via the stepper. Once the report is approved & locked,
 // EVERY step besides the current one is disabled — an approved report is
-// final, so there's no going back to re-edit Setup/Outline/Figures either.
+// final, so there's no going back to re-edit Setup/Outline/Preview either.
 export function EarningsStepper({
   activeStep,
   reportId,
