@@ -37,6 +37,56 @@ const CARRIES: Record<string, string> = {
     'The reconciliation working — the bridge from each IFRS measure to its non-IFRS counterpart.',
 };
 
+// What to ask for, in this section's own terms. One line of guidance and three
+// real phrasings — a single generic placeholder taught nobody anything about a
+// section they had never filled in before, and vanished the moment they typed.
+const PROMPT_HELP: Record<string, { guidance: string; examples: string[] }> = {
+  s04_financial_highlights: {
+    guidance: 'The headline numbers a reader checks first.',
+    examples: ['revenue, operating income and net income', 'EPS and margins',
+               'the numbers we lead the release with'],
+  },
+  s06_operational_kpis: {
+    guidance: 'How the business ran, not what it earned.',
+    examples: ['production and sales volumes', 'utilisation and reliability',
+               'safety and headcount'],
+  },
+  s07_segment_performance: {
+    guidance: 'The results broken down by business segment.',
+    examples: ['revenue and EBIT per segment', 'capex by segment',
+               'how Upstream did against Downstream'],
+  },
+  s09_capital_allocation: {
+    guidance: 'What you did with the cash, and what shareholders got.',
+    examples: ['dividends declared and paid', 'buybacks and capex',
+               'gearing and ROACE'],
+  },
+  s10_balance_sheet: {
+    guidance: 'Where you stood at the period end.',
+    examples: ['total assets, equity and borrowings', 'cash and short-term investments',
+               'current against non-current debt'],
+  },
+  s10b_cash_flow: {
+    guidance: 'The cash the period generated and spent.',
+    examples: ['operating cash flow and free cash flow', 'capex',
+               'the investing and financing totals'],
+  },
+  s12_consensus: {
+    guidance: 'The measures analysts publish forecasts for.',
+    examples: ['EPS and revenue', 'net income', 'what we get asked about'],
+  },
+  s14_condensed_statements: {
+    guidance: 'The primary statements, in summary.',
+    examples: ['the top lines of each statement', 'the income statement summary',
+               'balance sheet totals'],
+  },
+  s15_non_ifrs_recon: {
+    guidance: 'The bridge from each IFRS measure to its non-IFRS counterpart.',
+    examples: ['the EBIT reconciliation', 'how we get to free cash flow',
+               'the gearing build'],
+  },
+};
+
 function Step({ n, head, children }: { n: number; head: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
@@ -74,11 +124,16 @@ export function SectionFlowPanel({
   section,
   figureCount,
   onRename,
+  prompt,
+  onPromptChange,
 }: {
   section: EarningsOutlineSection;
   figureCount?: number;
   /** Resolves when saved; rejects to roll the name back. Empty string resets it. */
   onRename: (title: string) => Promise<void>;
+  /** What to look for in this section. Asked once, here, and used at Continue. */
+  prompt?: string;
+  onPromptChange?: (value: string) => void;
 }) {
   const original = section.title_original ?? section.title;
   const [draft, setDraft] = useState(section.title);
@@ -90,6 +145,7 @@ export function SectionFlowPanel({
   // held out by stale local state.
   useEffect(() => setDraft(section.title), [section.title]);
 
+  const help = PROMPT_HELP[section.section_code];
   const renamed = section.title !== original;
   const dirty = draft.trim() !== section.title.trim();
 
@@ -190,6 +246,54 @@ export function SectionFlowPanel({
           </div>
         )}
       </div>
+
+      {/* Asked once, here. Continue searches with it; there is no second chance
+          to type it later, so this is where the teaching has to happen. */}
+      {onPromptChange && (
+        <div>
+          <label
+            htmlFor={`brief-${section.section_code}`}
+            style={{
+              display: 'block',
+              fontSize: 9.5,
+              fontWeight: 700,
+              letterSpacing: '.7px',
+              textTransform: 'uppercase',
+              color: FAINT,
+              marginBottom: 5,
+            }}
+          >
+            What figures belong here?
+          </label>
+          <textarea
+            id={`brief-${section.section_code}`}
+            className="inp"
+            rows={2}
+            value={prompt ?? ''}
+            onChange={(e) => onPromptChange(e.target.value)}
+            placeholder={help?.examples[0] ?? 'in your own words…'}
+            style={{
+              width: '100%',
+              resize: 'none',
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              color: INK,
+              padding: '9px 12px',
+            }}
+          />
+          {help && (
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 6, lineHeight: 1.55 }}>
+              {help.guidance}
+              <div style={{ marginTop: 4, color: FAINT }}>
+                Try: {help.examples.map((e) => `“${e}”`).join(' · ')}
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: FAINT, marginTop: 5 }}>
+            Leave it blank and we will pick what this section usually carries.
+          </div>
+        </div>
+      )}
 
       {/* What is going to happen here, end to end. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

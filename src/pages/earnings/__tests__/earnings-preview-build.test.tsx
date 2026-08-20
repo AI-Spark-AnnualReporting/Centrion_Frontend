@@ -1,12 +1,8 @@
-// Step 3 — Preview, where the report gets built.
+// Step 3 — Preview, where a finished report gets checked.
 //
-// Every section in a rail, one in the pane. Financial sections are told what
-// belongs in them in the user's own words; narrative sections show their prose,
-// and the ones written FROM the figures show what they are still waiting on.
-//
-// The rule the whole screen is held to: it must never dead-end. A section that
-// cannot run yet says which sections are empty and links to each; Run stays
-// clickable regardless; a run that comes back empty is a reason, not an error.
+// The brief for every financial section is typed on the Outline and Continue
+// builds the whole thing, so this screen never asks for anything. It shows what
+// came back, lets it be adjusted by hand, and lets each section be marked done.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -26,6 +22,7 @@ const h = vi.hoisted(() => {
     getEarningsSections: vi.fn(),
     runEarningsSection: vi.fn(),
     patchEarningsSectionContent: vi.fn(),
+    finaliseEarningsSectionFigures: vi.fn(),
     searchSectionFigures: vi.fn(),
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
@@ -46,7 +43,8 @@ vi.mock('@/lib/api', () => ({
     getEarningsSections: (...a: unknown[]) => h.getEarningsSections(...a),
     runEarningsSection: (...a: unknown[]) => h.runEarningsSection(...a),
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
-    searchSectionFigures: (...a: unknown[]) => h.searchSectionFigures(...a),
+    finaliseEarningsSectionFigures: (...a: unknown[]) => h.finaliseEarningsSectionFigures(...a),
+    searchSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
@@ -89,7 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.getEarningsFigureSections.mockResolvedValue(SECTIONS);
   h.getEarningsSections.mockResolvedValue({ sections: [] });
-  h.searchSectionFigures.mockResolvedValue({
+  h.setSectionFigures.mockResolvedValue({
     report_id: 'rep-1', section_code: 's04_financial_highlights',
     prompt: 'margins', found: 2, total: 2,
     figures: [fig('qf_1', 'Revenue'), fig('qf_2', 'Gross margin')],
@@ -122,7 +120,7 @@ describe('EarningsPreviewPage', () => {
     // one pane at a time; the rail is how you reach the rest
     expect(screen.queryByRole('heading', { name: 'Cash Flow Highlights' })).toBeNull();
     expect(screen.getByRole('button', { name: /Cash Flow Highlights/ })).toBeInTheDocument();
-    expect(h.searchSectionFigures).not.toHaveBeenCalled();
+    expect(h.setSectionFigures).not.toHaveBeenCalled();
   });
 
   it('the rail switches which section fills the pane', async () => {
@@ -133,60 +131,17 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByRole('heading', { name: 'Financial Highlights' })).toBeNull();
   });
 
-  it("sends the user's words for that one section", async () => {
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-
-    fireEvent.change(
-      screen.getByLabelText('What figures belong in Financial Highlights'),
-      { target: { value: 'margins and segment revenue' } },
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    await waitFor(() =>
-      expect(h.searchSectionFigures).toHaveBeenCalledWith(
-        'rep-1', 's04_financial_highlights', 'margins and segment revenue'));
-  });
-
-  it('shows what came back, under that section', async () => {
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    // Wait for the search itself to land before reading the ledger — the rows
-    // are rendered by the state it sets, not by the click.
-    await waitFor(() => expect(h.searchSectionFigures).toHaveBeenCalled());
-    expect(await screen.findByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('Gross margin')).toBeInTheDocument();
-    expect(screen.getByText('2 lines')).toBeInTheDocument();
-  });
-
-  it('searching one section leaves the others alone', async () => {
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    await screen.findByText('Revenue');
-    expect(h.searchSectionFigures).toHaveBeenCalledTimes(1);
-    // cash flow, untouched — still showing no figures in the rail
-    fireEvent.click(screen.getByRole('button', { name: /Cash Flow Highlights/ }));
-    expect(await screen.findByText('Tell us what belongs here')).toBeInTheDocument();
-  });
-
-  it('a failed search says so and keeps the section as it was', async () => {
-    h.searchSectionFigures.mockRejectedValue(new h.MockApiError(500, 'Model unavailable'));
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Model unavailable');
-    expect(screen.getByText('Tell us what belongs here')).toBeInTheDocument();
-  });
-
   it('removing a figure saves the rest of the section', async () => {
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: 'margins', total: 2,
+          figures: [fig('qf_1', 'Revenue'), fig('qf_2', 'Gross margin')] },
+      ],
+    });
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
     await screen.findByText('Gross margin');
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Gross margin' }));
@@ -195,10 +150,10 @@ describe('EarningsPreviewPage', () => {
         'rep-1', 's04_financial_highlights', ['qf_1']));
   });
 
-  it('Add figure opens the picker for that section', async () => {
+  it('Edit figures opens the picker for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Add figure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit figures' }));
 
     await waitFor(() =>
       expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1', 's04_financial_highlights'));
@@ -212,7 +167,7 @@ describe('EarningsPreviewPage', () => {
   it('the picker saves the whole tick set for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Add figure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit figures' }));
     await screen.findByRole('checkbox', { name: 'Inventories' });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Inventories' }));
@@ -222,15 +177,6 @@ describe('EarningsPreviewPage', () => {
     const [, code, ids] = h.setSectionFigures.mock.calls[0];
     expect(code).toBe('s04_financial_highlights');
     expect(new Set(ids as string[])).toEqual(new Set(['qf_1', 'qf_9']));
-  });
-
-  it('warns about empty sections rather than blocking Continue', async () => {
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    expect(screen.getByText(/2 sections have no figures/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
-    await waitFor(() => expect(h.produceEarningsReport).toHaveBeenCalledWith('rep-1'));
   });
 
   it('Continue produces here, and only then goes to Preview', async () => {
@@ -255,94 +201,6 @@ describe('EarningsPreviewPage', () => {
         prompt: null, figures: [], total: 0 },
     ],
   };
-
-  it('quotes the brief of a section that has figures, until you ask again', async () => {
-    h.getEarningsFigureSections.mockResolvedValue(FILLED);
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-
-    // quoted, not an input, and no way to search it again
-    expect(screen.getByText('“revenue and margins”')).toBeInTheDocument();
-    expect(
-      screen.queryByLabelText('What figures belong in Financial Highlights'),
-    ).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Search figures' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
-
-    // reopened with what was asked last time, ready to be changed
-    const box = await screen.findByLabelText('What figures belong in Financial Highlights');
-    expect(box).toHaveValue('revenue and margins');
-    expect(screen.getByRole('button', { name: 'Search figures' })).toBeInTheDocument();
-  });
-
-  it('a second ask sends the new words and reports what it added', async () => {
-    h.getEarningsFigureSections.mockResolvedValue(FILLED);
-    h.searchSectionFigures.mockResolvedValue({
-      report_id: 'rep-1', section_code: 's04_financial_highlights',
-      prompt: 'and the segment splits', found: 2, total: 3,
-      figures: [fig('qf_1', 'Revenue'), fig('qf_4', 'Upstream'), fig('qf_5', 'Downstream')],
-    });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
-
-    const box = await screen.findByLabelText('What figures belong in Financial Highlights');
-    fireEvent.change(box, { target: { value: 'and the segment splits' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    await waitFor(() =>
-      expect(h.searchSectionFigures).toHaveBeenCalledWith(
-        'rep-1', 's04_financial_highlights', 'and the segment splits'));
-    // the one it already had is still there, with the two new ones
-    expect(await screen.findByText('Upstream')).toBeInTheDocument();
-    expect(screen.getByText('Revenue')).toBeInTheDocument();
-    expect(await screen.findByText('Added 2 more.')).toBeInTheDocument();
-  });
-
-  it('an ask that finds nothing new says so rather than looking broken', async () => {
-    h.getEarningsFigureSections.mockResolvedValue(FILLED);
-    h.searchSectionFigures.mockResolvedValue({
-      report_id: 'rep-1', section_code: 's04_financial_highlights',
-      prompt: 'x', found: 0, total: 1, figures: [fig('qf_1', 'Revenue')],
-    });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
-    await screen.findByLabelText('What figures belong in Financial Highlights');
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    expect(await screen.findByText(/Nothing new for those words/)).toBeInTheDocument();
-  });
-
-  it('a section keeps Add figure whether or not it has any', async () => {
-    h.getEarningsFigureSections.mockResolvedValue({
-      ...SECTIONS,
-      sections: [
-        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
-          prompt: 'x', figures: [fig('qf_1', 'Revenue')], total: 1 },
-        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
-          prompt: null, figures: [], total: 0 },
-      ],
-    });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    // manual curation is the way back in, so it is never withdrawn
-    expect(screen.getByRole('button', { name: 'Add figure' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Cash Flow Highlights/ }));
-    expect(await screen.findByRole('button', { name: 'Add figure' })).toBeInTheDocument();
-  });
-
-  it('figures that have landed are not left dimmed', async () => {
-    // analysis-reading means "stepping back while we think" — it belongs to the
-    // wait, not to the result. Keyed off the landing it never came back up.
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
-
-    const row = await screen.findByText('Revenue');
-    expect(row.closest('.analysis-reading')).toBeNull();
-  });
 
   it('tells apart two rows that read the same, and stays quiet otherwise', async () => {
     // "Free cash flow" is three different figures in one report. The label alone
@@ -507,6 +365,86 @@ describe('EarningsPreviewPage', () => {
 
     expect(await screen.findByRole('heading', { name: /Cover & colours/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Choose cover/ })).toBeInTheDocument();
+  });
+
+  // ── This screen no longer asks for anything ────────────────────────────────
+
+  const FILLED_ONE = {
+    ...SECTIONS,
+    sections: [
+      { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+        prompt: 'revenue and margins', total: 1, figures: [fig('qf_1', 'Revenue')],
+        finalised: false },
+    ],
+  };
+
+  it('has no brief box and no way to search', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    // the brief was typed on the Outline; here it is only a record of it
+    expect(screen.getByText('“revenue and margins”')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('What figures belong in Financial Highlights'),
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: /Search/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Ask again' })).toBeNull();
+  });
+
+  it('offers Edit figures and Finalise figures', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    expect(screen.getByRole('button', { name: 'Edit figures' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Finalise figures' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add figure' })).toBeNull();
+  });
+
+  it('finalising hides Edit, and can be undone', async () => {
+    // A bookmark, not a lock. A one-way door with nothing behind it would only be
+    // a nuisance the first time somebody spots a mistake.
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    h.finaliseEarningsSectionFigures.mockResolvedValue({});
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
+    await waitFor(() =>
+      expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledWith(
+        'rep-1', 's04_financial_highlights', true));
+    expect(await screen.findByText('✓ Figures finalised')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit figures' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    expect(await screen.findByRole('button', { name: 'Edit figures' })).toBeInTheDocument();
+  });
+
+  it('a failed finalise puts the button back rather than lying', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    h.finaliseEarningsSectionFigures.mockRejectedValue(new h.MockApiError(500, 'nope'));
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
+    expect(await screen.findByRole('button', { name: 'Finalise figures' })).toBeInTheDocument();
+  });
+
+  it('the footer counts what is left to finalise', async () => {
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: null, total: 1, figures: [fig('qf_1', 'Revenue')], finalised: true },
+        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
+          prompt: null, total: 2, figures: [], finalised: false },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    expect(screen.getByText(/1 of\s+2 sections finalised/)).toBeInTheDocument();
   });
 
 });

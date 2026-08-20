@@ -78,6 +78,8 @@ export function OutlineSectionCard({
   expanded,
   onToggleExpand,
   onRename,
+  prompt,
+  onPromptChange,
 }: {
   section: EarningsOutlineSection;
   number: number;
@@ -92,6 +94,9 @@ export function OutlineSectionCard({
   // Undefined for a section that renders no table; 0 is meaningful and shown, so
   // a section the model filed nothing into says so instead of looking broken.
   figureCount?: number;
+  /** What to look for in this section. Asked once, here, used at Continue. */
+  prompt?: string;
+  onPromptChange?: (value: string) => void;
 }) {
   const isRequired = section.requirement === 'required';
   const openable = isFinancialSection(section) && !!onToggleExpand && !!onRename;
@@ -266,7 +271,13 @@ export function OutlineSectionCard({
     </div>
 
       {openable && expanded && (
-        <SectionFlowPanel section={section} figureCount={figureCount} onRename={onRename} />
+        <SectionFlowPanel
+          section={section}
+          figureCount={figureCount}
+          onRename={onRename}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
       )}
     </div>
   );

@@ -2493,6 +2493,7 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     // The catalogue's own name for it, so the panel can offer Reset and say what
     // it would go back to. Null on a payload that predates renaming.
     title_original: earnStr(o.title_original),
+    prompt: earnStr(o.prompt),
     description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
     section_number: earnNum(o.section_number) ?? earnNum(o.number),
     display_order: displayOrder,
@@ -2920,6 +2921,55 @@ export const earnings = {
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
       { method: "POST", body: {} },
     ).then(readEarningsProduceHandle),
+
+  // Build the whole report: search every financial section with the brief typed
+  // on the Outline, then produce every section. One job, one poll, one loader --
+  // this is what the Outline's Continue fires, and Preview opens finished.
+  buildEarningsReport: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { search_figures: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Mark a section's figures as done with, or undo it. A bookmark, not a lock:
+  // it hides the edit control on Preview and nothing more.
+  finaliseEarningsSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    finalised: boolean,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/finalise-figures`,
+      { method: "PATCH", body: { finalised } },
+    ),
+
+  // Produce ONLY the sections that can be built before a figure exists — the
+  // CEO quote, guidance, the disclaimer, the IR calendar. This is what the
+  // Outline's Continue fires, so the wait before Preview buys the user readable
+  // narrative instead of buying nothing. Same 202 + poll shape as produce-all.
+  produceEarningsFigureFreeSections: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { figure_free_only: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Run (or re-run) one section, synchronously. Backs both the Run button on a
+  // section that has never been produced and Regenerate on one that has;
+  // `regenerate` bypasses the produce cache so a re-run is a real re-run.
+  runEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    regenerate = false,
+  ): Promise<EarningsProducedSection> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
+      { method: "POST", body: { regenerate } },
+    ).then((raw) => {
+      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      if (!sec) throw new Error("Run earnings section: response was not a section.");
+      return sec;
+    }),
 
   // Save a user's manual input for a needs_input section (typed directly, or
   // edited after extractSectionInput prefilled it from an uploaded file).

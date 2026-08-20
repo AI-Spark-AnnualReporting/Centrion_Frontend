@@ -183,6 +183,8 @@ export interface EarningsFigureSection {
   prompt: string | null;
   figures: EarningsSectionFigure[];
   total: number;
+  /** The user has finished curating this section's figures. UI only. */
+  finalised?: boolean;
 }
 
 export interface EarningsFigureSectionsResponse {
@@ -249,6 +251,8 @@ export interface EarningsOutlineSection {
    * Null on a payload that predates renaming.
    */
   title_original: string | null;
+  /** The brief for this section, typed on the Outline. Financial only. */
+  prompt: string | null;
   description: string | null;
   section_number: number | null; // display number on the card, when provided
   display_order: number; // authoritative sort key; array order on save

@@ -24,8 +24,6 @@ import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
 import { EditableProse } from '@/components/earnings/EditableProse';
-import { SectionBrief } from '@/components/earnings/SectionBrief';
-import { FigureSearchState, FigureSearchSweep } from '@/components/earnings/FigureSearchState';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
@@ -50,19 +48,12 @@ export default function EarningsFiguresPage() {
   const [sections, setSections] = useState<EarningsFigureSection[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<string, string>>({});
-  const [searching, setSearching] = useState<string | null>(null);
   const [sectionError, setSectionError] = useState<Record<string, string>>({});
   // Which sections just landed, so the ledger staggers in once and not on every
   // unrelated re-render.
-  const [justLanded, setJustLanded] = useState<Record<string, boolean>>({});
-  // Reopened briefs — a section with figures quotes its brief until you ask again.
-  const [editingBrief, setEditingBrief] = useState<Record<string, boolean>>({});
   // What the last ask actually added, so "it did nothing" is never the impression.
-  const [searchNote, setSearchNote] = useState<Record<string, string>>({});
 
   // The report's own line labels, used as the material for the reading state.
-  const [scanLabels, setScanLabels] = useState<string[]>([]);
-  const [lineCount, setLineCount] = useState(0);
 
   const [activeCode, setActiveCode] = useState<string | null>(null);
   // The content column is its own scrollport now, so switching sections has to put
@@ -112,24 +103,6 @@ export default function EarningsFiguresPage() {
     void load();
   }, [load]);
 
-  // Fetched once, quietly, purely so the reading state can stream real labels
-  // rather than a generic busy string. Failure costs nothing visible.
-  useEffect(() => {
-    if (!reportId) return;
-    let alive = true;
-    earnings
-      .getEarningsSourceLines(reportId)
-      .then((res) => {
-        if (!alive) return;
-        setLineCount(res.lines.length);
-        setScanLabels(res.lines.map((l) => l.display_label).filter(Boolean));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [reportId]);
-
 
   const replaceSection = (code: string, figures: EarningsFigureSection['figures']) =>
     setSections((prev) =>
@@ -138,39 +111,19 @@ export default function EarningsFiguresPage() {
       ),
     );
 
-  const search = async (code: string) => {
+  // A bookmark, not a lock -- it hides Edit and counts toward the footer tally.
+  // Optimistic, and it puts the state back if the save does not land.
+  const setFinalised = async (code: string, finalised: boolean) => {
     if (!reportId) return;
-    setSearching(code);
-    setSectionError((p) => ({ ...p, [code]: '' }));
-    setSearchNote((p) => ({ ...p, [code]: '' }));
+    const apply = (v: boolean) =>
+      setSections((prev) =>
+        (prev ?? []).map((x) => (x.section_code === code ? { ...x, finalised: v } : x)),
+      );
+    apply(finalised);
     try {
-      const before = sections?.find((s) => s.section_code === code)?.total ?? 0;
-      const res = await earnings.searchSectionFigures(reportId, code, prompts[code] ?? '');
-      replaceSection(code, res.figures);
-      setJustLanded((p) => ({ ...p, [code]: true }));
-      setEditingBrief((p) => ({ ...p, [code]: false }));
-      // Asking again adds, so nothing new looks identical to nothing happening.
-      setSearchNote((p) => ({
-        ...p,
-        [code]: res.found
-          ? before
-            ? `Added ${res.found} more.`
-            : ''
-          : res.note ??
-            (before
-              ? 'Nothing new for those words — everything else is already in a section.'
-              : 'No lines matched. Try describing the figures differently.'),
-      }));
-    } catch (e) {
-      setSectionError((p) => ({
-        ...p,
-        [code]:
-          e instanceof ApiError
-            ? e.message
-            : "That search didn't reach the server. Check your connection and try again.",
-      }));
-    } finally {
-      setSearching(null);
+      await earnings.finaliseEarningsSectionFigures(reportId, code, finalised);
+    } catch {
+      apply(!finalised);
     }
   };
 
@@ -179,7 +132,6 @@ export default function EarningsFiguresPage() {
     const before = section.figures;
     const keep = before.filter((f) => f.id !== figureId);
     replaceSection(section.section_code, keep);
-    setJustLanded((p) => ({ ...p, [section.section_code]: false }));
     try {
       const res = await earnings.setSectionFigures(
         reportId,
@@ -210,7 +162,6 @@ export default function EarningsFiguresPage() {
     try {
       const res = await earnings.setSectionFigures(reportId, picking.section_code, lineIds);
       replaceSection(picking.section_code, res.figures);
-      setJustLanded((p) => ({ ...p, [picking.section_code]: false }));
       setPicking(null);
     } finally {
       setPickBusy(false);
@@ -525,22 +476,13 @@ export default function EarningsFiguresPage() {
             )}
 
             {(sections ?? []).filter((s) => s.section_code === activeCode).map((s) => {
-              const isSearching = searching === s.section_code;
-              const has = s.total > 0;
-              // The brief is an input while the section is empty and a record of
-              // what was asked for once it is not. One search per section.
-              const collapsed = has && !isSearching && !editingBrief[s.section_code];
+              const finalised = !!s.finalised;
               return (
                 <section
                   key={s.section_code}
                   className="card"
-                  style={{
-                    padding: '15px 18px 16px',
-                    position: 'relative',
-                    overflow: 'hidden',
-                  }}
+                  style={{ padding: '24px 28px' }}
                 >
-                  {isSearching && <FigureSearchSweep />}
 
                   <div
                     style={{
@@ -562,9 +504,8 @@ export default function EarningsFiguresPage() {
                     >
                       {s.title}
                     </h2>
-                    {has ? (
+                    {s.total > 0 ? (
                       <span
-                        className={justLanded[s.section_code] ? 'analysis-pop' : undefined}
                         style={{
                           flexShrink: 0,
                           padding: '2px 9px',
@@ -585,32 +526,18 @@ export default function EarningsFiguresPage() {
                     )}
                   </div>
 
-                  <SectionBrief
-                    sectionTitle={s.title}
-                    value={prompts[s.section_code] ?? ''}
-                    onChange={(v) => setPrompts((p) => ({ ...p, [s.section_code]: v }))}
-                    onSearch={() => void search(s.section_code)}
-                    searching={isSearching}
-                    collapsed={collapsed}
-                    onExpand={() =>
-                      setEditingBrief((p) => ({ ...p, [s.section_code]: true }))
-                    }
-                  />
-
-                  {isSearching && (
-                    <FigureSearchState lineCount={lineCount} labels={scanLabels} />
-                  )}
-
-                  {!isSearching && !sectionError[s.section_code]
-                    && searchNote[s.section_code] && (
+                  {(prompts[s.section_code] || '').trim() && (
+                    // What was asked for, on the Outline. Read-only here: this
+                    // screen curates what came back, it does not re-ask.
                     <div
                       style={{
-                        fontSize: 11.5,
+                        fontSize: 12,
                         color: MUTED,
-                        marginTop: 9,
+                        fontStyle: 'italic',
+                        marginTop: 2,
                       }}
                     >
-                      {searchNote[s.section_code]}
+                      “{prompts[s.section_code]}”
                     </div>
                   )}
 
@@ -628,27 +555,58 @@ export default function EarningsFiguresPage() {
                     </div>
                   )}
 
-                  {!isSearching && (
-                    <div>
-                      {justLanded[s.section_code] && has && (
-                        <div className="analysis-rule" style={{ marginTop: 14, maxWidth: 64 }} />
-                      )}
-                      <FigureLedger
-                        figures={s.figures}
-                        onRemove={(id) => void removeFigure(s, id)}
-                        animate={!!justLanded[s.section_code]}
-                      />
-                    </div>
-                  )}
+                  <FigureLedger
+                    figures={s.figures}
+                    onRemove={(id) => void removeFigure(s, id)}
+                    animate={false}
+                  />
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                    <button
-                      type="button"
-                      className="btn bs bsm"
-                      onClick={() => void openPicker(s)}
-                    >
-                      Add figure
-                    </button>
+                  {/* Two actions, and they are different things. Edit opens the
+                      full tick-list -- which is what "Add figure" always actually
+                      did. Finalise is a bookmark: it hides Edit and counts toward
+                      the tally, and locks nothing. */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      gap: 9,
+                      marginTop: 16,
+                    }}
+                  >
+                    {finalised ? (
+                      <>
+                        <span style={{ flex: 1, fontSize: 11.5, color: '#15803D', fontWeight: 700 }}>
+                          ✓ Figures finalised
+                        </span>
+                        {/* A one-way door with no lock behind it would only be a
+                            nuisance the first time somebody spots a mistake. */}
+                        <button
+                          type="button"
+                          className="btn bs bsm"
+                          onClick={() => void setFinalised(s.section_code, false)}
+                        >
+                          Change
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn bs bsm"
+                          onClick={() => void openPicker(s)}
+                        >
+                          Edit figures
+                        </button>
+                        <button
+                          type="button"
+                          className="btn bp bsm"
+                          onClick={() => void setFinalised(s.section_code, true)}
+                        >
+                          Finalise figures
+                        </button>
+                      </>
+                    )}
                   </div>
                 </section>
               );
@@ -678,10 +636,10 @@ export default function EarningsFiguresPage() {
           ← Back
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {emptyCount > 0 && (
+          {(sections ?? []).length > 0 && (
             <span style={{ fontSize: 12, color: MUTED }}>
-              {emptyCount} {emptyCount === 1 ? 'section has' : 'sections have'} no figures and
-              will be left out
+              {(sections ?? []).filter((x) => x.finalised).length} of{' '}
+              {(sections ?? []).length} sections finalised
             </span>
           )}
           {continueError && (

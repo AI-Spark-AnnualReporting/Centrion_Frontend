@@ -70,6 +70,10 @@ export default function EarningsOutlinePage() {
   const [expandedCode, setExpandedCode] = useState<string | null>(null);
   // Sections the user is about to empty by removing them, as the server counted
   // them at the moment of the decision. null = nothing to confirm.
+  // The brief for each financial section. Asked once, here -- Continue searches
+  // with it and Preview never asks again.
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+
   const [pendingDrop, setPendingDrop] = useState<
     { section_code: string; title: string; figure_count: number }[] | null
   >(null);
@@ -100,6 +104,11 @@ export default function EarningsOutlinePage() {
     const av = sections.filter((s) => !s.included).sort(byTierThenOrder);
     setIncluded(inc);
     setAvailable(av);
+    // Seed from what is stored, but never over what is being typed.
+    setPrompts((prev) => ({
+      ...Object.fromEntries(sections.map((x) => [x.section_code, x.prompt ?? ''])),
+      ...prev,
+    }));
   }, []);
 
 
@@ -247,6 +256,7 @@ export default function EarningsOutlinePage() {
           section_code: s.section_code,
           included: true,
           display_order: i,
+          prompt: prompts[s.section_code] ?? '',
         })),
         ...available.map((s) => ({
           section_code: s.section_code,
@@ -283,25 +293,20 @@ export default function EarningsOutlinePage() {
       return;
     }
 
-    // Spend the handoff producing the sections that can be built before a figure
-    // exists -- the CEO quote, guidance, the disclaimer, the calendar. Preview then
-    // opens with narrative already readable instead of a screen of empty cards.
+    // Build the whole report here: search every financial section with the brief
+    // typed on it, then produce every section. The loader runs for the whole job
+    // and Preview opens finished -- it does not ask for anything.
     //
-    // Deliberately not awaited and deliberately not fatal: this is a head start,
-    // not a gate. If it fails the user lands on Preview and every section simply
-    // shows its Run button, which is where they were going anyway.
-    if (reportId) {
-      // try/catch as well as .catch: a head start must not be able to stop the
-      // handoff, however it fails.
-      try {
-        void Promise.resolve(earnings.produceEarningsFigureFreeSections(reportId)).catch(
-          () => {},
-        );
-      } catch {
-        /* the user is going to Preview either way */
-      }
+    // A failure still hands over. Preview can be curated by hand from whatever
+    // landed, and stranding somebody on the Outline helps nobody.
+    if (!reportId) return;
+    try {
+      setProduceRun(await earnings.buildEarningsReport(reportId));
+    } catch (err: unknown) {
+      setSaveError(apiErrorMessage(err, "Couldn't start building the report."));
+      setSaving(false);
+      navigate(`/earnings/${reportId}/preview`);
     }
-    navigate(`/earnings/${reportId}/preview`);
   };
 
   // ── Section production — full-screen loader, same one the quarterly
@@ -418,6 +423,10 @@ export default function EarningsOutlinePage() {
               setExpandedCode((prev) => (prev === code ? null : code))
             }
             onRename={renameSection}
+            prompts={prompts}
+            onPromptChange={(code, v) =>
+              setPrompts((p) => ({ ...p, [code]: v }))
+            }
           />
           <OutlineGroup
             title="Available to add"
@@ -431,6 +440,10 @@ export default function EarningsOutlinePage() {
               setExpandedCode((prev) => (prev === code ? null : code))
             }
             onRename={renameSection}
+            prompts={prompts}
+            onPromptChange={(code, v) =>
+              setPrompts((p) => ({ ...p, [code]: v }))
+            }
           />
         </>
       )}

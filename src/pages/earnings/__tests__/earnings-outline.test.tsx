@@ -36,6 +36,7 @@ const h = vi.hoisted(() => {
     selectEarningsLines: vi.fn(),
     produceEarningsReport: vi.fn(),
     produceEarningsFigureFreeSections: vi.fn(),
+    buildEarningsReport: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
     userRef: { current: { company_id: 'co-1', company_name: 'Acme' } as unknown },
@@ -56,6 +57,7 @@ vi.mock('@/lib/api', () => ({
     selectEarningsLines: (...a: unknown[]) => h.selectEarningsLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
     produceEarningsFigureFreeSections: (...a: unknown[]) => h.produceEarningsFigureFreeSections(...a),
+    buildEarningsReport: (...a: unknown[]) => h.buildEarningsReport(...a),
     renameEarningsSection: (...a: unknown[]) => h.renameEarningsSection(...a),
   },
   agentRuns: {
@@ -72,6 +74,7 @@ const sec = (over: Partial<EarningsOutlineSection>): EarningsOutlineSection => (
   section_code: 'code',
   title: 'Title',
   title_original: null,
+  prompt: null,
   description: 'A section',
   section_number: null,
   display_order: 0,
@@ -125,6 +128,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
   h.produceEarningsFigureFreeSections.mockResolvedValue({ run_id: 'r', poll_url: '/p' });
+  h.buildEarningsReport.mockResolvedValue({ run_id: 'r', poll_url: '/p' });
   h.getEarningsOutline.mockResolvedValue(OUTLINE);
   h.saveEarningsOutline.mockResolvedValue(OUTLINE);
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
@@ -293,7 +297,7 @@ describe('EarningsOutlinePage', () => {
     expect(gripsAfter).toEqual(['Reorder CEO Commentary', 'Reorder Financial Highlights']);
   });
 
-  it('toggling an optional on, reordering, then Continue hands over to Preview', async () => {
+  it('toggling an optional on, then Continue saves every brief and builds', async () => {
     renderPage();
     await screen.findByText('Report sections');
 
@@ -303,28 +307,29 @@ describe('EarningsOutlinePage', () => {
     await waitFor(() =>
       expect(h.saveEarningsOutline).toHaveBeenCalledWith('rep-1', {
         sections: [
-          { section_code: 'financial_highlights', included: true, display_order: 0 },
-          { section_code: 'ceo_commentary', included: true, display_order: 1 },
-          { section_code: 'outlook', included: true, display_order: 2 },
+          { section_code: 'financial_highlights', included: true, display_order: 0, prompt: '' },
+          { section_code: 'ceo_commentary', included: true, display_order: 1, prompt: '' },
+          { section_code: 'outlook', included: true, display_order: 2, prompt: '' },
           { section_code: 'segment_deep_dive', included: false, display_order: 0 },
         ],
       }),
     );
-    await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
+    // Continue does not navigate any more -- it starts the build and the loader
+    // stays up until the whole report is ready.
+    await waitFor(() => expect(h.buildEarningsReport).toHaveBeenCalledWith('rep-1'));
+    expect(h.navigateMock).not.toHaveBeenCalled();
   });
 
-  it('never produces here — a table built before its figures exist is empty', async () => {
-    // Production moved to the Figures screen. The outline does not know what the
-    // report's figures are any more, so producing from here can only be wasted.
+  it('builds the report here, rather than handing over an empty one', async () => {
+    // Every brief is typed on this screen now, so this is the only place the
+    // search can run -- and running it before the narrative sections is what
+    // makes the figure-grounded ones come out right first time.
     renderPage();
     await screen.findByText('Report sections');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
 
-    await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalled());
+    await waitFor(() => expect(h.buildEarningsReport).toHaveBeenCalledWith('rep-1'));
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
   });
 
   it('hands over whatever state the sections are in', async () => {
@@ -340,8 +345,7 @@ describe('EarningsOutlinePage', () => {
     await screen.findByText('Report sections');
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
 
-    await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
+    await waitFor(() => expect(h.buildEarningsReport).toHaveBeenCalledWith('rep-1'));
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
   });
 
@@ -582,6 +586,9 @@ describe('EarningsOutlinePage', () => {
     // the first attempt never carries it — it is only ever sent on the retry
     const [, first] = h.saveEarningsOutline.mock.calls[0];
     expect((first as { drop_figures?: string[] }).drop_figures).toBeUndefined();
+    // Drain the build the successful retry kicks off, or it settles inside the
+    // next test and shows up in its mock counts.
+    await waitFor(() => expect(h.buildEarningsReport).toHaveBeenCalled());
   });
 
   it('keeping the section abandons the save rather than half-doing it', async () => {
@@ -597,6 +604,53 @@ describe('EarningsOutlinePage', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(h.saveEarningsOutline).toHaveBeenCalledTimes(1);
     expect(h.navigateMock).not.toHaveBeenCalled();
+  });
+
+  // ── The brief, asked once, here ────────────────────────────────────────────
+
+  it("teaches what to ask for in this section's own terms", async () => {
+    // A single generic placeholder taught nobody anything about a section they
+    // had never filled in, and vanished the moment they typed.
+    h.getEarningsOutline.mockResolvedValue({
+      sections: [
+        sec({ section_code: 's07_segment_performance', title: 'Segment Performance',
+              mode: 'table', included: true, requirement: 'recommended' }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Segment Performance');
+    fireEvent.click(screen.getByRole('button', { name: 'Segment Performance' }));
+
+    expect(await screen.findByLabelText('What figures belong here?')).toBeInTheDocument();
+    expect(screen.getByText('The results broken down by business segment.')).toBeInTheDocument();
+    expect(screen.getByText(/revenue and EBIT per segment/)).toBeInTheDocument();
+    // and a blank one is a real choice, not a failure to fill in a form
+    expect(screen.getByText(/Leave it blank/)).toBeInTheDocument();
+  });
+
+  it('sends what was typed when Continue builds', async () => {
+    h.getEarningsOutline.mockResolvedValue({
+      sections: [
+        sec({ section_code: 's07_segment_performance', title: 'Segment Performance',
+              mode: 'table', included: true, requirement: 'recommended' }),
+      ],
+    });
+    renderPage();
+    await screen.findByText('Segment Performance');
+    fireEvent.click(screen.getByRole('button', { name: 'Segment Performance' }));
+
+    fireEvent.change(await screen.findByLabelText('What figures belong here?'), {
+      target: { value: 'revenue and EBIT per segment' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+
+    await waitFor(() => {
+      const [, payload] = h.saveEarningsOutline.mock.calls[0];
+      const row = (payload as { sections: { section_code: string; prompt?: string }[] })
+        .sections.find((x) => x.section_code === 's07_segment_performance');
+      expect(row?.prompt).toBe('revenue and EBIT per segment');
+    });
+    await waitFor(() => expect(h.buildEarningsReport).toHaveBeenCalledWith('rep-1'));
   });
 
 });

@@ -28,6 +28,8 @@ export function OutlineGroup({
   expandedCode,
   onToggleExpand,
   onRename,
+  prompts,
+  onPromptChange,
 }: {
   title: string;
   subtitle?: string;
@@ -41,6 +43,8 @@ export function OutlineGroup({
   expandedCode?: string | null;
   onToggleExpand?: (code: string) => void;
   onRename?: (code: string, title: string) => Promise<void>;
+  prompts?: Record<string, string>;
+  onPromptChange?: (code: string, value: string) => void;
 }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -88,6 +92,10 @@ export function OutlineGroup({
                 }
                 onRename={
                   onRename ? (title) => onRename(s.section_code, title) : undefined
+                }
+                prompt={prompts?.[s.section_code] ?? ''}
+                onPromptChange={
+                  onPromptChange ? (v) => onPromptChange(s.section_code, v) : undefined
                 }
               />
             </div>
