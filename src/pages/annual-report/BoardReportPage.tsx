@@ -434,15 +434,18 @@ export default function BoardReportPage() {
         )}
 
         {/* Back navigation belongs at the end of the document, on its own — the
-            top bar is for what you do with the finished report. */}
+            top bar is for what you do with the finished report. A locked report
+            has nothing to go back to: the earlier steps can't be edited. */}
         <div ref={tailRef} className="print-hide" style={{ marginTop: 18 }}>
-          <button
-            className="btn bs"
-            onClick={() => navigate(`/board-report/${reportId}/preview`)}
-            style={{ padding: '10px 18px', fontSize: 13 }}
-          >
-            ← Review
-          </button>
+          {!isLocked && (
+            <button
+              className="btn bs"
+              onClick={() => navigate(`/board-report/${reportId}/preview`)}
+              style={{ padding: '10px 18px', fontSize: 13 }}
+            >
+              ← Review
+            </button>
+          )}
         </div>
 
         {approveOpen && (
@@ -697,13 +700,13 @@ function ReportSection({
         >
           {s.title}
         </h2>
-        {meta?.requirement === 'M' && (
+        {!locked && meta?.requirement === 'M' && (
           <span className="badge b-gn print-hide" title="Mandatory">
             M
           </span>
         )}
-        {feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
-        {feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
+        {!locked && feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
+        {!locked && feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
         {saved && (
           <span
             className="print-hide"
