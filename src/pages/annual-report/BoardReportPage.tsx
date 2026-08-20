@@ -85,6 +85,8 @@ export default function BoardReportPage() {
   const missingNoticeShownRef = useRef(false);
 
   const isLocked = locked || approvedNow;
+  // Approving is one-way, so on the board pack it's the admin's call alone.
+  const isAdmin = user?.role === 'admin';
   // The cover design & colours, shared with the Review step.
   const cover = useBoardCover(reportId, {
     templateKey: assembled?.cover?.template_key ?? null,
@@ -355,11 +357,22 @@ export default function BoardReportPage() {
               // confirm dialog itself is where an incomplete report gets
               // called out, listing exactly what has no data before the
               // operator commits to a one-way lock.
+              //
+              // Gated on role instead: locking a board report is final, and the
+              // board pack is the one report where that call is the admin's.
+              disabled={!isAdmin}
+              title={isAdmin ? undefined : 'Only an admin can approve and lock the board report.'}
               onClick={() => {
                 setApproveError(null);
                 setApproveOpen(true);
               }}
-              style={{ padding: '9px 20px', fontSize: 12.5, fontWeight: 700 }}
+              style={{
+                padding: '9px 20px',
+                fontSize: 12.5,
+                fontWeight: 700,
+                cursor: isAdmin ? 'pointer' : 'not-allowed',
+                opacity: isAdmin ? 1 : 0.55,
+              }}
             >
               Approve &amp; Lock
             </button>
