@@ -146,11 +146,22 @@ export default function EarningsFiguresPage() {
         ),
       );
     apply(expected);
+    setSectionError((p) => ({ ...p, [section.section_code]: '' }));
     try {
       await earnings.setEarningsFigureExpectation(
         reportId, section.section_code, figureId, expected);
-    } catch {
+    } catch (e) {
+      // Rolling back silently is what made this look like the app eating the
+      // number: it appeared, did its thing, and vanished with nothing said. If we
+      // are going to undo somebody's typing we owe them the reason.
       apply(before);
+      setSectionError((p) => ({
+        ...p,
+        [section.section_code]:
+          e instanceof ApiError
+            ? `That expectation didn't save — ${e.message}`
+            : "That expectation didn't save. Check your connection and try again.",
+      }));
     }
   };
 

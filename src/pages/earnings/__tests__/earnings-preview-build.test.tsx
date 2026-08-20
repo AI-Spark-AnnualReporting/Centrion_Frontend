@@ -23,6 +23,7 @@ const h = vi.hoisted(() => {
     runEarningsSection: vi.fn(),
     patchEarningsSectionContent: vi.fn(),
     finaliseEarningsSectionFigures: vi.fn(),
+    setEarningsFigureExpectation: vi.fn(),
     searchSectionFigures: vi.fn(),
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('@/lib/api', () => ({
     runEarningsSection: (...a: unknown[]) => h.runEarningsSection(...a),
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     finaliseEarningsSectionFigures: (...a: unknown[]) => h.finaliseEarningsSectionFigures(...a),
+    setEarningsFigureExpectation: (...a: unknown[]) => h.setEarningsFigureExpectation(...a),
     searchSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
@@ -445,6 +447,60 @@ describe('EarningsPreviewPage', () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     expect(screen.getByText(/1 of\s+2 sections finalised/)).toBeInTheDocument();
+  });
+
+  it('an expectation typed into Consensus vs Actual stays there', async () => {
+    // Reported: type a value, the verdict appears, then it reverts to blank —
+    // which is what an optimistic update does when the request behind it fails.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's12_consensus', title: 'Consensus vs Actual',
+          prompt: null, total: 1,
+          figures: [{ ...fig('qf_1', 'External revenue'), value: 424095,
+                      expected_value: null }] },
+      ],
+    });
+    h.setEarningsFigureExpectation.mockResolvedValue({});
+    renderPage();
+    await screen.findByRole('heading', { name: 'Consensus vs Actual' });
+
+    const box = screen.getByLabelText('Expected External revenue');
+    fireEvent.change(box, { target: { value: '450000' } });
+    fireEvent.blur(box);
+
+    await waitFor(() =>
+      expect(h.setEarningsFigureExpectation).toHaveBeenCalledWith(
+        'rep-1', 's12_consensus', 'qf_1', 450000));
+
+    // and it is still on screen afterwards, with its verdict
+    expect(await screen.findByText('✗ Miss')).toBeInTheDocument();
+    expect(screen.getByLabelText('Expected External revenue')).toHaveValue('450000');
+  });
+
+  it('a failed expectation says so instead of quietly eating the number', async () => {
+    // The reported symptom: type a value, it does its thing, then it goes blank.
+    // Rolling back is right; rolling back in silence is what made it look like the
+    // app had swallowed it.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's12_consensus', title: 'Consensus vs Actual',
+          prompt: null, total: 1,
+          figures: [{ ...fig('qf_1', 'External revenue'), value: 424095,
+                      expected_value: null }] },
+      ],
+    });
+    h.setEarningsFigureExpectation.mockRejectedValue(new h.MockApiError(404, 'Not Found'));
+    renderPage();
+    await screen.findByRole('heading', { name: 'Consensus vs Actual' });
+
+    const box = screen.getByLabelText('Expected External revenue');
+    fireEvent.change(box, { target: { value: '450000' } });
+    fireEvent.blur(box);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/didn't save/);
+    expect(screen.getByLabelText('Expected External revenue')).toHaveValue('');
   });
 
 });
