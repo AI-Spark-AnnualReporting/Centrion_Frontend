@@ -247,6 +247,10 @@ export function ReviewerView({
 
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, EarningsProducedSection>>({});
+  // Why the document came back empty. Swallowing this is what made a permission
+  // failure look like "nothing has been written yet" — two very different things
+  // to the reviewer looking at the screen.
+  const [bodyError, setBodyError] = useState<string | null>(null);
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
   // Quarterly only: the cover page's real values + brand accents, so the review
   // renders the same document AssembledReportPage does. Null until loaded — the
@@ -343,6 +347,7 @@ export function ReviewerView({
             };
           })
         : earnings.getEarningsSections(reportId);
+    setBodyError(null);
     load
       .then((res) => {
         if (cancelled) return;
@@ -351,7 +356,9 @@ export function ReviewerView({
         setBodies(byCode);
         setCoverTemplateKey(res.cover_template_key);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!cancelled) setBodyError(detailMessage(e, 'Could not load the report content.'));
+      });
     return () => {
       cancelled = true;
     };
@@ -633,6 +640,25 @@ export function ReviewerView({
                 Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
                 requested change. When you're done, approve it or send it back to the creator.
               </div>
+
+              {/* The headings come from the review payload, the content from the
+                  report's own endpoint — so the content can fail on its own.
+                  Say so, rather than letting every section read as unwritten. */}
+              {bodyError && Object.keys(bodies).length === 0 && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    background: '#FEF2F2',
+                    border: '1px solid #FECACA',
+                    fontSize: 12.5,
+                    color: '#DC2626',
+                    marginBottom: 16,
+                  }}
+                >
+                  Could not load the report content — {bodyError}
+                </div>
+              )}
 
               {sections.length === 0 && (
                 <div
