@@ -1070,6 +1070,21 @@ function SectionPanel({
         />
       )}
 
+      {/* A written section keeps the upload too — replacing the document it was
+          read from is the fix when the wrong one fed it, and re-reading beats
+          retyping. `NeedsInput` renders its own, so this covers the rest. */}
+      {!readOnly && (produced || s.status === 'empty') && !editing && (
+        <div>
+          <AttachDocument
+            code={s.section_code}
+            slot={slot}
+            label={working ? working : 'Replace the supporting document'}
+            disabled={!!working || !!busy}
+            onUploadFile={onUploadFile}
+          />
+        </div>
+      )}
+
       {error && !editing && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
 
       {/* Stays available while the editor is open — sections are now always
@@ -1200,6 +1215,66 @@ function MarkdownHelpModal({ onClose }: { onClose: () => void }) {
 // into, offer a document to fill that field from, and one Save. Matches the
 // quarterly Preview's needs-input panel.
 
+// Files a document against the section's own slot. Offered on every section,
+// not only the empty ones: a produced section is often wrong because the wrong
+// document fed it, and the fix is the right document — not retyping the text.
+function AttachDocument({
+  code,
+  slot,
+  label,
+  disabled,
+  onUploadFile,
+}: {
+  code: string;
+  slot: string | null;
+  label: string;
+  disabled?: boolean;
+  onUploadFile: (code: string, slot: string, file: File) => void;
+}) {
+  const usable = !!slot && !disabled;
+  return (
+    <label
+      style={{
+        marginTop: 12,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '9px 14px',
+        borderRadius: 8,
+        border: '1.5px dashed #C9CDE4',
+        background: '#fff',
+        cursor: usable ? 'pointer' : 'not-allowed',
+        opacity: usable ? 1 : 0.55,
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: '#5A6080',
+      }}
+      title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
+    >
+      <input
+        type="file"
+        disabled={!usable}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && slot) onUploadFile(code, slot, f);
+          e.target.value = '';
+        }}
+      />
+      <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+        <path d="M10 4v8M6 8l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+        <path
+          d="M4 14v1a2 2 0 002 2h8a2 2 0 002-2v-1"
+          stroke="#9BA3C4"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      {label}
+    </label>
+  );
+}
+
 function NeedsInput({
   section: s,
   slot,
@@ -1300,45 +1375,12 @@ function NeedsInput({
 
           {/* Files the section's own slot, so there is no trip back to Sources
               to work out which document it was waiting on. */}
-          <label
-            style={{
-              marginTop: 12,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 14px',
-              borderRadius: 8,
-              border: '1.5px dashed #C9CDE4',
-              background: '#fff',
-              cursor: slot ? 'pointer' : 'not-allowed',
-              opacity: slot ? 1 : 0.55,
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: '#5A6080',
-            }}
-            title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
-          >
-            <input
-              type="file"
-              disabled={!slot}
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f && slot) onUploadFile(s.section_code, slot, f);
-                e.target.value = '';
-              }}
-            />
-            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
-              <path d="M10 4v8M6 8l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
-              <path
-                d="M4 14v1a2 2 0 002 2h8a2 2 0 002-2v-1"
-                stroke="#9BA3C4"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            Attach a supporting document
-          </label>
+          <AttachDocument
+            code={s.section_code}
+            slot={slot}
+            label="Attach a supporting document"
+            onUploadFile={onUploadFile}
+          />
 
           {error && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
 
