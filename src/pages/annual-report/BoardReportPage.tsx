@@ -203,7 +203,6 @@ export default function BoardReportPage() {
     [assembled],
   );
 
-  const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
   const titleByCode = useMemo(
     () => new Map(outline.map((s) => [s.section_code, s.title])),
     [outline],
@@ -427,7 +426,6 @@ export default function BoardReportPage() {
                     key={s.section_code}
                     section={s}
                     number={numberByCode.get(s.section_code) ?? null}
-                    meta={byCode.get(s.section_code)}
                     locked={isLocked}
                     editing={editingCode === s.section_code}
                     saving={savingCode === s.section_code}
@@ -675,7 +673,6 @@ function MissingSectionsModal({
 function ReportSection({
   section: s,
   number,
-  meta,
   locked,
   editing,
   saving,
@@ -688,7 +685,6 @@ function ReportSection({
   section: BoardSection;
   /** Its number in the finished document, from `/assemble`. */
   number: number | null;
-  meta?: BoardOutlineSection;
   locked: boolean;
   editing: boolean;
   saving: boolean;
@@ -718,11 +714,6 @@ function ReportSection({
         >
           {s.title}
         </h2>
-        {!locked && meta?.requirement === 'M' && (
-          <span className="badge b-gn print-hide" title="Mandatory">
-            M
-          </span>
-        )}
         {!locked && feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
         {!locked && feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
         {saved && (
