@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 // ── Mocks (vi.mock factories are hoisted → build shared state in vi.hoisted) ──
@@ -520,6 +520,80 @@ describe('EarningsOutlinePage', () => {
 
     expect(await screen.findByRole('button', { name: 'Reset' })).toBeInTheDocument();
     expect(screen.getByText(/Originally .Non-IFRS Reconciliations./)).toBeInTheDocument();
+  });
+
+  // ── Removing a section takes its figures with it ───────────────────────────
+
+  const withFigures = () => [
+    sec({ section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', included: true, requirement: 'required', figure_count: 12 }),
+    sec({ section_code: 's07_segment_performance', title: 'Segment Performance',
+          mode: 'table', included: true, requirement: 'recommended', figure_count: 25 }),
+  ];
+
+  const conflict = () => {
+    const e = new h.MockApiError(409, 'API 409');
+    (e as unknown as { body: unknown }).body = {
+      detail: {
+        error: 'sections_hold_figures',
+        sections: [{ section_code: 's07_segment_performance',
+                     title: 'Segment Performance', figure_count: 25 }],
+      },
+    };
+    return e;
+  };
+
+  it('names the figures it is about to remove, instead of just doing it', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: withFigures() });
+    h.saveEarningsOutline.mockRejectedValueOnce(conflict());
+    renderPage();
+    await screen.findByText('Segment Performance');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Exclude Segment Performance' }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Remove Segment Performance\?/)).toBeInTheDocument();
+    expect(within(dialog).getByText('25 figures')).toBeInTheDocument();
+    // and it says what survives, so the choice is an informed one
+    expect(within(dialog).getByText(/putting a section back is one search/)).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('confirming retries naming exactly the sections that were shown', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: withFigures() });
+    h.saveEarningsOutline
+      .mockRejectedValueOnce(conflict())
+      .mockResolvedValueOnce({ sections: withFigures() });
+    renderPage();
+    await screen.findByText('Segment Performance');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Exclude Segment Performance' }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove and continue' }));
+
+    await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalledTimes(2));
+    const [, second] = h.saveEarningsOutline.mock.calls[1];
+    expect((second as { drop_figures?: string[] }).drop_figures)
+      .toEqual(['s07_segment_performance']);
+    // the first attempt never carries it — it is only ever sent on the retry
+    const [, first] = h.saveEarningsOutline.mock.calls[0];
+    expect((first as { drop_figures?: string[] }).drop_figures).toBeUndefined();
+  });
+
+  it('keeping the section abandons the save rather than half-doing it', async () => {
+    h.getEarningsOutline.mockResolvedValue({ sections: withFigures() });
+    h.saveEarningsOutline.mockRejectedValueOnce(conflict());
+    renderPage();
+    await screen.findByText('Segment Performance');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Exclude Segment Performance' }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep section' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(h.saveEarningsOutline).toHaveBeenCalledTimes(1);
+    expect(h.navigateMock).not.toHaveBeenCalled();
   });
 
 });

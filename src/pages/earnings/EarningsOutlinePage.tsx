@@ -68,6 +68,11 @@ export default function EarningsOutlinePage() {
   // Which financial section is open. One at a time — two open panels just push
   // each other off screen.
   const [expandedCode, setExpandedCode] = useState<string | null>(null);
+  // Sections the user is about to empty by removing them, as the server counted
+  // them at the moment of the decision. null = nothing to confirm.
+  const [pendingDrop, setPendingDrop] = useState<
+    { section_code: string; title: string; figure_count: number }[] | null
+  >(null);
 
   // Section production, kicked once the outline is saved. Non-null → the
   // full-screen AI loader takes over; navigation to Preview only happens once
@@ -228,11 +233,15 @@ export default function EarningsOutlinePage() {
   // from PUT /outline's response. The backend resets every included section's
   // status back to 'pending' on every save (even a no-op reorder), so reading
   // post-save status would make this check always fire.
-  const handleContinue = async () => {
+  const handleContinue = async (dropFigures?: string[]) => {
     if (!reportId) return;
     setSaving(true);
     setSaveError(null);
     const payload = {
+      // Only ever sent on the retry, naming exactly the sections the user was
+      // shown and agreed to. A section they never touched cannot be emptied by
+      // somebody else's confirmation.
+      ...(dropFigures?.length ? { drop_figures: dropFigures } : null),
       sections: [
         ...included.map((s, i) => ({
           section_code: s.section_code,
@@ -251,6 +260,19 @@ export default function EarningsOutlinePage() {
     } catch (err: unknown) {
       // 422 (e.g. a stale include of an unavailable optional): surface the message
       // and refetch the outline rather than pushing on.
+      // Removing a section takes its figures with it, so the server refuses until
+      // the user has been told what that costs. This is the only guard: the count
+      // comes from the server at the moment of the decision, so it cannot be stale,
+      // and a second tab or a fresh search can never make it wrong.
+      const detail =
+        err instanceof ApiError && err.status === 409
+          ? (err.body as { detail?: { error?: string; sections?: typeof pendingDrop } })?.detail
+          : null;
+      if (detail?.error === 'sections_hold_figures' && detail.sections?.length) {
+        setPendingDrop(detail.sections);
+        setSaving(false);
+        return;
+      }
       if (err instanceof ApiError && err.status === 422) {
         setSaveError(apiErrorMessage(err, 'This arrangement was rejected — reloading the outline.'));
         setRetryKey((k) => k + 1); // refetch; the banner persists across the reload
@@ -415,12 +437,114 @@ export default function EarningsOutlinePage() {
         </span>
         <button
           className="btn bp"
-          onClick={handleContinue}
+          onClick={() => void handleContinue()}
           disabled={saving || includedCount === 0}
           style={{ opacity: saving || includedCount === 0 ? 0.6 : 1 }}
         >
           {saving ? 'Saving…' : 'Continue →'}
         </button>
+      </div>
+
+      {pendingDrop && (
+        <DropFiguresConfirm
+          sections={pendingDrop}
+          onCancel={() => setPendingDrop(null)}
+          onConfirm={() => {
+            const codes = pendingDrop.map((x) => x.section_code);
+            setPendingDrop(null);
+            void handleContinue(codes);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Removing a section takes its figures with it. That is a real cost and it is the
+// user's to weigh, so it is named — the section, and the number — rather than
+// happening as a side effect of pressing Continue. This dialog is the only thing
+// standing between a click and 83 figures.
+function DropFiguresConfirm({
+  sections,
+  onCancel,
+  onConfirm,
+}: {
+  sections: { section_code: string; title: string; figure_count: number }[];
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const total = sections.reduce((n, s) => n + s.figure_count, 0);
+  const one = sections.length === 1;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={one ? `Remove ${sections[0].title}?` : 'Remove these sections?'}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(20,22,40,.42)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+        zIndex: 60,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        className="card analysis-pop"
+        style={{ width: 'min(460px, 100%)', padding: '22px 24px' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 800, color: INK }}>
+          {one ? `Remove ${sections[0].title}?` : `Remove ${sections.length} sections?`}
+        </h2>
+        <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.6, margin: '9px 0 0' }}>
+          {one ? 'It holds' : 'They hold'}{' '}
+          <strong style={{ color: INK }}>
+            {total} figure{total === 1 ? '' : 's'}
+          </strong>{' '}
+          you chose. Removing {one ? 'the section' : 'them'} removes those figures from
+          this report.
+        </p>
+
+        {!one && (
+          <div style={{ margin: '12px 0 0' }}>
+            {sections.map((s) => (
+              <div
+                key={s.section_code}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '5px 0',
+                  fontSize: 12.5,
+                  color: INK,
+                }}
+              >
+                <span>{s.title}</span>
+                <span style={{ fontFamily: "'DM Mono', monospace", color: MUTED }}>
+                  {s.figure_count}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p style={{ fontSize: 11.5, color: FAINT, lineHeight: 1.6, margin: '12px 0 0' }}>
+          Your report's own lines are not touched, and we keep your brief — so putting a
+          section back is one search. Any figure you edited by hand is kept.
+        </p>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 18 }}>
+          <button type="button" className="btn bs bsm" onClick={onCancel}>
+            Keep {one ? 'section' : 'them'}
+          </button>
+          <button type="button" className="btn bp bsm" onClick={onConfirm}>
+            Remove and continue
+          </button>
+        </div>
       </div>
     </div>
   );

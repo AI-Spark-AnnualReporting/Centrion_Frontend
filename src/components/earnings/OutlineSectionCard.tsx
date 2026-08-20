@@ -241,8 +241,25 @@ export function OutlineSectionCard({
         {isRequired && <span className="badge b-gy">REQUIRED</span>}
         {section.requirement === 'recommended' && dataReady && <span className="badge b-gn">RECOMMENDED</span>}
         {figureCount !== undefined && (
-          <span className={figureCount > 0 ? 'badge b-gn' : 'badge b-gy'}>
+          // A green chip on a section in "Available to add" read as an achievement
+          // when it meant the opposite: work that is not in the report. Same number,
+          // amber, and it says what removing the section would cost.
+          <span
+            className={
+              figureCount === 0
+                ? 'badge b-gy'
+                : group === 'available'
+                  ? 'badge b-am'
+                  : 'badge b-gn'
+            }
+            title={
+              figureCount > 0 && group === 'available'
+                ? 'These figures are not in your report. Tick the section to keep them.'
+                : undefined
+            }
+          >
             {figureCount} {figureCount === 1 ? 'FIGURE' : 'FIGURES'}
+            {figureCount > 0 && group === 'available' ? ' · NOT IN REPORT' : ''}
           </span>
         )}
       </div>

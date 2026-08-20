@@ -12,10 +12,13 @@ export function FiguresRail({
   sections,
   activeCode,
   onSelect,
+  onAddSection,
 }: {
   sections: EarningsFigureSection[];
   activeCode: string | null;
   onSelect: (code: string) => void;
+  /** Back to the Outline — the only place the section set is decided. */
+  onAddSection?: () => void;
 }) {
   const filled = sections.filter((s) => s.total > 0).length;
 
@@ -118,6 +121,31 @@ export function FiguresRail({
           );
         })}
       </div>
+
+      {/* The honest answer to "where are the other sections". The Outline is the
+          only place the section set is decided, and this screen no longer offers
+          sections that are not in the report. */}
+      {onAddSection && (
+        <button
+          type="button"
+          onClick={onAddSection}
+          style={{
+            width: '100%',
+            border: 'none',
+            borderTop: `1px solid ${BORDER_SOFT}`,
+            background: 'none',
+            padding: '10px 14px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 11.5,
+            fontWeight: 700,
+            color: ACCENT,
+          }}
+        >
+          + Add a section
+        </button>
+      )}
     </div>
   );
 }

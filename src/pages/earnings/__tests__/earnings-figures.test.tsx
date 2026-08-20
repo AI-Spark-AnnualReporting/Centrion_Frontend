@@ -347,4 +347,38 @@ describe('EarningsFiguresPage', () => {
     expect(screen.queryByText('INVESTING ACTIVITIES')).toBeNull();
   });
 
+  it('shows only the sections the backend says are in the report', async () => {
+    // The screen does NOT filter — it renders what it is given. Step 3 having its
+    // own idea of the section set is exactly the bug: it used to offer all nine
+    // whatever the Outline said, so 83 figures went into sections that were not in
+    // the report and Preview showed none of them.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: null, figures: [], total: 0 },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    expect(screen.queryByRole('heading', { name: 'Cash Flow Highlights' })).toBeNull();
+  });
+
+  it('a report with no figure sections says so, and offers the way back', async () => {
+    h.getEarningsFigureSections.mockResolvedValue({ ...SECTIONS, sections: [] });
+    renderPage();
+
+    expect(await screen.findByText('No sections to fill in')).toBeInTheDocument();
+    // not a spinner, not an error — a choice, with a door
+    fireEvent.click(screen.getByRole('button', { name: 'Choose sections' }));
+    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
+  });
+
+  it('offers a way back to add a section', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Add a section' }));
+    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
+  });
+
 });

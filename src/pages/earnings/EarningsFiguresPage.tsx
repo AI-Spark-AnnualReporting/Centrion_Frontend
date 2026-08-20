@@ -284,10 +284,10 @@ export default function EarningsFiguresPage() {
           Choose your figures
         </h1>
         <p style={{ fontSize: 13, color: MUTED, margin: '5px 0 0', lineHeight: 1.55 }}>
-          Tell each section what belongs in it, in your own words. We read your report's
-          own lines and bring back the ones that match. Ask again in different words and
-          it adds to what is there, never repeating a line you already have — or add and
-          remove any of them by hand.
+          These are the sections you chose on the Outline. Tell each one what belongs in
+          it, in your own words, and we read your report's own lines and bring back the
+          ones that match. Ask again in different words and it adds to what is there,
+          never repeating a line you already have — or add and remove any by hand.
         </p>
       </header>
 
@@ -304,6 +304,34 @@ export default function EarningsFiguresPage() {
         <div style={{ padding: '60px 0', textAlign: 'center' }}>
           <Spinner />
         </div>
+      ) : sections.length === 0 ? (
+        // Reachable only by unticking every section that carries figures. It is a
+        // choice, not a fault, so it says what is true and offers the way back
+        // rather than looking like a screen that failed to load.
+        <div className="card" style={{ padding: '44px 28px', textAlign: 'center' }}>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: INK }}>
+            No sections to fill in
+          </div>
+          <p
+            style={{
+              fontSize: 13,
+              color: MUTED,
+              lineHeight: 1.6,
+              margin: '8px auto 18px',
+              maxWidth: 420,
+            }}
+          >
+            Your report has no sections that carry figures. Add one on the Outline and
+            it will appear here.
+          </p>
+          <button
+            type="button"
+            className="btn bp"
+            onClick={() => navigate(`/earnings/${reportId}/outline`)}
+          >
+            Choose sections
+          </button>
+        </div>
       ) : (
         <div
           style={{
@@ -316,6 +344,7 @@ export default function EarningsFiguresPage() {
         >
           <div className="fig-rail">
             <FiguresRail
+              onAddSection={() => navigate(`/earnings/${reportId}/outline`)}
               sections={sections ?? []}
               activeCode={activeCode}
               onSelect={jumpTo}
