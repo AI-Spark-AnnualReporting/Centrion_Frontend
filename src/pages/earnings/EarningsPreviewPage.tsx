@@ -65,6 +65,14 @@ export default function EarningsFiguresPage() {
   // it back to the top -- otherwise the next section opens halfway down.
   const paneRef = useRef<HTMLDivElement | null>(null);
 
+  // Expectations the user has typed but not yet committed, keyed section -> figure
+  // -> value. They live here rather than going to the server as they are typed:
+  // a consensus table gets a dozen forecasts entered and half of them changed on
+  // the way, and none of it is meant until the user finalises the section. Held
+  // in state rather than a ref so the count can be shown -- an unsaved number
+  // that looks saved is the whole failure mode this replaces.
+  const [unsaved, setUnsaved] = useState<Record<string, Record<string, number | null>>>({});
+
   const [picking, setPicking] = useState<EarningsFigureSection | null>(null);
   const [pickLines, setPickLines] = useState<EarningsSourceLine[] | null>(null);
   const [pickBusy, setPickBusy] = useState(false);
@@ -130,56 +138,59 @@ export default function EarningsFiguresPage() {
     );
 
   // A bookmark, not a lock -- it hides Edit and counts toward the footer tally.
-  // Optimistic, and it puts the state back if the save does not land.
+  //
+  // It is also the moment this section's typed expectations are written. One
+  // request, one moment: the user says the section is done and everything they
+  // entered goes in together. Optimistic on the flag, and if the write does not
+  // land the flag goes back AND the typed numbers are kept pending, so pressing
+  // it again sends them rather than having quietly dropped them.
   const setFinalised = async (code: string, finalised: boolean) => {
     if (!reportId) return;
+    const pending = finalised ? unsaved[code] : undefined;
     const apply = (v: boolean) =>
       setSections((prev) =>
         (prev ?? []).map((x) => (x.section_code === code ? { ...x, finalised: v } : x)),
       );
     apply(finalised);
+    setSectionError((p) => ({ ...p, [code]: '' }));
     try {
-      await earnings.finaliseEarningsSectionFigures(reportId, code, finalised);
-    } catch {
+      await earnings.finaliseEarningsSectionFigures(
+        reportId, code, finalised,
+        pending && Object.keys(pending).length ? pending : undefined,
+      );
+      if (pending) setUnsaved((p) => ({ ...p, [code]: {} }));
+    } catch (e) {
       apply(!finalised);
+      setSectionError((p) => ({
+        ...p,
+        [code]: e instanceof ApiError
+          ? `That didn't save — ${e.message}. Your figures are still here; try again.`
+          : "That didn't save. Check your connection and try again — your figures are still here.",
+      }));
     }
   };
 
-  // Optimistic: it is a number somebody just typed on their own screen, and
-  // waiting on a round trip to see the verdict would make the whole table feel
-  // dead. Put the old value back if it does not land.
-  const setExpected = async (
+  // Local only. Typing a forecast changes the table and nothing else -- the
+  // verdict updates as you type, and the numbers go to the server in one write
+  // when the section is finalised. Nothing here can fail, so nothing here can
+  // take a number back off the screen after showing it.
+  const setExpected = (
     section: EarningsFigureSection,
     figureId: string,
     expected: number | null,
   ) => {
-    if (!reportId) return;
-    const before = section.figures.find((f) => f.id === figureId)?.expected_value ?? null;
-    const apply = (v: number | null) =>
-      replaceSection(
-        section.section_code,
-        section.figures.map((f) =>
-          f.id === figureId ? { ...f, expected_value: v } : f,
-        ),
-      );
-    apply(expected);
-    setSectionError((p) => ({ ...p, [section.section_code]: '' }));
-    try {
-      await earnings.setEarningsFigureExpectation(
-        reportId, section.section_code, figureId, expected);
-    } catch (e) {
-      // Rolling back silently is what made this look like the app eating the
-      // number: it appeared, did its thing, and vanished with nothing said. If we
-      // are going to undo somebody's typing we owe them the reason.
-      apply(before);
-      setSectionError((p) => ({
-        ...p,
-        [section.section_code]:
-          e instanceof ApiError
-            ? `That expectation didn't save — ${e.message}`
-            : "That expectation didn't save. Check your connection and try again.",
-      }));
-    }
+    replaceSection(
+      section.section_code,
+      section.figures.map((f) =>
+        f.id === figureId ? { ...f, expected_value: expected } : f,
+      ),
+    );
+    // Exactly what the user touched, so finalising writes their edits and
+    // leaves every other row alone.
+    setUnsaved((p) => ({
+      ...p,
+      [section.section_code]: { ...(p[section.section_code] ?? {}), [figureId]: expected },
+    }));
   };
 
   const removeFigure = async (section: EarningsFigureSection, figureId: string) => {
@@ -532,6 +543,7 @@ export default function EarningsFiguresPage() {
 
             {(sections ?? []).filter((s) => s.section_code === activeCode).map((s) => {
               const finalised = !!s.finalised;
+              const pendingCount = Object.keys(unsaved[s.section_code] ?? {}).length;
               return (
                 <section
                   key={s.section_code}
@@ -630,7 +642,7 @@ export default function EarningsFiguresPage() {
                         // every row rather than just reporting one.
                         <ConsensusLedger
                           figures={s.figures}
-                          onSetExpected={(id, v) => void setExpected(s, id, v)}
+                          onSetExpected={(id, v) => setExpected(s, id, v)}
                           onRemove={(id) => void removeFigure(s, id)}
                         />
                       ) : (
@@ -723,6 +735,15 @@ export default function EarningsFiguresPage() {
                       </>
                     ) : (
                       <>
+                        {/* Typed expectations are not stored until this button is
+                            pressed, so the screen has to say so. Silence here is
+                            what turns "I typed it" into "it was saved". */}
+                        {pendingCount > 0 && (
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: MUTED }}>
+                            {pendingCount} expectation{pendingCount === 1 ? '' : 's'} typed —
+                            finalise to save {pendingCount === 1 ? 'it' : 'them'}.
+                          </span>
+                        )}
                         <button
                           type="button"
                           className="btn bs bsm"

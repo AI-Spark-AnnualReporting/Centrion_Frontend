@@ -23,7 +23,6 @@ const h = vi.hoisted(() => {
     runEarningsSection: vi.fn(),
     patchEarningsSectionContent: vi.fn(),
     finaliseEarningsSectionFigures: vi.fn(),
-    setEarningsFigureExpectation: vi.fn(),
     analyseEarningsSection: vi.fn(),
     saveEarningsSectionAnalysis: vi.fn(),
     searchSectionFigures: vi.fn(),
@@ -47,7 +46,6 @@ vi.mock('@/lib/api', () => ({
     runEarningsSection: (...a: unknown[]) => h.runEarningsSection(...a),
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     finaliseEarningsSectionFigures: (...a: unknown[]) => h.finaliseEarningsSectionFigures(...a),
-    setEarningsFigureExpectation: (...a: unknown[]) => h.setEarningsFigureExpectation(...a),
     analyseEarningsSection: (...a: unknown[]) => h.analyseEarningsSection(...a),
     saveEarningsSectionAnalysis: (...a: unknown[]) => h.saveEarningsSectionAnalysis(...a),
     searchSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
@@ -420,7 +418,7 @@ describe('EarningsPreviewPage', () => {
 
     await waitFor(() =>
       expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledWith(
-        'rep-1', 's04_financial_highlights', true));
+        'rep-1', 's04_financial_highlights', true, undefined));
     // The green text is gone; the useful thing in its place is the commentary.
     expect(await screen.findByRole('button', { name: /Analyse/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add figures' })).toBeNull();
@@ -454,19 +452,21 @@ describe('EarningsPreviewPage', () => {
     expect(screen.getByText(/1 of\s+2 sections finalised/)).toBeInTheDocument();
   });
 
-  it('an expectation typed into Consensus vs Actual stays there', async () => {
-    // Reported: type a value, the verdict appears, then it reverts to blank —
-    // which is what an optimistic update does when the request behind it fails.
-    h.getEarningsFigureSections.mockResolvedValue({
-      ...SECTIONS,
-      sections: [
-        { section_code: 's12_consensus', title: 'Consensus vs Actual',
-          prompt: null, total: 1,
-          figures: [{ ...fig('qf_1', 'External revenue'), value: 424095,
-                      expected_value: null }] },
-      ],
-    });
-    h.setEarningsFigureExpectation.mockResolvedValue({});
+  const CONSENSUS_ONE = {
+    ...SECTIONS,
+    sections: [
+      { section_code: 's12_consensus', title: 'Consensus vs Actual',
+        prompt: null, total: 1,
+        figures: [{ ...fig('qf_1', 'External revenue'), value: 424095,
+                    expected_value: null }] },
+    ],
+  };
+
+  it('a typed expectation stays on screen and is not sent yet', async () => {
+    // Reported twice: type a value, the verdict appears, then it reverts to
+    // blank. It was an optimistic write rolling back behind a failing request.
+    // Now typing touches nothing but the screen, so there is no request to fail.
+    h.getEarningsFigureSections.mockResolvedValue(CONSENSUS_ONE);
     renderPage();
     await screen.findByRole('heading', { name: 'Consensus vs Actual' });
 
@@ -474,29 +474,15 @@ describe('EarningsPreviewPage', () => {
     fireEvent.change(box, { target: { value: '450000' } });
     fireEvent.blur(box);
 
-    await waitFor(() =>
-      expect(h.setEarningsFigureExpectation).toHaveBeenCalledWith(
-        'rep-1', 's12_consensus', 'qf_1', 450000));
-
-    // and it is still on screen afterwards, with its verdict
     expect(await screen.findByText('✗ Miss')).toBeInTheDocument();
     expect(screen.getByLabelText('Expected External revenue')).toHaveValue('450000');
+    expect(h.finaliseEarningsSectionFigures).not.toHaveBeenCalled();
   });
 
-  it('a failed expectation says so instead of quietly eating the number', async () => {
-    // The reported symptom: type a value, it does its thing, then it goes blank.
-    // Rolling back is right; rolling back in silence is what made it look like the
-    // app had swallowed it.
-    h.getEarningsFigureSections.mockResolvedValue({
-      ...SECTIONS,
-      sections: [
-        { section_code: 's12_consensus', title: 'Consensus vs Actual',
-          prompt: null, total: 1,
-          figures: [{ ...fig('qf_1', 'External revenue'), value: 424095,
-                      expected_value: null }] },
-      ],
-    });
-    h.setEarningsFigureExpectation.mockRejectedValue(new h.MockApiError(404, 'Not Found'));
+  it('says the typed numbers are not saved until the section is finalised', async () => {
+    // Held locally is only honest if the screen admits it. Silence here is what
+    // turns "I typed it" into "it was saved".
+    h.getEarningsFigureSections.mockResolvedValue(CONSENSUS_ONE);
     renderPage();
     await screen.findByRole('heading', { name: 'Consensus vs Actual' });
 
@@ -504,8 +490,42 @@ describe('EarningsPreviewPage', () => {
     fireEvent.change(box, { target: { value: '450000' } });
     fireEvent.blur(box);
 
+    expect(await screen.findByText(/1 expectation typed/)).toBeInTheDocument();
+  });
+
+  it('finalising writes every typed expectation in one request', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(CONSENSUS_ONE);
+    h.finaliseEarningsSectionFigures.mockResolvedValue({});
+    renderPage();
+    await screen.findByRole('heading', { name: 'Consensus vs Actual' });
+
+    const box = screen.getByLabelText('Expected External revenue');
+    fireEvent.change(box, { target: { value: '450000' } });
+    fireEvent.blur(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
+    await waitFor(() =>
+      expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledWith(
+        'rep-1', 's12_consensus', true, { qf_1: 450000 }));
+    expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed finalise keeps the typed numbers and says what happened', async () => {
+    // The number must not disappear because the write failed. It is still on
+    // screen, still pending, and pressing Finalise again sends it.
+    h.getEarningsFigureSections.mockResolvedValue(CONSENSUS_ONE);
+    h.finaliseEarningsSectionFigures.mockRejectedValue(new h.MockApiError(500, 'nope'));
+    renderPage();
+    await screen.findByRole('heading', { name: 'Consensus vs Actual' });
+
+    const box = screen.getByLabelText('Expected External revenue');
+    fireEvent.change(box, { target: { value: '450000' } });
+    fireEvent.blur(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
     expect(await screen.findByRole('alert')).toHaveTextContent(/didn't save/);
-    expect(screen.getByLabelText('Expected External revenue')).toHaveValue('');
+    expect(screen.getByLabelText('Expected External revenue')).toHaveValue('450000');
+    expect(await screen.findByText(/1 expectation typed/)).toBeInTheDocument();
   });
 
   it('an analysis survives switching sections and coming back', async () => {

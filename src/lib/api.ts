@@ -2958,33 +2958,26 @@ export const earnings = {
       { method: "PATCH", body: { text } },
     ),
 
-  // Set what the market expected for one figure, or clear it with null.
-  // Only the expectation — the actual value has its own PATCH, and confusing
-  // the two would be confusing the company's number with a forecast of it.
-  setEarningsFigureExpectation: (
-    reportId: string,
-    sectionCode: string,
-    qrFigureId: string,
-    expected: number | null,
-  ): Promise<unknown> =>
-    request<unknown>(
-      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
-        `/sections/${encodeURIComponent(sectionCode)}` +
-        `/figures/${encodeURIComponent(qrFigureId)}/expected`,
-      { method: "PATCH", body: { expected } },
-    ),
-
-  // Mark a section's figures as done with, or undo it. A bookmark, not a lock:
-  // it hides the edit control on Preview and nothing more.
+  // Mark a section's figures as done with, or undo it — and store the
+  // expectations typed against them, all in this one request.
+  //
+  // The expectations ride along here rather than having an endpoint of their
+  // own. Preview holds them locally while the user types, because a consensus
+  // table gets a dozen numbers entered and half of them changed, and none of it
+  // is meant until the user says the section is done. One write at that moment.
+  //
+  // `expectations` maps a figure id to its expected value, or to null to clear
+  // one. Omit it entirely when only the bookmark is moving.
   finaliseEarningsSectionFigures: (
     reportId: string,
     sectionCode: string,
     finalised: boolean,
+    expectations?: Record<string, number | null>,
   ): Promise<unknown> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
         `/sections/${encodeURIComponent(sectionCode)}/finalise-figures`,
-      { method: "PATCH", body: { finalised } },
+      { method: "PATCH", body: { finalised, ...(expectations ? { expectations } : {}) } },
     ),
 
   // Produce ONLY the sections that can be built before a figure exists — the
