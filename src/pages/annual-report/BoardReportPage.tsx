@@ -17,6 +17,8 @@ import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
+import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { ReportStatusCard } from '@/components/shared/ReportStatusCard';
 import type {
   BoardAssembleResponse,
   BoardCompletion,
@@ -400,11 +402,13 @@ export default function BoardReportPage() {
             className="doc-scroll"
             style={{ height: frameHeight ?? undefined, overflowY: 'auto', paddingRight: 6 }}
           >
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', justifyContent: 'center' }}>
             <div
               className="print-doc"
               style={{
+                flex: '1 1 auto',
                 maxWidth: DOC_WIDTH,
-                margin: '0 auto',
+                minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 20,
@@ -443,6 +447,26 @@ export default function BoardReportPage() {
                   />
                 ))}
               </div>
+            </div>
+
+            {/* Share for review, and the discussion that comes back — the same
+                rail the quarterly assembled report carries. Status lives in the
+                card above it, so the panel's own radios stay hidden. */}
+            <div
+              className="print-hide"
+              style={{
+                width: 290,
+                flexShrink: 0,
+                position: 'sticky',
+                top: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <ReportStatusCard approved={isLocked} approvedAt={null} />
+              <ReportHubPanel reportId={reportId} showStatus={false} readOnly={isLocked} />
+            </div>
             </div>
           </div>
         )}
