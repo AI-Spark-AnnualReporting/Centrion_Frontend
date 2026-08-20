@@ -330,19 +330,6 @@ describe('SectionRenderer dispatch', () => {
     expect(screen.getByText('Not broken out in the filing')).toBeInTheDocument();
   });
 
-  it('Sources, Methodology & Assumptions renders a labelled citation list, not a raw text blob', () => {
-    render(<SectionRenderer section={SOURCES} />);
-    expect(screen.getByText('Total Assets')).toBeInTheDocument();
-    expect(screen.getByText('Q1-2026')).toBeInTheDocument();
-    expect(screen.getByText('financial-statements.pdf')).toBeInTheDocument();
-    expect(screen.getByText('p.13')).toBeInTheDocument();
-    // A derived line (no " · " citation) reads as a note, not a fake citation.
-    expect(screen.getByText('Free Cash Flow')).toBeInTheDocument();
-    expect(screen.getByText(/Derived · OCF − Capex/)).toBeInTheDocument();
-    // Never the raw "Label: rest" line as one literal string.
-    expect(screen.queryByText('Total Assets: Q1-2026 · financial-statements.pdf · p.13')).not.toBeInTheDocument();
-  });
-
   it('MD&A renders the "not disclosed" line verbatim, unembellished', () => {
     render(<SectionRenderer section={MDNA_NOT_DISCLOSED} />);
     expect(screen.getByText('Not disclosed for this period.')).toBeInTheDocument();

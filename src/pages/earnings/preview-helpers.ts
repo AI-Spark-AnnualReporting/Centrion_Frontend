@@ -136,43 +136,6 @@ export function isReconciliationMode(
   return section.mode === 'reconciliation' || /reconciliation/i.test(section.section_code);
 }
 
-// Sources, Methodology & Assumptions (S18) — one citation per figure, rendered
-// as a labelled list instead of raw "Label: period · filename · page" prose lines.
-export function isSourcesMode(section: Pick<EarningsProducedSection, 'mode' | 'section_code'>): boolean {
-  return /sources|methodology/i.test(section.section_code);
-}
-
-// One "<Label>: <rest>" line from the sources section's plain-text content.
-// `rest` is either "<period> · <filename> · <page>" (a real citation) or a
-// bare note with no " · " at all (e.g. a derived figure's formula) — never
-// guessed, just split on the structure the backend actually sends.
-export interface SourceCitationLine {
-  label: string;
-  period: string | null;
-  filename: string | null;
-  page: string | null;
-  note: string | null;
-}
-
-export function parseSourcesContent(content: string): SourceCitationLine[] {
-  return content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line): SourceCitationLine => {
-      const idx = line.indexOf(':');
-      if (idx === -1) return { label: line, period: null, filename: null, page: null, note: null };
-      const label = line.slice(0, idx).trim();
-      const rest = line.slice(idx + 1).trim();
-      const segments = rest.split('·').map((s) => s.trim()).filter(Boolean);
-      if (segments.length >= 2) {
-        const [period, filename, page] = segments;
-        return { label, period: period ?? null, filename: filename ?? null, page: page ?? null, note: null };
-      }
-      return { label, period: null, filename: null, page: null, note: rest || null };
-    });
-}
-
 // Sections that vanish ENTIRELY (no card, no rail entry) when they produced
 // nothing by design. Only quote (S05) and trend (S16) get this treatment — the
 // spec's "doesn't appear" language is specific to these two. Reconciliation/KPI
