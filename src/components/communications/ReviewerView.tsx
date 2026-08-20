@@ -485,9 +485,11 @@ export function ReviewerView({
   // Quarterly renders as the assembled document: cover as its own page, so it
   // drops out of the numbered body list exactly as AssembledReportPage does.
   // Both assemble into a real document — cover as its own page, prose and
-  // tables through the quarterly renderer — so they render the same way.
-  const isQuarterly = reportType === QUARTERLY || BOARD.includes(reportType ?? '');
-  const sections = isQuarterly
+  // tables through the quarterly renderer — so they render the same way. Board
+  // content is the one difference: it's Markdown, and needs parsing.
+  const isBoard = BOARD.includes(reportType ?? '');
+  const isDocument = reportType === QUARTERLY || isBoard;
+  const sections = isDocument
     ? allSections.filter((s) => !isCoverSection({ section_code: s.id }))
     : allSections;
   // Once the report is approved (or otherwise finished) the review is over —
@@ -671,7 +673,7 @@ export function ReviewerView({
 
               {/* Quarterly cover — page 1, same renderer and width the assembled
                   report uses. Skipped until the real header values load. */}
-              {isQuarterly && cover && (
+              {isDocument && cover && (
                 <div
                   style={{
                     marginBottom: 20,
@@ -696,11 +698,11 @@ export function ReviewerView({
                   own assembled screen. The brand vars drive report-content
                   accents (headings, table headers, figures) in both. */}
               <div
-                className={isQuarterly && sections.length > 0 ? 'card' : undefined}
+                className={isDocument && sections.length > 0 ? 'card' : undefined}
                 style={{
                   ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
                   ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
-                  ...(isQuarterly && sections.length > 0
+                  ...(isDocument && sections.length > 0
                     ? { padding: '32px 40px', maxWidth: DOC_WIDTH, margin: '0 auto' }
                     : {}),
                 }}
@@ -711,13 +713,13 @@ export function ReviewerView({
                 // section.id is the earnings section_code verbatim.
                 const body = bodies[s.id];
                 return (
-                  <div key={s.id} id={sectionDomId(s.id)} style={{ marginBottom: isQuarterly ? 34 : 16, scrollMarginTop: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isQuarterly ? 10 : 11, marginBottom: isQuarterly ? 14 : 10 }}>
+                  <div key={s.id} id={sectionDomId(s.id)} style={{ marginBottom: isDocument ? 34 : 16, scrollMarginTop: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isDocument ? 10 : 11, marginBottom: isDocument ? 14 : 10 }}>
                       <span
                         style={{
                           flexShrink: 0,
-                          fontWeight: isQuarterly ? 700 : 800,
-                          ...(isQuarterly
+                          fontWeight: isDocument ? 700 : 800,
+                          ...(isDocument
                             ? { fontFamily: MONO, fontSize: 12, color: BRAND }
                             : // EarningsPreviewPage: faint "01", tabular figures.
                               { fontSize: 11, color: '#9BA3C4', fontVariantNumeric: 'tabular-nums' }),
@@ -731,7 +733,7 @@ export function ReviewerView({
                           minWidth: 0,
                           fontWeight: 800,
                           color: BRAND,
-                          ...(isQuarterly ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
+                          ...(isDocument ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
                         }}
                       >
                         {s.title}
@@ -783,10 +785,10 @@ export function ReviewerView({
                         through the quarterly renderer (same tables and prose the
                         assembled report draws) and sits directly on the document
                         page rather than in its own card. */}
-                    <div className={isQuarterly ? undefined : 'card'} style={isQuarterly ? undefined : { padding: '18px 22px' }}>
+                    <div className={isDocument ? undefined : 'card'} style={isDocument ? undefined : { padding: '18px 22px' }}>
                       {body ? (
-                        isQuarterly ? (
-                          <SectionContent section={body} />
+                        isDocument ? (
+                          <SectionContent section={body} markdown={isBoard} />
                         ) : (
                           <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
                         )
@@ -829,7 +831,7 @@ export function ReviewerView({
               </div>
 
               {/* Report-level comments (section_id: null) */}
-              <div className="card" style={{ padding: '16px 20px', maxWidth: isQuarterly ? DOC_WIDTH : undefined, margin: isQuarterly ? '16px auto 0' : undefined }}>
+              <div className="card" style={{ padding: '16px 20px', maxWidth: isDocument ? DOC_WIDTH : undefined, margin: isDocument ? '16px auto 0' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: '#1A1D2E' }}>
                     On the report as a whole
