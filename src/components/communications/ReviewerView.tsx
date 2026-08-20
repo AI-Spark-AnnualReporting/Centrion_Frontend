@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import {
+  boardReports,
   communications,
   earnings,
   quarterlyReports,
@@ -13,6 +14,8 @@ import {
 } from '@/lib/api';
 import type { EarningsProducedSection } from '@/types/earnings';
 import type { AssembledSection, BrandColors } from '@/types/quarterly';
+import type { BoardAssembledSection } from '@/types/board';
+import { numberBoardHeadings } from '@/pages/annual-report/board-helpers';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
@@ -51,9 +54,11 @@ const REPORT_LEVEL_KEY = 'null';
 // Anchors for the in-document sections, so the comments rail can jump to one.
 const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`;
 
-// Quarterly reports assemble from their own endpoint; every other type reads
-// through the earnings sections endpoint.
+// Quarterly and board reports each assemble from their own endpoint; every
+// other type reads through the earnings sections endpoint. `board_pack` is the
+// older type string for the same report.
 const QUARTERLY = 'quarterly';
+const BOARD = ['board_report', 'board_pack'];
 
 // Document presentation, matched to AssembledReportPage so the reviewer reads
 // exactly what the creator approved — same page width, numbering, and accents.
@@ -76,6 +81,35 @@ export function assembledToProduced(s: AssembledSection): EarningsProducedSectio
     mode: s.mode,
     status: 'produced',
     content: raw == null ? null : typeof raw === 'string' ? raw : JSON.stringify(raw),
+    included: true,
+    feeder_status: 'ready',
+    feeder_message: null,
+    source_label: null,
+    source_ref: null,
+    confidence: null,
+    flag: null,
+    grounding_flag: null,
+    grounding_acknowledged: false,
+    edited: false,
+  };
+}
+
+// The board document's own assemble shape, mapped to what the renderers read.
+// Board content arrives as Markdown prose or a JSON table, the same two shapes
+// the quarterly renderer already draws.
+function boardToProduced(s: BoardAssembledSection): EarningsProducedSection {
+  const raw = s.content as unknown;
+  const content = raw == null ? null : typeof raw === 'string' ? raw : JSON.stringify(raw);
+  return {
+    section_code: s.section_code,
+    title: s.title,
+    display_order: s.display_order ?? 0,
+    source_type: s.source_type ?? null,
+    mode: s.mode === 'table' ? 'table' : 'generate',
+    status: 'produced',
+    // Headings inside a section are numbered from the section's own number, as
+    // on the Report step — the reviewer reads what the creator approved.
+    content: numberBoardHeadings(content, s.number ?? null) || content,
     included: true,
     feeder_status: 'ready',
     feeder_message: null,
@@ -268,8 +302,25 @@ export function ReviewerView({
   useEffect(() => {
     if (!reportId || !reportType) return;
     let cancelled = false;
-    const load =
-      reportType === QUARTERLY && companyId
+    const load = BOARD.includes(reportType)
+      ? boardReports.getAssemble(reportId).then((res) => {
+          if (!cancelled) {
+            const values = (res.cover?.values ?? {}) as Record<string, unknown>;
+            const str = (k: string) => (typeof values[k] === 'string' ? (values[k] as string) : null);
+            setCover({
+              companyName: str('company_name') ?? userCompanyName,
+              period: str('period_label') ?? res.period ?? null,
+              title: str('title') ?? 'Board of Directors’ Report',
+              preparedOn: str('prepared_on'),
+            });
+            setBrand(res.brand ?? res.cover?.brand ?? null);
+          }
+          return {
+            sections: res.sections.map(boardToProduced),
+            cover_template_key: res.cover?.template_key ?? null,
+          };
+        })
+      : reportType === QUARTERLY && companyId
         ? quarterlyReports.getAssembled(companyId, reportId).then((res) => {
             if (!cancelled) {
               // /assemble often omits `header` entirely. AssembledReportPage
@@ -426,7 +477,9 @@ export function ReviewerView({
         .map((s, i) => ({ id: s.section_code, order: i + 1, title: s.title, type: s.mode }));
   // Quarterly renders as the assembled document: cover as its own page, so it
   // drops out of the numbered body list exactly as AssembledReportPage does.
-  const isQuarterly = reportType === QUARTERLY;
+  // Both assemble into a real document — cover as its own page, prose and
+  // tables through the quarterly renderer — so they render the same way.
+  const isQuarterly = reportType === QUARTERLY || BOARD.includes(reportType ?? '');
   const sections = isQuarterly
     ? allSections.filter((s) => !isCoverSection({ section_code: s.id }))
     : allSections;
