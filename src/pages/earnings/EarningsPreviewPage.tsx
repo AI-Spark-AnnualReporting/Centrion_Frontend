@@ -21,6 +21,7 @@ import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { FigureDialog } from '@/components/earnings/FigureDialog';
 import { FigureLedger } from '@/components/earnings/FigureLedger';
 import { ConsensusLedger } from '@/components/earnings/ConsensusLedger';
+import SectionAnalysis from '@/components/quarterly/SectionAnalysis';
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
@@ -104,6 +105,19 @@ export default function EarningsFiguresPage() {
     void load();
   }, [load]);
 
+
+  // SectionAnalysis reads a produced section's content (to spot a table edited
+  // after the analysis was written) and its stored analysis. The figures screen
+  // carries neither, so it is stitched from the produced half.
+  const analysisSection = (s: EarningsFigureSection) => {
+    const p = produced.find((x) => x.section_code === s.section_code);
+    return {
+      section_code: s.section_code,
+      title: s.title,
+      content: p?.content ?? null,
+      analysis: (p as { analysis?: unknown } | undefined)?.analysis ?? null,
+    } as never;
+  };
 
   const replaceSection = (code: string, figures: EarningsFigureSection['figures']) =>
     setSections((prev) =>
@@ -625,9 +639,24 @@ export default function EarningsFiguresPage() {
                   >
                     {finalised ? (
                       <>
-                        <span style={{ flex: 1, fontSize: 11.5, color: '#15803D', fontWeight: 700 }}>
-                          ✓ Figures finalised
-                        </span>
+                        {/* Where a line of green text saying "finalised" used to
+                            sit. Once the figures are settled the useful next thing
+                            is the commentary that goes under them. */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <SectionAnalysis
+                            companyId=""
+                            reportId={reportId ?? ''}
+                            section={analysisSection(s)}
+                            analyse={(code, opts) =>
+                              earnings.analyseEarningsSection(
+                                reportId ?? '', code, opts) as Promise<never>
+                            }
+                            saveAnalysis={(code, text) =>
+                              earnings.saveEarningsSectionAnalysis(
+                                reportId ?? '', code, text) as Promise<never>
+                            }
+                          />
+                        </div>
                         {/* A one-way door with no lock behind it would only be a
                             nuisance the first time somebody spots a mistake. */}
                         <button
@@ -645,7 +674,7 @@ export default function EarningsFiguresPage() {
                           className="btn bs bsm"
                           onClick={() => void openPicker(s)}
                         >
-                          Edit figures
+                          Add figures
                         </button>
                         <button
                           type="button"

@@ -74,9 +74,18 @@ const REPORT_FLOW_EXACT = ['/reports/processing'];
 // chatbot parked over the Continue button.
 const REPORT_FLOW_PREFIXES = ['/quarterly-report', '/earnings'];
 
+// /earnings/setup is the exception: it is an ordinary form, not one of the
+// full-height screens with a pinned footer, and it behaved like any other page
+// long before the rest of the flow existed. The prefix above is about the screens
+// that build the report, which all carry a report id.
+const REPORT_FLOW_EXCEPT = ['/earnings/setup'];
+
 // Exact-or-segment match, NOT a bare startsWith, so a future sibling route like
 // /quarterly-reports-archive can't accidentally match.
 function isReportFlowRoute(pathname: string): boolean {
+  if (REPORT_FLOW_EXCEPT.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    return false;
+  }
   return (
     REPORT_FLOW_EXACT.includes(pathname) ||
     REPORT_FLOW_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))

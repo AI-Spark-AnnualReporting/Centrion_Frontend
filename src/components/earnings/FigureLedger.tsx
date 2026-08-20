@@ -90,17 +90,12 @@ export function FigureLedger({
         </span>
       </div>
 
-      {/* A generous search can return thirty lines, and nine sections of that is a
-          page nobody can navigate. The rows scroll; the header stays put above
-          them, so the unit column never scrolls out of view, and the total sits
-          below — see 11 rows against "30 lines" and you know there is more. */}
-      <div
-        style={{
-          maxHeight: 336,
-          overflowY: 'auto',
-          overscrollBehavior: 'contain',
-        }}
-      >
+      {/* NO inner scroller. This used to cap the rows and scroll them, from when
+          the screen was one long stack of section cards. The content column is its
+          own scrollport now, and a scroller inside a scroller put the section's
+          own buttons below a fold the user could not reach — they had to scroll an
+          inner box to the end before the outer one would move. One scrollbar. */}
+      <div>
       {[...groups.entries()].map(([table, rows]) => (
         <div key={table}>
           {multi && (

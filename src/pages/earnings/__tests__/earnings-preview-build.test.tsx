@@ -152,10 +152,10 @@ describe('EarningsPreviewPage', () => {
         'rep-1', 's04_financial_highlights', ['qf_1']));
   });
 
-  it('Edit figures opens the picker for that section', async () => {
+  it('Add figures opens the picker for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit figures' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add figures' }));
 
     await waitFor(() =>
       expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1', 's04_financial_highlights'));
@@ -169,7 +169,7 @@ describe('EarningsPreviewPage', () => {
   it('the picker saves the whole tick set for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: 'Edit figures' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add figures' }));
     await screen.findByRole('checkbox', { name: 'Inventories' });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Inventories' }));
@@ -394,17 +394,17 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByRole('button', { name: 'Ask again' })).toBeNull();
   });
 
-  it('offers Edit figures and Finalise figures', async () => {
+  it('offers Add figures and Finalise figures', async () => {
     h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
 
-    expect(screen.getByRole('button', { name: 'Edit figures' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add figures' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Finalise figures' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add figure' })).toBeNull();
   });
 
-  it('finalising hides Edit, and can be undone', async () => {
+  it('finalising swaps Add figures for Analyse, and can be undone', async () => {
     // A bookmark, not a lock. A one-way door with nothing behind it would only be
     // a nuisance the first time somebody spots a mistake.
     h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
@@ -417,11 +417,12 @@ describe('EarningsPreviewPage', () => {
     await waitFor(() =>
       expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledWith(
         'rep-1', 's04_financial_highlights', true));
-    expect(await screen.findByText('✓ Figures finalised')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit figures' })).toBeNull();
+    // The green text is gone; the useful thing in its place is the commentary.
+    expect(await screen.findByRole('button', { name: /Analyse/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add figures' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Change' }));
-    expect(await screen.findByRole('button', { name: 'Edit figures' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Add figures' })).toBeInTheDocument();
   });
 
   it('a failed finalise puts the button back rather than lying', async () => {

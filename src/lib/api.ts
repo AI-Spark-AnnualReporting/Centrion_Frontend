@@ -2931,6 +2931,33 @@ export const earnings = {
       { method: "POST", body: { search_figures: true } },
     ).then(readEarningsProduceHandle),
 
+  // Write the short commentary under one section's figures, or re-write it.
+  // Cached server-side on a fingerprint of the table, model, prompt, tone and
+  // language, so re-opening a section costs nothing; force is "write it again".
+  analyseEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
+
+  // Save an edited analysis, or clear it with an empty string. Marks it edited,
+  // which stops the cache serving our words over the user's.
+  saveEarningsSectionAnalysis: (
+    reportId: string,
+    sectionCode: string,
+    text: string,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
   // Set what the market expected for one figure, or clear it with null.
   // Only the expectation — the actual value has its own PATCH, and confusing
   // the two would be confusing the company's number with a forecast of it.
