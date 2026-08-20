@@ -20,6 +20,19 @@ export interface NormTable {
    * carry `cells` keyed to these instead of a single value.
    */
   matrixColumns?: MatrixColumn[];
+  /**
+   * Set when the section prints named columns whose cells are keyed BY that name —
+   * Consensus vs Actual's Line / Actual / Expected / Result. The shared exporter
+   * calls the same thing `columns`, so screen and PDF read one shape.
+   */
+  columns?: string[];
+}
+
+/** A list of column names off the wire, keeping only real strings. */
+function asStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  return out.length ? out : undefined;
 }
 
 /** matrix_columns off the wire, keeping only entries that can address a cell. */
@@ -81,6 +94,7 @@ export function normalizeTables(parsed: unknown): NormTable[] {
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
         matrixColumns: asMatrixColumns(t.matrix_columns),
+        columns: asStringArray(t.columns),
       }));
     }
     return [{ rows: parsed.filter(isRecord) as LooseRow[] }];
@@ -91,6 +105,7 @@ export function normalizeTables(parsed: unknown): NormTable[] {
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
         matrixColumns: asMatrixColumns(t.matrix_columns),
+        columns: asStringArray(t.columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {

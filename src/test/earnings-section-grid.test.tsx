@@ -84,4 +84,38 @@ describe('SectionTable', () => {
     expect(screen.queryByRole('columnheader', { name: 'Line item' })).toBeNull();
     expect(screen.getByText('424,095 SAR_million')).toBeInTheDocument();
   });
+
+  it('renders a section that prints its own named columns', () => {
+    // Consensus vs Actual. Without this the row keys meant nothing to the
+    // Metric/Value renderer, which found no label and no current_display and drew
+    // a table of blank rows all reading "Pending".
+    render(
+      <SectionTable
+        content={JSON.stringify({
+          title: 'Consensus vs Actual',
+          tables: [{
+            title: 'Consensus vs Actual',
+            columns: ['Line', 'Actual', 'Expected', 'Result'],
+            rows: [
+              { code: 'a', Line: 'Earnings per share', Actual: '2.15',
+                Expected: '2.00', Result: '✓ Beat  +7.5%' },
+              { code: 'b', Line: 'External revenue', Actual: '424,095',
+                Expected: '—', Result: '—' },
+            ],
+          }],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('columnheader', { name: 'Expected' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Result' })).toBeInTheDocument();
+
+    const eps = screen.getByRole('row', { name: /Earnings per share/ });
+    expect(within(eps).getByText('2.15')).toBeInTheDocument();
+    expect(within(eps).getByText(/Beat/)).toBeInTheDocument();
+
+    // nothing anywhere claims a row is pending
+    expect(screen.queryByText('Pending')).toBeNull();
+  });
+
 });
