@@ -700,13 +700,13 @@ function ReportSection({
         >
           {s.title}
         </h2>
-        {meta?.requirement === 'M' && (
+        {!locked && meta?.requirement === 'M' && (
           <span className="badge b-gn print-hide" title="Mandatory">
             M
           </span>
         )}
-        {feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
-        {feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
+        {!locked && feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
+        {!locked && feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
         {saved && (
           <span
             className="print-hide"
