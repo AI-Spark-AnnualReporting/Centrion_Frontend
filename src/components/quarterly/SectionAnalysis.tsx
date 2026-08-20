@@ -104,9 +104,8 @@ function ConfirmDialog({
             {redo ? 'Write this analysis again?' : 'Analyse this section?'}
           </div>
           <p style={{ margin: '10px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
-            This sends the <strong>{lines} {lines === 1 ? 'line' : 'lines'}</strong> of figures in{' '}
-            <strong>{title}</strong> to AI to be read and summarised. Nothing else from your
-            report is sent.
+            This sends the figures in <strong>{title}</strong> to AI to be read and
+            summarised. Nothing else from your report is sent.
           </p>
           <p style={{ margin: '8px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             {redo

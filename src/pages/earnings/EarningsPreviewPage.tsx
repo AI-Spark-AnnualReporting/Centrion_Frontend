@@ -21,7 +21,7 @@ import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { FigureDialog } from '@/components/earnings/FigureDialog';
 import { FigureLedger } from '@/components/earnings/FigureLedger';
 import { ConsensusLedger } from '@/components/earnings/ConsensusLedger';
-import SectionAnalysis from '@/components/quarterly/SectionAnalysis';
+import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
@@ -58,6 +58,9 @@ export default function EarningsFiguresPage() {
   // The report's own line labels, used as the material for the reading state.
 
   const [activeCode, setActiveCode] = useState<string | null>(null);
+  // Which section the analyser is reading, so its table can dim and take the
+  // band travelling down it.
+  const [analysing, setAnalysing] = useState<string | null>(null);
   // The content column is its own scrollport now, so switching sections has to put
   // it back to the top -- otherwise the next section opens halfway down.
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -607,22 +610,39 @@ export default function EarningsFiguresPage() {
                     </div>
                   )}
 
-                  {s.section_code === 's12_consensus' ? (
-                    // The beat/miss section: what landed against what was
-                    // expected. Its own table because it asks a question of every
-                    // row rather than just reporting one.
-                    <ConsensusLedger
-                      figures={s.figures}
-                      onSetExpected={(id, v) => void setExpected(s, id, v)}
-                      onRemove={(id) => void removeFigure(s, id)}
-                    />
-                  ) : (
-                    <FigureLedger
-                      figures={s.figures}
-                      onRemove={(id) => void removeFigure(s, id)}
-                      animate={false}
-                    />
-                  )}
+                  {/* The band travels over the table while the analyser reads it,
+                      so it wraps the content and sits OUTSIDE any scroller of the
+                      table's own, which would clip a vertically-moving band. */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      overflow: analysing === s.section_code ? 'hidden' : undefined,
+                    }}
+                  >
+                    <div
+                      className={
+                        analysing === s.section_code ? 'analysis-reading' : undefined
+                      }
+                    >
+                      {s.section_code === 's12_consensus' ? (
+                        // The beat/miss section: what landed against what was
+                        // expected. Its own table because it asks a question of
+                        // every row rather than just reporting one.
+                        <ConsensusLedger
+                          figures={s.figures}
+                          onSetExpected={(id, v) => void setExpected(s, id, v)}
+                          onRemove={(id) => void removeFigure(s, id)}
+                        />
+                      ) : (
+                        <FigureLedger
+                          figures={s.figures}
+                          onRemove={(id) => void removeFigure(s, id)}
+                          animate={false}
+                        />
+                      )}
+                    </div>
+                    {analysing === s.section_code && <ReadingBand />}
+                  </div>
 
                   {/* Two actions, and they are different things. Edit opens the
                       full tick-list -- which is what "Add figure" always actually
@@ -644,6 +664,10 @@ export default function EarningsFiguresPage() {
                             is the commentary that goes under them. */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <SectionAnalysis
+                            // Remounts on every rail switch, deliberately: it is
+                            // what stops one section's in-flight request and open
+                            // dialog leaking onto the next.
+                            key={s.section_code}
                             companyId=""
                             reportId={reportId ?? ''}
                             section={analysisSection(s)}
@@ -654,6 +678,36 @@ export default function EarningsFiguresPage() {
                             saveAnalysis={(code, text) =>
                               earnings.saveEarningsSectionAnalysis(
                                 reportId ?? '', code, text) as Promise<never>
+                            }
+                            onBusyChange={(busy) =>
+                              setAnalysing(busy ? s.section_code : null)
+                            }
+                            // A remount re-seeds from section.analysis, so a fresh
+                            // result has to land HERE. Without this, analysing a
+                            // section and switching away threw the analysis away
+                            // until a reload -- it was written and stored, and the
+                            // screen just stopped knowing about it.
+                            onAnalysis={(a) =>
+                              setProduced((prev) =>
+                                prev.some((x) => x.section_code === s.section_code)
+                                  ? prev.map((x) =>
+                                      x.section_code === s.section_code
+                                        ? ({ ...x, analysis: a } as typeof x)
+                                        : x,
+                                    )
+                                  : // A section with no produced row yet still has
+                                    // somewhere to keep its analysis, or mapping over
+                                    // a list that does not contain it would drop the
+                                    // result on the floor exactly as before.
+                                    [
+                                      ...prev,
+                                      {
+                                        section_code: s.section_code,
+                                        title: s.title,
+                                        analysis: a,
+                                      } as unknown as (typeof prev)[number],
+                                    ],
+                              )
                             }
                           />
                         </div>

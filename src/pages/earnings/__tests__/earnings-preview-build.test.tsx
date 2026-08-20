@@ -5,7 +5,7 @@
 // came back, lets it be adjusted by hand, and lets each section be marked done.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 const h = vi.hoisted(() => {
@@ -24,6 +24,8 @@ const h = vi.hoisted(() => {
     patchEarningsSectionContent: vi.fn(),
     finaliseEarningsSectionFigures: vi.fn(),
     setEarningsFigureExpectation: vi.fn(),
+    analyseEarningsSection: vi.fn(),
+    saveEarningsSectionAnalysis: vi.fn(),
     searchSectionFigures: vi.fn(),
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
@@ -46,6 +48,8 @@ vi.mock('@/lib/api', () => ({
     patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     finaliseEarningsSectionFigures: (...a: unknown[]) => h.finaliseEarningsSectionFigures(...a),
     setEarningsFigureExpectation: (...a: unknown[]) => h.setEarningsFigureExpectation(...a),
+    analyseEarningsSection: (...a: unknown[]) => h.analyseEarningsSection(...a),
+    saveEarningsSectionAnalysis: (...a: unknown[]) => h.saveEarningsSectionAnalysis(...a),
     searchSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
@@ -502,6 +506,53 @@ describe('EarningsPreviewPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/didn't save/);
     expect(screen.getByLabelText('Expected External revenue')).toHaveValue('');
+  });
+
+  it('an analysis survives switching sections and coming back', async () => {
+    // Reported: analyse, click another section, come back — gone. The control
+    // remounts on every rail switch (deliberately, so an in-flight request cannot
+    // leak onto the next section) and re-seeds from section.analysis, so a fresh
+    // result has to be lifted into the page or it is thrown away until a reload.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: null, total: 1, finalised: true,
+          figures: [fig('qf_1', 'Revenue')] },
+        { section_code: 's10b_cash_flow', title: 'Cash Flow Highlights',
+          prompt: null, total: 1, finalised: true,
+          figures: [fig('qf_2', 'Free cash flow')] },
+      ],
+    });
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true,
+          content: '{"tables":[]}', analysis: null },
+      ],
+    });
+    h.analyseEarningsSection.mockResolvedValue({
+      text: '- Revenue is the largest line in the section.',
+      fingerprint: 'FP', warnings: [], edited: false,
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Analyse/ }));
+    // the dialog's own confirm, not the trigger behind it
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Analyse' }));
+    expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
+
+    // away…
+    fireEvent.click(screen.getAllByRole('button', { name: /Cash Flow Highlights/ })[0]);
+    expect(await screen.findByText('Free cash flow')).toBeInTheDocument();
+    // …and back
+    fireEvent.click(screen.getAllByRole('button', { name: /Financial Highlights/ })[0]);
+    expect(await screen.findByText('Revenue')).toBeInTheDocument();
+
+    expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
   });
 
 });
