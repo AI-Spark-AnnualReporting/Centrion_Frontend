@@ -350,29 +350,20 @@ export default function BoardReportPage() {
               Choose cover design &amp; colors
             </button>
           )}
-          {!isLocked && (
+          {/* Admin only — a non-admin has nothing to do with this button, so it
+              isn't there at all rather than sitting greyed out. */}
+          {!isLocked && isAdmin && (
             <button
               className="btn bp"
               // Not gated on readiness — approving with gaps is allowed. The
               // confirm dialog itself is where an incomplete report gets
               // called out, listing exactly what has no data before the
               // operator commits to a one-way lock.
-              //
-              // Gated on role instead: locking a board report is final, and the
-              // board pack is the one report where that call is the admin's.
-              disabled={!isAdmin}
-              title={isAdmin ? undefined : 'Only an admin can approve and lock the board report.'}
               onClick={() => {
                 setApproveError(null);
                 setApproveOpen(true);
               }}
-              style={{
-                padding: '9px 20px',
-                fontSize: 12.5,
-                fontWeight: 700,
-                cursor: isAdmin ? 'pointer' : 'not-allowed',
-                opacity: isAdmin ? 1 : 0.55,
-              }}
+              style={{ padding: '9px 20px', fontSize: 12.5, fontWeight: 700 }}
             >
               Approve &amp; Lock
             </button>
