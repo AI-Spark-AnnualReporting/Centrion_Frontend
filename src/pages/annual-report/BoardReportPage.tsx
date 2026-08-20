@@ -99,16 +99,19 @@ export default function BoardReportPage() {
   const templateKey = coverKey ?? assembled?.cover?.template_key ?? null;
 
   const load = useCallback(async () => {
-    const [secs, out, comp, asm] = await Promise.all([
+    const [secs, out, comp, asm, cov] = await Promise.all([
       boardReports.getSections(reportId),
       boardReports.getOutline(reportId),
       boardReports.getCompletion(reportId).catch(() => null),
       boardReports.getAssemble(reportId).catch(() => null),
+      boardReports.getCoverTemplate(reportId).catch(() => null),
     ]);
     setSections(secs.sections ?? []);
     setOutline(out.sections ?? []);
     if (comp) setCompletion(comp);
     if (asm) setAssembled(asm);
+    if (cov?.cover_template_key) setCoverKey(cov.cover_template_key);
+    if (cov?.brand) setCoverBrand(cov.brand);
   }, [reportId]);
 
   useEffect(() => {
@@ -139,7 +142,6 @@ export default function BoardReportPage() {
         if (cancelled) return;
         const list = res.cover_templates ?? [];
         setCoverTemplates(list);
-        setCoverKey((prev) => prev ?? (list.find((t) => t.is_default) ?? list[0])?.key ?? null);
       })
       .catch(() => {});
     quarterlyReports

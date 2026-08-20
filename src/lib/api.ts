@@ -3085,6 +3085,11 @@ export const boardReports = {
   approve: (reportId: string) =>
     request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
 
+  // The cover design + colours already saved on this report, so the picker
+  // opens on the current choice rather than blank.
+  getCoverTemplate: (reportId: string, signal?: AbortSignal) =>
+    request<CoverSelectionResponse>(boardPath(reportId, "/cover-template"), { signal }),
+
   // Cover design + brand colours, same payload shape as the quarterly picker
   // (`PATCH .../cover-template`). The catalogue and palettes themselves are
   // company-scoped, so the board step reuses quarterlyReports.getCoverTemplates.
