@@ -1074,15 +1074,19 @@ function SectionPanel({
           read from is the fix when the wrong one fed it, and re-reading beats
           retyping. `NeedsInput` renders its own, so this covers the rest. */}
       {!readOnly && (produced || s.status === 'empty') && !editing && (
-        <div>
-          <AttachDocument
-            code={s.section_code}
-            slot={slot}
-            label={working ? working : 'Replace the supporting document'}
-            disabled={!!working || !!busy}
-            onUploadFile={onUploadFile}
-          />
-        </div>
+        working ? (
+          <WorkingLine text={working} />
+        ) : (
+          <div>
+            <AttachDocument
+              code={s.section_code}
+              slot={slot}
+              label="Replace the supporting document"
+              disabled={!!busy}
+              onUploadFile={onUploadFile}
+            />
+          </div>
+        )
       )}
 
       {error && !editing && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
@@ -1215,6 +1219,37 @@ function MarkdownHelpModal({ onClose }: { onClose: () => void }) {
 // into, offer a document to fill that field from, and one Save. Matches the
 // quarterly Preview's needs-input panel.
 
+// A document is being read, or the section is being written from it. Same line
+// wherever it happens — an empty section shows it in place of the form, a
+// written one under the content it is about to replace.
+function WorkingLine({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '24px 4px',
+        fontSize: 13,
+        fontWeight: 600,
+        color: ACCENT,
+      }}
+    >
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
+      >
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+      {text} — this section fills in when it lands.
+    </div>
+  );
+}
+
 // Files a document against the section's own slot. Offered on every section,
 // not only the empty ones: a produced section is often wrong because the wrong
 // document fed it, and the fix is the right document — not retyping the text.
@@ -1299,33 +1334,7 @@ function NeedsInput({
   const [draft, setDraft] = useState('');
   const need = s.feeder?.message?.trim() || 'the content for this section';
 
-  if (working) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '24px 4px',
-          fontSize: 13,
-          fontWeight: 600,
-          color: ACCENT,
-        }}
-      >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
-        >
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-        </svg>
-        {working} — this section fills in when it lands.
-      </div>
-    );
-  }
+  if (working) return <WorkingLine text={working} />;
 
   return (
     <div>
