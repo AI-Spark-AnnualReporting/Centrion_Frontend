@@ -24,7 +24,6 @@ export function useBoardCover(
   fallback?: { templateKey?: string | null; brand?: BrandColors | null },
 ) {
   const { user } = useAuth();
-  const companyId = user?.company_id ?? null;
 
   const [templates, setTemplates] = useState<CoverTemplate[]>([]);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
@@ -51,22 +50,23 @@ export function useBoardCover(
     };
   }, [reportId]);
 
-  // A failure here just leaves the picker empty — it never blocks the page.
+  // The shared catalogue — company-unscoped reference data, the same list
+  // quarterly and earnings pick from. A failure here leaves the picker empty;
+  // it never blocks the page.
   useEffect(() => {
-    if (!companyId) return;
     let cancelled = false;
     quarterlyReports
-      .getCoverTemplates(companyId)
+      .getCoverTemplatesGlobal()
       .then((res) => !cancelled && setTemplates(res.cover_templates ?? []))
       .catch(() => {});
     quarterlyReports
-      .getColorPalettes(companyId)
+      .getColorPalettesGlobal()
       .then((res) => !cancelled && setPalettes(res.color_palettes ?? []))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, []);
 
   const apply = useCallback(
     async (payload: CoverSelectionPayload) => {
