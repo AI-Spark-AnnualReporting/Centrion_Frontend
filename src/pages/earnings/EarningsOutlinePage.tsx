@@ -283,9 +283,25 @@ export default function EarningsOutlinePage() {
       return;
     }
 
-    // Producing moved to the Figures screen. A table produced here would be built
-    // before its figures exist, which is an empty table and a wasted pass.
-    navigate(`/earnings/${reportId}/figures`);
+    // Spend the handoff producing the sections that can be built before a figure
+    // exists -- the CEO quote, guidance, the disclaimer, the calendar. Preview then
+    // opens with narrative already readable instead of a screen of empty cards.
+    //
+    // Deliberately not awaited and deliberately not fatal: this is a head start,
+    // not a gate. If it fails the user lands on Preview and every section simply
+    // shows its Run button, which is where they were going anyway.
+    if (reportId) {
+      // try/catch as well as .catch: a head start must not be able to stop the
+      // handoff, however it fails.
+      try {
+        void Promise.resolve(earnings.produceEarningsFigureFreeSections(reportId)).catch(
+          () => {},
+        );
+      } catch {
+        /* the user is going to Preview either way */
+      }
+    }
+    navigate(`/earnings/${reportId}/preview`);
   };
 
   // ── Section production — full-screen loader, same one the quarterly

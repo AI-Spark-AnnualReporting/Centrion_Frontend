@@ -216,7 +216,9 @@ export function FigureLedger({
                     lineHeight: 1,
                     padding: '2px 3px',
                     borderRadius: 5,
-                    transition: 'color .12s, background .12s',
+                    // opacity is in the list because .fig-remove fades the control in on hover;
+                    // a shorthand without it silently replaces that transition.
+                    transition: 'opacity .12s, color .12s, background .12s',
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.color = DANGER;

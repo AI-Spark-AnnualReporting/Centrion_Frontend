@@ -69,7 +69,10 @@ const PAGE_NAME_PREFIXES: [string, string][] = [
 // intentional: a full-screen progress page is the last place the launcher
 // belongs, and route state would be lost on refresh anyway.
 const REPORT_FLOW_EXACT = ['/reports/processing'];
-const REPORT_FLOW_PREFIXES = ['/quarterly-report'];
+// Earnings joins quarterly here: both are full-height report flows with their own
+// pinned footer, so they need the flush padding and must not have a floating
+// chatbot parked over the Continue button.
+const REPORT_FLOW_PREFIXES = ['/quarterly-report', '/earnings'];
 
 // Exact-or-segment match, NOT a bare startsWith, so a future sibling route like
 // /quarterly-reports-archive can't accidentally match.

@@ -35,6 +35,7 @@ const h = vi.hoisted(() => {
     getEarningsSourceLines: vi.fn(),
     selectEarningsLines: vi.fn(),
     produceEarningsReport: vi.fn(),
+    produceEarningsFigureFreeSections: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
     userRef: { current: { company_id: 'co-1', company_name: 'Acme' } as unknown },
@@ -54,6 +55,7 @@ vi.mock('@/lib/api', () => ({
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     selectEarningsLines: (...a: unknown[]) => h.selectEarningsLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
+    produceEarningsFigureFreeSections: (...a: unknown[]) => h.produceEarningsFigureFreeSections(...a),
     renameEarningsSection: (...a: unknown[]) => h.renameEarningsSection(...a),
   },
   agentRuns: {
@@ -122,6 +124,7 @@ const renderPage = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   h.userRef.current = { company_id: 'co-1', company_name: 'Acme' };
+  h.produceEarningsFigureFreeSections.mockResolvedValue({ run_id: 'r', poll_url: '/p' });
   h.getEarningsOutline.mockResolvedValue(OUTLINE);
   h.saveEarningsOutline.mockResolvedValue(OUTLINE);
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
@@ -290,7 +293,7 @@ describe('EarningsOutlinePage', () => {
     expect(gripsAfter).toEqual(['Reorder CEO Commentary', 'Reorder Financial Highlights']);
   });
 
-  it('toggling an optional on, reordering, then Continue hands over to Figures', async () => {
+  it('toggling an optional on, reordering, then Continue hands over to Preview', async () => {
     renderPage();
     await screen.findByText('Report sections');
 
@@ -308,7 +311,7 @@ describe('EarningsOutlinePage', () => {
       }),
     );
     await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
   });
 
   it('never produces here — a table built before its figures exist is empty', async () => {
@@ -321,7 +324,7 @@ describe('EarningsOutlinePage', () => {
     await waitFor(() => expect(h.saveEarningsOutline).toHaveBeenCalled());
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
     await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
   });
 
   it('hands over whatever state the sections are in', async () => {
@@ -338,7 +341,7 @@ describe('EarningsOutlinePage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Continue →/ }));
 
     await waitFor(() =>
-      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/figures'));
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/preview'));
     expect(h.produceEarningsReport).not.toHaveBeenCalled();
   });
 

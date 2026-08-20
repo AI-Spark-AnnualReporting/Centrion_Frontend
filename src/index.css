@@ -775,18 +775,6 @@ body {
   .fig-remove { opacity: 1; }
 }
 
-/* ── Figures step — the rail is a luxury, not a requirement ──────────────────
-   Below 1100px the rail would squeeze the ledger's figure column, which is the
-   one thing on the screen that must not wrap. So it goes, and the sections take
-   the full width; the stepper still says where you are. */
-.fig-grid { grid-template-columns: minmax(0, 1fr); }
-.fig-rail { display: none; }
-
-@media (min-width: 1100px) {
-  .fig-grid { grid-template-columns: 220px minmax(0, 1fr); }
-  .fig-rail { display: block; }
-}
-
 /* The remove control only resolves on hover or focus — nine sections of rows
    each carrying a permanent × reads as a page asking to be dismantled. */
 .fig-remove { opacity: 0; transition: opacity .12s; }

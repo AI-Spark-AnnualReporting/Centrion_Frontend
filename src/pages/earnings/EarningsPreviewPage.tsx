@@ -15,12 +15,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { earnings, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
-import type { EarningsFigureSection, EarningsSourceLine } from '@/types/earnings';
+import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { FigureChecklist } from '@/components/earnings/FigureChecklist';
 import { FigureDialog } from '@/components/earnings/FigureDialog';
 import { FigureLedger } from '@/components/earnings/FigureLedger';
-import { FiguresRail } from '@/components/earnings/FiguresRail';
+import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
+import type { RailItem } from '@/components/earnings/PreviewRail';
+import { NarrativePane } from '@/components/earnings/NarrativePane';
+import { EditableProse } from '@/components/earnings/EditableProse';
 import { SectionBrief } from '@/components/earnings/SectionBrief';
 import { FigureSearchState, FigureSearchSweep } from '@/components/earnings/FigureSearchState';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
@@ -62,11 +65,20 @@ export default function EarningsFiguresPage() {
   const [lineCount, setLineCount] = useState(0);
 
   const [activeCode, setActiveCode] = useState<string | null>(null);
-  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  // The content column is its own scrollport now, so switching sections has to put
+  // it back to the top -- otherwise the next section opens halfway down.
+  const paneRef = useRef<HTMLDivElement | null>(null);
 
   const [picking, setPicking] = useState<EarningsFigureSection | null>(null);
   const [pickLines, setPickLines] = useState<EarningsSourceLine[] | null>(null);
   const [pickBusy, setPickBusy] = useState(false);
+
+  // The narrative half of the report. The figure-free ones were produced while
+  // the user watched the loading screen after the Outline, so most of these
+  // arrive already written.
+  const [produced, setProduced] = useState<EarningsProducedSection[]>([]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
 
   const [produceRun, setProduceRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [continueError, setContinueError] = useState<string | null>(null);
@@ -78,8 +90,14 @@ export default function EarningsFiguresPage() {
   const load = useCallback(async () => {
     if (!reportId) return;
     try {
-      const res = await earnings.getEarningsFigureSections(reportId);
+      const [res, prod] = await Promise.all([
+        earnings.getEarningsFigureSections(reportId),
+        // Never fatal on its own: a report whose narrative sections fail to load
+        // is still a report whose figures can be chosen.
+        earnings.getEarningsSections(reportId, true).catch(() => ({ sections: [] })),
+      ]);
       setSections(res.sections);
+      setProduced(prod.sections ?? []);
       setPrompts(Object.fromEntries(res.sections.map((s) => [s.section_code, s.prompt ?? ''])));
       setActiveCode((prev) => prev ?? res.sections[0]?.section_code ?? null);
       setLoadError(null);
@@ -112,24 +130,6 @@ export default function EarningsFiguresPage() {
     };
   }, [reportId]);
 
-  // Which section the reader is on, for the rail. Purely an enhancement — where
-  // IntersectionObserver is missing (jsdom, older browsers) the rail still works,
-  // it just stops following the scroll.
-  useEffect(() => {
-    if (!sections?.length || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        const seen = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-        const code = seen?.target.getAttribute('data-code');
-        if (code) setActiveCode(code);
-      },
-      { rootMargin: '-96px 0px -60% 0px' },
-    );
-    Object.values(cardRefs.current).forEach((el) => el && io.observe(el));
-    return () => io.disconnect();
-  }, [sections]);
 
   const replaceSection = (code: string, figures: EarningsFigureSection['figures']) =>
     setSections((prev) =>
@@ -230,10 +230,106 @@ export default function EarningsFiguresPage() {
     }
   };
 
-  const jumpTo = (code: string) => {
-    setActiveCode(code);
-    cardRefs.current[code]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Every section, financial and narrative, in report order. The rail reads this;
+  // the pane below renders whichever one is active.
+  const narrative = useMemo(
+    () =>
+      produced.filter(
+        (p) =>
+          p.mode !== 'table' &&
+          p.mode !== 'kpi' &&
+          p.section_code !== 's01_cover' &&
+          p.section_code !== 's02_toc',
+      ),
+    [produced],
+  );
+
+  const railItems: RailItem[] = useMemo(() => {
+    const fin: RailItem[] = (sections ?? []).map((s) => ({
+      code: s.section_code,
+      title: s.title,
+      kind: 'financial',
+      figures: s.total,
+    }));
+    const nar: RailItem[] = narrative.map((p) => ({
+      code: p.section_code,
+      title: p.title || p.section_code,
+      kind: 'narrative',
+      written: !!(p.content || '').trim(),
+    }));
+    return [...fin, ...nar];
+  }, [sections, narrative]);
+
+  // What a figure-grounded section is waiting on, named so the user can go and do
+  // it rather than being told no.
+  const emptySections = useMemo(
+    () =>
+      (sections ?? [])
+        .filter((s) => s.total === 0)
+        .map((s) => ({ section_code: s.section_code, title: s.title })),
+    [sections],
+  );
+
+  const activeNarrative = useMemo(
+    () => narrative.find((p) => p.section_code === activeCode) ?? null,
+    [narrative, activeCode],
+  );
+
+  // Editing a produced section in place. Optimistic, because it is the user's own
+  // words going back on their own screen.
+  const saveNarrative = async (code: string, content: string) => {
+    if (!reportId) return;
+    setProduced((prev) =>
+      prev.map((p) => (p.section_code === code ? { ...p, content } : p)),
+    );
+    try {
+      await earnings.patchEarningsSectionContent(reportId, code, { content });
+    } catch (e) {
+      setRunErrors((p) => ({
+        ...p,
+        [code]:
+          e instanceof ApiError ? e.message : "That edit didn't save. Try again.",
+      }));
+    }
   };
+
+  const runSection = async (code: string, regenerate: boolean) => {
+    if (!reportId) return;
+    setRunning(code);
+    setRunErrors((p) => ({ ...p, [code]: '' }));
+    try {
+      const sec = await earnings.runEarningsSection(reportId, code, regenerate);
+      setProduced((prev) =>
+        prev.map((p) => (p.section_code === code ? { ...p, ...sec } : p)),
+      );
+      // A section can come back with no usable content -- the backend rejects
+      // prose carrying a number that is not among the figures. That is not an
+      // error to apologise for, it is a reason, so say it and leave Run there.
+      if (!(sec.content || '').trim()) {
+        setRunErrors((p) => ({
+          ...p,
+          [code]:
+            (sec as { error?: string }).error ||
+            'It came back empty. Adding figures to the sections above usually fixes it.',
+        }));
+      }
+    } catch (e) {
+      setRunErrors((p) => ({
+        ...p,
+        [code]:
+          e instanceof ApiError
+            ? e.message
+            : "That didn't reach the server. Check your connection and try again.",
+      }));
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  useEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = 0;
+  }, [activeCode]);
+
 
   const emptyCount = useMemo(
     () => (sections ?? []).filter((s) => s.total === 0).length,
@@ -276,18 +372,25 @@ export default function EarningsFiguresPage() {
   }
 
   return (
-    <div style={{ padding: '18px 22px 44px' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: '#fff',
+        borderRadius: 12,
+        overflow: 'hidden',
+      }}
+    >
       <EarningsStepper activeStep={3} reportId={reportId} />
 
-      <header style={{ margin: '20px 0 18px', maxWidth: 640 }}>
-        <h1 style={{ fontSize: 21, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>
-          Choose your figures
+      <header style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>
+          Report preview
         </h1>
-        <p style={{ fontSize: 13, color: MUTED, margin: '5px 0 0', lineHeight: 1.55 }}>
-          These are the sections you chose on the Outline. Tell each one what belongs in
-          it, in your own words, and we read your report's own lines and bring back the
-          ones that match. Ask again in different words and it adds to what is there,
-          never repeating a line you already have — or add and remove any by hand.
+        <p style={{ fontSize: 12, color: MUTED, margin: '4px 0 0' }}>
+          Pick a section on the left. Tell the financial ones what belongs in them; read and
+          edit the written ones.
         </p>
       </header>
 
@@ -300,10 +403,14 @@ export default function EarningsFiguresPage() {
         </div>
       )}
 
-      {sections === null && !loadError ? (
-        <div style={{ padding: '60px 0', textAlign: 'center' }}>
-          <Spinner />
-        </div>
+      {sections === null ? (
+        // A load that failed has already said so above; a spinner underneath it
+        // would claim something is still coming.
+        loadError ? null : (
+          <div style={{ padding: '60px 0', textAlign: 'center' }}>
+            <Spinner />
+          </div>
+        )
       ) : sections.length === 0 ? (
         // Reachable only by unticking every section that carries figures. It is a
         // choice, not a fault, so it says what is true and offers the way back
@@ -335,24 +442,89 @@ export default function EarningsFiguresPage() {
       ) : (
         <div
           style={{
+            flex: 1,
+            minHeight: 0,
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr)',
-            gap: 18,
-            alignItems: 'start',
+            gridTemplateColumns: '280px 1fr',
+            gap: 16,
+            padding: '0 28px 16px',
+            alignItems: 'stretch',
           }}
-          className="fig-grid"
         >
-          <div className="fig-rail">
-            <FiguresRail
-              onAddSection={() => navigate(`/earnings/${reportId}/outline`)}
-              sections={sections ?? []}
+            <PreviewRail
+              items={railItems}
               activeCode={activeCode}
-              onSelect={jumpTo}
+              onSelect={setActiveCode}
+              onAddSection={() => navigate(`/earnings/${reportId}/outline`)}
             />
-          </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-            {(sections ?? []).map((s) => {
+          {/* Its own scrollport, so choosing a section never moves the rail or the
+              footer. */}
+          <div
+            ref={paneRef}
+            style={{
+              minWidth: 0,
+              minHeight: 0,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            {activeCode === COVER_CODE && (
+              // The rail always offers this row, so it must always render
+              // something. It rendered nothing at all -- both section lookups
+              // missed and the column came up blank.
+              <section className="card" style={{ padding: '24px 28px' }}>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: INK, margin: 0 }}>
+                  Cover &amp; colours
+                </h2>
+                <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.6, margin: '8px 0 18px', maxWidth: 520 }}>
+                  The front page of the report and the colour it is printed in. Choose it
+                  whenever you like — it changes nothing about the figures or the writing.
+                </p>
+                <button
+                  type="button"
+                  className="btn bp"
+                  onClick={() => navigate(`/earnings/${reportId}/report`)}
+                >
+                  Choose cover &amp; colours →
+                </button>
+                <p style={{ fontSize: 11, color: FAINT, margin: '10px 0 0' }}>
+                  Opens on the Report screen, where you can see it applied.
+                </p>
+              </section>
+            )}
+
+            {activeNarrative && (
+              <section className="card" style={{ padding: '18px 22px 20px' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>
+                    {activeNarrative.title || activeNarrative.section_code}
+                  </h2>
+                  <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: FAINT }}>
+                    {activeNarrative.source_type ?? 'Written'}
+                  </span>
+                </div>
+                <NarrativePane
+                  section={activeNarrative}
+                  emptySections={emptySections}
+                  running={running === activeNarrative.section_code}
+                  runError={runErrors[activeNarrative.section_code] || null}
+                  onRun={(regen) => void runSection(activeNarrative.section_code, regen)}
+                  onJumpTo={setActiveCode}
+                >
+                  <EditableProse
+                    section={activeNarrative}
+                    coverTemplateKey={null}
+                    locked={false}
+                    onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
+                  />
+                </NarrativePane>
+              </section>
+            )}
+
+            {(sections ?? []).filter((s) => s.section_code === activeCode).map((s) => {
               const isSearching = searching === s.section_code;
               const has = s.total > 0;
               // The brief is an input while the section is empty and a record of
@@ -361,16 +533,11 @@ export default function EarningsFiguresPage() {
               return (
                 <section
                   key={s.section_code}
-                  data-code={s.section_code}
-                  ref={(el) => {
-                    cardRefs.current[s.section_code] = el;
-                  }}
                   className="card"
                   style={{
                     padding: '15px 18px 16px',
                     position: 'relative',
                     overflow: 'hidden',
-                    scrollMarginTop: 14,
                   }}
                 >
                   {isSearching && <FigureSearchSweep />}
@@ -496,9 +663,10 @@ export default function EarningsFiguresPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 14,
-          marginTop: 20,
-          paddingTop: 16,
+          flexShrink: 0,
+          background: '#fff',
           borderTop: `1px solid ${BORDER_SOFT}`,
+          padding: '12px 28px',
           flexWrap: 'wrap',
         }}
       >

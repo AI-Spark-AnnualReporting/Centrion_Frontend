@@ -1,10 +1,12 @@
-// Step 3 — Figures.
+// Step 3 — Preview, where the report gets built.
 //
-// The screen exists because a user-metrics report's lines are the company's own
-// and there is no registry to match them against. So the user says what they want
-// per section and the model is asked for THAT section with those words in the
-// call. The two things worth pinning are that nothing fires until they ask, and
-// that their words actually travel.
+// Every section in a rail, one in the pane. Financial sections are told what
+// belongs in them in the user's own words; narrative sections show their prose,
+// and the ones written FROM the figures show what they are still waiting on.
+//
+// The rule the whole screen is held to: it must never dead-end. A section that
+// cannot run yet says which sections are empty and links to each; Run stays
+// clickable regardless; a run that comes back empty is a reason, not an error.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -21,6 +23,9 @@ const h = vi.hoisted(() => {
   return {
     navigateMock: vi.fn(),
     getEarningsFigureSections: vi.fn(),
+    getEarningsSections: vi.fn(),
+    runEarningsSection: vi.fn(),
+    patchEarningsSectionContent: vi.fn(),
     searchSectionFigures: vi.fn(),
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
@@ -38,6 +43,9 @@ vi.mock('react-router-dom', async () => {
 vi.mock('@/lib/api', () => ({
   earnings: {
     getEarningsFigureSections: (...a: unknown[]) => h.getEarningsFigureSections(...a),
+    getEarningsSections: (...a: unknown[]) => h.getEarningsSections(...a),
+    runEarningsSection: (...a: unknown[]) => h.runEarningsSection(...a),
+    patchEarningsSectionContent: (...a: unknown[]) => h.patchEarningsSectionContent(...a),
     searchSectionFigures: (...a: unknown[]) => h.searchSectionFigures(...a),
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
@@ -80,6 +88,7 @@ const renderPage = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   h.getEarningsFigureSections.mockResolvedValue(SECTIONS);
+  h.getEarningsSections.mockResolvedValue({ sections: [] });
   h.searchSectionFigures.mockResolvedValue({
     report_id: 'rep-1', section_code: 's04_financial_highlights',
     prompt: 'margins', found: 2, total: 2,
@@ -107,12 +116,21 @@ beforeEach(() => {
 });
 
 describe('EarningsPreviewPage', () => {
-  it('opens with every section empty and no model call', async () => {
+  it('opens on the first section, with every section in the rail and no model call', async () => {
     renderPage();
     expect(await screen.findByRole('heading', { name: 'Financial Highlights' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Cash Flow Highlights' })).toBeInTheDocument();
+    // one pane at a time; the rail is how you reach the rest
+    expect(screen.queryByRole('heading', { name: 'Cash Flow Highlights' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Cash Flow Highlights/ })).toBeInTheDocument();
     expect(h.searchSectionFigures).not.toHaveBeenCalled();
-    expect(screen.getAllByText('Tell us what belongs here')).toHaveLength(2);
+  });
+
+  it('the rail switches which section fills the pane', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Cash Flow Highlights/ }));
+    expect(await screen.findByRole('heading', { name: 'Cash Flow Highlights' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Financial Highlights' })).toBeNull();
   });
 
   it("sends the user's words for that one section", async () => {
@@ -123,7 +141,7 @@ describe('EarningsPreviewPage', () => {
       screen.getByLabelText('What figures belong in Financial Highlights'),
       { target: { value: 'margins and segment revenue' } },
     );
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     await waitFor(() =>
       expect(h.searchSectionFigures).toHaveBeenCalledWith(
@@ -133,7 +151,7 @@ describe('EarningsPreviewPage', () => {
   it('shows what came back, under that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     // Wait for the search itself to land before reading the ledger — the rows
     // are rendered by the state it sets, not by the click.
@@ -145,29 +163,30 @@ describe('EarningsPreviewPage', () => {
 
   it('searching one section leaves the others alone', async () => {
     renderPage();
-    await screen.findByRole('heading', { name: 'Cash Flow Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     await screen.findByText('Revenue');
     expect(h.searchSectionFigures).toHaveBeenCalledTimes(1);
-    // cash flow, untouched — still inviting a brief
-    expect(screen.getByText('Tell us what belongs here')).toBeInTheDocument();
+    // cash flow, untouched — still showing no figures in the rail
+    fireEvent.click(screen.getByRole('button', { name: /Cash Flow Highlights/ }));
+    expect(await screen.findByText('Tell us what belongs here')).toBeInTheDocument();
   });
 
   it('a failed search says so and keeps the section as it was', async () => {
     h.searchSectionFigures.mockRejectedValue(new h.MockApiError(500, 'Model unavailable'));
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Model unavailable');
-    expect(screen.getAllByText('Tell us what belongs here')).toHaveLength(2);
+    expect(screen.getByText('Tell us what belongs here')).toBeInTheDocument();
   });
 
   it('removing a figure saves the rest of the section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
     await screen.findByText('Gross margin');
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Gross margin' }));
@@ -179,7 +198,7 @@ describe('EarningsPreviewPage', () => {
   it('Add figure opens the picker for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add figure' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Add figure' }));
 
     await waitFor(() =>
       expect(h.getEarningsSourceLines).toHaveBeenCalledWith('rep-1', 's04_financial_highlights'));
@@ -193,7 +212,7 @@ describe('EarningsPreviewPage', () => {
   it('the picker saves the whole tick set for that section', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add figure' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Add figure' }));
     await screen.findByRole('checkbox', { name: 'Inventories' });
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Inventories' }));
@@ -242,19 +261,19 @@ describe('EarningsPreviewPage', () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
 
-    // quoted, not an input — the empty section is the one still asking
+    // quoted, not an input, and no way to search it again
     expect(screen.getByText('“revenue and margins”')).toBeInTheDocument();
     expect(
       screen.queryByLabelText('What figures belong in Financial Highlights'),
     ).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Search figures' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
 
     // reopened with what was asked last time, ready to be changed
     const box = await screen.findByLabelText('What figures belong in Financial Highlights');
     expect(box).toHaveValue('revenue and margins');
-    expect(screen.getAllByRole('button', { name: 'Search figures' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Search figures' })).toBeInTheDocument();
   });
 
   it('a second ask sends the new words and reports what it added', async () => {
@@ -270,7 +289,7 @@ describe('EarningsPreviewPage', () => {
 
     const box = await screen.findByLabelText('What figures belong in Financial Highlights');
     fireEvent.change(box, { target: { value: 'and the segment splits' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     await waitFor(() =>
       expect(h.searchSectionFigures).toHaveBeenCalledWith(
@@ -291,7 +310,7 @@ describe('EarningsPreviewPage', () => {
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getByRole('button', { name: 'Ask again' }));
     await screen.findByLabelText('What figures belong in Financial Highlights');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     expect(await screen.findByText(/Nothing new for those words/)).toBeInTheDocument();
   });
@@ -309,7 +328,9 @@ describe('EarningsPreviewPage', () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     // manual curation is the way back in, so it is never withdrawn
-    expect(screen.getAllByRole('button', { name: 'Add figure' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Add figure' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Cash Flow Highlights/ }));
+    expect(await screen.findByRole('button', { name: 'Add figure' })).toBeInTheDocument();
   });
 
   it('figures that have landed are not left dimmed', async () => {
@@ -317,7 +338,7 @@ describe('EarningsPreviewPage', () => {
     // wait, not to the result. Keyed off the landing it never came back up.
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Search figures' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Search figures' }));
 
     const row = await screen.findByText('Revenue');
     expect(row.closest('.analysis-reading')).toBeNull();
@@ -379,6 +400,113 @@ describe('EarningsPreviewPage', () => {
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getByRole('button', { name: '+ Add a section' }));
     expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
+  });
+
+  // ── The narrative half ──────────────────────────────────────────────────────
+
+  const NARRATIVE = [
+    { section_code: 's05_management_commentary', title: 'CEO Commentary', mode: 'quote',
+      source_type: 'Release', status: 'produced', included: true,
+      content: JSON.stringify({ quote: 'Our results reinforce our ability to deliver.',
+                                attribution: 'Amin H. Nasser, President and CEO' }) },
+    { section_code: 's03_exec_summary', title: 'Executive Summary', mode: 'generate',
+      source_type: 'Hybrid', status: 'pending', included: true, content: null },
+  ];
+
+  it('lists narrative sections beside the financial ones', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    // the whole report is reachable from one rail
+    expect(screen.getByRole('button', { name: /CEO Commentary/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Executive Summary/ })).toBeInTheDocument();
+  });
+
+  it('shows a produced narrative section, with a way to run it again', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /CEO Commentary/ }));
+
+    expect(await screen.findByText(/reinforce our ability to deliver/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+  });
+
+  it('an un-run section names what it is waiting on, and links to it', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Executive Summary/ }));
+
+    expect(await screen.findByText(/2 sections still have no figures/)).toBeInTheDocument();
+    // each one is a door, not a scolding
+    const jump = screen.getByRole('button', { name: 'Cash Flow Highlights →' });
+    fireEvent.click(jump);
+    expect(await screen.findByRole('heading', { name: 'Cash Flow Highlights' })).toBeInTheDocument();
+  });
+
+  it('never blocks Run, however unready it thinks the report is', async () => {
+    // The check informs. A user who knows something we do not still gets to press it.
+    h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
+    h.runEarningsSection.mockResolvedValue({
+      ...NARRATIVE[1], status: 'produced', content: 'Revenue rose.' });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Executive Summary/ }));
+
+    const run = await screen.findByRole('button', { name: 'Run this section' });
+    expect(run).not.toBeDisabled();
+    fireEvent.click(run);
+
+    await waitFor(() =>
+      expect(h.runEarningsSection).toHaveBeenCalledWith('rep-1', 's03_exec_summary', false));
+    expect(await screen.findByText('Revenue rose.')).toBeInTheDocument();
+  });
+
+  it('a run that comes back empty is a reason, not a dead end', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
+    h.runEarningsSection.mockResolvedValue({ ...NARRATIVE[1], content: '' });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Executive Summary/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run this section' }));
+
+    expect(await screen.findByText(/didn't produce anything usable/)).toBeInTheDocument();
+    // and the way forward is still right there
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  // ── Layout ─────────────────────────────────────────────────────────────────
+  //
+  // The rail shipped as a full-width band across the top with the section stacked
+  // underneath, because an inline gridTemplateColumns was quietly beating the
+  // stylesheet rule that made it two columns. It looked like a sidebar in the code
+  // and like a header on the screen.
+
+  it('puts the rail beside the content, not above it', async () => {
+    renderPage();
+    const heading = await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    const rail = screen.getByText('Sections').closest('.card') as HTMLElement;
+    const grid = rail.parentElement as HTMLElement;
+    expect(grid.style.display).toBe('grid');
+    // two tracks, rail first — the whole point
+    expect(grid.style.gridTemplateColumns).toBe('280px 1fr');
+    // and the section pane is the sibling that follows it, not a row below
+    expect(grid.contains(heading)).toBe(true);
+    expect(grid.children.length).toBe(2);
+  });
+
+  it('selecting Cover & colours renders something', async () => {
+    // The rail always offers this row, so a blank pane is not an option. It was
+    // blank: both section lookups missed and nothing else was keyed on it.
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Cover & colours/ }));
+
+    expect(await screen.findByRole('heading', { name: /Cover & colours/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Choose cover/ })).toBeInTheDocument();
   });
 
 });
