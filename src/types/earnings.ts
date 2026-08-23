@@ -344,9 +344,13 @@ export interface EarningsSectionsResponse {
 }
 
 // POST /produce async handle (mirrors the quarterly ProduceAllHandle).
+// A produce request's outcome. `run_id`/`poll_url` are null when the server
+// found nothing to do and started no run at all — a report that is already built
+// and unchanged. There is nothing to poll and no loader to show; the caller just
+// carries on. See _nothing_to_produce on the backend.
 export interface EarningsProduceHandle {
-  run_id: string;
-  poll_url: string;
+  run_id: string | null;
+  poll_url: string | null;
 }
 
 // PATCH .../content body.

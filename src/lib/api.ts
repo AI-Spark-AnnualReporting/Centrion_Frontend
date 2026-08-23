@@ -2594,6 +2594,12 @@ function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
   const o = earnRecord(raw);
   const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
   const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  // Nothing to do: the report is already built and unchanged, so no run was
+  // started. A handle with nothing to poll is the honest answer here, not a
+  // failure — the caller navigates straight on and never raises a loader.
+  if (earnStr(o.status) === "completed" && !runId) {
+    return { run_id: null, poll_url: null };
+  }
   if (!runId || !pollUrl) {
     throw new Error("Produce earnings report: response did not include run_id/poll_url.");
   }

@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useRememberStep, reachedStepNumber } from './earnings-resume';
 import { earnings, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
@@ -45,6 +46,12 @@ const PRODUCE_TIPS = [
 
 export default function EarningsFiguresPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'preview');
+  // How far the REPORT has got, so the stepper does not grey out a step this
+  // user has already been to — see earnings-resume.
+  const reached = reachedStepNumber(reportId, 3);
   const navigate = useNavigate();
 
   const [sections, setSections] = useState<EarningsFigureSection[] | null>(null);
@@ -399,7 +406,7 @@ export default function EarningsFiguresPage() {
         overflow: 'hidden',
       }}
     >
-      <EarningsStepper activeStep={3} reportId={reportId} />
+      <EarningsStepper activeStep={3} reportId={reportId} reachedStep={reached} />
 
       <header style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>

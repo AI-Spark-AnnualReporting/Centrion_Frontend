@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useRememberStep } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
@@ -66,6 +67,9 @@ const FINISHED_STATUSES = ['approved', 'locked', 'published', 'complete', 'compl
 
 export default function EarningsReportPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'report');
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
