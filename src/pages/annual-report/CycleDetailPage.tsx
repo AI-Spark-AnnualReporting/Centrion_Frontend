@@ -468,8 +468,66 @@ export default function CycleDetailPage() {
         />
       </div>
 
-      {/* Report Sections */}
+      {/* Department Sessions — shown for non-draft (or read-only IR) views; the
+          draft-admin view uses the Assign Departments section above instead.
+          Placed above Report Sections: which departments are doing is the more
+          actionable question day-to-day than the section list itself. */}
+      {!(cycle.status === 'draft' && canManage) && (
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Department Sessions</div>
+          <button className="btn bs bsm" type="button" disabled={deptBusy} onClick={() => fetchOverview()}>
+            ⟳ Refresh
+          </button>
+        </div>
+        {departments.length === 0 ? (
+          <div style={{ padding: 28, textAlign: 'center', fontSize: 12, color: '#9BA3C4' }}>No department sessions yet.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#FAFBFE' }}>
+                <th style={th}>Department</th>
+                <th style={th}>Assigned user</th>
+                <th style={th}>Progress</th>
+                <th style={th}>Status</th>
+                <th style={th}>Submitted</th>
+              </tr>
+            </thead>
+            <tbody>
+              {departments.map((d) => (
+                <tr key={d.department_id} style={{ borderTop: '1px solid #F4F5FB' }}>
+                  <td style={td}>
+                    <div style={{ fontWeight: 700 }}>{d.department_name}</div>
+                    <div style={{ fontSize: 10, color: '#9BA3C4' }}>{d.department_code}</div>
+                  </td>
+                  <td style={td}>
+                    {d.assigned_user_name ? (
+                      <>
+                        <div>{d.assigned_user_name}</div>
+                        {d.assigned_user_email && <div style={{ fontSize: 10, color: '#9BA3C4' }}>{d.assigned_user_email}</div>}
+                      </>
+                    ) : (
+                      <span style={{ color: '#C4C9DD' }}>—</span>
+                    )}
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ProgressBar pct={d.progress} width={120} />
+                      <span style={{ fontSize: 11, color: '#5A6080', fontFamily: "'DM Mono', monospace" }}>{safePct(d.progress)}%</span>
+                    </div>
+                  </td>
+                  <td style={td}><SessionStatusBadge status={d.session_status} /></td>
+                  <td style={{ ...td, color: '#5A6080' }}>{d.submitted_at ? formatCycleDate(d.submitted_at) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      )}
+
+      {/* Report Sections */}
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Report Sections</div>
@@ -531,62 +589,6 @@ export default function CycleDetailPage() {
           </table>
         )}
       </div>
-
-      {/* Department Sessions — shown for non-draft (or read-only IR) views; the
-          draft-admin view uses the Assign Departments section above instead. */}
-      {!(cycle.status === 'draft' && canManage) && (
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Department Sessions</div>
-          <button className="btn bs bsm" type="button" disabled={deptBusy} onClick={() => fetchOverview()}>
-            ⟳ Refresh
-          </button>
-        </div>
-        {departments.length === 0 ? (
-          <div style={{ padding: 28, textAlign: 'center', fontSize: 12, color: '#9BA3C4' }}>No department sessions yet.</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#FAFBFE' }}>
-                <th style={th}>Department</th>
-                <th style={th}>Assigned user</th>
-                <th style={th}>Progress</th>
-                <th style={th}>Status</th>
-                <th style={th}>Submitted</th>
-              </tr>
-            </thead>
-            <tbody>
-              {departments.map((d) => (
-                <tr key={d.department_id} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={td}>
-                    <div style={{ fontWeight: 700 }}>{d.department_name}</div>
-                    <div style={{ fontSize: 10, color: '#9BA3C4' }}>{d.department_code}</div>
-                  </td>
-                  <td style={td}>
-                    {d.assigned_user_name ? (
-                      <>
-                        <div>{d.assigned_user_name}</div>
-                        {d.assigned_user_email && <div style={{ fontSize: 10, color: '#9BA3C4' }}>{d.assigned_user_email}</div>}
-                      </>
-                    ) : (
-                      <span style={{ color: '#C4C9DD' }}>—</span>
-                    )}
-                  </td>
-                  <td style={td}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ProgressBar pct={d.progress} width={120} />
-                      <span style={{ fontSize: 11, color: '#5A6080', fontFamily: "'DM Mono', monospace" }}>{safePct(d.progress)}%</span>
-                    </div>
-                  </td>
-                  <td style={td}><SessionStatusBadge status={d.session_status} /></td>
-                  <td style={{ ...td, color: '#5A6080' }}>{d.submitted_at ? formatCycleDate(d.submitted_at) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      )}
 
       {editing && (
         <EditCycleModal
