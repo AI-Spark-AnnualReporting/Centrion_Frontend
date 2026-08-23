@@ -62,19 +62,6 @@ const GRIP = (
   </svg>
 );
 
-// The one status/source pill each row gets, closest match first:
-//   - awaiting content → red "Needs input" (mirrors quarterly's red pill)
-//   - drawn from an uploaded document → green "From {file}" (same as quarterly)
-//   - system-filled with no source document (e.g. the cover) → grey "System template"
-//   - otherwise data_source names who owns it (Chairman, Finance, ...) — shown as-is
-function sourceBadge(s: BoardOutlineSection): { text: string; cls: string } | null {
-  if (s.status === 'needs_input') return { text: 'Needs input', cls: 'b-rd' };
-  if (s.source_document) return { text: `From ${s.source_document}`, cls: 'b-gn' };
-  if (s.data_source === 'Generated') return { text: 'System template', cls: 'b-gy' };
-  if (s.data_source) return { text: s.data_source, cls: 'b-gy' };
-  return null;
-}
-
 export default function BoardSectionsPage() {
   const { reportId = '' } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
@@ -97,6 +84,8 @@ export default function BoardSectionsPage() {
 
   const saveTimerRef = useRef<number | null>(null);
   const saveSeqRef = useRef(0);
+  // What the pending debounce is holding, so leaving the step can flush it.
+  const pendingRef = useRef<BoardOutlineSection[] | null>(null);
   const dragIndexRef = useRef<number | null>(null);
 
   const refetch = useCallback(async () => {
@@ -121,11 +110,18 @@ export default function BoardSectionsPage() {
     };
   }, [reportId, refetch]);
 
+  // Flush on the way out, don't cancel. Clicking "Review sections" (or the
+  // stepper) inside the 700ms debounce used to throw the pending PUT away, so a
+  // drag-reorder looked applied here and was never sent — every later step then
+  // showed the old order, because the server had never heard about the new one.
   useEffect(
     () => () => {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      if (!saveTimerRef.current) return;
+      window.clearTimeout(saveTimerRef.current);
+      const pending = pendingRef.current;
+      if (pending) void boardReports.saveOutline(reportId, outlinePayload(pending)).catch(() => {});
     },
-    [],
+    [reportId],
   );
 
   // Debounced PUT with a latest-wins guard. On failure, refetch: a 422 means
@@ -134,7 +130,10 @@ export default function BoardSectionsPage() {
     (next: BoardOutlineSection[]) => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
       setSaveState('saving');
+      pendingRef.current = next;
       saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        pendingRef.current = null;
         const seq = ++saveSeqRef.current;
         boardReports
           .saveOutline(reportId, outlinePayload(next))
@@ -312,7 +311,6 @@ export default function BoardSectionsPage() {
               const mandatory = s.requirement === 'M';
               const draggable = !readOnly;
 
-              const badge = sourceBadge(s);
               const locked = mandatory || readOnly;
 
               return (
@@ -396,7 +394,7 @@ export default function BoardSectionsPage() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     {s.provenance === 'carried_forward' && <span className="badge b-am">Carried forward</span>}
-                    {badge && <span className={`badge ${badge.cls}`}>{badge.text}</span>}
+                    {s.status === 'needs_input' && <span className="badge b-rd">Needs input</span>}
                     <span className="badge b-gy" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>
                       {REQ_TEXT[s.requirement]}
                     </span>

@@ -17,6 +17,8 @@ import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
+import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { ReportStatusCard } from '@/components/shared/ReportStatusCard';
 import type {
   BoardAssembleResponse,
   BoardCompletion,
@@ -33,6 +35,7 @@ import {
 } from './board-helpers';
 import { BoardStepShell } from './board-shell';
 import { useBoardReport } from './useBoardReport';
+import { useBoardCover } from './useBoardCover';
 import { useFitFrame } from './useFitFrame';
 import { ACCENT, AMBER, BORDER_SOFT, FAINT, GREEN, INK, MUTED, Notice } from './board-ui';
 
@@ -82,7 +85,14 @@ export default function BoardReportPage() {
   const missingNoticeShownRef = useRef(false);
 
   const isLocked = locked || approvedNow;
-  const brand = assembled?.brand ?? assembled?.cover?.brand ?? null;
+  // Approving is one-way, so on the board pack it's the admin's call alone.
+  const isAdmin = user?.role === 'admin';
+  // The cover design & colours, shared with the Review step.
+  const cover = useBoardCover(reportId, {
+    templateKey: assembled?.cover?.template_key ?? null,
+    brand: assembled?.brand ?? assembled?.cover?.brand ?? null,
+  });
+  const brand = cover.brand;
 
   const load = useCallback(async () => {
     const [secs, out, comp, asm] = await Promise.all([
@@ -197,7 +207,6 @@ export default function BoardReportPage() {
     [assembled],
   );
 
-  const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
   const titleByCode = useMemo(
     () => new Map(outline.map((s) => [s.section_code, s.title])),
     [outline],
@@ -333,6 +342,18 @@ export default function BoardReportPage() {
           </span>
           {!isLocked && (
             <button
+              type="button"
+              className="btn bs"
+              onClick={cover.openPicker}
+              style={{ padding: '9px 16px', fontSize: 12.5, fontWeight: 700 }}
+            >
+              Choose cover design &amp; colors
+            </button>
+          )}
+          {/* Admin only — a non-admin has nothing to do with this button, so it
+              isn't there at all rather than sitting greyed out. */}
+          {!isLocked && isAdmin && (
+            <button
               className="btn bp"
               // Not gated on readiness — approving with gaps is allowed. The
               // confirm dialog itself is where an incomplete report gets
@@ -385,11 +406,13 @@ export default function BoardReportPage() {
             className="doc-scroll"
             style={{ height: frameHeight ?? undefined, overflowY: 'auto', paddingRight: 6 }}
           >
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', justifyContent: 'center' }}>
             <div
               className="print-doc"
               style={{
+                flex: '1 1 auto',
                 maxWidth: DOC_WIDTH,
-                margin: '0 auto',
+                minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 20,
@@ -401,7 +424,7 @@ export default function BoardReportPage() {
                 title={str('title') ?? 'Board of Directors’ Report'}
                 preparedOn={str('prepared_on')}
                 brand={brand}
-                templateKey={assembled?.cover?.template_key ?? null}
+                templateKey={cover.templateKey}
                 maxWidth={DOC_WIDTH}
               />
 
@@ -411,7 +434,6 @@ export default function BoardReportPage() {
                     key={s.section_code}
                     section={s}
                     number={numberByCode.get(s.section_code) ?? null}
-                    meta={byCode.get(s.section_code)}
                     locked={isLocked}
                     editing={editingCode === s.section_code}
                     saving={savingCode === s.section_code}
@@ -430,6 +452,26 @@ export default function BoardReportPage() {
                 ))}
               </div>
             </div>
+
+            {/* Share for review, and the discussion that comes back — the same
+                rail the quarterly assembled report carries. Status lives in the
+                card above it, so the panel's own radios stay hidden. */}
+            <div
+              className="print-hide"
+              style={{
+                width: 290,
+                flexShrink: 0,
+                position: 'sticky',
+                top: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+              }}
+            >
+              <ReportStatusCard approved={isLocked} approvedAt={null} />
+              <ReportHubPanel reportId={reportId} showStatus={false} readOnly={isLocked} />
+            </div>
+            </div>
           </div>
         )}
 
@@ -447,6 +489,8 @@ export default function BoardReportPage() {
             </button>
           )}
         </div>
+
+        {cover.picker}
 
         {approveOpen && (
           <ApproveConfirmDialog
@@ -657,7 +701,6 @@ function MissingSectionsModal({
 function ReportSection({
   section: s,
   number,
-  meta,
   locked,
   editing,
   saving,
@@ -670,7 +713,6 @@ function ReportSection({
   section: BoardSection;
   /** Its number in the finished document, from `/assemble`. */
   number: number | null;
-  meta?: BoardOutlineSection;
   locked: boolean;
   editing: boolean;
   saving: boolean;
@@ -700,11 +742,6 @@ function ReportSection({
         >
           {s.title}
         </h2>
-        {!locked && meta?.requirement === 'M' && (
-          <span className="badge b-gn print-hide" title="Mandatory">
-            M
-          </span>
-        )}
         {!locked && feeder?.edited && <span className="badge b-bl print-hide">Edited</span>}
         {!locked && feeder?.refined && <span className="badge b-pp print-hide">Refined with AI</span>}
         {saved && (

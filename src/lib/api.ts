@@ -1808,6 +1808,11 @@ export const quarterlyReports = {
   getColorPalettesGlobal: () =>
     request<ColorPalettesResponse>("/api/v1/reports/quarterly/color-palettes"),
 
+  // The designs, company-unscoped. The URL says quarterly, but this is the
+  // shared catalogue — earnings and board reports pick from it too.
+  getCoverTemplatesGlobal: (signal?: AbortSignal) =>
+    request<CoverTemplatesResponse>("/api/v1/reports/quarterly/cover-templates", { signal }),
+
   // Persist the chosen cover design + brand colors; re-renders the cover +
   // report accents. Colors apply to accents/headings only (body stays dark).
   selectCoverTemplate: (
@@ -3084,6 +3089,25 @@ export const boardReports = {
   // completion payload, so the caller can list exactly what is missing.
   approve: (reportId: string) =>
     request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
+
+  // The cover design + colours already saved on this report, so the picker
+  // opens on the current choice rather than blank.
+  // `cover_template_key` is null until the user picks one; `brand` always comes
+  // back with real hex. Safe to call on an approved report.
+  getCoverTemplate: (reportId: string, signal?: AbortSignal) =>
+    request<Partial<CoverSelectionResponse>>(boardPath(reportId, "/cover-template"), { signal }),
+
+  // Cover design + brand colours, same payload shape as the quarterly picker
+  // (`PATCH .../cover-template`). The catalogue and palettes themselves are
+  // company-scoped, so the board step reuses quarterlyReports.getCoverTemplates.
+  // Answers {report_id, generation_config} — not the selection — so the caller
+  // keeps what the user picked rather than reading it back. 409 once the report
+  // is approved; 422 on an unknown template key or a bad colour.
+  selectCoverTemplate: (reportId: string, body: CoverSelectionPayload) =>
+    request<Partial<CoverSelectionResponse>>(boardPath(reportId, "/cover-template"), {
+      method: "PATCH",
+      body,
+    }),
 
   // The same dict the exporter renders, so the preview and the PDF can't drift.
   getAssemble: (reportId: string, signal?: AbortSignal) =>
