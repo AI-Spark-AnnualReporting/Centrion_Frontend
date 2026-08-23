@@ -253,6 +253,58 @@ describe('SectionRenderer dispatch', () => {
     expect(screen.queryByText('Prior')).not.toBeInTheDocument();
   });
 
+  // A RAG-composed narrative section stores {heading, content}. With no branch
+  // for that shape it fell through to the generic record fallback and rendered
+  // as a METRIC/VALUE table whose two rows were literally labelled "heading" and
+  // "content" — the section's own field names printed as data.
+  it('renders a {heading, content} narrative as a heading and prose, not a table of its own field names', () => {
+    render(
+      <SectionRenderer
+        section={sec({
+          section_code: 's03_exec_summary',
+          title: 'Executive Summary / Highlights',
+          mode: 'generate',
+          source_type: 'AI-written',
+          display_order: 2,
+          content: JSON.stringify({
+            heading: 'Third Quarter 2024 Financial and Operational Highlights',
+            content: 'Aramco showcased strong operational performance despite a challenging oil price environment.',
+          }),
+        })}
+      />,
+    );
+    // A real heading element, not a cell that happens to hold the same text.
+    expect(
+      screen.getByRole('heading', { name: 'Third Quarter 2024 Financial and Operational Highlights' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/strong operational performance/).tagName).toBe('P');
+    // The field names are not data.
+    expect(screen.queryByText('heading')).toBeNull();
+    expect(screen.queryByText('content')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'METRIC' })).toBeNull();
+  });
+
+  it('still renders a {title, entries} envelope as a label/value table', () => {
+    // Guards the ordering: the heading/content branch sits ABOVE the generic
+    // record fallback, and must not have swallowed it.
+    render(
+      <SectionRenderer
+        section={sec({
+          section_code: 's19_ir_calendar',
+          title: 'Reporting Calendar',
+          mode: 'auto',
+          display_order: 9,
+          content: JSON.stringify({
+            title: 'Reporting Calendar',
+            entries: [{ label: 'Q4 results', value: '12 February 2024' }],
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByText('Q4 results')).toBeInTheDocument();
+    expect(screen.getByText('12 February 2024')).toBeInTheDocument();
+  });
+
   it('renders a prose string as prose', () => {
     render(<SectionRenderer section={OVERVIEW} />);
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
@@ -426,6 +478,32 @@ describe('EarningsReportPage', () => {
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
     expect(screen.getByText('Revenue')).toBeInTheDocument();
     expect(screen.getByText('4,182.6')).toBeInTheDocument();
+  });
+
+  // The finished report is a DOCUMENT, not a list of parts: the cover is a page
+  // in its own right and everything after it flows inside one sheet. It used to
+  // be a card per section, which drew a border between every heading and the
+  // text above it.
+  it('the cover is a page of its own, outside the body sheet', async () => {
+    const { container } = renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    const cover = container.querySelector('#earnings-sec-cover') as HTMLElement;
+    expect(cover).not.toBeNull();
+    expect(cover.closest('.card')).toBeNull();
+  });
+
+  it('the body is one sheet, not a card per section', async () => {
+    const { container } = renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    // Both body sections live inside the SAME card…
+    const overview = container.querySelector('#earnings-sec-overview_highlights');
+    const performance = container.querySelector('#earnings-sec-earnings_performance');
+    const sheet = overview?.closest('.card');
+    expect(sheet).not.toBeNull();
+    expect(performance?.closest('.card')).toBe(sheet);
+    // …and neither is a card itself.
+    expect(overview?.classList.contains('card')).toBe(false);
+    expect(performance?.classList.contains('card')).toBe(false);
   });
 
   it('never shows a Regenerate button on any section', async () => {

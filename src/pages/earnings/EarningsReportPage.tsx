@@ -5,6 +5,7 @@ import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
+import { DOC_WIDTH } from '@/components/quarterly/CoverRenderer';
 import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
 import { EditableProse } from '@/components/earnings/EditableProse';
@@ -14,6 +15,10 @@ import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT, BRAND } from '@/components/earnings/tokens';
+
+// Same face the quarterly report numbers its sections in — the two assembled
+// screens are one document design, not two.
+const MONO = "'DM Mono', 'Courier New', monospace";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -395,6 +400,10 @@ export default function EarningsReportPage() {
   const visibleSections = sections.filter(
     (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
   );
+  // The cover renders as a page in its own right, ahead of the body sheet —
+  // see the layout below for why it must not be wrapped in a card.
+  const coverSection = visibleSections.find(isCoverMode) ?? null;
+  const bodySections = visibleSections.filter((s) => !isCoverMode(s));
   const included = visibleSections.filter((s) => s.included);
   // "Has this report been generated at all" — not "is every section fully
   // produced". Once real content exists anywhere (excluding the cover, which
@@ -450,8 +459,11 @@ export default function EarningsReportPage() {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 16,
+              gap: 20,
               minWidth: 0,
+              // The document has a fixed width; without this it stretches to
+              // fill a wide monitor and stops reading as a sheet of paper.
+              maxWidth: DOC_WIDTH,
               ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
               ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
             }}
@@ -473,25 +485,57 @@ export default function EarningsReportPage() {
                     </button>
                   </div>
                 )}
-                {visibleSections.map((s, i) => (
-                  <div key={s.section_code} id={`earnings-sec-${s.section_code}`} className="card" style={{ padding: '18px 22px' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: FAINT, fontVariantNumeric: 'tabular-nums' }}>
-                        {String(i + 1).padStart(2, '0')}
-                      </span>
-                      <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
-                    </div>
+                {/* The cover is a page, so it is the outermost element — not
+                    nested in a card. An A4 sheet with its own border and shadow
+                    sitting inside another bordered card is what made this screen
+                    read as a stack of parts rather than a document. */}
+                {coverSection && (
+                  <div id={`earnings-sec-${coverSection.section_code}`}>
                     <EditableProse
-                      section={s}
+                      section={coverSection}
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
-                      onSave={(content) => handleSaveSection(s.section_code, content)}
-                      onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
-                      onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
-                      onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
+                      onSave={(content) => handleSaveSection(coverSection.section_code, content)}
+                      onSaveInput={(text) => handleSaveSectionInput(coverSection.section_code, text)}
+                      onExtractInput={(file) => handleExtractSectionInput(coverSection.section_code, file)}
+                      onAcknowledgeFlag={() => acknowledgeFlag(coverSection.section_code)}
                     />
                   </div>
-                ))}
+                )}
+
+                {/* ONE sheet for the whole body, the way the quarterly report
+                    reads (AssembledReportPage). A card per section drew a border
+                    between every heading and the text above it, which is the
+                    opposite of what a finished document looks like. */}
+                {bodySections.length > 0 && (
+                  <div className="card" style={{ padding: '32px 40px', maxWidth: DOC_WIDTH }}>
+                    {bodySections.map((s, i) => (
+                      <section
+                        key={s.section_code}
+                        id={`earnings-sec-${s.section_code}`}
+                        style={{ marginBottom: 34 }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                          <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: BRAND, fontVariantNumeric: 'tabular-nums' }}>
+                            {String(i + 1).padStart(2, '0')}
+                          </span>
+                          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: BRAND, flex: 1, minWidth: 0, lineHeight: 1.25 }}>
+                            {s.title}
+                          </h2>
+                        </div>
+                        <EditableProse
+                          section={s}
+                          coverTemplateKey={coverTemplateKey}
+                          locked={locked}
+                          onSave={(content) => handleSaveSection(s.section_code, content)}
+                          onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
+                          onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
+                          onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
+                        />
+                      </section>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>

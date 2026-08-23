@@ -13,7 +13,7 @@ import {
 import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
-import { MUTED } from './tokens';
+import { MUTED, BRAND } from './tokens';
 
 // Prose block — split on blank lines into justified paragraphs, never a JSON blob.
 function Prose({ text }: { text: string }) {
@@ -102,12 +102,37 @@ export function SectionRenderer({
     return <SectionTable content={content} />;
   }
 
+  const parsed = tryParseJson(content);
+
+  // A RAG-composed narrative section stores {heading, content} — its own topic
+  // sub-heading plus the paragraph under it. This branch has to come BEFORE the
+  // generic record fallback below: without it the envelope is just an object, so
+  // it went to SectionTable and printed its own field names as rows, a
+  // METRIC/VALUE table reading "heading" / "content". The exporter has rendered
+  // this shape correctly all along (report_export._section_to_html) — the screen
+  // simply never learned it.
+  if (isRecord(parsed) && (typeof parsed.heading === 'string' || typeof parsed.content === 'string')) {
+    const heading = typeof parsed.heading === 'string' ? parsed.heading.trim() : '';
+    const body = typeof parsed.content === 'string' ? parsed.content.trim() : '';
+    if (heading || body) {
+      return (
+        <>
+          {heading && (
+            <h3 style={{ margin: '0 0 8px', fontSize: 14.5, fontWeight: 800, color: BRAND }}>
+              {canonicalMoneyInText(heading)}
+            </h3>
+          )}
+          {body && <Prose text={body} />}
+        </>
+      );
+    }
+  }
+
   // Fallback: some sections (e.g. Reporting Calendar / IR Contact) carry a
   // structured JSON envelope ({title, entries:[…]} / {rows:[…]} / an array of
   // objects) even though their mode isn't a known tabular one. Render that as a
   // label/value table rather than dumping raw JSON. Plain prose never JSON-parses
   // to an object/array, so it still falls through to <Prose>.
-  const parsed = tryParseJson(content);
   if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
     return <SectionTable content={content} />;
   }
