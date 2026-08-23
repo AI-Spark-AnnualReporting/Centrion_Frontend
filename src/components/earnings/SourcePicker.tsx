@@ -24,13 +24,18 @@ function coverageBadge(coverage: string): { cls: string; label: string } {
   return { cls: 'badge b-gy', label: coverage || 'Unknown' };
 }
 
+// Whether an upload's text has actually been extracted yet. 'completed' is the
+// live backend's terminal value (confirmed against a real GET .../sources
+// response); 'ready' is kept as an alias for naming robustness, not because the
+// backend has been observed to send it. Never implies ready before the backend
+// says so (D-12).
+function isExtracted(status: string | null): boolean {
+  return status === 'ready' || status === 'completed';
+}
+
 // Extraction state → shared badge class + label (narrative/upload rows only).
-// Never implies "ready" before the backend actually says so (D-12).
-// 'completed' is the live backend's terminal value (confirmed against a real
-// GET .../sources response) — 'ready' is kept as an alias for naming
-// robustness, not because the backend has been observed to send it.
 function extractionBadge(status: string | null): { cls: string; label: string } {
-  if (status === 'ready' || status === 'completed') return { cls: 'badge b-gn', label: 'Ready' };
+  if (isExtracted(status)) return { cls: 'badge b-gn', label: 'Ready' };
   if (status === 'failed') return { cls: 'badge b-rd', label: 'Failed' };
   return { cls: 'badge b-am', label: 'Extracting…' };
 }
@@ -108,11 +113,31 @@ export function SourcePicker({
     };
   }, [companyId, periodKey, refreshKey]);
 
-  // Drop any selected ids that are no longer in the list (period changed, etc.).
+  // Drop any selected ids that are no longer in the list (period changed, etc.),
+  // and pull in every upload.
+  //
+  // An upload is not a choice: the user put the file there BECAUSE they want the
+  // report written from it, so making them tick it afterwards only creates a way
+  // to silently omit it. The backend still receives an explicit
+  // source_document_ids list (_official_and_uploaded_document_ids reads it), so
+  // the selection has to keep carrying them — it just isn't the user's to make.
+  // Official filings stay selectable: those are the company's own filed reports,
+  // several may cover one period, and which of them a report is built from is a
+  // real decision.
   useEffect(() => {
     const present = new Set(sources.map(sourceKey));
     const kept = selectedIds.filter((id) => present.has(id));
-    if (kept.length !== selectedIds.length) emit(kept);
+    // Only the ones actually extracted. A file still being read, or one that
+    // failed, has no text to write from — including it would put an empty source
+    // in the report and blame the result on the model. It stays listed, with its
+    // own badge saying which it is, so nothing silently disappears.
+    const uploads = sources
+      .filter((s) => s.track === 'narrative_adjusted' && isExtracted(s.extraction_status))
+      .map(sourceKey);
+    const next = [...new Set([...kept, ...uploads])];
+    const same =
+      next.length === selectedIds.length && next.every((id) => selectedIds.includes(id));
+    if (!same) emit(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources]);
 
@@ -188,17 +213,17 @@ export function SourcePicker({
               <div style={{ fontSize: 12, color: FAINT, marginBottom: 10 }}>No uploads yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-                {narrativeSources.map((s) => {
-                  const key = sourceKey(s);
-                  return (
-                    <SourceRow
-                      key={key}
-                      source={s}
-                      checked={selectedIds.includes(key)}
-                      onToggle={() => toggle(key)}
-                    />
-                  );
-                })}
+                {narrativeSources.map((s) => (
+                  // `checked` here is not a choice — it is whether this file is
+                  // actually in the report yet, which is the same question as
+                  // whether its text has been extracted. An extracting or failed
+                  // upload reads as pending rather than as included.
+                  <SourceRow
+                    key={sourceKey(s)}
+                    source={s}
+                    checked={isExtracted(s.extraction_status)}
+                  />
+                ))}
               </div>
             )}
             {/* Staging only — no upload call here. Continue does the actual
@@ -324,25 +349,36 @@ function TypeCorrector({ source: s }: { source: SelectableSource }) {
 // One selectable row. Shared chrome (checkbox, label); trailing badge differs
 // by track. A narrative source still extracting/failed can't be selected yet
 // — never a usable source before it's actually ready (D-12).
+// One source row. An official filing is a checkbox — several can cover a period
+// and picking between them is a real decision. An upload has no `onToggle`: it is
+// listed as what it is, a file already in the report, with no way to un-choose it
+// (see the selection effect above). Rendering it as an unticked checkbox would be
+// worse than either, since it would read as "not included".
 function SourceRow({
   source: s,
-  checked,
+  checked = true,
   onToggle,
 }: {
   source: SelectableSource;
-  checked: boolean;
-  onToggle: () => void;
+  checked?: boolean;
+  onToggle?: () => void;
 }) {
   const isNarrative = s.track === 'narrative_adjusted';
+  const selectable = onToggle != null;
   const disabled = isNarrative && (s.extraction_status === 'extracting' || s.extraction_status === 'failed');
   const badge = isNarrative ? extractionBadge(s.extraction_status) : coverageBadge(s.coverage);
+  const Tag = selectable ? 'button' : 'div';
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-disabled={disabled || undefined}
-      onClick={disabled ? undefined : onToggle}
+    <Tag
+      {...(selectable
+        ? {
+            type: 'button' as const,
+            role: 'checkbox',
+            'aria-checked': checked,
+            'aria-disabled': disabled || undefined,
+            onClick: disabled ? undefined : onToggle,
+          }
+        : {})}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -350,33 +386,35 @@ function SourceRow({
         textAlign: 'left',
         padding: '11px 14px',
         borderRadius: 12,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        cursor: !selectable ? 'default' : disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.6 : 1,
         background: checked ? ACCENT_TINT : '#fff',
         border: `1.5px solid ${checked ? ACCENT : BORDER}`,
         transition: 'border-color .12s, background .12s',
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 18,
-          height: 18,
-          flexShrink: 0,
-          borderRadius: 5,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: checked ? ACCENT : '#fff',
-          border: checked ? 'none' : '1.5px solid #C9CDE4',
-        }}
-      >
-        {checked && (
-          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </span>
+      {selectable && (
+        <span
+          aria-hidden
+          style={{
+            width: 18,
+            height: 18,
+            flexShrink: 0,
+            borderRadius: 5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: checked ? ACCENT : '#fff',
+            border: checked ? 'none' : '1.5px solid #C9CDE4',
+          }}
+        >
+          {checked && (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2.5 6.2l2.2 2.2L9.5 3.6" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </span>
+      )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
@@ -397,7 +435,7 @@ function SourceRow({
         )}
       </div>
       <span className={badge.cls}>{badge.label}</span>
-    </button>
+    </Tag>
   );
 }
 

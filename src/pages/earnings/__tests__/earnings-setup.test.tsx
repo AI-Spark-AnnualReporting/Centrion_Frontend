@@ -530,31 +530,72 @@ describe('EarningsSetupPage', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/outline'));
   });
 
-  it('an extracting/failed narrative source cannot be selected', async () => {
-    getSelectableSources.mockResolvedValueOnce({
-      sources: [
-        {
-          report_id: null,
-          document_id: 'doc-1',
-          label: 'Investor Presentation Q4',
-          report_type: null,
-          period: 'FY 2025',
-          updated_at: '2026-01-01T00:00:00Z',
-          coverage: 'partial',
-          track: 'narrative_adjusted',
-          type: 'presentation',
-          extraction_status: 'extracting',
-        },
-      ],
-    });
+  // An upload is no longer a choice — putting the file there IS the decision, so
+  // there is no checkbox to tick and no way to leave it out by accident. What
+  // still has to hold is that a file with no extracted text yet is not written
+  // from: it stays listed, with its own badge, but off the source list.
+  const _narrativeSource = (extraction_status: string) => ({
+    report_id: null,
+    document_id: 'doc-1',
+    label: 'Investor Presentation Q4',
+    report_type: null,
+    period: 'FY 2025',
+    updated_at: '2026-01-01T00:00:00Z',
+    coverage: 'partial',
+    track: 'narrative_adjusted',
+    type: 'presentation',
+    extraction_status,
+  });
+
+  const _officialSource = {
+    report_id: 'rep-1',
+    label: 'Acme — FY24 Annual Report',
+    report_type: 'annual',
+    period: 'FY 2024',
+    updated_at: '2026-01-01T00:00:00Z',
+    coverage: 'full',
+  };
+
+  it.each(['extracting', 'failed'])(
+    'a %s upload is listed but never sent as a source',
+    async (status) => {
+      // An official filing rides along so Continue is reachable at all — on its
+      // own an unusable upload means zero sources, and the button is correctly
+      // disabled. This isolates the upload's exclusion from that.
+      getSelectableSources.mockResolvedValueOnce({
+        sources: [_officialSource, _narrativeSource(status)],
+      });
+      renderSetup();
+      fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+      fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+
+      // Visible, so nothing silently vanishes…
+      const row = await screen.findByText('Investor Presentation Q4');
+      // …and not a checkbox, because there is nothing to choose.
+      expect(row.closest('button[role="checkbox"]')).toBeNull();
+
+      fireEvent.click(screen.getByText('Acme — FY24 Annual Report'));
+      fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+      await waitFor(() =>
+        expect(createEarningsReport).toHaveBeenCalledWith(
+          expect.objectContaining({ source_report_ids: ['rep-1'], source_document_ids: [] }),
+        ),
+      );
+    },
+  );
+
+  it('a ready upload is sent as a source without anyone selecting it', async () => {
+    getSelectableSources.mockResolvedValueOnce({ sources: [_narrativeSource('completed')] });
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    const chip = await screen.findByText('Investor Presentation Q4');
-    const checkbox = chip.closest('button[role="checkbox"]') as HTMLButtonElement;
-    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(checkbox);
-    expect(checkbox).toHaveAttribute('aria-checked', 'false');
+    await screen.findByText('Investor Presentation Q4');
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await waitFor(() =>
+      expect(createEarningsReport).toHaveBeenCalledWith(
+        expect.objectContaining({ source_document_ids: ['doc-1'] }),
+      ),
+    );
   });
 
   it('Continue sends both source_report_ids and source_document_ids', async () => {
@@ -586,7 +627,7 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     fireEvent.click(await screen.findByText('Acme — FY24 Annual Report'));
-    fireEvent.click(await screen.findByText('Investor Presentation Q4'));
+    await screen.findByText('Investor Presentation Q4');  // the upload needs no click
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
     await waitFor(() =>
       expect(createEarningsReport).toHaveBeenCalledWith(
