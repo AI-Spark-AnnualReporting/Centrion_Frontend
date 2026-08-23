@@ -15,31 +15,7 @@ import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
 import { SourcesList } from './SourcesList';
 import { MUTED } from './tokens';
-
-// Prose block — split on blank lines into justified paragraphs, never a JSON blob.
-function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  const blocks = paragraphs.length ? paragraphs : [text];
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{
-            margin: i === 0 ? 0 : '14px 0 0',
-            fontSize: 14,
-            lineHeight: 1.75,
-            color: '#2A2E47',
-            whiteSpace: 'pre-wrap',
-            textAlign: 'justify',
-          }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  );
-}
+import { MarkdownProse as Prose } from '@/components/quarterly/SectionContent';
 
 // Dispatch a produced section by content shape: cover → CoverRenderer (reused from
 // quarterly), table/kpi → SectionTable (label + value only), else prose.
