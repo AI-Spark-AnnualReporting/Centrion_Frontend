@@ -31,6 +31,10 @@ const h = vi.hoisted(() => {
     produceEarningsReport: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
+    getEarningsCoverTemplates: vi.fn(),
+    getEarningsColorPalettes: vi.fn(),
+    getEarningsCoverSelection: vi.fn(),
+    saveEarningsCoverSelection: vi.fn(),
     MockApiError,
   };
 });
@@ -52,6 +56,10 @@ vi.mock('@/lib/api', () => ({
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
+    getEarningsCoverTemplates: (...a: unknown[]) => h.getEarningsCoverTemplates(...a),
+    getEarningsColorPalettes: (...a: unknown[]) => h.getEarningsColorPalettes(...a),
+    getEarningsCoverSelection: (...a: unknown[]) => h.getEarningsCoverSelection(...a),
+    saveEarningsCoverSelection: (...a: unknown[]) => h.saveEarningsCoverSelection(...a),
   },
   agentRuns: {
     getByPollUrl: (...a: unknown[]) => h.getByPollUrl(...a),
@@ -115,6 +123,9 @@ beforeEach(() => {
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
   h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'completed', error_message: null });
   h.getNodes.mockResolvedValue({ nodes: [] });
+  h.getEarningsCoverTemplates.mockResolvedValue({ cover_templates: [] });
+  h.getEarningsColorPalettes.mockResolvedValue({ color_palettes: [] });
+  h.getEarningsCoverSelection.mockResolvedValue({ cover_template_key: null, brand: null });
 });
 
 describe('EarningsPreviewPage', () => {
@@ -257,11 +268,10 @@ describe('EarningsPreviewPage', () => {
     expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
   });
 
-  it('offers a way back to add a section', async () => {
+  it('does not offer an "Add a section" button on the rail', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a section' }));
-    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
+    expect(screen.queryByRole('button', { name: '+ Add a section' })).not.toBeInTheDocument();
   });
 
   // ── The narrative half ──────────────────────────────────────────────────────
@@ -285,14 +295,14 @@ describe('EarningsPreviewPage', () => {
     expect(screen.getByRole('button', { name: /Executive Summary/ })).toBeInTheDocument();
   });
 
-  it('shows a produced narrative section, with a way to run it again', async () => {
+  it('shows a produced narrative section, with no Regenerate button', async () => {
     h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getByRole('button', { name: /CEO Commentary/ }));
 
     expect(await screen.findByText(/reinforce our ability to deliver/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument();
   });
 
   it('an un-run section names what it is waiting on, and links to it', async () => {

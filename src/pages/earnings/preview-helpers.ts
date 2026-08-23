@@ -129,6 +129,52 @@ export function normalizeTables(parsed: unknown): NormTable[] {
   return [];
 }
 
+// Some narrative sections (Financial Review / MD&A, Executive Summary, Capital
+// Allocation — written FROM the report's own figures) come back as a
+// `{heading, content}` JSON envelope rather than bare prose: a heading line
+// plus the actual paragraphs. Read it defensively so it renders as a proper
+// heading + prose block. Without this, the parsed object falls into
+// normalizeTables's generic "plain object → key/value table" branch and
+// prints "heading" / "content" as two table rows instead of real text.
+export interface NarrativeEnvelope {
+  heading: string | null;
+  body: string;
+}
+
+export function readNarrativeEnvelope(content: string): NarrativeEnvelope | null {
+  const parsed = tryParseJson(content);
+  if (!isRecord(parsed)) return null;
+  const body = parsed.content;
+  if (typeof body !== 'string' || body.trim() === '') return null;
+  const heading = typeof parsed.heading === 'string' && parsed.heading.trim() !== '' ? parsed.heading : null;
+  return { heading, body };
+}
+
+// A section the backend "produced" but with nothing to say — a fixed
+// boilerplate sentence ("No forward-looking guidance was disclosed in the
+// uploaded documents for this period.") rather than real prose. Confirmed
+// live across multiple sections (Guidance/Outlook, Reporting Calendar/IR
+// Contact) — the backend always closes this exact sentence with "in the
+// uploaded documents for this period.", which a legitimate finding never
+// would (this is a template tail, not organic writing). Matched narrowly —
+// short, starts with "No", ends with the fixed tail — so real content that
+// happens to start with "No" (e.g. "No dividends were declared this
+// quarter, in line with the prior year.") is never swept up by mistake.
+// TODO(backend): this is a stopgap. The real fix is a backend flag (see
+// .claude/specs/Earnings/NoDataPlaceholder(Backend).md) so the frontend
+// reads an explicit signal instead of pattern-matching the sentence — and so
+// the EXPORTED PDF/DOCX (server-rendered, entirely out of the frontend's
+// control) can also blank it, not just the Preview screen.
+const NO_DATA_TAIL = /in the uploaded documents for this period\.?\s*$/i;
+
+export function isNoDataPlaceholder(content: string | null): boolean {
+  if (!content) return false;
+  const envelope = readNarrativeEnvelope(content);
+  const text = (envelope ? envelope.body : content).trim();
+  if (!text || text.length > 220 || text.includes('\n\n')) return false;
+  return /^No\b/i.test(text) && NO_DATA_TAIL.test(text);
+}
+
 // ─── content-shape dispatch ───────────────────────────────────────────────────
 export function isCoverMode(section: Pick<EarningsProducedSection, 'section_code' | 'mode'>): boolean {
   return section.mode === 'cover' || /cover/i.test(section.section_code);
@@ -238,7 +284,9 @@ function hasRealContent(
     const parsed = tryParseJson(c);
     if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose
     const q = isRecord(parsed) ? parsed : {};
-    const quote = cell(q, 'quote', 'text');
+    // 'content' is the `{heading, content}` envelope this section can also
+    // arrive as — mirrors QuoteBlock's own alias list.
+    const quote = cell(q, 'quote', 'text', 'content');
     return typeof quote === 'string' && quote.trim() !== '';
   }
   return true;

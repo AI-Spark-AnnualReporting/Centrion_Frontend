@@ -164,7 +164,15 @@ export default function EarningsSetupPage() {
   const ready =
     !!sessionReportId ||
     (!!companyId &&
-      canContinue({ variant, fiscalYear, quarter, tone, sourceIds, pendingUploadCount: uploadFiles.length }));
+      canContinue({
+        variant,
+        fiscalYear,
+        quarter,
+        tone,
+        sourceIds,
+        pendingUploadCount: uploadFiles.length,
+        uploadedDocumentCount: sourceSplit.source_document_ids.length,
+      }));
 
   const handleVariant = (v: EarningsVariant) => {
     setVariant(v);

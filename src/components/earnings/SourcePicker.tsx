@@ -3,7 +3,7 @@ import { earnings } from '@/lib/api';
 import type { EarningsVariant, EarningsQuarter, SelectableSource, SourceUploadType } from '@/types/earnings';
 import { sourcesPeriodKey, sourceKey, formatSourceType, needsTypeConfirmation } from '@/pages/earnings/helpers';
 import { DocumentUploader } from './DocumentUploader';
-import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER } from './tokens';
+import { INK, MUTED, FAINT, ACCENT, ACCENT_TINT, BORDER, DANGER } from './tokens';
 
 // Document types the backend recognises (_FILING_TYPES) — shown as GUIDANCE
 // only now (the AI detects the type on upload); also reused as the correction
@@ -208,6 +208,9 @@ export function SourcePicker({
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
               <span style={{ fontSize: 12.5, fontWeight: 800, color: INK }}>Uploaded — narrative</span>
               <span style={{ fontSize: 11, color: FAINT }}>From your uploads</span>
+              <span style={{ fontSize: 10.5, fontWeight: 800, color: DANGER, letterSpacing: '.3px' }}>
+                REQUIRED
+              </span>
             </div>
             {narrativeSources.length === 0 ? (
               <div style={{ fontSize: 12, color: FAINT, marginBottom: 10 }}>No uploads yet.</div>

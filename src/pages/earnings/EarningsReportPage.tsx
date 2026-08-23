@@ -5,7 +5,7 @@ import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
+import { earningsSectionState, isHiddenWhenOmitted, isCoverMode, isNoDataPlaceholder } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -482,7 +482,12 @@ export default function EarningsReportPage() {
                       <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
                     </div>
                     <EditableProse
-                      section={s}
+                      // A "no data found" boilerplate sentence isn't real
+                      // content — blank it here instead of printing it. The
+                      // exported PDF/DOCX is generated server-side from the raw
+                      // `content` field, so this can't fix that half — see
+                      // .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
+                      section={isNoDataPlaceholder(s.content) ? { ...s, content: '' } : s}
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
                       onSave={(content) => handleSaveSection(s.section_code, content)}

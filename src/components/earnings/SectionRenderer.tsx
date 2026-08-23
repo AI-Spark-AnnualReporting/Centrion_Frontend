@@ -7,13 +7,14 @@ import {
   isQuoteMode,
   isReconciliationMode,
   readCoverValues,
+  readNarrativeEnvelope,
   tryParseJson,
   isRecord,
 } from '@/pages/earnings/preview-helpers';
 import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
-import { MUTED } from './tokens';
+import { INK, MUTED } from './tokens';
 
 // Prose block — split on blank lines into justified paragraphs, never a JSON blob.
 function Prose({ text }: { text: string }) {
@@ -100,6 +101,25 @@ export function SectionRenderer({
     // the metric/value table.
     if (tryParseJson(content) === undefined) return <Prose text={content} />;
     return <SectionTable content={content} />;
+  }
+
+  // A `{heading, content}` narrative envelope (Financial Review/MD&A, Executive
+  // Summary, Capital Allocation — written from the report's own figures) reads
+  // as a heading line + real prose, not a label/value dump of its two keys.
+  // Checked before the generic table fallback below, which would otherwise
+  // print "heading" / "content" as table rows.
+  const narrative = readNarrativeEnvelope(content);
+  if (narrative) {
+    return (
+      <>
+        {narrative.heading && (
+          <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 800, color: INK }}>
+            {narrative.heading}
+          </h3>
+        )}
+        <Prose text={narrative.body} />
+      </>
+    );
   }
 
   // Fallback: some sections (e.g. Reporting Calendar / IR Contact) carry a

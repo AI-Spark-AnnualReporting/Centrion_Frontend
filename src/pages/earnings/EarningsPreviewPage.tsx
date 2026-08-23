@@ -26,6 +26,10 @@ import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
 import { EditableProse } from '@/components/earnings/EditableProse';
+import { SectionRenderer } from '@/components/earnings/SectionRenderer';
+import { isNoDataPlaceholder } from './preview-helpers';
+import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
+import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
@@ -86,6 +90,15 @@ export default function EarningsFiguresPage() {
 
   const [produceRun, setProduceRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [continueError, setContinueError] = useState<string | null>(null);
+
+  // ── Cover design + brand color (mirrors the quarterly picker) ──
+  const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
+  const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [palettes, setPalettes] = useState<ColorPalette[]>([]);
+  const [brand, setBrand] = useState<BrandColors | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [coverApplying, setCoverApplying] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
   const { state: producePoll, restart: restartProduce } = usePipelinePoll(
     produceRun?.run_id ?? null,
     produceRun?.poll_url ?? null,
@@ -102,6 +115,7 @@ export default function EarningsFiguresPage() {
       ]);
       setSections(res.sections);
       setProduced(prod.sections ?? []);
+      if ('cover_template_key' in prod) setCoverTemplateKey(prod.cover_template_key ?? null);
       setPrompts(Object.fromEntries(res.sections.map((s) => [s.section_code, s.prompt ?? ''])));
       setActiveCode((prev) => prev ?? res.sections[0]?.section_code ?? null);
       setLoadError(null);
@@ -115,6 +129,58 @@ export default function EarningsFiguresPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // ── Load cover templates + palettes + the saved selection (pre-select) ──────
+  useEffect(() => {
+    if (!reportId) return;
+    let cancelled = false;
+    earnings
+      .getEarningsCoverTemplates()
+      .then((res) => {
+        if (!cancelled) setCoverTemplates(res.cover_templates ?? []);
+      })
+      .catch(() => {
+        /* picker simply has nothing to show until the backend lands */
+      });
+    earnings
+      .getEarningsColorPalettes()
+      .then((res) => {
+        if (!cancelled) setPalettes(res.color_palettes ?? []);
+      })
+      .catch(() => {});
+    earnings
+      .getEarningsCoverSelection(reportId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.cover_template_key) setCoverTemplateKey(res.cover_template_key);
+        if (res?.brand) setBrand(res.brand);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId]);
+
+  const handleCoverApply = useCallback(
+    async (payload: CoverSelectionPayload) => {
+      if (!reportId) return;
+      setCoverApplying(true);
+      setCoverError(null);
+      try {
+        const res = await earnings.saveEarningsCoverSelection(reportId, payload);
+        // Prefer the payload the user actually picked — the PATCH response may not
+        // echo cover_template_key/brand, which would reset to the default.
+        setCoverTemplateKey(res?.cover_template_key ?? payload.cover_template_key);
+        setBrand(res?.brand ?? payload.brand);
+        setPickerOpen(false);
+      } catch (err: unknown) {
+        setCoverError(err instanceof ApiError ? err.message : 'Could not save the cover selection.');
+      } finally {
+        setCoverApplying(false);
+      }
+    },
+    [reportId],
+  );
 
 
   // SectionAnalysis reads a produced section's content (to spot a table edited
@@ -272,7 +338,9 @@ export default function EarningsFiguresPage() {
       code: p.section_code,
       title: p.title || p.section_code,
       kind: 'narrative',
-      written: !!(p.content || '').trim(),
+      // A "no data found" boilerplate sentence isn't real content — the rail
+      // should read it the same as never having been run.
+      written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
     }));
     return [...fin, ...nar];
   }, [sections, narrative]);
@@ -394,9 +462,6 @@ export default function EarningsFiguresPage() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#fff',
-        borderRadius: 12,
-        overflow: 'hidden',
       }}
     >
       <EarningsStepper activeStep={3} reportId={reportId} />
@@ -472,7 +537,6 @@ export default function EarningsFiguresPage() {
               items={railItems}
               activeCode={activeCode}
               onSelect={setActiveCode}
-              onAddSection={() => navigate(`/earnings/${reportId}/outline`)}
             />
 
           {/* Its own scrollport, so choosing a section never moves the rail or the
@@ -488,58 +552,75 @@ export default function EarningsFiguresPage() {
               gap: 14,
             }}
           >
-            {activeCode === COVER_CODE && (
-              // The rail always offers this row, so it must always render
-              // something. It rendered nothing at all -- both section lookups
-              // missed and the column came up blank.
-              <section className="card" style={{ padding: '24px 28px' }}>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: INK, margin: 0 }}>
-                  Cover &amp; colours
-                </h2>
-                <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.6, margin: '8px 0 18px', maxWidth: 520 }}>
-                  The front page of the report and the colour it is printed in. Choose it
-                  whenever you like — it changes nothing about the figures or the writing.
-                </p>
-                <button
-                  type="button"
-                  className="btn bp"
-                  onClick={() => navigate(`/earnings/${reportId}/report`)}
+            {activeCode === COVER_CODE && (() => {
+              const coverSection = produced.find((p) => p.section_code === 's01_cover') ?? null;
+              return (
+                <section
+                  className="card"
+                  style={{
+                    padding: '24px 28px',
+                    ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
+                    ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+                  }}
                 >
-                  Choose cover &amp; colours →
-                </button>
-                <p style={{ fontSize: 11, color: FAINT, margin: '10px 0 0' }}>
-                  Opens on the Report screen, where you can see it applied.
-                </p>
-              </section>
-            )}
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+                    <h2 style={{ fontSize: 18, fontWeight: 800, color: INK, margin: 0 }}>
+                      Cover &amp; colours
+                    </h2>
+                    <button type="button" className="btn bp bsm" onClick={() => setPickerOpen(true)}>
+                      Choose cover design &amp; colors
+                    </button>
+                  </div>
+                  {coverSection ? (
+                    <SectionRenderer section={coverSection} coverTemplateKey={coverTemplateKey} />
+                  ) : (
+                    <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.6, margin: 0, maxWidth: 520 }}>
+                      The cover hasn't been produced yet — it will show here once the report is
+                      generated. You can still pick a design and colours now.
+                    </p>
+                  )}
+                </section>
+              );
+            })()}
 
-            {activeNarrative && (
-              <section className="card" style={{ padding: '18px 22px 20px' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                  <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>
-                    {activeNarrative.title || activeNarrative.section_code}
-                  </h2>
-                  <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: FAINT }}>
-                    {activeNarrative.source_type ?? 'Written'}
-                  </span>
-                </div>
-                <NarrativePane
-                  section={activeNarrative}
-                  emptySections={emptySections}
-                  running={running === activeNarrative.section_code}
-                  runError={runErrors[activeNarrative.section_code] || null}
-                  onRun={(regen) => void runSection(activeNarrative.section_code, regen)}
-                  onJumpTo={setActiveCode}
-                >
-                  <EditableProse
-                    section={activeNarrative}
-                    coverTemplateKey={null}
-                    locked={false}
-                    onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
-                  />
-                </NarrativePane>
-              </section>
-            )}
+            {activeNarrative && (() => {
+              // A "no data found" boilerplate sentence isn't real content — show
+              // this section as blank (not-yet-written) rather than printing it,
+              // in Preview and everywhere else the frontend controls. The
+              // exported PDF/DOCX is generated server-side from the same raw
+              // `content` field, so this alone can't blank it there too — see
+              // .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
+              const displayNarrative = isNoDataPlaceholder(activeNarrative.content)
+                ? { ...activeNarrative, content: '' }
+                : activeNarrative;
+              return (
+                <section className="card" style={{ padding: '18px 22px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                    <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>
+                      {activeNarrative.title || activeNarrative.section_code}
+                    </h2>
+                    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: FAINT }}>
+                      {activeNarrative.source_type ?? 'Written'}
+                    </span>
+                  </div>
+                  <NarrativePane
+                    section={displayNarrative}
+                    emptySections={emptySections}
+                    running={running === activeNarrative.section_code}
+                    runError={runErrors[activeNarrative.section_code] || null}
+                    onRun={(regen) => void runSection(activeNarrative.section_code, regen)}
+                    onJumpTo={setActiveCode}
+                  >
+                    <EditableProse
+                      section={displayNarrative}
+                      coverTemplateKey={null}
+                      locked={false}
+                      onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
+                    />
+                  </NarrativePane>
+                </section>
+              );
+            })()}
 
             {(sections ?? []).filter((s) => s.section_code === activeCode).map((s) => {
               const finalised = !!s.finalised;
@@ -821,6 +902,19 @@ export default function EarningsFiguresPage() {
             />
           )}
         </FigureDialog>
+      )}
+
+      {pickerOpen && (
+        <CoverTemplatePicker
+          templates={coverTemplates}
+          palettes={palettes}
+          initialTemplateKey={coverTemplateKey}
+          initialBrand={brand}
+          applying={coverApplying}
+          error={coverError}
+          onApply={handleCoverApply}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </div>
   );
