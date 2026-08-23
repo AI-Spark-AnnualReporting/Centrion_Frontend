@@ -49,7 +49,16 @@ function flatValue(row: unknown, units: FigureUnits | null): string {
 // off each figure\'s own position in its source table.
 function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
   const cols = table.matrixColumns ?? [];
+  // A grid repeated the currency in every one of its cells — eight categories wide,
+  // that is most of the table. Stated once above instead, exactly as the file does.
+  const units = deriveUnits(
+    table.rows.flatMap((r) => cols.map((c) => matrixCell(r, c.key))),
+  );
   return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -81,13 +90,15 @@ function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties 
               >
                 {/* A blank cell is information — this line does not exist for
                     that category — so it reads as a dash, not as missing data. */}
-                {matrixCell(r, c.key) ?? '—'}
+                {(units ? gridValue(matrixCell(r, c.key), units.currency)
+                        : matrixCell(r, c.key)) ?? '—'}
               </td>
             ))}
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 
@@ -101,7 +112,16 @@ function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties 
 // blank rows all reading "Pending".
 function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
   const cols = table.columns ?? [];
+  // Consensus vs Actual prices its Actual/Expected columns in one currency and was
+  // repeating it in every cell. Same rule as everywhere else: state it once above,
+  // bare the cells. deriveUnits finds nothing in the board's text columns, so those
+  // tables come back untouched.
+  const units = deriveUnits(table.rows.flatMap((r) => cols.map((c) => stringifyCell(r[c]))));
   return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -127,13 +147,15 @@ function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties
                   whiteSpace: ci === 0 ? undefined : 'nowrap',
                 }}
               >
-                {stringifyCell(r[c]) || '—'}
+                {(units ? gridValue(stringifyCell(r[c]), units.currency)
+                        : stringifyCell(r[c])) || '—'}
               </td>
             ))}
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 

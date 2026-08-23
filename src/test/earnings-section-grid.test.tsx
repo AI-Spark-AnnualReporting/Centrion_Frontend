@@ -124,3 +124,66 @@ describe('SectionTable', () => {
   });
 
 });
+
+// The third table shape: its own named columns, rows keyed BY those names.
+// Consensus vs Actual. Covered late — the flat and matrix shapes were fixed first
+// and this one returns early in the renderer, so it went on printing the token.
+describe('SectionTable — a table with its own named columns', () => {
+  const CONSENSUS = JSON.stringify({
+    title: 'Consensus vs Actual',
+    tables: [{
+      title: 'Consensus vs Actual',
+      columns: ['Line', 'Actual', 'Expected', 'Result'],
+      rows: [
+        { code: 'a', Line: 'Revenue from sales', Actual: '424 SAR_million', Expected: '—', Result: '—' },
+        { code: 'b', Line: 'Revenue', Actual: '424,095 SAR_million', Expected: '—', Result: '—' },
+      ],
+    }],
+  });
+
+  it('states the currency once and bares the cells', () => {
+    render(<SectionTable content={CONSENSUS} />);
+    expect(
+      screen.getByText('All figures in SAR millions unless otherwise stated.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('424,095')).toBeInTheDocument();
+    expect(screen.queryByText(/SAR_million/)).toBeNull();
+  });
+
+  it('leaves a table of text columns exactly as it was', () => {
+    // The board's governance tables share this shape but hold no money — nothing
+    // matches, so no caption is claimed and no cell is touched.
+    render(<SectionTable content={JSON.stringify({
+      title: 'Board Attendance',
+      tables: [{
+        title: 'Board Attendance',
+        columns: ['Name', 'Role', 'Attended'],
+        rows: [{ code: 'a', Name: 'A. Rahman', Role: 'Chair', Attended: '4 of 4' }],
+      }],
+    })} />);
+    expect(screen.queryByText(/unless otherwise stated/)).toBeNull();
+    expect(screen.getByText('Chair')).toBeInTheDocument();
+    expect(screen.getByText('4 of 4')).toBeInTheDocument();
+  });
+});
+
+// The catch-all, after this leak was found three separate times in three
+// different render paths. All three table shapes, one assertion.
+describe('SectionTable — no storage token survives any shape', () => {
+  it.each([
+    ['flat', JSON.stringify({ title: 'T', tables: [{ title: 'T', rows: [
+      { code: 'a', label: 'Revenue', current_display: '424,095 SAR_million' }] }] })],
+    ['named columns', JSON.stringify({ title: 'T', tables: [{ title: 'T',
+      columns: ['Line', 'Actual'],
+      rows: [{ code: 'a', Line: 'Revenue', Actual: '424,095 SAR_million' }] }] })],
+    ['matrix', JSON.stringify({ title: 'T', tables: [{ title: 'T',
+      matrix_columns: [{ key: 'Upstream', label: 'Upstream' }],
+      rows: [{ code: 'a', label: 'External revenue',
+               cells: [{ key: 'Upstream', display: '424,095 SAR_million' }] }] }] })],
+  ])('%s', (_shape, content) => {
+    const { container } = render(<SectionTable content={content} />);
+    expect(container.textContent).not.toMatch(/SAR_million/);
+    expect(container.textContent).toContain('424,095');
+    expect(container.textContent).toMatch(/unless otherwise stated/);
+  });
+});
