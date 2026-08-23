@@ -48,6 +48,23 @@ describe('agreeing on one unit for a table', () => {
   it('declines when there is no money at all', () => {
     expect(deriveUnits(['4.7%', '3.1%'])).toBeNull();
   });
+
+  it('takes the majority denomination rather than needing unanimity', () => {
+    // One foreign line no longer makes forty SAR rows go on repeating "SAR";
+    // bareFigure leaves the odd cell alone, which is what the caption promises.
+    expect(deriveUnits(['SAR 100M', 'SAR 5M', 'SAR 2M', 'USD 9M']))
+      .toEqual({ currency: 'SAR', scale: 'M' });
+  });
+
+  it('still declines on a tie, because "mostly" would name neither', () => {
+    expect(deriveUnits(['SAR 100M', 'SAR 5M', 'USD 9M', 'USD 3M'])).toBeNull();
+  });
+
+  it('declines on mixed scales even when one is the clear majority', () => {
+    // bareFigure strips the scale letter with the code, so captioning this in
+    // millions would print 5B as "5" — the figure wrong by a factor of a thousand.
+    expect(deriveUnits(['SAR 100M', 'SAR 5M', 'SAR 2M', 'SAR 9B'])).toBeNull();
+  });
 });
 
 describe('baring a figure', () => {
@@ -71,9 +88,9 @@ describe('baring a figure', () => {
 describe('the caption', () => {
   it('names the scale', () => {
     expect(unitsCaption({ currency: 'SAR', scale: 'M' }))
-      .toBe('All amounts in SAR millions unless otherwise stated.');
+      .toBe('All figures in SAR millions unless otherwise stated.');
     expect(unitsCaption({ currency: 'SAR', scale: '' }))
-      .toBe('All amounts in SAR unless otherwise stated.');
+      .toBe('All figures in SAR unless otherwise stated.');
   });
 });
 
@@ -98,7 +115,7 @@ function gridSection(cells: Array<[string, string]>): ProducedSection {
 describe('a grid on the report page', () => {
   it('states the currency once and leaves the cells bare', () => {
     render(<SectionContent section={gridSection([['Goodwill', 'SAR 100,603M'], ['Other', 'SAR 4,031M']])} />);
-    expect(screen.getByText('All amounts in SAR millions unless otherwise stated.')).toBeInTheDocument();
+    expect(screen.getByText('All figures in SAR millions unless otherwise stated.')).toBeInTheDocument();
     const table = screen.getByRole('table');
     expect(within(table).getByText('100,603')).toBeInTheDocument();
     expect(within(table).queryByText('SAR 100,603M')).not.toBeInTheDocument();
@@ -157,5 +174,38 @@ describe('the equity grid on the report page', () => {
     expect(within(table).queryByText('SAR 0M')).not.toBeInTheDocument();
     expect(within(table).getByText('307,135')).toBeInTheDocument();
     expect(within(table).getAllByText(NIL_CELL).length).toBeGreaterThan(0);
+  });
+});
+
+// ── Already-produced reports: the pre-_fmt_value earnings shape ──────────────
+// Sections produced before the formatter change still carry "123,534 SAR_million"
+// in the database, and the produce cache keys on a section's INPUTS — so they do
+// not re-render on their own. These strings have to read correctly as they are.
+describe('the old stored format', () => {
+  it('is recognised as money so the table still gets its caption', () => {
+    expect(moneyParts('123,534 SAR_million')).toEqual({ currency: 'SAR', scale: 'M' });
+    expect(moneyParts('-116,185 SAR_million')).toEqual({ currency: 'SAR', scale: 'M' });
+    expect(moneyParts('1.2 SAR_billion')).toEqual({ currency: 'SAR', scale: 'B' });
+  });
+
+  it('is not confused with something that merely looks similar', () => {
+    expect(moneyParts('4.7%')).toBeNull();
+    expect(moneyParts('55 USD/bbl')).toBeNull();
+    expect(moneyParts('102 percent')).toBeNull();
+  });
+
+  it('bares the cell and turns the old minus into accounting parentheses', () => {
+    expect(bareFigure('123,534 SAR_million', 'SAR')).toBe('123,534');
+    expect(bareFigure('-116,185 SAR_million', 'SAR')).toBe('(116,185)');
+  });
+
+  it('leaves a genuinely foreign cell visibly foreign', () => {
+    expect(bareFigure('9,000 USD_million', 'SAR')).toBe('9,000 USD_million');
+  });
+
+  it('derives one denomination across a whole legacy table', () => {
+    expect(deriveUnits([
+      '123,534 SAR_million', '-116,185 SAR_million', '424,095 SAR_million', '4.7%',
+    ])).toEqual({ currency: 'SAR', scale: 'M' });
   });
 });

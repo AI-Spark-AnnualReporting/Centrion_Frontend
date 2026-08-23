@@ -74,7 +74,9 @@ describe('SectionTable', () => {
     render(<SectionTable content={GRID} />);
     expect(screen.getByText('Other lines')).toBeInTheDocument();
     const total = screen.getByRole('row', { name: /Total revenue/ });
-    expect(within(total).getByText('424,095 SAR_million')).toBeInTheDocument();
+    // Bare: the currency is stated once above the table now, and the old stored
+    // "424,095 SAR_million" is recognised and stripped the same as a fresh one.
+    expect(within(total).getByText('424,095')).toBeInTheDocument();
   });
 
   it('a section with no columns is still a plain Metric/Value table', () => {
@@ -82,7 +84,10 @@ describe('SectionTable', () => {
     expect(screen.getByRole('columnheader', { name: 'Metric' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Value' })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Line item' })).toBeNull();
-    expect(screen.getByText('424,095 SAR_million')).toBeInTheDocument();
+    expect(screen.getByText('424,095')).toBeInTheDocument();
+    expect(
+      screen.getByText('All figures in SAR millions unless otherwise stated.'),
+    ).toBeInTheDocument();
   });
 
   it('renders a section that prints its own named columns', () => {
