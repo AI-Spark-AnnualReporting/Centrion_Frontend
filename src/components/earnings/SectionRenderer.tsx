@@ -1,4 +1,5 @@
 import type { EarningsProducedSection } from '@/types/earnings';
+import { canonicalMoneyInText } from '@/components/quarterly/figureUnits';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import {
   isCoverMode,
@@ -16,7 +17,10 @@ import { MUTED } from './tokens';
 
 // Prose block — split on blank lines into justified paragraphs, never a JSON blob.
 function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  // Sentences written before the formatter fix still carry the raw storage token
+  // ("248,891 SAR_million") — rewritten here so the screen reads like the file.
+  const paragraphs = canonicalMoneyInText(text)
+    .split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   const blocks = paragraphs.length ? paragraphs : [text];
   return (
     <>

@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { moneyParts, deriveUnits, bareFigure, unitsCaption, gridValue, NIL_CELL } from '@/components/quarterly/figureUnits';
+import { moneyParts, deriveUnits, bareFigure, unitsCaption, gridValue, NIL_CELL, canonicalMoneyInText } from '@/components/quarterly/figureUnits';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import type { ProducedSection } from '@/types/quarterly';
 
@@ -207,5 +207,40 @@ describe('the old stored format', () => {
     expect(deriveUnits([
       '123,534 SAR_million', '-116,185 SAR_million', '424,095 SAR_million', '4.7%',
     ])).toEqual({ currency: 'SAR', scale: 'M' });
+  });
+});
+
+// ── Storage tokens written into prose ────────────────────────────────────────
+// The analysis prompt tells the model to quote a figure EXACTLY as displayed, so
+// "248,891 SAR_million" was copied into the sentence and stored. Fixing the
+// formatter does not reach text that was already written.
+describe('money written into a sentence', () => {
+  it('reads the way a release writes it', () => {
+    expect(canonicalMoneyInText('Cash fell from 248,891 SAR_million to 191,022 SAR_million.'))
+      .toBe('Cash fell from SAR 248,891 million to SAR 191,022 million.');
+  });
+
+  it('gives a negative the parentheses the tables use', () => {
+    expect(canonicalMoneyInText('a net decrease of -57,869 SAR_million'))
+      .toBe('a net decrease of (SAR 57,869 million)');
+  });
+
+  it('spells the scale out rather than abbreviating it mid-sentence', () => {
+    expect(canonicalMoneyInText('was 1.2 SAR_billion')).toBe('was SAR 1.2 billion');
+    expect(canonicalMoneyInText('was 500 SAR_thousand')).toBe('was SAR 500 thousand');
+  });
+
+  it('leaves anything that is not a money token alone', () => {
+    for (const text of [
+      'Revenue rose 9.2% and the ratio was 4.7%.',
+      'A price of 55 USD/bbl and 102 percent utilisation.',
+      'Basis points moved 25 basis_points on the quarter.',
+    ]) expect(canonicalMoneyInText(text)).toBe(text);
+  });
+
+  it('agrees with the exporter, which is the whole point', () => {
+    // report_export.canonical_money_in_text produces exactly this.
+    expect(canonicalMoneyInText('Free cash flow was 76,280 SAR_million.'))
+      .toBe('Free cash flow was SAR 76,280 million.');
   });
 });

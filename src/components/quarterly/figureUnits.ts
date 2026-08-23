@@ -161,3 +161,36 @@ export function unitsCaption({ currency, scale }: FigureUnits): string {
     ? `All figures in ${currency} ${word} unless otherwise stated.`
     : `All figures in ${currency} unless otherwise stated.`;
 }
+
+// ── Storage tokens written into PROSE ────────────────────────────────────────
+//
+// The narrative producers were handed a figure's display string, and the analysis
+// prompt tells the model to quote it EXACTLY as displayed — so "248,891
+// SAR_million" was copied into the sentence and then stored. Fixing the formatter
+// does not reach text that was already written, so sentences are rewritten at
+// render time instead.
+//
+// Prose spells the scale out ("SAR 248,891 million"): a table column has a caption
+// above it doing that job, a sentence does not, and "SAR 248,891M" mid-sentence
+// reads like a typo. Negatives take the accounting parentheses the tables use.
+//
+// Mirrors report_export.canonical_money_in_text; pinned by tests on both sides.
+const PROSE_MONEY_RE = /(?<![\w,.])(-?)\s*([\d,]+(?:\.\d+)?)\s+([A-Z]{3})_([A-Z]+)\b/gi;
+
+const PROSE_SCALE_WORDS: Record<string, string> = {
+  thousand: 'thousand', thousands: 'thousand',
+  million: 'million', millions: 'million',
+  billion: 'billion', billions: 'billion',
+  actual: '', units: '',
+};
+
+/** "248,891 SAR_million" → "SAR 248,891 million"; a negative → "(SAR 57,869 million)". */
+export function canonicalMoneyInText(text: string): string {
+  if (!text || !text.includes('_')) return text; // the overwhelmingly common case
+  return text.replace(PROSE_MONEY_RE, (whole, sign, digits, currency, scale) => {
+    const word = PROSE_SCALE_WORDS[String(scale).toLowerCase()];
+    if (word === undefined) return whole; // not a scale token — leave the sentence alone
+    const body = `${String(currency).toUpperCase()} ${digits}${word ? ` ${word}` : ''}`;
+    return sign ? `(${body})` : body;
+  });
+}
