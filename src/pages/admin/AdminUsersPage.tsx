@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { admin, adminConsole, adminUserPermissions } from '@/lib/api';
@@ -57,6 +57,31 @@ function normalizeUser(raw: any): AdminUserRow {
     last_active: raw.last_active ?? raw.last_login ?? null,
     reports_count: raw.reports_count ?? raw.report_count ?? null,
   };
+}
+
+// Modules the "filter by module access" control can check — the two `app:*`
+// keys are a different concept (which dashboard app a user lands in), not a
+// report module, so they're left out here.
+const MODULE_FILTER_FEATURES = GRANTABLE_FEATURES.filter((f) => !f.key.startsWith('app:'));
+
+// A user has a feature+action once their per-user permissions are known
+// (role default OR an additive extra grant — grants only ever add on top of
+// the role default, never remove it). Until that fetch resolves, fall back to
+// the role default alone: it undercounts a user with an extra grant beyond
+// their role, but never overcounts, so a still-loading count only ever climbs
+// as real data comes in — it doesn't have to flicker down again.
+function hasFeatureAccess(
+  user: AdminUserRow,
+  perm: UserPermissionsResponse | undefined,
+  featureKey: string,
+  action: FeatureAction,
+): boolean {
+  if (perm) {
+    const locked = Boolean(perm.role_defaults?.[featureKey]?.[action]);
+    const granted = perm.extra_grants.some((g) => g.feature_key === featureKey && g.action === action);
+    return locked || granted;
+  }
+  return Boolean(ROLE_FEATURE_DEFAULTS[user.role]?.[featureKey]?.[action as keyof FeaturePermissions]);
 }
 
 // ── Role summary cards ─────────────────────────────────────────────────────
@@ -639,6 +664,18 @@ export default function AdminUsersPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
 
+  // Module-access filter — "how many users have <module> <action> access".
+  // Per-user permissions aren't in the users list, so once a module is picked
+  // we fetch each user's permissions and cache them here (shared with the
+  // expanded-row panel would be nicer, but that panel already fetches on its
+  // own open; this cache just avoids re-fetching a user twice for the filter).
+  const [moduleFilter, setModuleFilter] = useState<string | null>(null);
+  const [moduleAction, setModuleAction] = useState<FeatureAction>('read');
+  const [permsCache, setPermsCache] = useState<Record<string, UserPermissionsResponse>>({});
+  const [loadingModuleAccess, setLoadingModuleAccess] = useState(false);
+  const permsCacheRef = useRef(permsCache);
+  permsCacheRef.current = permsCache;
+
   const { toast } = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
   // Only set when the invite email failed and the temp password needs handing
@@ -684,6 +721,49 @@ export default function AdminUsersPage() {
       .catch(() => setDepartments([]));
   }, []);
 
+  // Reset to an action the picked module actually supports (e.g. switching
+  // from Board Report — read/create — to Command Center, which is read-only).
+  useEffect(() => {
+    const feature = MODULE_FILTER_FEATURES.find((f) => f.key === moduleFilter);
+    if (feature && !feature.actions.includes(moduleAction)) {
+      setModuleAction(feature.actions[0]);
+    }
+  }, [moduleFilter, moduleAction]);
+
+  // Fetch permissions for whichever users aren't cached yet once a module
+  // filter is active. Runs again only when `users` changes (a refetch) or a
+  // new module is picked — not on every cache update, so it settles instead
+  // of looping.
+  useEffect(() => {
+    if (!moduleFilter) return;
+    const missing = users.filter((u) => !permsCacheRef.current[u.user_id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    setLoadingModuleAccess(true);
+    Promise.all(
+      missing.map((u) =>
+        adminUserPermissions
+          .get(u.user_id)
+          .then((res) => [u.user_id, res] as const)
+          .catch(() => null),
+      ),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setPermsCache((prev) => {
+          const next = { ...prev };
+          for (const r of results) if (r) next[r[0]] = r[1];
+          return next;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingModuleAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleFilter, users]);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const u of users) c[u.role] = (c[u.role] ?? 0) + 1;
@@ -702,9 +782,10 @@ export default function AdminUsersPage() {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (roleFilter && u.role !== roleFilter) return false;
       if (q && !`${u.full_name} ${u.email}`.toLowerCase().includes(q)) return false;
+      if (moduleFilter && !hasFeatureAccess(u, permsCache[u.user_id], moduleFilter, moduleAction)) return false;
       return true;
     });
-  }, [users, statusFilter, roleFilter, search]);
+  }, [users, statusFilter, roleFilter, search, moduleFilter, moduleAction, permsCache]);
 
   const changeRole = async (u: AdminUserRow, role: BackendRole) => {
     setRowBusy(u.user_id);
@@ -798,6 +879,13 @@ export default function AdminUsersPage() {
           onChangeRole={changeRole}
           onChangeStatus={changeStatus}
           onChangeDepartment={changeDepartment}
+          users={users}
+          permsCache={permsCache}
+          loadingModuleAccess={loadingModuleAccess}
+          moduleFilter={moduleFilter}
+          moduleAction={moduleAction}
+          onModuleChange={setModuleFilter}
+          onActionChange={setModuleAction}
         />
       ) : (
         <>
@@ -853,6 +941,13 @@ function UsersView(props: {
   onChangeRole: (u: AdminUserRow, role: BackendRole) => void;
   onChangeStatus: (u: AdminUserRow, status: UserStatus) => void;
   onChangeDepartment: (u: AdminUserRow, departmentId: string) => void;
+  users: AdminUserRow[];
+  permsCache: Record<string, UserPermissionsResponse>;
+  loadingModuleAccess: boolean;
+  moduleFilter: string | null;
+  moduleAction: FeatureAction;
+  onModuleChange: (key: string | null) => void;
+  onActionChange: (action: FeatureAction) => void;
 }) {
   const {
     loading,
@@ -871,7 +966,19 @@ function UsersView(props: {
     onChangeRole,
     onChangeStatus,
     onChangeDepartment,
+    users,
+    permsCache,
+    loadingModuleAccess,
+    moduleFilter,
+    moduleAction,
+    onModuleChange,
+    onActionChange,
   } = props;
+
+  const moduleFeature = MODULE_FILTER_FEATURES.find((f) => f.key === moduleFilter);
+  const moduleMatchCount = moduleFilter
+    ? users.filter((u) => hasFeatureAccess(u, permsCache[u.user_id], moduleFilter, moduleAction)).length
+    : null;
 
   return (
     <>
@@ -895,24 +1002,71 @@ function UsersView(props: {
             </button>
           ))}
         </div>
-        <div style={{ position: 'relative', width: 240 }}>
-          <input
-            className="inp"
-            placeholder="Search name or email"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: 30 }}
-          />
-          <svg
-            viewBox="0 0 13 13"
-            width="13"
-            height="13"
-            fill="none"
-            style={{ position: 'absolute', left: 11, top: 11, color: '#9BA3C4' }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Select
+            value={moduleFilter ?? '__none'}
+            onValueChange={(v) => onModuleChange(v === '__none' ? null : v)}
           >
-            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M8.5 8.5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
+            <SelectTrigger className="inp" style={{ width: 190, height: 37 }}>
+              <SelectValue placeholder="All modules" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">All modules</SelectItem>
+              {MODULE_FILTER_FEATURES.map((f) => (
+                <SelectItem key={f.key} value={f.key}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {moduleFeature && moduleFeature.actions.length > 1 && (
+            <Select value={moduleAction} onValueChange={(v) => onActionChange(v as FeatureAction)}>
+              <SelectTrigger className="inp" style={{ width: 90, height: 37 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {moduleFeature.actions.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {ACTION_LABEL[a]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {moduleFeature && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: loadingModuleAccess ? '#9BA3C4' : PRIMARY,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {loadingModuleAccess ? 'Checking…' : `${moduleMatchCount} of ${users.length}`}
+            </span>
+          )}
+
+          <div style={{ position: 'relative', width: 240 }}>
+            <input
+              className="inp"
+              placeholder="Search name or email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 30 }}
+            />
+            <svg
+              viewBox="0 0 13 13"
+              width="13"
+              height="13"
+              fill="none"
+              style={{ position: 'absolute', left: 11, top: 11, color: '#9BA3C4' }}
+            >
+              <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8.5 8.5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </div>
         </div>
       </div>
 
@@ -1390,7 +1544,7 @@ function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
 }
 
 const ACTION_LABEL: Record<FeatureAction, string> = {
-  read: 'View',
+  read: 'Read',
   create: 'Create',
   access: 'Access',
 };
