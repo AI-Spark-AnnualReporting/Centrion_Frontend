@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useToast } from '@/hooks/use-toast';
 import { communications, ApiError, type ReportHubResponse, type ThreadDetailResponse } from '@/lib/api';
 import { ShareReportModal } from './ShareReportModal';
@@ -287,7 +288,11 @@ export function ReportHubPanel({
         </div>
       </div>
 
-      {showShare && (
+      {/* Portalled to <body>: the panel is often placed in a `position: sticky`
+          rail, which is a stacking context of its own — an overlay rendered
+          inside it is trapped there, and anything on the page with a higher
+          z-index (a sticky toolbar, the runs dock) paints over the modal. */}
+      {showShare && createPortal(
         <ShareReportModal
           reportId={reportId}
           report={report}
@@ -298,10 +303,11 @@ export function ReportHubPanel({
             setOpenThread(true);
             void load();
           }}
-        />
+        />,
+        document.body,
       )}
 
-      {openThread && (thread_id || sharePayload) && (
+      {openThread && (thread_id || sharePayload) && createPortal(
         <ThreadViewModal
           threadId={sharePayload?.thread.thread_id ?? thread_id!}
           initialPayload={sharePayload}
@@ -315,10 +321,11 @@ export function ReportHubPanel({
             setSharePayload(undefined);
             setReviewThreadId(id);
           }}
-        />
+        />,
+        document.body,
       )}
 
-      {reviewThreadId && (
+      {reviewThreadId && createPortal(
         <ReviewerView
           threadId={reviewThreadId}
           onClose={() => {
@@ -331,7 +338,8 @@ export function ReportHubPanel({
             setOpenThread(true);
           }}
           onChanged={() => void load()}
-        />
+        />,
+        document.body,
       )}
     </>
   );

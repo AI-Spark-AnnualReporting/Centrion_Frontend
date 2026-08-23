@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import {
+  boardReports,
   communications,
   earnings,
   quarterlyReports,
@@ -13,6 +14,8 @@ import {
 } from '@/lib/api';
 import type { EarningsProducedSection } from '@/types/earnings';
 import type { AssembledSection, BrandColors } from '@/types/quarterly';
+import type { BoardAssembledSection } from '@/types/board';
+import { numberBoardHeadings } from '@/pages/annual-report/board-helpers';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
@@ -51,9 +54,11 @@ const REPORT_LEVEL_KEY = 'null';
 // Anchors for the in-document sections, so the comments rail can jump to one.
 const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`;
 
-// Quarterly reports assemble from their own endpoint; every other type reads
-// through the earnings sections endpoint.
+// Quarterly and board reports each assemble from their own endpoint; every
+// other type reads through the earnings sections endpoint. `board_pack` is the
+// older type string for the same report.
 const QUARTERLY = 'quarterly';
+const BOARD = ['board_report', 'board_pack'];
 
 // Document presentation, matched to AssembledReportPage so the reviewer reads
 // exactly what the creator approved — same page width, numbering, and accents.
@@ -76,6 +81,35 @@ export function assembledToProduced(s: AssembledSection): EarningsProducedSectio
     mode: s.mode,
     status: 'produced',
     content: raw == null ? null : typeof raw === 'string' ? raw : JSON.stringify(raw),
+    included: true,
+    feeder_status: 'ready',
+    feeder_message: null,
+    source_label: null,
+    source_ref: null,
+    confidence: null,
+    flag: null,
+    grounding_flag: null,
+    grounding_acknowledged: false,
+    edited: false,
+  };
+}
+
+// The board document's own assemble shape, mapped to what the renderers read.
+// Board content arrives as Markdown prose or a JSON table, the same two shapes
+// the quarterly renderer already draws.
+function boardToProduced(s: BoardAssembledSection): EarningsProducedSection {
+  const raw = s.content as unknown;
+  const content = raw == null ? null : typeof raw === 'string' ? raw : JSON.stringify(raw);
+  return {
+    section_code: s.section_code,
+    title: s.title,
+    display_order: s.display_order ?? 0,
+    source_type: s.source_type ?? null,
+    mode: s.mode === 'table' ? 'table' : 'generate',
+    status: 'produced',
+    // Headings inside a section are numbered from the section's own number, as
+    // on the Report step — the reviewer reads what the creator approved.
+    content: numberBoardHeadings(content, s.number ?? null) || content,
     included: true,
     feeder_status: 'ready',
     feeder_message: null,
@@ -213,6 +247,10 @@ export function ReviewerView({
 
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, EarningsProducedSection>>({});
+  // Why the document came back empty. Swallowing this is what made a permission
+  // failure look like "nothing has been written yet" — two very different things
+  // to the reviewer looking at the screen.
+  const [bodyError, setBodyError] = useState<string | null>(null);
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
   // Quarterly only: the cover page's real values + brand accents, so the review
   // renders the same document AssembledReportPage does. Null until loaded — the
@@ -268,8 +306,25 @@ export function ReviewerView({
   useEffect(() => {
     if (!reportId || !reportType) return;
     let cancelled = false;
-    const load =
-      reportType === QUARTERLY && companyId
+    const load = BOARD.includes(reportType)
+      ? boardReports.getAssemble(reportId).then((res) => {
+          if (!cancelled) {
+            const values = (res.cover?.values ?? {}) as Record<string, unknown>;
+            const str = (k: string) => (typeof values[k] === 'string' ? (values[k] as string) : null);
+            setCover({
+              companyName: str('company_name') ?? userCompanyName,
+              period: str('period_label') ?? res.period ?? null,
+              title: str('title') ?? 'Board of Directors’ Report',
+              preparedOn: str('prepared_on'),
+            });
+            setBrand(res.brand ?? res.cover?.brand ?? null);
+          }
+          return {
+            sections: res.sections.map(boardToProduced),
+            cover_template_key: res.cover?.template_key ?? null,
+          };
+        })
+      : reportType === QUARTERLY && companyId
         ? quarterlyReports.getAssembled(companyId, reportId).then((res) => {
             if (!cancelled) {
               // /assemble often omits `header` entirely. AssembledReportPage
@@ -292,6 +347,7 @@ export function ReviewerView({
             };
           })
         : earnings.getEarningsSections(reportId);
+    setBodyError(null);
     load
       .then((res) => {
         if (cancelled) return;
@@ -300,7 +356,9 @@ export function ReviewerView({
         setBodies(byCode);
         setCoverTemplateKey(res.cover_template_key);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!cancelled) setBodyError(detailMessage(e, 'Could not load the report content.'));
+      });
     return () => {
       cancelled = true;
     };
@@ -426,8 +484,12 @@ export function ReviewerView({
         .map((s, i) => ({ id: s.section_code, order: i + 1, title: s.title, type: s.mode }));
   // Quarterly renders as the assembled document: cover as its own page, so it
   // drops out of the numbered body list exactly as AssembledReportPage does.
-  const isQuarterly = reportType === QUARTERLY;
-  const sections = isQuarterly
+  // Both assemble into a real document — cover as its own page, prose and
+  // tables through the quarterly renderer — so they render the same way. Board
+  // content is the one difference: it's Markdown, and needs parsing.
+  const isBoard = BOARD.includes(reportType ?? '');
+  const isDocument = reportType === QUARTERLY || isBoard;
+  const sections = isDocument
     ? allSections.filter((s) => !isCoverSection({ section_code: s.id }))
     : allSections;
   // Once the report is approved (or otherwise finished) the review is over —
@@ -581,6 +643,25 @@ export function ReviewerView({
                 requested change. When you're done, approve it or send it back to the creator.
               </div>
 
+              {/* The headings come from the review payload, the content from the
+                  report's own endpoint — so the content can fail on its own.
+                  Say so, rather than letting every section read as unwritten. */}
+              {bodyError && Object.keys(bodies).length === 0 && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    background: '#FEF2F2',
+                    border: '1px solid #FECACA',
+                    fontSize: 12.5,
+                    color: '#DC2626',
+                    marginBottom: 16,
+                  }}
+                >
+                  Could not load the report content — {bodyError}
+                </div>
+              )}
+
               {sections.length === 0 && (
                 <div
                   className="card"
@@ -592,7 +673,7 @@ export function ReviewerView({
 
               {/* Quarterly cover — page 1, same renderer and width the assembled
                   report uses. Skipped until the real header values load. */}
-              {isQuarterly && cover && (
+              {isDocument && cover && (
                 <div
                   style={{
                     marginBottom: 20,
@@ -617,11 +698,11 @@ export function ReviewerView({
                   own assembled screen. The brand vars drive report-content
                   accents (headings, table headers, figures) in both. */}
               <div
-                className={isQuarterly && sections.length > 0 ? 'card' : undefined}
+                className={isDocument && sections.length > 0 ? 'card' : undefined}
                 style={{
                   ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
                   ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
-                  ...(isQuarterly && sections.length > 0
+                  ...(isDocument && sections.length > 0
                     ? { padding: '32px 40px', maxWidth: DOC_WIDTH, margin: '0 auto' }
                     : {}),
                 }}
@@ -632,13 +713,13 @@ export function ReviewerView({
                 // section.id is the earnings section_code verbatim.
                 const body = bodies[s.id];
                 return (
-                  <div key={s.id} id={sectionDomId(s.id)} style={{ marginBottom: isQuarterly ? 34 : 16, scrollMarginTop: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isQuarterly ? 10 : 11, marginBottom: isQuarterly ? 14 : 10 }}>
+                  <div key={s.id} id={sectionDomId(s.id)} style={{ marginBottom: isDocument ? 34 : 16, scrollMarginTop: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isDocument ? 10 : 11, marginBottom: isDocument ? 14 : 10 }}>
                       <span
                         style={{
                           flexShrink: 0,
-                          fontWeight: isQuarterly ? 700 : 800,
-                          ...(isQuarterly
+                          fontWeight: isDocument ? 700 : 800,
+                          ...(isDocument
                             ? { fontFamily: MONO, fontSize: 12, color: BRAND }
                             : // EarningsPreviewPage: faint "01", tabular figures.
                               { fontSize: 11, color: '#9BA3C4', fontVariantNumeric: 'tabular-nums' }),
@@ -652,7 +733,7 @@ export function ReviewerView({
                           minWidth: 0,
                           fontWeight: 800,
                           color: BRAND,
-                          ...(isQuarterly ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
+                          ...(isDocument ? { fontSize: 19, lineHeight: 1.25 } : { fontSize: 16 }),
                         }}
                       >
                         {s.title}
@@ -704,10 +785,10 @@ export function ReviewerView({
                         through the quarterly renderer (same tables and prose the
                         assembled report draws) and sits directly on the document
                         page rather than in its own card. */}
-                    <div className={isQuarterly ? undefined : 'card'} style={isQuarterly ? undefined : { padding: '18px 22px' }}>
+                    <div className={isDocument ? undefined : 'card'} style={isDocument ? undefined : { padding: '18px 22px' }}>
                       {body ? (
-                        isQuarterly ? (
-                          <SectionContent section={body} />
+                        isDocument ? (
+                          <SectionContent section={body} markdown={isBoard} />
                         ) : (
                           <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
                         )
@@ -750,7 +831,7 @@ export function ReviewerView({
               </div>
 
               {/* Report-level comments (section_id: null) */}
-              <div className="card" style={{ padding: '16px 20px', maxWidth: isQuarterly ? DOC_WIDTH : undefined, margin: isQuarterly ? '16px auto 0' : undefined }}>
+              <div className="card" style={{ padding: '16px 20px', maxWidth: isDocument ? DOC_WIDTH : undefined, margin: isDocument ? '16px auto 0' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: '#1A1D2E' }}>
                     On the report as a whole

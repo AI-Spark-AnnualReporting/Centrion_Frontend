@@ -19,7 +19,6 @@ import type {
   RunRejectedBody,
 } from '@/types/compliance';
 import { UPLOAD_EXTENSIONS, UPLOAD_MAX_BYTES } from '@/types/compliance';
-import { ComplianceStepper } from './ComplianceStepper';
 import { CertifiedGallery } from './CertifiedGallery';
 import type { ComplianceRunningState } from './ComplianceRunningPage';
 import {
@@ -186,31 +185,134 @@ function readRunError(err: unknown): string {
 
 // ── shared bits ──────────────────────────────────────────────────────────────
 
-function Card({
+// The whole wizard lives in one card — Source, Regulators and Validate are
+// sections inside it, not separate cards — with a single header up top that
+// can collapse the entire form away once it's been set up once.
+function SetupCard({
+  expanded,
+  onToggleExpanded,
+  caption,
+  children,
+}: {
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  caption: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="card" style={{ marginBottom: 14, overflow: 'hidden' }}>
+      <button
+        type="button"
+        onClick={onToggleExpanded}
+        aria-expanded={expanded}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '14px 18px',
+          background: 'transparent',
+          border: 'none',
+          borderBottom: expanded ? '1px solid #ECEEF8' : 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: 'inherit',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg,#4040C8,#7C3AED)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 1.5l5.5 2v4c0 4-2.4 6.6-5.5 7.7C4.9 14.1 2.5 11.5 2.5 7.5v-4l5.5-2z"
+                stroke="white"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M5.8 8l1.7 1.7L10.3 6.3"
+                stroke="white"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div className="ct">Set up validation</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: MUTED,
+                marginTop: 2,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {caption}
+            </div>
+          </div>
+        </div>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          style={{
+            flexShrink: 0,
+            transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)',
+            transition: 'transform .15s',
+          }}
+        >
+          <path
+            d="M2.5 7L6 3.5 9.5 7"
+            stroke={MUTED}
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {expanded && children}
+    </div>
+  );
+}
+
+function Section({
   step,
   title,
   caption,
+  last,
   children,
 }: {
   step: number;
   title: string;
   caption?: string;
+  last?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="card" style={{ marginBottom: 14 }}>
-      <div className="ch">
-        <div>
-          <div className="ct">
-            <span style={{ color: MUTED, fontFamily: MONO, marginRight: 6 }}>{step}</span>
-            {title}
-          </div>
-          {caption && (
-            <div style={{ fontSize: 11, color: MUTED, marginTop: 3, maxWidth: 620 }}>{caption}</div>
-          )}
-        </div>
+    <div style={{ padding: '16px 18px', borderBottom: last ? 'none' : '1px solid #ECEEF8' }}>
+      <div className="ct">
+        <span style={{ color: MUTED, fontFamily: MONO, marginRight: 6 }}>{step}</span>
+        {title}
       </div>
-      <div className="cb">{children}</div>
+      {caption && (
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 3, marginBottom: 14, maxWidth: 620 }}>{caption}</div>
+      )}
+      {children}
     </div>
   );
 }
@@ -736,6 +838,10 @@ export default function ComplianceSetupPage() {
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState('');
 
+  // The whole setup form collapses behind one header once it's been filled in
+  // — expanded by default, since there's nothing to hide on first arrival.
+  const [setupExpanded, setSetupExpanded] = useState(true);
+
   // One endpoint returns both, but they belong to different tabs: reports we
   // generated and the company approved, and files the user brought us. Keeping
   // an uploaded file in the approved list would misdescribe it — nobody
@@ -1129,9 +1235,16 @@ export default function ComplianceSetupPage() {
 
       {canCreate && (
       <>
-      <ComplianceStepper activeStep={1} />
-      {/* ── Card 1 · Source ─────────────────────────────────────────────── */}
-      <Card
+      {/* No stepper here — this is the entry screen, not a step inside a report
+          already underway. It shows up once there's an actual run to walk
+          through: Review (step 2) and Gate (step 3). */}
+      <SetupCard
+        expanded={setupExpanded}
+        onToggleExpanded={() => setSetupExpanded((e) => !e)}
+        caption="Source, regulators, and the run itself — all in one place."
+      >
+      {/* ── Section 1 · Source ───────────────────────────────────────────── */}
+      <Section
         step={1}
         title="Source"
         caption={
@@ -1249,10 +1362,10 @@ export default function ComplianceSetupPage() {
             </div>
           )}
         </div>
-      </Card>
+      </Section>
 
-      {/* ── Card 2 · Regulators ─────────────────────────────────────────── */}
-      <Card
+      {/* ── Section 2 · Regulators ───────────────────────────────────────── */}
+      <Section
         step={2}
         title="Regulators"
         caption={
@@ -1329,12 +1442,13 @@ export default function ComplianceSetupPage() {
             </>
           )}
         </div>
-      </Card>
+      </Section>
 
-      {/* ── Card 3 · Validate ───────────────────────────────────────────── */}
-      <Card
+      {/* ── Section 3 · Validate ─────────────────────────────────────────── */}
+      <Section
         step={3}
         title="Validate"
+        last
         caption={
           // Only a brand-new file pays the reading cost. Re-running something
           // already uploaded is an ordinary run — its text is already extracted.
@@ -1394,7 +1508,8 @@ export default function ComplianceSetupPage() {
             {runError}
           </div>
         )}
-      </Card>
+      </Section>
+      </SetupCard>
       </>
       )}
 

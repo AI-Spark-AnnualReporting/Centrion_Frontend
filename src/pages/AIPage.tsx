@@ -258,7 +258,15 @@ export default function AIPage() {
       .toUpperCase() || 'U';
 
   return (
-    <div>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        // .content's top+bottom padding (20+20) plus the 56px topbar it sits
+        // under — see .content.no-fab in index.css, applied to this route.
+        height: 'calc(100vh - 96px)',
+      }}
+    >
       <div
         style={{
           marginBottom: 14,
@@ -266,6 +274,7 @@ export default function AIPage() {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
+          flexShrink: 0,
         }}
       >
         <div>
@@ -323,8 +332,17 @@ export default function AIPage() {
           {isClearing ? 'Clearing…' : 'Clear chat'}
         </button>
       </div>
-      <div className="card" style={{ overflow: 'hidden' }}>
-        <div className="chat-area" style={{ height: 500 }}>
+      <div
+        className="card"
+        style={{
+          overflow: 'hidden',
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div className="chat-area" style={{ flex: 1, minHeight: 0 }}>
           <div className="chat-msgs" ref={scrollRef}>
             {sessionLoading && (
               <div
