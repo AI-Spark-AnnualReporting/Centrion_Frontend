@@ -9,10 +9,38 @@ import {
   matrixCell,
 } from '@/pages/earnings/preview-helpers';
 import type { NormTable } from '@/pages/earnings/preview-helpers';
+import { deriveUnits, gridValue, unitsCaption } from '@/components/quarterly/figureUnits';
+import type { FigureUnits } from '@/components/quarterly/figureUnits';
 import { INK, MUTED, BRAND } from './tokens';
 
 // ConfidenceBadge's established amber — within-feature consistency.
 const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
+
+// The denomination a flat line-item table is priced in, or null when no single
+// sentence would be true of it (see deriveUnits). Read off the same three fields
+// the value cells print, so the caption can never claim a unit no cell carries.
+// Memoised per table object: this is called once for the caption and once per row.
+const _flatUnitsCache = new WeakMap<NormTable, FigureUnits | null>();
+
+function flatUnits(table: NormTable): FigureUnits | null {
+  const cached = _flatUnitsCache.get(table);
+  if (cached !== undefined) return cached;
+  const units = deriveUnits(
+    table.rows.map((r) => stringifyCell(cell(r, 'current_display', 'current', 'value'))),
+  );
+  _flatUnitsCache.set(table, units);
+  return units;
+}
+
+// One value cell: the currency dropped when it is the table's own (stated once in
+// the caption instead), a nil printed as a dash, and anything in another unit — a
+// rate, a per-share figure — left exactly as it is. That last part is what the
+// caption's "unless otherwise stated" is promising.
+function flatValue(row: unknown, units: FigureUnits | null): string {
+  const raw = stringifyCell(cell(row as never, 'current_display', 'current', 'value'));
+  if (!units) return raw || '—';
+  return gridValue(raw, units.currency);
+}
 
 // A section the source printed as a GRID — line items down the side, categories
 // across the top. Flattened to Metric/Value it became "External revenue —
@@ -21,7 +49,16 @@ const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
 // off each figure\'s own position in its source table.
 function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
   const cols = table.matrixColumns ?? [];
+  // A grid repeated the currency in every one of its cells — eight categories wide,
+  // that is most of the table. Stated once above instead, exactly as the file does.
+  const units = deriveUnits(
+    table.rows.flatMap((r) => cols.map((c) => matrixCell(r, c.key))),
+  );
   return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -53,13 +90,15 @@ function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties 
               >
                 {/* A blank cell is information — this line does not exist for
                     that category — so it reads as a dash, not as missing data. */}
-                {matrixCell(r, c.key) ?? '—'}
+                {(units ? gridValue(matrixCell(r, c.key), units.currency)
+                        : matrixCell(r, c.key)) ?? '—'}
               </td>
             ))}
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 
@@ -73,7 +112,16 @@ function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties 
 // blank rows all reading "Pending".
 function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
   const cols = table.columns ?? [];
+  // Consensus vs Actual prices its Actual/Expected columns in one currency and was
+  // repeating it in every cell. Same rule as everywhere else: state it once above,
+  // bare the cells. deriveUnits finds nothing in the board's text columns, so those
+  // tables come back untouched.
+  const units = deriveUnits(table.rows.flatMap((r) => cols.map((c) => stringifyCell(r[c]))));
   return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
         <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -99,13 +147,15 @@ function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties
                   whiteSpace: ci === 0 ? undefined : 'nowrap',
                 }}
               >
-                {stringifyCell(r[c]) || '—'}
+                {(units ? gridValue(stringifyCell(r[c]), units.currency)
+                        : stringifyCell(r[c])) || '—'}
               </td>
             ))}
           </tr>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 
@@ -157,6 +207,15 @@ export function SectionTable({ content }: { content: string | null }) {
           ) : t.matrixColumns ? (
             <MatrixTable table={t} TH={TH} />
           ) : (
+          <>
+          {/* The currency is stated once here and dropped from every cell below —
+              the same rule, off the same helper, that report_export applies to the
+              exported file. A table repeating "SAR" forty times reads as noise. */}
+          {flatUnits(t) && (
+            <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>
+              {unitsCaption(flatUnits(t) as FigureUnits)}
+            </p>
+          )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
@@ -204,7 +263,7 @@ export function SectionTable({ content }: { content: string | null }) {
                           fontWeight: 700,
                         }}
                       >
-                        {stringifyCell(cell(r, 'current_display', 'current', 'value')) || '—'}
+                        {flatValue(r, flatUnits(t))}
                       </td>
                     )}
                     {showSource && (
@@ -215,6 +274,7 @@ export function SectionTable({ content }: { content: string | null }) {
               })}
             </tbody>
           </table>
+          </>
           )}
         </div>
       ))}

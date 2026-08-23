@@ -442,25 +442,8 @@ export default function EarningsReportPage() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '290px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
-          {/* Left — what you DO with the finished report. It sits beside the
-              document rather than under it, so approving and exporting are never
-              a scroll away. The section rail is gone: this screen is the report
-              read end to end, not a place to jump between parts. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 12 }}>
-            <PublishBar
-              locked={locked}
-              approvedAt={reportStatus?.approved_at ?? null}
-              blockers={blockers}
-              approving={approving}
-              onApprove={handleApprove}
-              onExport={handleExport}
-              showApprove={false}
-            />
-            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
-          </div>
-
-          {/* Right — generate state or the assembled document. The chosen brand
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 290px', gap: 18, alignItems: 'start' }}>
+          {/* Left — generate state or the assembled document. The chosen brand
               color drives report-content accents (cover, headings) via
               --brand-primary; product-UI chrome stays indigo. */}
           <div
@@ -511,6 +494,30 @@ export default function EarningsReportPage() {
                 ))}
               </>
             )}
+          </div>
+
+          {/* Right — what you DO with the finished report. It sits beside the
+              document rather than under it, so approving and exporting are never
+              a scroll away, and on the trailing side so the page opens on the
+              report itself rather than on its controls. The section rail is gone:
+              this screen is the report read end to end, not a place to jump
+              between parts.
+
+              Second in source as well as on screen, so tab order and screen-reader
+              order reach the report before the controls that act on it — rather
+              than being visually moved with `order`, which leaves the two
+              disagreeing. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'sticky', top: 12 }}>
+            <PublishBar
+              locked={locked}
+              approvedAt={reportStatus?.approved_at ?? null}
+              blockers={blockers}
+              approving={approving}
+              onApprove={handleApprove}
+              onExport={handleExport}
+              showApprove={false}
+            />
+            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
           </div>
 
         </div>

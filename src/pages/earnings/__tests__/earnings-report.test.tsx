@@ -242,7 +242,11 @@ describe('SectionRenderer dispatch', () => {
   it('renders a table envelope as label + value, with NO delta column', () => {
     render(<SectionRenderer section={PERFORMANCE} />);
     expect(screen.getByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('SAR 4,182.6M')).toBeInTheDocument();
+    // The currency is stated once above the table now, not in the cell — the same
+    // rule the exported file follows, so screen and PDF cannot disagree.
+    expect(screen.getByText('4,182.6')).toBeInTheDocument();
+    expect(screen.getByText('All figures in SAR millions unless otherwise stated.'))
+      .toBeInTheDocument();
     expect(screen.getByText('Value')).toBeInTheDocument();
     // No delta columns ever, even though rows carry prior_display/change_pct = null.
     expect(screen.queryByText('Change')).not.toBeInTheDocument();
@@ -421,7 +425,7 @@ describe('EarningsReportPage', () => {
     expect(await screen.findAllByText('Overview')).not.toHaveLength(0);
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
     expect(screen.getByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('SAR 4,182.6M')).toBeInTheDocument();
+    expect(screen.getByText('4,182.6')).toBeInTheDocument();
   });
 
   it('never shows a Regenerate button on any section', async () => {
