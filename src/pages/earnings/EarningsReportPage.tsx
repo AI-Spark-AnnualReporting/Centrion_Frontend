@@ -451,7 +451,20 @@ export default function EarningsReportPage() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 290px', gap: 18, alignItems: 'start' }}>
+        // The document column is sized to the document, not to the space left
+        // over. As `1fr` it stretched to fill the viewport while the sheet inside
+        // stayed at DOC_WIDTH, so everything past 820px became a gap between the
+        // report and the rail. justifyContent centres the pair instead of pinning
+        // them to opposite edges on a wide monitor.
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `minmax(0, ${DOC_WIDTH}px) 290px`,
+            justifyContent: 'center',
+            gap: 18,
+            alignItems: 'start',
+          }}
+        >
           {/* Left — generate state or the assembled document. The chosen brand
               color drives report-content accents (cover, headings) via
               --brand-primary; product-UI chrome stays indigo. */}
