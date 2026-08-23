@@ -381,8 +381,9 @@ export default function EarningsSetupPage() {
       </div>
       )}
 
-      {/* Your earnings reports — dashboard tiles. Each opens the preview screen. */}
-      {canRead && (
+      {/* Your earnings reports — dashboard tiles. Each opens the preview screen.
+          Hidden entirely once we know there are none — no empty-state card. */}
+      {canRead && (reportsLoading || reportsError || reports.length > 0) && (
       <div style={{ marginTop: 28 }}>
         <div style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your earnings reports</h2>
@@ -396,13 +397,6 @@ export default function EarningsSetupPage() {
         ) : reportsError ? (
           <div className="card" role="alert" style={{ padding: '14px 18px', fontSize: 12.5, color: '#DC2626' }}>
             {reportsError}
-          </div>
-        ) : reports.length === 0 ? (
-          <div
-            className="card"
-            style={{ padding: '28px 20px', textAlign: 'center', fontSize: 12.5, color: FAINT }}
-          >
-            No earnings reports yet. Create one above to get started.
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>

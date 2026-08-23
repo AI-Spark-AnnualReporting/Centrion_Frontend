@@ -640,9 +640,10 @@ describe('EarningsSetupPage — earnings reports dashboard', () => {
     expect(navigateMock).toHaveBeenCalledWith('/earnings/e-42/preview');
   });
 
-  it('shows an empty state when there are no reports', async () => {
+  it('hides the reports section entirely when there are no reports', async () => {
     listEarningsReports.mockResolvedValue({ reports: [] });
     renderSetup();
-    expect(await screen.findByText(/No earnings reports yet/)).toBeInTheDocument();
+    await waitFor(() => expect(listEarningsReports).toHaveBeenCalled());
+    expect(screen.queryByText('Your earnings reports')).not.toBeInTheDocument();
   });
 });
