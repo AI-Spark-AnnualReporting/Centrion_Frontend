@@ -3555,7 +3555,10 @@ export interface StartThreadBody {
   subject?: string;
   message: string;
   // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  // On a private thread these people ARE the members — 422 if empty.
   mentioned_user_ids: string[];
+  // Only the mentioned people can see the thread. Omit for a normal thread.
+  is_private?: boolean;
 }
 
 export interface CommunicationThread {
@@ -3602,6 +3605,9 @@ export interface ThreadReport {
   status_label: string;
 }
 
+// The person who STARTED the thread (confirmed with the backend) — not the
+// report's owner, even on a report thread. `can_add_members` is true only for
+// them on a private thread.
 export interface ThreadOwner {
   user_id: string;
   full_name: string;
@@ -3624,6 +3630,10 @@ export interface ThreadSummary {
   thread_id: string;
   report: ThreadReport | null;
   subject: string | null;
+  // Private threads you're not a member of never appear in the list at all.
+  is_private: boolean;
+  // Non-null once you've been removed — the row stays, read-only.
+  removed_at: string | null;
   owner: ThreadOwner | null;
   // Added alongside the review flow; null when the report isn't out for review
   // (always null for ad-hoc threads — review doesn't apply to them).
@@ -3652,8 +3662,9 @@ export interface MessageSender {
   is_you: boolean;
 }
 
-// `kind` drives the bubble: "system" renders with the Communication Hub avatar
-// and label (ignore `sender` for the display name); "user" renders as a person;
+// `kind` drives the bubble: "system" lines are rendered with a muted avatar and
+// name the actor (`sender`) — who added or removed someone; "user" renders as a
+// person;
 // "attachment" also renders as a person (the uploader) but with `attachment`
 // rendered as a file chip instead of `body` as plain text.
 export type ThreadMessageKind = 'system' | 'user' | 'attachment';
@@ -3689,10 +3700,40 @@ export interface ReviewAssignment {
   assigned_at: string;
 }
 
+// A member of a private thread. `id` is the users.id UUID the member endpoints
+// take; `user_id` is the usr_… string (matches MessageSender.user_id) and is
+// what membership comparisons against the mention picker go through.
+export interface ThreadMemberSummary {
+  // The users.id UUID — what BOTH member endpoints take. Not `user_id`: the
+  // usr_… string won't resolve and comes back 403.
+  id: string;
+  user_id: string;
+  full_name: string;
+  role: string;
+  is_you: boolean;
+}
+
+// Both member calls return this — drop it straight into the strip.
+export interface ThreadMembersResponse {
+  members: ThreadMemberSummary[];
+  can_add_members: boolean;
+}
+
 export interface ThreadDetail {
   thread_id: string;
   report: ThreadReport | null;
   subject: string | null;
+  is_private: boolean;
+  // When you were removed from this thread. null = current member. Non-null
+  // means read-only: the backend still serves the thread, cut off at that
+  // moment, and 403s every write.
+  removed_at: string | null;
+  // [] on a public thread — render the members strip off this alone, no need
+  // to check is_private first.
+  members: ThreadMemberSummary[];
+  // True only for the creator of a private thread; false for its other members
+  // and on every public thread. Gates who may pull a non-member in.
+  can_add_members: boolean;
   owner: ThreadOwner | null;
   assignment: ReviewAssignment | null;
   // True only for the assigned reviewer — gates "Open as reviewer". Always
@@ -3958,6 +3999,10 @@ export interface ReviewViewResponse {
   // can_act && !can_approve.
   can_act: boolean;
   can_approve: boolean;
+  // Same flag the thread payload carries: non-null → you were removed, so the
+  // screen is read-only. `can_comment` is the derived form — use that.
+  removed_at: string | null;
+  can_comment: boolean;
   // Empty when the narrative hasn't been generated — hide the per-section rail.
   sections: ReviewSection[];
   comments: ReviewComment[];
@@ -4011,6 +4056,24 @@ export const communications = {
 
   // Move the caller's read watermark to now for this thread → clears "N new".
   // Fire when the user opens a thread. 404 → thread gone / not in company.
+  // Add people to a private thread. Creator only (403 otherwise); idempotent —
+  // re-adding an existing member is a 200 that changes nothing. The
+  // "X added Y" system line lands on the next message fetch, not in here.
+  addThreadMembers: (threadId: string, userIds: string[]) =>
+    request<ThreadMembersResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/members`,
+      { method: "POST", body: { user_ids: userIds } },
+    ),
+
+  // Remove one person. `userId` is the users.id UUID, NOT the usr_ `user_id`
+  // on ThreadMemberSummary. Creator only · 422 removing yourself, or the last
+  // other person, or on a public thread · 404 if you're not in the thread.
+  removeThreadMember: (threadId: string, userId: string) =>
+    request<ThreadMembersResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    ),
+
   markThreadRead: (threadId: string) =>
     request<MarkThreadReadResponse>(
       `/api/v1/communications/threads/${encodeURIComponent(threadId)}/read`,
@@ -4064,9 +4127,13 @@ export const communications = {
       { query: type ? { type } : undefined },
     ),
 
-  // Members eligible for the @mention picker. Loaded once and filtered client-side.
-  members: () =>
-    request<CommunicationMembersResponse>("/api/v1/communications/members"),
+  // Company members. With `reportId` the list narrows to people who can open
+  // that report (404 if it isn't in your company) — that's the assign/reassign
+  // picker. The @mention picker passes nothing and gets every active member.
+  members: (reportId?: string) =>
+    request<CommunicationMembersResponse>("/api/v1/communications/members", {
+      query: reportId ? { report_id: reportId } : undefined,
+    }),
 
   // Start a thread on a report with a first message + optional mentions.
   startThread: (body: StartThreadBody) =>
@@ -4197,8 +4264,10 @@ export const communications = {
       { method: "POST", body: note ? { note } : {} },
     ),
 
-  // Note is REQUIRED (422 if blank). Returns the report to draft and clears the
-  // assignment. 403 → not the reviewer · 409 → report locked/published.
+  // Note is REQUIRED (422 if blank). Returns the report to draft and hands the
+  // review back to the report's owner — the person who shared it — so it is a
+  // reassignment, not an unassignment. 403 → not the reviewer · 409 → report
+  // locked/published.
   sendBackReview: (threadId: string, note: string) =>
     request<SendBackReviewResponse>(
       `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-back`,

@@ -15,33 +15,13 @@ import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
 import { INK, MUTED } from './tokens';
+import { MarkdownProse } from '@/components/quarterly/SectionContent';
 
-// Prose block — split on blank lines into justified paragraphs, never a JSON blob.
+// Prose block — Markdown-rendered (headings, bullets, GFM tables), with raw
+// storage-token money references ("248,891 SAR_million") rewritten to their
+// canonical display form first, so the screen reads like the file.
 function Prose({ text }: { text: string }) {
-  // Sentences written before the formatter fix still carry the raw storage token
-  // ("248,891 SAR_million") — rewritten here so the screen reads like the file.
-  const paragraphs = canonicalMoneyInText(text)
-    .split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  const blocks = paragraphs.length ? paragraphs : [text];
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{
-            margin: i === 0 ? 0 : '14px 0 0',
-            fontSize: 14,
-            lineHeight: 1.75,
-            color: '#2A2E47',
-            whiteSpace: 'pre-wrap',
-            textAlign: 'justify',
-          }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  );
+  return <MarkdownProse text={canonicalMoneyInText(text)} />;
 }
 
 // Dispatch a produced section by content shape: cover → CoverRenderer (reused from

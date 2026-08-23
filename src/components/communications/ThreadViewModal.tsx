@@ -7,10 +7,11 @@ import {
   type CommunicationMember,
   type ThreadAttachment,
   type ThreadDetail,
+  type ThreadMemberSummary,
   type ThreadDetailResponse,
   type ThreadMessage,
 } from '@/lib/api';
-import { MentionComposer } from './MentionComposer';
+import { MentionComposer, MemberPicker } from './MentionComposer';
 import { AttachedReportCard } from './AttachedReportCard';
 import { SendExternalModal } from './SendExternalModal';
 import {
@@ -300,6 +301,20 @@ function AttachmentPreviewModal({ attachment, onClose }: { attachment: ThreadAtt
   );
 }
 
+// "Sara", "Sara and Omar", "Sara, Omar and Lina" — for the add-member warning.
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+// System bodies are verb-first predicates now — the header supplies the subject.
+// Rows written before that change still start with the actor's name and end in
+// a full stop; strip both so they don't read "Aizaz · Aizaz removed you.".
+function systemBody(body: string, actor: string): string {
+  const withoutName = body.startsWith(`${actor} `) ? body.slice(actor.length + 1) : body;
+  return withoutName.replace(/\.$/, '');
+}
+
 function MessageRow({ message, onPreview }: { message: ThreadMessage; onPreview: (a: ThreadAttachment) => void }) {
   const { sender, body, created_at, kind, attachment } = message;
   const isSystem = kind === 'system';
@@ -319,7 +334,7 @@ function MessageRow({ message, onPreview }: { message: ThreadMessage; onPreview:
             justifyContent: 'center',
           }}
         >
-          <span style={{ width: 8, height: 8, borderRadius: '50%', border: '2px solid #8890AE' }} />
+          <span style={{ fontSize: 11, fontWeight: 800, color: '#8890AE' }}>{initials(sender.full_name)}</span>
         </span>
       ) : (
         <span
@@ -344,7 +359,10 @@ function MessageRow({ message, onPreview }: { message: ThreadMessage; onPreview:
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 5 }}>
           {isSystem ? (
-            <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Communication Hub</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+              {sender.full_name}
+              {sender.is_you && ' (you)'}
+            </span>
           ) : (
             <>
               <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
@@ -372,7 +390,7 @@ function MessageRow({ message, onPreview }: { message: ThreadMessage; onPreview:
               wordBreak: 'break-word',
             }}
           >
-            {body}
+            {isSystem ? systemBody(body, sender.full_name) : body}
           </div>
         )}
       </div>
@@ -410,6 +428,13 @@ export function ThreadViewModal({
   const [mentions, setMentions] = useState<CommunicationMember[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // Names this reply would add to a private thread — set on the first click so
+  // the sender confirms before letting someone read the whole backlog.
+  const [confirmAdding, setConfirmAdding] = useState<string[] | null>(null);
+  // Member add/remove is its own call now — no message required.
+  const [memberBusy, setMemberBusy] = useState(false);
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<ThreadMemberSummary | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewAttachment, setPreviewAttachment] = useState<ThreadAttachment | null>(null);
@@ -478,6 +503,46 @@ export function ThreadViewModal({
   // message, so it's never required to send. An attachment with no text is a
   // valid send on its own.
   const hasMessage = message.trim().length > 0;
+  // Membership is keyed on usr_… `user_id`; the picker's `id` is the UUID the
+  // API takes. Comparing the wrong one flags every mention as a new member.
+  const threadMembers = thread?.members ?? [];
+  const adding =
+    threadMembers.length === 0
+      ? []
+      : mentions.filter((m) => !threadMembers.some((tm) => tm.user_id === m.user_id));
+  // Only the creator of a private thread may pull in someone new; the backend
+  // 403s anyone else on the send call, which would cost them their message.
+  // One flag drives the whole state: removed → read what's there, write nothing.
+  const removedAt = thread?.removed_at ?? null;
+  const readOnly = !!removedAt;
+  const canAddPeople = !!thread?.can_add_members && !readOnly;
+  // So when they can't add, the "@" picker only offers people already here.
+  const runMemberCall = async (call: () => Promise<unknown>) => {
+    setMemberBusy(true);
+    setMemberError(null);
+    try {
+      await call();
+      // The "X added/removed Y" system line only lands on the next fetch, so
+      // re-read rather than patching members off the response.
+      reloadThread();
+    } catch (e) {
+      setMemberError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.');
+    } finally {
+      setMemberBusy(false);
+    }
+  };
+
+  const mentionableMembers =
+    threadMembers.length > 0 && !canAddPeople
+      ? members.filter((m) => threadMembers.some((tm) => tm.user_id === m.user_id))
+      : members;
+  // Company members who aren't in this thread yet and aren't already queued.
+  const addableMembers = members.filter(
+    (m) =>
+      m.user_id !== user?.user_id &&
+      !threadMembers.some((tm) => tm.user_id === m.user_id) &&
+      !mentions.some((x) => x.id === m.id),
+  );
   const canSend = !sending && (!!pendingFile || hasMessage);
 
   const pickFile = (file: File) => {
@@ -494,6 +559,16 @@ export function ThreadViewModal({
     if (sending) return;
     const text = message.trim();
     if (!text && !pendingFile) return;
+
+    // Private thread: @mentioning a non-member puts them in, and new members
+    // see the whole history. Confirm before that happens.
+    if (adding.length > 0 && !confirmAdding) {
+      setConfirmAdding(adding.map((m) => m.full_name));
+      return;
+    }
+    const added = adding.length > 0;
+    setConfirmAdding(null);
+
     setSending(true);
     setSendError(null);
 
@@ -534,6 +609,9 @@ export function ThreadViewModal({
       setMessage('');
       setMentions([]);
       setSending(false);
+      // The member list just changed and the backend appended a system line —
+      // re-read rather than patching `members` locally and missing it.
+      if (added) reloadThread();
     } catch (e) {
       if (!(e instanceof ApiError)) {
         setSendError('Something went wrong. Please try again.');
@@ -550,7 +628,12 @@ export function ThreadViewModal({
           onClose();
           return;
         case 403:
-          toast({ title: 'One of the mentioned people is no longer available', variant: 'destructive' });
+          // Two different 403s land here now: an inactive member, and "you
+          // didn't start this private thread". The backend's detail says which.
+          toast({
+            title: e.message || 'One of the mentioned people is no longer available',
+            variant: 'destructive',
+          });
           communications
             .members()
             .then((r) => setMembers(r.members))
@@ -572,10 +655,12 @@ export function ThreadViewModal({
   const isAdHoc = !!thread && !report;
   const title = report ? report.title : (thread?.subject?.trim() || 'Discussion');
   const assignment = thread?.assignment ?? null;
-  const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null;
+  // The person is the identity; `label` is the authority they sign off as
+  // ("Board Chairman"), so it must not stand in for their name.
+  const assignedName = assignment ? (assignment.full_name || assignment.label) : null;
   // Review actions never apply to an ad-hoc thread — the review endpoints
   // themselves 422 on those, so don't offer a way to call them.
-  const openReview = onOpenReview && report ? () => onOpenReview(threadId) : undefined;
+  const openReview = onOpenReview && report && !readOnly ? () => onOpenReview(threadId) : undefined;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -692,6 +777,159 @@ export function ThreadViewModal({
                 </div>
               )}
 
+              {threadMembers.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginTop: 14,
+                    padding: '9px 12px',
+                    borderRadius: 10,
+                    background: '#F6F7FC',
+                    border: '1px solid #E2E4F0',
+                  }}
+                >
+                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {threadMembers.map((m) => {
+                      // No ✕ on your own row (422), and none on the last other
+                      // person (also 422) — don't offer a control that fails.
+                      const removable = canAddPeople && !m.is_you;
+                      const isLastOther = threadMembers.length <= 2;
+                      return (
+                        <span
+                          key={m.user_id}
+                          title={`${m.full_name}${m.is_you ? ' (you)' : ''}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: removable ? '3px 5px 3px 3px' : 3,
+                            borderRadius: 20,
+                            background: '#fff',
+                            border: '1px solid #E2E4F0',
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              flexShrink: 0,
+                              background: m.is_you ? 'linear-gradient(150deg,#5B5BF0,#4040C8)' : '#EEEEFF',
+                              color: m.is_you ? '#fff' : '#4040C8',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 9,
+                              fontWeight: 800,
+                            }}
+                          >
+                            {initials(m.full_name)}
+                          </span>
+                          {removable && (
+                            <button
+                              type="button"
+                              disabled={memberBusy || isLastOther}
+                              aria-label={`Remove ${m.full_name}`}
+                              title={
+                                isLastOther
+                                  ? 'A private conversation needs at least one other person.'
+                                  : `Remove ${m.full_name}`
+                              }
+                              onClick={() => {
+                                setMemberError(null);
+                                setConfirmRemove(m);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                border: 'none',
+                                background: 'transparent',
+                                padding: 0,
+                                color: '#9BA3C4',
+                                cursor: memberBusy || isLastOther ? 'not-allowed' : 'pointer',
+                                opacity: isLastOther ? 0.4 : 1,
+                              }}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: '#5A6080' }}>
+                    Only {threadMembers.length === 1 ? 'you' : `these ${threadMembers.length} people`} can see this
+                    conversation
+                    {!canAddPeople && thread?.owner && !thread.owner.is_you && (
+                      <span style={{ fontWeight: 500, color: '#8890AE' }}>
+                        {' '}
+                        · {thread.owner.full_name} started it and can add people
+                      </span>
+                    )}
+                  </span>
+                  {canAddPeople && (
+                    <MemberPicker
+                      compact
+                      options={addableMembers}
+                      onPick={(m) => runMemberCall(() => communications.addThreadMembers(threadId, [m.id]))}
+                      label={
+                        memberBusy ? 'Working…' : addableMembers.length === 0 ? 'Everyone is in' : '+ Add people'
+                      }
+                    />
+                  )}
+                </div>
+              )}
+
+              {confirmRemove && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                    marginTop: 8,
+                    padding: '9px 11px',
+                    borderRadius: 8,
+                    background: '#FFF7ED',
+                    border: '1px solid #FED7AA',
+                    fontSize: 12,
+                    color: '#9A3412',
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 180 }}>
+                    <strong>{confirmRemove.full_name}</strong> will lose access to this conversation. It takes effect
+                    immediately.
+                  </span>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={memberBusy}
+                    onClick={() => setConfirmRemove(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn bp"
+                    disabled={memberBusy}
+                    onClick={() => {
+                      const id = confirmRemove.id;
+                      setConfirmRemove(null);
+                      runMemberCall(() => communications.removeThreadMember(threadId, id));
+                    }}
+                  >
+                    {memberBusy ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+              )}
+
+              {memberError && (
+                <div style={{ marginTop: 8, fontSize: 11.5, fontWeight: 600, color: '#DC2626' }}>{memberError}</div>
+              )}
+
               <div style={{ ...SECTION_LABEL, marginTop: 18, marginBottom: 4 }}>THREAD</div>
 
               {messages.length === 0 ? (
@@ -702,6 +940,23 @@ export function ThreadViewModal({
                 messages.map((m) => <MessageRow key={m.id} message={m} onPreview={setPreviewAttachment} />)
               )}
 
+              {readOnly ? (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '11px 14px',
+                    borderRadius: 10,
+                    background: '#F6F7FC',
+                    border: '1px solid #E2E4F0',
+                    fontSize: 12.5,
+                    color: '#8890AE',
+                    textAlign: 'center',
+                  }}
+                >
+                  You can't send messages in this conversation.
+                </div>
+              ) : (
+              <>
               {/* Reply composer */}
               <div style={{ marginTop: 12, paddingTop: 14, borderTop: '1px solid #ECEEF8' }}>
                 {pendingFile && (
@@ -759,18 +1014,48 @@ export function ThreadViewModal({
                   </div>
                 )}
                 <MentionComposer
-                  members={members}
+                  members={mentionableMembers}
                   currentUserId={user?.user_id}
                   message={message}
                   onMessageChange={(v) => {
                     setMessage(v);
                     if (sendError) setSendError(null);
+                    if (confirmAdding) setConfirmAdding(null);
                   }}
                   mentions={mentions}
-                  onMentionsChange={setMentions}
+                  onMentionsChange={(next) => {
+                    setMentions(next);
+                    if (confirmAdding) setConfirmAdding(null);
+                  }}
                   placeholder="Write a reply…  (type @ to mention)"
                   minHeight={70}
                 />
+                {(confirmAdding || adding.length > 0) && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '9px 11px',
+                      borderRadius: 8,
+                      background: '#FFF7ED',
+                      border: '1px solid #FED7AA',
+                      fontSize: 12,
+                      color: '#9A3412',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {confirmAdding ? (
+                      <>
+                        This will let <strong>{listNames(confirmAdding)}</strong> read the whole conversation, including
+                        everything said before they joined. Send again to confirm.
+                      </>
+                    ) : (
+                      <>
+                        <strong>{listNames(adding.map((m) => m.full_name))}</strong> will be added when you send this
+                        message, and will see everything said before they joined.
+                      </>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10 }}>
                   <span style={{ fontSize: 11.5, fontWeight: 600, color: '#DC2626' }}>{sendError ?? ''}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -822,6 +1107,8 @@ export function ThreadViewModal({
                   </div>
                 </div>
               </div>
+              </>
+              )}
             </>
           )}
         </div>
@@ -841,7 +1128,7 @@ export function ThreadViewModal({
             Close
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {thread && !loading && !error && (
+            {thread && !loading && !error && !readOnly && (
               <button type="button" className="btn bs" style={{ gap: 8 }} onClick={() => setShowSendExternal(true)}>
                 {ICON_MAIL}
                 Send externally

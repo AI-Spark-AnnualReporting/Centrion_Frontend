@@ -15,7 +15,7 @@ import {
 import type { EarningsProducedSection } from '@/types/earnings';
 import type { AssembledSection, BrandColors } from '@/types/quarterly';
 import type { BoardAssembledSection } from '@/types/board';
-import { numberBoardHeadings } from '@/pages/annual-report/board-helpers';
+import { isBoardCoverSection, numberBoardHeadings } from '@/pages/annual-report/board-helpers';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
@@ -214,6 +214,14 @@ function CommentRow({
   );
 }
 
+// "23 Aug 2026" for the removed-from-thread banner.
+function formatRemovedOn(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 export function ReviewerView({
   threadId,
   onClose,
@@ -287,19 +295,21 @@ export function ReviewerView({
     void load();
   }, [load]);
 
-  // The reassign dropdown needs the member list.
-  useEffect(() => {
-    communications
-      .members()
-      .then((r) => setMembers(r.members))
-      .catch(() => {});
-  }, []);
-
   // Pull the report body once we know the report id and type. Both endpoints
   // are company-scoped on the backend, so a non-owner reviewer can read them.
   // A type neither branch resolves still renders its headings without a body.
   const reportId = data?.report?.id;
   const reportType = data?.report?.report_type;
+
+  // The reassign dropdown needs the member list — scoped to this report, so
+  // only people who can open it are offered.
+  useEffect(() => {
+    if (!reportId) return;
+    communications
+      .members(reportId)
+      .then((r) => setMembers(r.members))
+      .catch(() => {});
+  }, [reportId]);
   // Read off `data` here, not inside the effect, so re-fetching the review (a
   // posted comment reloads it) doesn't re-pull the whole document body.
   const userCompanyName = user?.company_name ?? null;
@@ -419,6 +429,12 @@ export function ReviewerView({
     }
   };
 
+  // Reassigning and the approve / request-changes panel are two ways to end the
+  // same review — never both at once. An open panel holds a note the reassign
+  // would discard, and the send-back that followed would 403 (no longer the
+  // reviewer), so each side locks the other while it's in play.
+  const reassignLocked = !!panel || busy;
+
   const runReassign = async () => {
     if (!reassignTo || reassigning) return;
     setReassigning(true);
@@ -453,7 +469,13 @@ export function ReviewerView({
         toast({ title: 'Report approved', description: res.status_label });
       } else {
         const res = await communications.sendBackReview(threadId, note.trim());
-        toast({ title: 'Sent back to the creator', description: res.status_label });
+        // The review is reassigned to the report's owner, not left unassigned —
+        // name them, since the reviewer is handing the work to a person.
+        const back = data?.owner?.full_name;
+        toast({
+          title: back ? `Sent back to ${back}` : 'Sent back to the creator',
+          description: res.status_label,
+        });
       }
       setPanel(null);
       setNote('');
@@ -469,8 +491,14 @@ export function ReviewerView({
 
   const report = data?.report;
   const assignment = data?.assignment ?? null;
-  const assignedName = assignment ? (assignment.label ?? assignment.full_name) : null;
+  // The person is the identity; `label` is the authority they sign off as
+  // ("Board Chairman"), so it must not stand in for their name.
+  const assignedName = assignment ? (assignment.full_name || assignment.label) : null;
   const canAct = data?.can_act ?? false;
+  // Removed from the thread → read the record, add nothing to it. can_act
+  // already folds in the removal, so the approve/reassign buttons need nothing.
+  const canComment = data?.can_comment ?? true;
+  const removedAt = data?.removed_at ?? null;
   const canApprove = data?.can_approve ?? false;
   // The review payload's section list is earnings-only on the backend — it comes
   // back empty for a quarterly report even when the report is fully assembled,
@@ -489,8 +517,15 @@ export function ReviewerView({
   // content is the one difference: it's Markdown, and needs parsing.
   const isBoard = BOARD.includes(reportType ?? '');
   const isDocument = reportType === QUARTERLY || isBoard;
+  // The board cover's code is BR01, which the quarterly /cover/i test misses —
+  // it would then render as an empty body section under the cover CoverRenderer
+  // already drew. Use the board's own detector for board reports.
   const sections = isDocument
-    ? allSections.filter((s) => !isCoverSection({ section_code: s.id }))
+    ? allSections.filter((s) =>
+        isBoard
+          ? !isBoardCoverSection({ section_code: s.id, content: bodies[s.id]?.content })
+          : !isCoverSection({ section_code: s.id }),
+      )
     : allSections;
   // Once the report is approved (or otherwise finished) the review is over —
   // reassign / request-changes no longer make sense even though the backend
@@ -639,8 +674,17 @@ export function ReviewerView({
                   marginBottom: 16,
                 }}
               >
-                Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
-                requested change. When you're done, approve it or send it back to the creator.
+                {canComment ? (
+                  <>
+                    Read the report below. Click <strong>Add comment</strong> on any section to leave a note or
+                    requested change. When you're done, approve it or send it back to the creator.
+                  </>
+                ) : (
+                  <>
+                    You were removed from this conversation
+                    {removedAt ? ` on ${formatRemovedOn(removedAt)}` : ''}. You can read what was said up to then.
+                  </>
+                )}
               </div>
 
               {/* The headings come from the review payload, the content from the
@@ -667,7 +711,9 @@ export function ReviewerView({
                   className="card"
                   style={{ padding: '28px 20px', textAlign: 'center', fontSize: 13, color: '#8890AE', marginBottom: 12 }}
                 >
-                  This report has no generated sections yet — leave a comment on the report as a whole below.
+                  {canComment
+                    ? 'This report has no generated sections yet — leave a comment on the report as a whole below.'
+                    : 'This report has no generated sections yet.'}
                 </div>
               )}
 
@@ -762,7 +808,7 @@ export function ReviewerView({
                         onClick={() => (open ? setComposerFor(undefined) : openComposer(s.id))}
                         style={{
                           flexShrink: 0,
-                          display: 'inline-flex',
+                          display: canComment ? 'inline-flex' : 'none',
                           alignItems: 'center',
                           gap: 7,
                           padding: '7px 13px',
@@ -788,7 +834,7 @@ export function ReviewerView({
                     <div className={isDocument ? undefined : 'card'} style={isDocument ? undefined : { padding: '18px 22px' }}>
                       {body ? (
                         isDocument ? (
-                          <SectionContent section={body} markdown={isBoard} />
+                          <SectionContent section={body} />
                         ) : (
                           <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
                         )
@@ -855,14 +901,16 @@ export function ReviewerView({
                       {reportLevel.length}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className="btn bs"
-                    style={{ padding: '6px 11px', fontSize: 12 }}
-                    onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
-                  >
-                    {composerFor === null ? 'Cancel' : 'Add comment'}
-                  </button>
+                  {canComment && (
+                    <button
+                      type="button"
+                      className="btn bs"
+                      style={{ padding: '6px 11px', fontSize: 12 }}
+                      onClick={() => (composerFor === null ? setComposerFor(undefined) : openComposer(null))}
+                    >
+                      {composerFor === null ? 'Cancel' : 'Add comment'}
+                    </button>
+                  )}
                 </div>
 
                 {reportLevel.map((c) => (
@@ -931,18 +979,28 @@ export function ReviewerView({
                       {assignedName ?? 'Unassigned'}
                       {assignment?.is_you && ' (you)'}
                     </span>
-                    <span style={{ display: 'block', fontSize: 11.5, color: '#8890AE' }}>Current reviewer</span>
+                    <span style={{ display: 'block', fontSize: 11.5, color: '#8890AE' }}>
+                      {assignment?.label ? `Current reviewer · ${assignment.label}` : 'Current reviewer'}
+                    </span>
                   </span>
                 </div>
 
                 {canAct && !reviewClosed && (
                   <>
                     <div style={{ ...RAIL_LABEL, marginTop: 16 }}>Reassign to</div>
+                    {members.length === 0 ? (
+                      <div style={{ fontSize: 11.5, color: '#8890AE', lineHeight: 1.5 }}>
+                        No one in your company has access to this report yet — an admin can grant it
+                        in Admin Console.
+                      </div>
+                    ) : (
+                      <>
                     <select
                       className="inp"
                       value={reassignTo}
                       onChange={(e) => setReassignTo(e.target.value)}
-                      style={{ width: '100%' }}
+                      disabled={reassignLocked}
+                      style={{ width: '100%', opacity: reassignLocked ? 0.55 : 1 }}
                     >
                       <option value="">Choose a person…</option>
                       {members.map((m) => (
@@ -954,8 +1012,13 @@ export function ReviewerView({
                     <button
                       type="button"
                       className="btn bs"
-                      style={{ width: '100%', marginTop: 8, gap: 7, opacity: reassignTo && !reassigning ? 1 : 0.55 }}
-                      disabled={!reassignTo || reassigning}
+                      style={{
+                        width: '100%',
+                        marginTop: 8,
+                        gap: 7,
+                        opacity: reassignTo && !reassigning && !reassignLocked ? 1 : 0.55,
+                      }}
+                      disabled={!reassignTo || reassigning || reassignLocked}
                       onClick={() => void runReassign()}
                     >
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -963,6 +1026,8 @@ export function ReviewerView({
                       </svg>
                       {reassigning ? 'Reassigning…' : 'Reassign review'}
                     </button>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -1122,7 +1187,7 @@ export function ReviewerView({
                           opacity: canApprove ? 1 : 0.5,
                           cursor: canApprove ? 'pointer' : 'not-allowed',
                         }}
-                        disabled={!canApprove}
+                        disabled={!canApprove || reassigning}
                         onClick={() => {
                           setPanel('approve');
                           setNote('');
@@ -1143,7 +1208,8 @@ export function ReviewerView({
                       <button
                         type="button"
                         className="btn bs"
-                        style={{ width: '100%', gap: 8, padding: '12px 16px' }}
+                        style={{ width: '100%', gap: 8, padding: '12px 16px', opacity: reassigning ? 0.55 : 1 }}
+                        disabled={reassigning}
                         onClick={() => {
                           setPanel('send_back');
                           setNote('');
