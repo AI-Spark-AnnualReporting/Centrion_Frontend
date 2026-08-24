@@ -34,7 +34,7 @@ export function EarningsStepper({
   const activeIndex = activeStep - 1; // 0-based
 
   return (
-    <div style={{ borderBottom: `1px solid ${BORDER}`, paddingBottom: 16, marginBottom: 18 }}>
+    <div style={{ borderBottom: `1px solid ${BORDER}`, paddingBottom: 16, marginBottom: 18, marginRight: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center' }}>
         {STEPS.map((step, i) => {
           const state: StepState = i < activeIndex ? 'done' : i === activeIndex ? 'active' : 'upcoming';
