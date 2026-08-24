@@ -137,6 +137,13 @@ const ICON_PUBLISH = (
     <path d="M2.5 9.5v1.4a.9.9 0 0 0 .9.9h7.2a.9.9 0 0 0 .9-.9V9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
   </svg>
 );
+const ICON_EXTERNAL = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const ICON_PAPERCLIP = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <path
@@ -215,6 +222,7 @@ function ThreadRow({
   onOpen,
   onExternal,
   onPublish,
+  onReview,
   onAttached,
 }: {
   thread: ThreadSummary;
@@ -222,11 +230,16 @@ function ThreadRow({
   onOpen: (thread: ThreadSummary) => void;
   onExternal: (thread: ThreadSummary) => void;
   onPublish: () => void;
+  // Opens the reviewer view straight from the row — same action the thread
+  // modal's footer button fires. Only rendered once the report has actually
+  // been sent for review (`assignment` non-null); the view itself self-gates
+  // approve/reassign on can_act.
+  onReview: (thread: ThreadSummary) => void;
   // Fired after a successful quick-attach so the parent can refresh the row's
   // internal_count / last_message / updated_at without a full page reload.
   onAttached: () => void;
 }) {
-  const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at } = thread;
+  const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread;
   const { toast } = useToast();
   const title = report ? report.title : (subject?.trim() || 'Discussion');
 
@@ -405,6 +418,17 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
+        {assignment && !removed_at && (
+          <button
+            type="button"
+            className="btn bp"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', fontSize: 12 }}
+            onClick={() => onReview(thread)}
+          >
+            Open review
+            {ICON_EXTERNAL}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2641,6 +2665,7 @@ export default function CommunicationHubPage() {
                   onOpen={openThread}
                   onExternal={(t) => (t.report ? setExternalThread(t) : setSendExternalTarget(t))}
                   onPublish={() => setShowPublish(true)}
+                  onReview={(t) => setReviewThreadId(t.thread_id)}
                   onAttached={() => void fetchThreads()}
                 />
               ))}
