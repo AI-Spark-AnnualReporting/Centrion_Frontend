@@ -46,6 +46,17 @@ export function usePipelinePoll(
 
   useEffect(() => {
     if (!pollUrl) {
+      // A run id with nothing to poll it at is a contradiction, and the only
+      // version of "watching nothing" this hook can recognise as wrong. Every
+      // valve below lives inside tick(), which never runs without a url, so
+      // left as plain `idle` this is an absorbing state with no clock: the
+      // caller sits on a loading screen that nothing can ever end. Say timeout
+      // instead -- a phase every screen already handles, with Retry and Keep
+      // waiting on it.
+      if (runId) {
+        setState({ phase: "timeout", run: null, nodes: [], elapsedMs: 0 });
+        return;
+      }
       setState({ phase: "idle", run: null, nodes: [], elapsedMs: 0 });
       return;
     }
@@ -135,5 +146,19 @@ export function usePipelinePoll(
     setRestartCount((c) => c + 1);
   }, []);
 
-  return { state, restart };
+  // A url to watch means we ARE watching, from the very first render. The effect
+  // that flips the state runs a tick later, and callers papered over that one
+  // frame by rendering `idle` as `running` -- which is how a screen with nothing
+  // behind it showed a spinner that no timer could ever end, because the timers
+  // only exist while polling.
+  //
+  // Derived here so `idle` means exactly one thing everywhere, in every consumer:
+  // nothing is being watched. Nobody has to reinterpret it, and nobody can
+  // reinterpret it wrongly.
+  const effective: PipelinePollState =
+    pollUrl && state.phase === "idle"
+      ? { phase: "running", run: null, nodes: [], elapsedMs: 0 }
+      : state;
+
+  return { state: effective, restart };
 }

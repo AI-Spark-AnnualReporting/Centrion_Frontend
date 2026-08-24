@@ -5,9 +5,54 @@ import type { EarningsProducedSection } from '@/types/earnings';
 // dispatch at render time — never printing a raw JSON blob, never fabricating data.
 
 export type LooseRow = Record<string, unknown>;
+/** One column of a grid: the key its cells are matched on, and its heading. */
+export interface MatrixColumn {
+  key: string;
+  label: string;
+}
+
 export interface NormTable {
   title?: string;
   rows: LooseRow[];
+  /**
+   * Set when the source printed this as a GRID — line items down the side,
+   * categories across the top (Upstream / Downstream / Corporate). Rows then
+   * carry `cells` keyed to these instead of a single value.
+   */
+  matrixColumns?: MatrixColumn[];
+  /**
+   * Set when the section prints named columns whose cells are keyed BY that name —
+   * Consensus vs Actual's Line / Actual / Expected / Result. The shared exporter
+   * calls the same thing `columns`, so screen and PDF read one shape.
+   */
+  columns?: string[];
+}
+
+/** A list of column names off the wire, keeping only real strings. */
+function asStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  return out.length ? out : undefined;
+}
+
+/** matrix_columns off the wire, keeping only entries that can address a cell. */
+export function asMatrixColumns(raw: unknown): MatrixColumn[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cols = raw.filter(isRecord).flatMap((c) => {
+    const key = asString(c.key);
+    return key ? [{ key, label: asString(c.label) ?? key }] : [];
+  });
+  return cols.length ? cols : undefined;
+}
+
+/** A grid row's display value for one column, or null when it has none. */
+export function matrixCell(row: LooseRow, key: string): string | null {
+  const cells = row.cells;
+  if (!Array.isArray(cells)) return null;
+  for (const c of cells) {
+    if (isRecord(c) && asString(c.key) === key) return asString(c.display) ?? null;
+  }
+  return null;
 }
 
 export function tryParseJson(s: string): unknown | undefined {
@@ -48,6 +93,8 @@ export function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        matrixColumns: asMatrixColumns(t.matrix_columns),
+        columns: asStringArray(t.columns),
       }));
     }
     return [{ rows: parsed.filter(isRecord) as LooseRow[] }];
@@ -57,6 +104,8 @@ export function normalizeTables(parsed: unknown): NormTable[] {
       return (parsed.tables as LooseRow[]).map((t) => ({
         title: asString(t.title),
         rows: Array.isArray(t.rows) ? (t.rows as LooseRow[]) : [],
+        matrixColumns: asMatrixColumns(t.matrix_columns),
+        columns: asStringArray(t.columns),
       }));
     }
     if (Array.isArray(parsed.rows)) {
@@ -80,6 +129,78 @@ export function normalizeTables(parsed: unknown): NormTable[] {
   return [];
 }
 
+// Some narrative sections (Financial Review / MD&A, Executive Summary, Capital
+// Allocation — written FROM the report's own figures) come back as a
+// `{heading, content}` JSON envelope rather than bare prose: a heading line
+// plus the actual paragraphs. Read it defensively so it renders as a proper
+// heading + prose block. Without this, the parsed object falls into
+// normalizeTables's generic "plain object → key/value table" branch and
+// prints "heading" / "content" as two table rows instead of real text.
+export interface NarrativeEnvelope {
+  heading: string | null;
+  body: string;
+}
+
+export function readNarrativeEnvelope(content: string): NarrativeEnvelope | null {
+  const parsed = tryParseJson(content);
+  if (!isRecord(parsed)) return null;
+  const body = parsed.content;
+  if (typeof body !== 'string' || body.trim() === '') return null;
+  const heading = typeof parsed.heading === 'string' && parsed.heading.trim() !== '' ? parsed.heading : null;
+  return { heading, body };
+}
+
+// A section the backend "produced" but with nothing to say — a fixed
+// boilerplate sentence ("No forward-looking guidance was disclosed in the
+// uploaded documents for this period.") rather than real prose. Confirmed
+// live across multiple sections (Guidance/Outlook, Reporting Calendar/IR
+// Contact) — the backend always closes this exact sentence with "in the
+// uploaded documents for this period.", which a legitimate finding never
+// would (this is a template tail, not organic writing). Matched narrowly —
+// short, starts with "No", ends with the fixed tail — so real content that
+// happens to start with "No" (e.g. "No dividends were declared this
+// quarter, in line with the prior year.") is never swept up by mistake.
+// LEGACY. The backend flag this asked for exists — a no-data section now stores
+// content: null and feeder {status: 'no_data', message}, and the exporter drops
+// it server-side, which is the half no amount of frontend cleverness could ever
+// have reached. What is left here reads rows produced BEFORE that flag, which
+// still hold the sentence and whose content_hash never moved. Delete this, and
+// the sentences below it, once no live report predates the flag.
+const NO_DATA_TAIL = /in the uploaded documents for this period\.?\s*$/i;
+
+/**
+ * The finding itself, when a section's only content is the backend's fixed
+ * "nothing found" sentence — so Preview can SAY it rather than blank the section
+ * and leave a Run button that can never succeed.
+ *
+ * This is a real answer ("your documents contain no forward-looking guidance"),
+ * not a gap the user is expected to fill, and not a failure. The Report screen
+ * still drops the section entirely (see isHiddenWhenOmitted) — a published
+ * release does not carry a paragraph explaining what it does not say.
+ */
+export function noDataMessage(
+  section: Pick<EarningsProducedSection, 'content' | 'feeder_status' | 'feeder_message'>,
+): string | null {
+  // The backend states this now: content comes back null and the explanation
+  // rides on the feeder. The sentence match below is only for rows produced
+  // before that flag existed.
+  if (section.feeder_status === 'no_data') {
+    return (section.feeder_message || '').trim()
+      || 'Nothing was found for this section in the uploaded documents.';
+  }
+  if (!isNoDataPlaceholder(section.content)) return null;
+  const envelope = readNarrativeEnvelope(section.content as string);
+  return (envelope ? envelope.body : (section.content as string)).trim();
+}
+
+export function isNoDataPlaceholder(content: string | null): boolean {
+  if (!content) return false;
+  const envelope = readNarrativeEnvelope(content);
+  const text = (envelope ? envelope.body : content).trim();
+  if (!text || text.length > 220 || text.includes('\n\n')) return false;
+  return /^No\b/i.test(text) && NO_DATA_TAIL.test(text);
+}
+
 // ─── content-shape dispatch ───────────────────────────────────────────────────
 export function isCoverMode(section: Pick<EarningsProducedSection, 'section_code' | 'mode'>): boolean {
   return section.mode === 'cover' || /cover/i.test(section.section_code);
@@ -90,9 +211,15 @@ export function isTableMode(section: Pick<EarningsProducedSection, 'mode'>): boo
   return section.mode === 'table' || section.mode === 'kpi' || section.mode === 'trend';
 }
 
-// Management commentary (S05) — a quote block: verbatim text + attribution.
+// A quote block: verbatim text + attribution.
+//
+// Matching on the section CODE as well was right when s05_management_commentary
+// was Release/quote. D-31 moved it to AI-written/generate, producing through the
+// shared RAG composer and storing {heading, content} -- so QuoteBlock found no
+// `quote` key, returned null, and the CEO Commentary panel rendered completely
+// blank. The mode is the only honest signal for what the content actually is.
 export function isQuoteMode(section: Pick<EarningsProducedSection, 'mode' | 'section_code'>): boolean {
-  return section.mode === 'quote' || /commentary/i.test(section.section_code);
+  return section.mode === 'quote';
 }
 
 // Non-IFRS reconciliation (S15) — reported → adjustments → adjusted, per line.
@@ -102,52 +229,22 @@ export function isReconciliationMode(
   return section.mode === 'reconciliation' || /reconciliation/i.test(section.section_code);
 }
 
-// Sources, Methodology & Assumptions (S18) — one citation per figure, rendered
-// as a labelled list instead of raw "Label: period · filename · page" prose lines.
-export function isSourcesMode(section: Pick<EarningsProducedSection, 'mode' | 'section_code'>): boolean {
-  return /sources|methodology/i.test(section.section_code);
-}
-
-// One "<Label>: <rest>" line from the sources section's plain-text content.
-// `rest` is either "<period> · <filename> · <page>" (a real citation) or a
-// bare note with no " · " at all (e.g. a derived figure's formula) — never
-// guessed, just split on the structure the backend actually sends.
-export interface SourceCitationLine {
-  label: string;
-  period: string | null;
-  filename: string | null;
-  page: string | null;
-  note: string | null;
-}
-
-export function parseSourcesContent(content: string): SourceCitationLine[] {
-  return content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line): SourceCitationLine => {
-      const idx = line.indexOf(':');
-      if (idx === -1) return { label: line, period: null, filename: null, page: null, note: null };
-      const label = line.slice(0, idx).trim();
-      const rest = line.slice(idx + 1).trim();
-      const segments = rest.split('·').map((s) => s.trim()).filter(Boolean);
-      if (segments.length >= 2) {
-        const [period, filename, page] = segments;
-        return { label, period: period ?? null, filename: filename ?? null, page: page ?? null, note: null };
-      }
-      return { label, period: null, filename: null, page: null, note: rest || null };
-    });
-}
-
 // Sections that vanish ENTIRELY (no card, no rail entry) when they produced
-// nothing by design. Only quote (S05) and trend (S16) get this treatment — the
-// spec's "doesn't appear" language is specific to these two. Reconciliation/KPI
-// still render their (possibly all-gap) table, and MD&A always renders its
-// prose (including a literal "not disclosed" line) rather than disappearing.
+// nothing by design: quote (S05), trend (S16) — the spec's "doesn't appear"
+// language is specific to these two — and any section whose only "content" is
+// the backend's fixed "no data found" boilerplate sentence (see
+// isNoDataPlaceholder). Reconciliation/KPI still render their (possibly
+// all-gap) table — that's a real, structured "here's what's missing" view,
+// not a placeholder sentence standing in for nothing.
 export function isHiddenWhenOmitted(
-  section: Pick<EarningsProducedSection, 'mode' | 'section_code'>,
+  section: Pick<EarningsProducedSection, 'mode' | 'section_code' | 'content'>,
 ): boolean {
-  return isQuoteMode(section) || section.mode === 'trend' || /trend/i.test(section.section_code);
+  return (
+    isQuoteMode(section) ||
+    section.mode === 'trend' ||
+    /trend/i.test(section.section_code) ||
+    isNoDataPlaceholder(section.content)
+  );
 }
 
 export interface CoverValues {
@@ -193,6 +290,30 @@ export function gapReason(row: LooseRow): string | null {
   return typeof v === 'string' && v ? v : null;
 }
 
+// Gap reasons that can NEVER resolve, however many times the report is run.
+//
+//   sector_excluded — the line belongs to another kind of issuer. NPL ratio and
+//     CASA ratio are bank measures; an oil company does not have one.
+//   not_in_catalog  — the extractor has no metric for this line at all. Every one
+//     of s06's ten KPI rows is seeded in_catalog=FALSE today.
+//
+// Distinct from `not_resolved`, which IS worth printing: that one means the line
+// was expected this period and the figure did not arrive, which is information.
+const PERMANENT_GAPS = new Set(['sector_excluded', 'not_in_catalog']);
+
+/**
+ * A row that cannot ever carry a figure, so it does not belong in the finished
+ * report — it was printing its own gap reason as the value, giving an oil
+ * company's published release a row reading "NPL ratio: sector_excluded".
+ *
+ * Preview keeps showing these: while curating, "these ten KPIs are not tracked
+ * yet" is worth knowing. The Report screen and the exported file drop them.
+ */
+export function isUnresolvableRow(row: LooseRow): boolean {
+  const reason = gapReason(row);
+  return reason != null && PERMANENT_GAPS.has(reason);
+}
+
 export function rowBlankState(row: LooseRow): RowBlankState {
   const status = cell(row, 'row_status', 'status');
   if (status === 'omitted') return 'omitted';
@@ -217,6 +338,10 @@ function hasRealContent(
 ): boolean {
   const c = section.content;
   if (c == null || c.trim() === '') return false;
+  // A "no data found" boilerplate sentence isn't real content — without this,
+  // a no-data section reads as 'produced' (it has non-empty text) instead of
+  // 'omitted', which is what actually lets it vanish via isHiddenWhenOmitted.
+  if (isNoDataPlaceholder(c)) return false;
   if (isTableMode(section)) {
     const parsed = tryParseJson(c);
     if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose
@@ -226,7 +351,9 @@ function hasRealContent(
     const parsed = tryParseJson(c);
     if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose
     const q = isRecord(parsed) ? parsed : {};
-    const quote = cell(q, 'quote', 'text');
+    // 'content' is the `{heading, content}` envelope this section can also
+    // arrive as — mirrors QuoteBlock's own alias list.
+    const quote = cell(q, 'quote', 'text', 'content');
     return typeof quote === 'string' && quote.trim() !== '';
   }
   return true;
@@ -234,6 +361,10 @@ function hasRealContent(
 
 export function earningsSectionState(section: EarningsProducedSection): EarningsRenderState {
   if (hasRealContent(section)) return 'produced';
+  // Stated rather than inferred. A flagged section reaches 'omitted' by
+  // elimination anyway, but only for as long as nobody changes the status it is
+  // stored with.
+  if (section.feeder_status === 'no_data') return 'omitted';
   if (
     section.status === 'needs_input' ||
     section.feeder_status === 'needs_input' ||

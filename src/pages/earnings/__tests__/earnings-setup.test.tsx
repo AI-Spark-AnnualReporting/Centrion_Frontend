@@ -151,12 +151,19 @@ describe('canContinue', () => {
     quarter: null,
     tone: 'investor_focused' as const,
     sourceIds: ['doc-1'],
+    pendingUploadCount: 1,
   };
-  it('true when type + period + tone + ≥1 source', () => {
+  it('true when type + period + tone + ≥1 uploaded document', () => {
     expect(canContinue(base)).toBe(true);
   });
-  it('false when no source selected', () => {
-    expect(canContinue({ ...base, sourceIds: [] })).toBe(false);
+  it('false when no document is staged for upload, even with a source selected', () => {
+    expect(canContinue({ ...base, pendingUploadCount: 0 })).toBe(false);
+  });
+  it('false with no upload and no source selected either', () => {
+    expect(canContinue({ ...base, sourceIds: [], pendingUploadCount: 0 })).toBe(false);
+  });
+  it('true when an already-uploaded document is selected, even with nothing newly staged', () => {
+    expect(canContinue({ ...base, pendingUploadCount: 0, uploadedDocumentCount: 1 })).toBe(true);
   });
   it('false when no tone selected', () => {
     expect(canContinue({ ...base, tone: null })).toBe(false);
@@ -308,6 +315,15 @@ describe('EarningsSetupPage', () => {
     expect(screen.queryByText(/No sources found/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Shell — Quarterly Report Q4-2023'));
+    // Selecting an official report alone never enables Continue — an upload
+    // is mandatory too.
+    expect(screen.getByRole('button', { name: /Continue/ })).toBeDisabled();
+
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toBeDisabled());
+
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
     await waitFor(() =>
       expect(createEarningsReport).toHaveBeenCalledWith(
@@ -329,9 +345,9 @@ describe('EarningsSetupPage', () => {
     expect(screen.getByText('No uploads yet.')).toBeInTheDocument();
   });
 
-  it('Continue is disabled until type + period + tone + ≥1 source, then creates + navigates', async () => {
+  it('Continue is disabled until type + period + tone + ≥1 uploaded document, then creates + navigates', async () => {
     renderSetup();
-    const continueBtn = () => screen.getByRole('button', { name: /Continue|Creating/ });
+    const continueBtn = () => screen.getByRole('button', { name: /Continue|Creating|Uploading/ });
     expect(continueBtn()).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
@@ -339,7 +355,14 @@ describe('EarningsSetupPage', () => {
     const sourceRow = await screen.findByText('Acme — FY24 Annual Report');
     expect(continueBtn()).toBeDisabled();
 
+    // Selecting an existing official report is optional context, not a
+    // substitute for an upload — still disabled.
     fireEvent.click(sourceRow);
+    expect(continueBtn()).toBeDisabled();
+
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
     await waitFor(() => expect(continueBtn()).not.toBeDisabled());
 
     fireEvent.click(continueBtn());
@@ -355,7 +378,7 @@ describe('EarningsSetupPage', () => {
         }),
       ),
     );
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-99/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-99/outline'));
   });
 
   it('a 409 surfaces the "active report exists" message with an open-existing link', async () => {
@@ -366,13 +389,17 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     fireEvent.click(await screen.findByText('Acme — FY24 Annual Report'));
+
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
 
     expect(await screen.findByText('Active report exists')).toBeInTheDocument();
     const link = screen.getByRole('button', { name: /Open existing draft/i });
     fireEvent.click(link);
-    expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/extract');
+    expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-existing/outline');
   });
 
   it('has no tab control — both groups are labelled and visible with no prior click', async () => {
@@ -500,7 +527,7 @@ describe('EarningsSetupPage', () => {
     expect(await screen.findByText('Uploading and reading your documents…')).toBeInTheDocument();
 
     // 3) Navigates on success; exactly one draft was ever created.
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-upload/outline'));
     expect(createEarningsReport).toHaveBeenCalledTimes(1);
   });
 
@@ -527,34 +554,81 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(continueBtn());
     await waitFor(() => expect(uploadEarningsSources).toHaveBeenCalledTimes(2));
     expect(createEarningsReport).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/extract'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/earnings/rep-retry/outline'));
   });
 
-  it('an extracting/failed narrative source cannot be selected', async () => {
-    getSelectableSources.mockResolvedValueOnce({
-      sources: [
-        {
-          report_id: null,
-          document_id: 'doc-1',
-          label: 'Investor Presentation Q4',
-          report_type: null,
-          period: 'FY 2025',
-          updated_at: '2026-01-01T00:00:00Z',
-          coverage: 'partial',
-          track: 'narrative_adjusted',
-          type: 'presentation',
-          extraction_status: 'extracting',
-        },
-      ],
-    });
+  // An upload is no longer a choice — putting the file there IS the decision, so
+  // there is no checkbox to tick and no way to leave it out by accident. What
+  // still has to hold is that a file with no extracted text yet is not written
+  // from: it stays listed, with its own badge, but off the source list.
+  const _narrativeSource = (extraction_status: string) => ({
+    report_id: null,
+    document_id: 'doc-1',
+    label: 'Investor Presentation Q4',
+    report_type: null,
+    period: 'FY 2025',
+    updated_at: '2026-01-01T00:00:00Z',
+    coverage: 'partial',
+    track: 'narrative_adjusted',
+    type: 'presentation',
+    extraction_status,
+  });
+
+  const _officialSource = {
+    report_id: 'rep-1',
+    label: 'Acme — FY24 Annual Report',
+    report_type: 'annual',
+    period: 'FY 2024',
+    updated_at: '2026-01-01T00:00:00Z',
+    coverage: 'full',
+  };
+
+  it.each(['extracting', 'failed'])(
+    'a %s upload is listed but never sent as a source',
+    async (status) => {
+      // A second, already-ready upload rides along so Continue is reachable at
+      // all — an uploaded document is mandatory, and neither an official filing
+      // nor an unusable upload satisfies that on its own. This isolates the
+      // unusable upload's exclusion from the mandatory-upload gate.
+      getSelectableSources.mockResolvedValueOnce({
+        sources: [
+          _officialSource,
+          _narrativeSource(status),
+          { ..._narrativeSource('completed'), document_id: 'doc-ready', label: 'Q1 Deck' },
+        ],
+      });
+      renderSetup();
+      fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
+      fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
+
+      // Visible, so nothing silently vanishes…
+      const row = await screen.findByText('Investor Presentation Q4');
+      // …and not a checkbox, because there is nothing to choose.
+      expect(row.closest('button[role="checkbox"]')).toBeNull();
+      await screen.findByText('Q1 Deck');
+
+      fireEvent.click(screen.getByText('Acme — FY24 Annual Report'));
+      fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+      await waitFor(() =>
+        expect(createEarningsReport).toHaveBeenCalledWith(
+          expect.objectContaining({ source_report_ids: ['rep-1'], source_document_ids: ['doc-ready'] }),
+        ),
+      );
+    },
+  );
+
+  it('a ready upload is sent as a source without anyone selecting it', async () => {
+    getSelectableSources.mockResolvedValueOnce({ sources: [_narrativeSource('completed')] });
     renderSetup();
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
-    const chip = await screen.findByText('Investor Presentation Q4');
-    const checkbox = chip.closest('button[role="checkbox"]') as HTMLButtonElement;
-    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(checkbox);
-    expect(checkbox).toHaveAttribute('aria-checked', 'false');
+    await screen.findByText('Investor Presentation Q4');
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await waitFor(() =>
+      expect(createEarningsReport).toHaveBeenCalledWith(
+        expect.objectContaining({ source_document_ids: ['doc-1'] }),
+      ),
+    );
   });
 
   it('Continue sends both source_report_ids and source_document_ids', async () => {
@@ -586,7 +660,15 @@ describe('EarningsSetupPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Annual Earnings Report/i }));
     fireEvent.change(screen.getByDisplayValue('Select fiscal year…'), { target: { value: '2025' } });
     fireEvent.click(await screen.findByText('Acme — FY24 Annual Report'));
-    fireEvent.click(await screen.findByText('Investor Presentation Q4'));
+    await screen.findByText('Investor Presentation Q4');  // the upload needs no click, and is folded into the selection automatically
+
+    // Selecting existing sources (official or already-uploaded narrative) is
+    // never enough on its own — a NEW upload is still required to Continue.
+    const file = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toBeDisabled());
+
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
     await waitFor(() =>
       expect(createEarningsReport).toHaveBeenCalledWith(
@@ -640,9 +722,10 @@ describe('EarningsSetupPage — earnings reports dashboard', () => {
     expect(navigateMock).toHaveBeenCalledWith('/earnings/e-42/preview');
   });
 
-  it('shows an empty state when there are no reports', async () => {
+  it('hides the reports section entirely when there are no reports', async () => {
     listEarningsReports.mockResolvedValue({ reports: [] });
     renderSetup();
-    expect(await screen.findByText(/No earnings reports yet/)).toBeInTheDocument();
+    await waitFor(() => expect(listEarningsReports).toHaveBeenCalled());
+    expect(screen.queryByText('Your earnings reports')).not.toBeInTheDocument();
   });
 });

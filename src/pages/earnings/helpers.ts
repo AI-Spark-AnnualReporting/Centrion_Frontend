@@ -37,17 +37,27 @@ export interface EarningsSetupState {
   quarter: EarningsQuarter | null;
   tone: ReportTone | null;
   sourceIds: string[];
-  // Staged, not-yet-uploaded files also count as "has a source" — the unified
-  // Continue flow uploads them as part of the same action.
+  // Files staged for upload but not yet sent — the unified Continue flow
+  // uploads them as part of the same action.
   pendingUploadCount?: number;
+  // Already-uploaded narrative documents currently part of the selection
+  // (folded in automatically once extracted — see SourcePicker, "an upload is
+  // no longer a choice"). Distinct from `sourceIds`, which also includes
+  // official report picks that don't count as "an uploaded document" here.
+  uploadedDocumentCount?: number;
 }
 
-// Continue is allowed only when type + period + tone + ≥1 source (selected or
-// staged-for-upload) are set. Quarterly additionally requires a quarter.
+// Continue is allowed only when type + period + tone + ≥1 uploaded document
+// are set. An uploaded document is mandatory for every earnings report —
+// selecting an existing official system report is optional extra context,
+// never a substitute for it. "An uploaded document" means either a file
+// staged this session, or one already uploaded and extracted in an earlier
+// session (auto-included, so it counts too). Quarterly additionally requires
+// a quarter.
 export function canContinue(s: EarningsSetupState): boolean {
   if (!s.variant || s.fiscalYear == null || !s.tone) return false;
   if (s.variant === 'quarterly' && s.quarter == null) return false;
-  return s.sourceIds.length > 0 || (s.pendingUploadCount ?? 0) > 0;
+  return (s.pendingUploadCount ?? 0) > 0 || (s.uploadedDocumentCount ?? 0) > 0;
 }
 
 // ─── Part 2 — figures ─────────────────────────────────────────────────────────

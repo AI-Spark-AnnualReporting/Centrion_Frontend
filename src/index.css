@@ -770,6 +770,20 @@ body {
   .analysis-reading { opacity: 1; }
   .analysis-rail::after { animation: none; width: 100%; opacity: .35; }
   .analysis-rule, .analysis-rise, .analysis-pop, .analysis-tick { animation: none; }
+  /* The figures step reuses the same family; the status line and the ledger
+     carry the meaning without any of it. */
+  .fig-remove { opacity: 1; }
+}
+
+/* The remove control only resolves on hover or focus — nine sections of rows
+   each carrying a permanent × reads as a page asking to be dismantled. */
+.fig-remove { opacity: 0; transition: opacity .12s; }
+section:hover .fig-remove,
+.fig-remove:focus-visible { opacity: 1; }
+
+@media (hover: none) {
+  /* No hover to reveal it on touch, so it simply stays. */
+  .fig-remove { opacity: 1; }
 }
 
 /* Onboarding — eye-catching reveals */

@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { boardReports } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
@@ -179,7 +180,15 @@ export default function BoardSectionsPage() {
     setError(null);
     try {
       const handle = await boardReports.produceAll(reportId);
-      setRun({ run_id: handle.run_id, poll_url: handle.poll_url });
+      // A handle with nothing to poll would put this page's full-screen loader
+      // over a job that does not exist. No board endpoint returns one today; the
+      // shape allows it, and the earnings flow has already proved what that costs.
+      const started = startedRun(handle);
+      if (!started) {
+        await refetch();
+        return;
+      }
+      setRun(started);
     } catch (err: unknown) {
       const existing = readExistingRunId(err);
       if (existing) {
