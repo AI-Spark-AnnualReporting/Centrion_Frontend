@@ -355,6 +355,20 @@ export interface EarningsSectionsResponse {
 // found nothing to do and started no run at all — a report that is already built
 // and unchanged. There is nothing to poll and no loader to show; the caller just
 // carries on. See _nothing_to_produce on the backend.
+// What POST .../sections/{code}/produce actually returns: the four fields that
+// endpoint owns, and nothing else. Deliberately NOT an EarningsProducedSection —
+// running a section used to be normalised into a whole one, which invented a
+// title (falling back to the section CODE), a display_order of 0 and a mode of
+// 'generate' for the fields the response never carried. Merged over the real
+// section, those invented values won, and a Run renamed the section to its own
+// code and sent it to the top of the rail.
+export interface EarningsSectionPatch {
+  section_code: string;
+  status: EarningsSectionStatus;
+  content: string | null;
+  error?: string | null;
+}
+
 export interface EarningsProduceHandle {
   run_id: string | null;
   poll_url: string | null;

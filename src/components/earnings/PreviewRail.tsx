@@ -26,6 +26,11 @@ export interface RailItem {
    *  count alone is how Non-IFRS Reconciliations sat here green, counted in the
    *  total, and was silently absent from the PDF. */
   stalled?: boolean;
+  /** narrative: it ran, and the honest answer was that the documents say
+   *  nothing on this. Distinct from `written` — there is no prose — and from
+   *  un-run, which is what it used to look like, complete with a Run button
+   *  that produced the same finding every time. */
+  noData?: boolean;
 }
 
 function Dot({ done }: { done: boolean }) {
@@ -80,7 +85,7 @@ export function PreviewRail({
   // section that never produced is not finished by any reading a user would
   // recognise -- it does not appear in the report they are about to send.
   const isDone = (i: RailItem) =>
-    i.kind === 'financial' ? (i.figures ?? 0) > 0 && !i.stalled : !!i.written;
+    i.kind === 'financial' ? (i.figures ?? 0) > 0 && !i.stalled : !!i.written || !!i.noData;
   const done = items.filter(isDone).length;
 
   const row = (
@@ -202,7 +207,7 @@ export function PreviewRail({
               </span>
             ) : (
               <span style={{ flexShrink: 0, fontSize: 10, color: FAINT }}>
-                {i.written ? '' : 'not run'}
+                {i.noData ? 'nothing to report' : i.written ? '' : 'not run'}
               </span>
             ),
             () => onSelect(i.code),

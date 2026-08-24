@@ -86,6 +86,7 @@ import type {
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
+  EarningsSectionPatch,
   EarningsSectionsResponse,
   EarningsSectionStatus,
   EarningsProduceHandle,
@@ -2583,6 +2584,29 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
       : null),
   };
 }
+// The produce response is a PATCH, not a section. It carries status/content/error
+// for one section and nothing else, so it is read as exactly that — running it
+// through normalizeEarningsSection built a whole section around those four
+// fields, defaulting the title to the section code, display_order to 0 and mode
+// to 'generate'. Spread over the real section by the caller, those defaults won.
+function readEarningsSectionPatch(raw: unknown): EarningsSectionPatch | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  const rawContent = o.content ?? o.body ?? o.text;
+  return {
+    section_code: code,
+    status: (earnStr(o.status) ?? "pending") as EarningsSectionPatch["status"],
+    content:
+      rawContent == null
+        ? null
+        : typeof rawContent === "string"
+          ? rawContent
+          : JSON.stringify(rawContent),
+    error: earnStr(o.error),
+  };
+}
+
 function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
   const rec = earnRecord(raw);
   const arr: unknown[] = Array.isArray(raw)
@@ -3016,14 +3040,14 @@ export const earnings = {
     reportId: string,
     sectionCode: string,
     regenerate = false,
-  ): Promise<EarningsProducedSection> =>
+  ): Promise<EarningsSectionPatch> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
       { method: "POST", body: { regenerate } },
     ).then((raw) => {
-      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
-      if (!sec) throw new Error("Run earnings section: response was not a section.");
-      return sec;
+      const patch = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
+      if (!patch) throw new Error("Run earnings section: response was not a section.");
+      return patch;
     }),
 
   // Save a user's manual input for a needs_input section (typed directly, or

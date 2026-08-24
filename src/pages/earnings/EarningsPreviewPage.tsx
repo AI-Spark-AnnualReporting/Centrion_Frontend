@@ -361,9 +361,11 @@ export default function EarningsFiguresPage() {
       code: p.section_code,
       title: p.title || p.section_code,
       kind: 'narrative',
-      // A "no data found" boilerplate sentence isn't real content — the rail
-      // should read it the same as never having been run.
+      // Three states, not two: written, un-run, and ran-and-found-nothing. The
+      // last used to be folded into un-run, which is why a finished section sat
+      // here saying "not run" with a Run button that changed nothing.
       written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
+      noData: isNoDataPlaceholder(p.content),
     }));
     return [...fin, ...nar];
   }, [sections, narrative, isStalled]);
@@ -632,15 +634,16 @@ export default function EarningsFiguresPage() {
             })()}
 
             {activeNarrative && (() => {
-              // A "no data found" boilerplate sentence isn't real content — show
-              // this section as blank (not-yet-written) rather than printing it,
-              // in Preview and everywhere else the frontend controls. The
-              // exported PDF/DOCX is generated server-side from the same raw
-              // `content` field, so this alone can't blank it there too — see
-              // .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
-              const displayNarrative = isNoDataPlaceholder(activeNarrative.content)
-                ? { ...activeNarrative, content: '' }
-                : activeNarrative;
+              // The "nothing found" sentence is no longer blanked here —
+              // NarrativePane states it as the finding it is, and the Report
+              // screen still drops the section entirely (isHiddenWhenOmitted),
+              // so it never reaches a published release. Blanking it on Preview
+              // made a finished section read as un-run.
+              //
+              // The exported PDF/DOCX still prints the sentence: export renders
+              // server-side from the same `content` field, out of reach from
+              // here — see .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
+              const displayNarrative = activeNarrative;
               return (
                 <section className="card" style={{ padding: '18px 22px 20px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>

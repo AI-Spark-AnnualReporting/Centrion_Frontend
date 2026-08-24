@@ -338,6 +338,75 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText('Revenue rose.')).toBeInTheDocument();
   });
 
+  // Reported live on s11_guidance: the section sat at "not run" with a Run
+  // button, and pressing it changed nothing — no prose, no error, no
+  // explanation. It HAD run. The backend answers "your documents say nothing
+  // about this" with a fixed sentence, and Preview blanked that sentence, so a
+  // finished section was indistinguishable from one nobody had run.
+  const NO_DATA = JSON.stringify({
+    heading: null,
+    content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+  });
+
+  const withGuidance = (content: string | null) => [
+    ...NARRATIVE,
+    { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
+      source_type: 'AI-written', status: 'produced', included: true, content },
+  ];
+
+  it('a section that ran and found nothing says so, instead of looking un-run', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(NO_DATA) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Guidance/ }));
+
+    // The finding itself, stated…
+    expect(await screen.findByText(/No forward-looking guidance was disclosed/)).toBeInTheDocument();
+    // …not a Run button implying it was never attempted.
+    expect(screen.queryByRole('button', { name: 'Run this section' })).toBeNull();
+    // Running it again is still offered, for when a source is added.
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeInTheDocument();
+    // And it says what happens to it.
+    expect(screen.getByText(/left out of the finished report/)).toBeInTheDocument();
+  });
+
+  it('the rail calls that its own state, not "not run"', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(NO_DATA) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    const row = screen.getByRole('button', { name: /Guidance/ });
+    expect(row).toHaveTextContent('nothing to report');
+    expect(row).not.toHaveTextContent('not run');
+  });
+
+  it('a section that genuinely has not run still says not run', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(null) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    expect(screen.getByRole('button', { name: /Guidance/ })).toHaveTextContent('not run');
+  });
+
+  // The produce endpoint returns four fields — section_code, status, content,
+  // error. It was being normalised into a WHOLE section first, which invented a
+  // title (falling back to the section code), display_order 0 and mode
+  // 'generate' for everything missing; merged over the real section, those won.
+  // Running a section renamed it to its own code.
+  it('running a section does not rename it to its own section code', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(null) });
+    h.runEarningsSection.mockResolvedValue({
+      section_code: 's11_guidance', status: 'produced', content: 'Guidance follows.', error: null,
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Guidance/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run this section' }));
+
+    expect(await screen.findByText('Guidance follows.')).toBeInTheDocument();
+    // The title survives the run — in the pane and in the rail.
+    expect(screen.getByRole('heading', { name: 'Guidance / Outlook' })).toBeInTheDocument();
+    expect(screen.queryByText('s11_guidance')).toBeNull();
+  });
+
   it('a run that comes back empty is a reason, not a dead end', async () => {
     h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
     h.runEarningsSection.mockResolvedValue({ ...NARRATIVE[1], content: '' });

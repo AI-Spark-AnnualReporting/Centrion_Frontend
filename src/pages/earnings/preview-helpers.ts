@@ -167,6 +167,22 @@ export function readNarrativeEnvelope(content: string): NarrativeEnvelope | null
 // control) can also blank it, not just the Preview screen.
 const NO_DATA_TAIL = /in the uploaded documents for this period\.?\s*$/i;
 
+/**
+ * The finding itself, when a section's only content is the backend's fixed
+ * "nothing found" sentence — so Preview can SAY it rather than blank the section
+ * and leave a Run button that can never succeed.
+ *
+ * This is a real answer ("your documents contain no forward-looking guidance"),
+ * not a gap the user is expected to fill, and not a failure. The Report screen
+ * still drops the section entirely (see isHiddenWhenOmitted) — a published
+ * release does not carry a paragraph explaining what it does not say.
+ */
+export function noDataMessage(content: string | null): string | null {
+  if (!isNoDataPlaceholder(content)) return null;
+  const envelope = readNarrativeEnvelope(content as string);
+  return (envelope ? envelope.body : (content as string)).trim();
+}
+
 export function isNoDataPlaceholder(content: string | null): boolean {
   if (!content) return false;
   const envelope = readNarrativeEnvelope(content);
