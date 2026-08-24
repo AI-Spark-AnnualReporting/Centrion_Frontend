@@ -5,7 +5,7 @@ import { earnings, agentRuns, ApiError } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState, isHiddenWhenOmitted, isCoverMode, isNoDataPlaceholder } from './preview-helpers';
+import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -388,10 +388,18 @@ export default function EarningsReportPage() {
     );
   }
 
-  // Sections that vanish entirely when omitted by design (quote/trend) — no
-  // card, no rail entry, no gating on a section that will never produce
-  // content. Returning null from the leaf renderer alone isn't enough; the
-  // outer numbered card would still render around an empty body.
+  // Sections that vanish entirely when omitted by design (quote/trend, or a
+  // "no data found" boilerplate section) — no card, no rail entry, no gating
+  // on a section that will never produce content. Returning null from the
+  // leaf renderer alone isn't enough; the outer numbered card would still
+  // render around an empty body.
+  //
+  // A needs_input section stays visible here on purpose: this screen (Report,
+  // formerly "Preview" — see "Rename the last two earnings steps") is where
+  // its manual text/upload form actually lives. Today's Preview page is a
+  // different, unrelated screen (financial figure-picking, inherited from the
+  // old Figures step) that was never built to host it — hiding it here would
+  // leave no way to ever complete the section.
   const visibleSections = sections.filter(
     (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
   );
@@ -482,12 +490,7 @@ export default function EarningsReportPage() {
                       <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
                     </div>
                     <EditableProse
-                      // A "no data found" boilerplate sentence isn't real
-                      // content — blank it here instead of printing it. The
-                      // exported PDF/DOCX is generated server-side from the raw
-                      // `content` field, so this can't fix that half — see
-                      // .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
-                      section={isNoDataPlaceholder(s.content) ? { ...s, content: '' } : s}
+                      section={s}
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
                       onSave={(content) => handleSaveSection(s.section_code, content)}

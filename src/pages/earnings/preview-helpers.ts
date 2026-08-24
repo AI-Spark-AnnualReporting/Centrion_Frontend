@@ -198,14 +198,21 @@ export function isReconciliationMode(
 }
 
 // Sections that vanish ENTIRELY (no card, no rail entry) when they produced
-// nothing by design. Only quote (S05) and trend (S16) get this treatment — the
-// spec's "doesn't appear" language is specific to these two. Reconciliation/KPI
-// still render their (possibly all-gap) table, and MD&A always renders its
-// prose (including a literal "not disclosed" line) rather than disappearing.
+// nothing by design: quote (S05), trend (S16) — the spec's "doesn't appear"
+// language is specific to these two — and any section whose only "content" is
+// the backend's fixed "no data found" boilerplate sentence (see
+// isNoDataPlaceholder). Reconciliation/KPI still render their (possibly
+// all-gap) table — that's a real, structured "here's what's missing" view,
+// not a placeholder sentence standing in for nothing.
 export function isHiddenWhenOmitted(
-  section: Pick<EarningsProducedSection, 'mode' | 'section_code'>,
+  section: Pick<EarningsProducedSection, 'mode' | 'section_code' | 'content'>,
 ): boolean {
-  return isQuoteMode(section) || section.mode === 'trend' || /trend/i.test(section.section_code);
+  return (
+    isQuoteMode(section) ||
+    section.mode === 'trend' ||
+    /trend/i.test(section.section_code) ||
+    isNoDataPlaceholder(section.content)
+  );
 }
 
 export interface CoverValues {
@@ -275,6 +282,10 @@ function hasRealContent(
 ): boolean {
   const c = section.content;
   if (c == null || c.trim() === '') return false;
+  // A "no data found" boilerplate sentence isn't real content — without this,
+  // a no-data section reads as 'produced' (it has non-empty text) instead of
+  // 'omitted', which is what actually lets it vanish via isHiddenWhenOmitted.
+  if (isNoDataPlaceholder(c)) return false;
   if (isTableMode(section)) {
     const parsed = tryParseJson(c);
     if (parsed === undefined) return true; // non-JSON but non-empty → treat as prose

@@ -195,6 +195,13 @@ const TREND_DEFERRED = sec({
   display_order: 6,
   content: null,
 });
+const GUIDANCE_NO_DATA = sec({
+  section_code: 'guidance_outlook',
+  title: 'Guidance / Outlook',
+  mode: 'generate',
+  display_order: 5.5,
+  content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+});
 const KPI_TABLE = sec({
   section_code: 'operational_kpis',
   title: 'Operational KPIs',
@@ -713,6 +720,21 @@ describe('EarningsReportPage', () => {
     await screen.findByText(/resilient full-year performance/);
     expect(screen.queryByText('Trend')).not.toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+  });
+
+  it('a "no data found" section is absent entirely — no card, no boilerplate sentence on screen', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, { ...GUIDANCE_NO_DATA, included: true }],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Guidance / Outlook')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/No forward-looking guidance was disclosed/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
   });
 });
