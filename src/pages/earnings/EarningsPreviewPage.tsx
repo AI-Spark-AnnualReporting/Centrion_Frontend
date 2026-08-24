@@ -651,6 +651,19 @@ export default function EarningsFiguresPage() {
                       onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
                     />
                   </NarrativePane>
+                  {/* Only over prose that exists. A section still showing "Run this
+                      section" has nothing to refine, and offering the box there
+                      would read as a second way to write it. Gated on
+                      displayNarrative, not activeNarrative, so a no-data
+                      placeholder counts as empty here exactly as it does above. */}
+                  {!!(displayNarrative.content || '').trim() && (
+                    <SectionRefineChat
+                      key={activeNarrative.section_code}
+                      onSend={(instruction) =>
+                        refineNarrative(activeNarrative.section_code, instruction)
+                      }
+                    />
+                  )}
                 </section>
               );
             })()}
