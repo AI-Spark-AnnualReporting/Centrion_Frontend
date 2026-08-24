@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { reportHref, resumeHref } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { useFeaturePermissions } from '@/lib/features';
 import { earnings, ApiError } from '@/lib/api';
@@ -337,7 +338,7 @@ export default function EarningsSetupPage() {
               <button
                 type="button"
                 className="btn bs bsm"
-                onClick={() => navigate(`/earnings/${conflict.reportId}/outline`)}
+                onClick={() => navigate(resumeHref(conflict.reportId))}
               >
                 Open existing draft
               </button>
@@ -389,7 +390,8 @@ export default function EarningsSetupPage() {
       </div>
       )}
 
-      {/* Your earnings reports — dashboard tiles. Each opens the preview screen.
+      {/* Your earnings reports — dashboard tiles. Each reopens the report at the
+          step its owner was last on (see earnings-resume).
           Hidden entirely once we know there are none — no empty-state card. */}
       {canRead && (reportsLoading || reportsError || reports.length > 0) && (
       <div style={{ marginTop: 28 }}>
@@ -412,7 +414,12 @@ export default function EarningsSetupPage() {
               <EarningsReportCard
                 key={r.report_id}
                 report={r}
-                onOpen={(rep) => navigate(`/earnings/${rep.report_id}/preview`)}
+                // Back to where they left off, not to the middle of the flow.
+                // This was hardcoded to /preview, so someone who had finished a
+                // report and gone to read it landed a step short — and could not
+                // even click forward, since the stepper greys a step it thinks
+                // is ahead of you.
+                onOpen={(rep) => navigate(reportHref(rep))}
               />
             ))}
           </div>

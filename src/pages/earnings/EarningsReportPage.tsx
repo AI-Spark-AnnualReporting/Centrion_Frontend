@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useRememberStep } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, agentRuns, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
+import { DOC_WIDTH } from '@/components/quarterly/CoverRenderer';
+import { earningsSectionState, isCoverMode } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -14,6 +17,10 @@ import { EarningsStepper } from '@/components/earnings/EarningsStepper';
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT, BRAND } from '@/components/earnings/tokens';
+
+// Same face the quarterly report numbers its sections in — the two assembled
+// screens are one document design, not two.
+const MONO = "'DM Mono', 'Courier New', monospace";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -61,6 +68,9 @@ const FINISHED_STATUSES = ['approved', 'locked', 'published', 'complete', 'compl
 
 export default function EarningsReportPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'report');
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
@@ -234,7 +244,15 @@ export default function EarningsReportPage() {
     setError(null);
     try {
       const handle = await earnings.produceEarningsReport(reportId);
-      setRunInfo(handle);
+      // Same null handle as above: no run was started because there was nothing to
+      // start. Holding a generating state open for it would stall this screen the
+      // way it stalled Preview.
+      const started = startedRun(handle);
+      if (!started) {
+        applyResponse(await earnings.getEarningsSections(reportId, true));
+        return;
+      }
+      setRunInfo(started);
     } catch (err: unknown) {
       setError(apiErrorMessage(err, 'Could not start generation.'));
     }
@@ -249,10 +267,26 @@ export default function EarningsReportPage() {
         list.map((s) => (s.section_code === code ? { ...s, content, edited: true } : s)),
       );
       try {
-        const updated = await earnings.patchEarningsSectionContent(reportId, code, { content });
-        // Preserve client-only inclusion; take the server's authoritative content + flags.
+        const patch = await earnings.patchEarningsSectionContent(reportId, code, { content });
+        // MERGE, never replace. The response answers for content/status/violations
+        // and nothing else, so replacing the section dropped its title (which fell
+        // back to the raw section code), its display_order and its mode.
         setSections((list) =>
-          list.map((s) => (s.section_code === code ? { ...updated, included: s.included, edited: true } : s)),
+          list.map((s) =>
+            s.section_code === code
+              ? {
+                  ...s,
+                  content: patch.content,
+                  status: patch.status,
+                  edited: true,
+                  // A save that grounds cleanly clears the flag on the server, so
+                  // it has to clear here too — otherwise the banner outlives the
+                  // thing it is reporting.
+                  grounding_flag: (patch.grounding_violations ?? []).join(', ') || null,
+                  grounding_acknowledged: false,
+                }
+              : s,
+          ),
         );
       } catch (err) {
         setSections((list) => list.map((s) => (s.section_code === code && prev ? prev : s)));
@@ -306,11 +340,37 @@ export default function EarningsReportPage() {
     [reportId],
   );
 
-  const acknowledgeFlag = useCallback((code: string) => {
-    setSections((list) =>
-      list.map((s) => (s.section_code === code ? { ...s, grounding_acknowledged: true } : s)),
-    );
-  }, []);
+  // Accept a section's ungrounded numbers as they stand, which is what clears the
+  // approve blocker. This used to set local state and nothing else, so the banner
+  // disappeared, the next reload brought it back, and Approve & lock went on
+  // failing with no indication why — the server was never told.
+  //
+  // The content is re-sent unchanged: the backend re-validates on every save and
+  // sets edit_acknowledged alongside whatever violations it finds, so acknowledging
+  // IS a save. Optimistic, and rolled back if the request fails, the way
+  // handleSaveSection already does.
+  const acknowledgeFlag = useCallback(
+    async (code: string) => {
+      if (!reportId) return;
+      const prev = sections.find((s) => s.section_code === code) ?? null;
+      if (!prev) return;
+      setSections((list) =>
+        list.map((s) => (s.section_code === code ? { ...s, grounding_acknowledged: true } : s)),
+      );
+      try {
+        await earnings.patchEarningsSectionContent(reportId, code, {
+          content: prev.content ?? '',
+          acknowledge: true,
+        });
+        // The gate is judged server-side, so a stale blocker list would keep
+        // showing a resolved problem.
+        setBlockers([]);
+      } catch {
+        setSections((list) => list.map((s) => (s.section_code === code && prev ? prev : s)));
+      }
+    },
+    [reportId, sections],
+  );
 
   // ── Export ──────────────────────────────────────────────────────────────────
   const handleExport = useCallback(
@@ -400,9 +460,22 @@ export default function EarningsReportPage() {
   // different, unrelated screen (financial figure-picking, inherited from the
   // old Figures step) that was never built to host it — hiding it here would
   // leave no way to ever complete the section.
+  // Show exactly what the file will contain. The export drops any section with
+  // no real content -- it always has -- while this screen showed them, so a
+  // section could sit here looking like part of the report and be absent from
+  // every delivered copy. Guidance / Outlook was the live case: Preview said
+  // "left out of the finished report" and the PDF printed it anyway.
+  //
+  // needs_input stays, deliberately. This screen is where its manual text/upload
+  // form lives, so hiding those would leave no way to ever complete them: a gap
+  // the user can close is not the same as a finding they cannot.
   const visibleSections = sections.filter(
-    (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
+    (s) => earningsSectionState(s) !== 'omitted',
   );
+  // The cover renders as a page in its own right, ahead of the body sheet —
+  // see the layout below for why it must not be wrapped in a card.
+  const coverSection = visibleSections.find(isCoverMode) ?? null;
+  const bodySections = visibleSections.filter((s) => !isCoverMode(s));
   const included = visibleSections.filter((s) => s.included);
   // "Has this report been generated at all" — not "is every section fully
   // produced". Once real content exists anywhere (excluding the cover, which
@@ -450,7 +523,20 @@ export default function EarningsReportPage() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 290px', gap: 18, alignItems: 'start' }}>
+        // The document column is sized to the document, not to the space left
+        // over. As `1fr` it stretched to fill the viewport while the sheet inside
+        // stayed at DOC_WIDTH, so everything past 820px became a gap between the
+        // report and the rail. justifyContent centres the pair instead of pinning
+        // them to opposite edges on a wide monitor.
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `minmax(0, ${DOC_WIDTH}px) 290px`,
+            justifyContent: 'center',
+            gap: 18,
+            alignItems: 'start',
+          }}
+        >
           {/* Left — generate state or the assembled document. The chosen brand
               color drives report-content accents (cover, headings) via
               --brand-primary; product-UI chrome stays indigo. */}
@@ -458,8 +544,11 @@ export default function EarningsReportPage() {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 16,
+              gap: 20,
               minWidth: 0,
+              // The document has a fixed width; without this it stretches to
+              // fill a wide monitor and stops reading as a sheet of paper.
+              maxWidth: DOC_WIDTH,
               ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
               ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
             }}
@@ -481,25 +570,67 @@ export default function EarningsReportPage() {
                     </button>
                   </div>
                 )}
-                {visibleSections.map((s, i) => (
-                  <div key={s.section_code} id={`earnings-sec-${s.section_code}`} className="card" style={{ padding: '18px 22px' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: FAINT, fontVariantNumeric: 'tabular-nums' }}>
-                        {String(i + 1).padStart(2, '0')}
-                      </span>
-                      <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
-                    </div>
+                {/* The cover is a page, so it is the outermost element — not
+                    nested in a card. An A4 sheet with its own border and shadow
+                    sitting inside another bordered card is what made this screen
+                    read as a stack of parts rather than a document. */}
+                {coverSection && (
+                  <div id={`earnings-sec-${coverSection.section_code}`}>
                     <EditableProse
-                      section={s}
+                      section={coverSection}
+                      deliverable
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
-                      onSave={(content) => handleSaveSection(s.section_code, content)}
-                      onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
-                      onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
-                      onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
+                      onSave={(content) => handleSaveSection(coverSection.section_code, content)}
+                      onSaveInput={(text) => handleSaveSectionInput(coverSection.section_code, text)}
+                      onExtractInput={(file) => handleExtractSectionInput(coverSection.section_code, file)}
+                      onAcknowledgeFlag={() => acknowledgeFlag(coverSection.section_code)}
                     />
                   </div>
-                ))}
+                )}
+
+                {/* ONE sheet for the whole body, the way the quarterly report
+                    reads (AssembledReportPage). A card per section drew a border
+                    between every heading and the text above it, which is the
+                    opposite of what a finished document looks like. */}
+                {bodySections.length > 0 && (
+                  <div className="card" style={{ padding: '32px 40px', maxWidth: DOC_WIDTH }}>
+                    {bodySections.map((s, i) => (
+                      <section
+                        key={s.section_code}
+                        id={`earnings-sec-${s.section_code}`}
+                        style={{ marginBottom: 34 }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                          <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: BRAND, fontVariantNumeric: 'tabular-nums' }}>
+                            {String(i + 1).padStart(2, '0')}
+                          </span>
+                          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: BRAND, flex: 1, minWidth: 0, lineHeight: 1.25 }}>
+                            {s.title}
+                          </h2>
+                        </div>
+                        <EditableProse
+                          section={s}
+                          // The finished report, not the workbench: rows that can
+                          // never carry a figure are left out. They were printing
+                          // their own gap reason as the value, so an oil company's
+                          // release carried "NPL ratio: sector_excluded".
+                          deliverable
+                          coverTemplateKey={coverTemplateKey}
+                          // The finished report prints the analysis; it does not
+                          // offer to rewrite it. The Analyse / Re-analyse control
+                          // stays on Preview, where the figures are still editable.
+                          showAnalysis
+                          locked={locked}
+                          onSave={(content) => handleSaveSection(s.section_code, content)}
+                          onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
+                          onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
+                          onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
+                        />
+                      </section>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -523,7 +654,6 @@ export default function EarningsReportPage() {
               approving={approving}
               onApprove={handleApprove}
               onExport={handleExport}
-              showApprove={false}
             />
             {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
           </div>

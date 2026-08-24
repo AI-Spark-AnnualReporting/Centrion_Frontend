@@ -1,9 +1,9 @@
 /**
  * The reports.status vocabulary (schema.sql `valid_report_status`) as a display pill.
  *
- * Shared so the dashboard cards agree on what a status looks like. The Communication Hub
- * still paints every status the same amber (CommunicationHubPage / ReviewerView) — that
- * drift started with one hardcoded copy, so new callers import this instead.
+ * Shared so every status pill agrees on what a status looks like — the dashboard cards,
+ * the Communication Hub rows, the reviewer view, and the linked-report card. It started as
+ * one hardcoded copy that painted everything amber; import this instead of adding another.
  *
  * Colours are the existing badge palette from index.css; no new colour enters the system.
  */

@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useRememberStep, reachedStepNumber } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsOutlineSection, EarningsOutlineResponse } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
@@ -52,6 +54,12 @@ function byTierThenOrder(a: EarningsOutlineSection, b: EarningsOutlineSection): 
 
 export default function EarningsOutlinePage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'outline');
+  // How far the REPORT has got, so the stepper does not grey out a step this
+  // user has already been to — see earnings-resume.
+  const reached = reachedStepNumber(reportId, 2);
   const navigate = useNavigate();
   const { user } = useAuth();
   // The outline endpoints are report-scoped (no company_id). Read it defensively
@@ -230,18 +238,19 @@ export default function EarningsOutlinePage() {
     },
   };
 
-  // ── Continue: save the arrangement, then produce ONLY if something actually
-  // needs it — a section already 'produced' or 'needs_input' has already been
-  // attempted and re-running produce on it would just redo unchanged work (or
-  // clobber a needs_input reason a fresh attempt won't resolve anyway). Only a
-  // still-'pending' included section (never attempted — e.g. newly added)
-  // triggers the loader; otherwise Preview is reached immediately, showing
-  // whatever's already stored.
+  // ── Continue: save the arrangement, then ask the server to build.
   //
-  // The decision is made from `included` as loaded BEFORE this save — NOT
-  // from PUT /outline's response. The backend resets every included section's
-  // status back to 'pending' on every save (even a no-op reorder), so reading
-  // post-save status would make this check always fire.
+  // Whether anything actually needs building is the SERVER's call, not this
+  // screen's — it is the only side that can compare each section's stored
+  // content hash against its current inputs. It answers "nothing to do" by
+  // starting no run, and this handler then skips the loader entirely.
+  //
+  // This used to be decided here, from section statuses read before the save.
+  // That could not work: the backend reset every included section to 'pending'
+  // on every save, even a no-op reorder, so no client-side reading of status
+  // could tell a finished report from a fresh one. Both halves are fixed —
+  // persist_earnings_outline keeps a produced section produced, and the produce
+  // endpoint short-circuits — so the guard belongs where the facts are.
   const handleContinue = async (dropFigures?: string[]) => {
     if (!reportId) return;
     setSaving(true);
@@ -301,7 +310,18 @@ export default function EarningsOutlinePage() {
     // landed, and stranding somebody on the Outline helps nobody.
     if (!reportId) return;
     try {
-      setProduceRun(await earnings.buildEarningsReport(reportId));
+      const handle = await earnings.buildEarningsReport(reportId);
+      // Nothing to build: the server found every section already produced and
+      // unchanged, and started no run. Go straight through — raising a loader to
+      // wait for work that will not happen is the whole reason coming back to a
+      // finished report felt slow.
+      const started = startedRun(handle);
+      if (!started) {
+        setSaving(false);
+        navigate(`/earnings/${reportId}/preview`);
+        return;
+      }
+      setProduceRun(started);
     } catch (err: unknown) {
       setSaveError(apiErrorMessage(err, "Couldn't start building the report."));
       setSaving(false);
@@ -313,7 +333,8 @@ export default function EarningsOutlinePage() {
   // Outline → Preview handoff uses. Takes over as soon as produce is kicked;
   // the outline UI underneath is irrelevant once we're here.
   if (produceRun) {
-    const phase = producePoll.phase === 'idle' ? 'running' : producePoll.phase;
+    // See EarningsPreviewPage: `idle` is "watching nothing", never "working".
+    const phase = producePoll.phase;
     if (phase === 'failed' || phase === 'timeout') {
       return (
         <GeneratingScreen
@@ -347,7 +368,7 @@ export default function EarningsOutlinePage() {
   if (loading) {
     return (
       <div>
-        <EarningsStepper activeStep={2} reportId={reportId} />
+        <EarningsStepper activeStep={2} reportId={reportId} reachedStep={reached} />
         <div className="card" style={{ padding: 0 }}>
           <Spinner pad={80} />
         </div>
@@ -358,7 +379,7 @@ export default function EarningsOutlinePage() {
   if (error && included.length === 0 && available.length === 0) {
     return (
       <div>
-        <EarningsStepper activeStep={2} reportId={reportId} />
+        <EarningsStepper activeStep={2} reportId={reportId} reachedStep={reached} />
         <div
           className="card"
           role="alert"
@@ -383,7 +404,7 @@ export default function EarningsOutlinePage() {
 
   return (
     <div>
-      <EarningsStepper activeStep={2} reportId={reportId} />
+      <EarningsStepper activeStep={2} reportId={reportId} reachedStep={reached} />
       <div style={{ marginBottom: 14 }}>
         <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
           Arrange your report outline

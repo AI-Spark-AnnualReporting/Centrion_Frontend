@@ -15,7 +15,8 @@
 
 import { useState } from 'react';
 import type { EarningsProducedSection } from '@/types/earnings';
-import { MUTED, FAINT, ACCENT, BORDER_SOFT, DANGER } from './tokens';
+import { noDataMessage } from '@/pages/earnings/preview-helpers';
+import { INK, MUTED, FAINT, ACCENT, BORDER_SOFT, DANGER } from './tokens';
 
 export interface EmptySection {
   section_code: string;
@@ -42,7 +43,38 @@ export function NarrativePane({
   children?: React.ReactNode;
 }) {
   const [showWhy, setShowWhy] = useState(false);
-  const hasContent = !!(section.content || '').trim();
+  const finding = noDataMessage(section);
+  const hasContent = !!(section.content || '').trim() && !finding;
+
+  // It ran, and the answer is that the documents say nothing on this. That is a
+  // result, so it is stated. It used to be blanked, which made a finished
+  // section look un-run and put a Run button on it that produced this same
+  // finding every time, with no error and no explanation — press it forever.
+  if (finding) {
+    return (
+      <div>
+        <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.65, color: INK }}>{finding}</p>
+        <div style={{ marginTop: 16, paddingTop: 13, borderTop: `1px solid ${BORDER_SOFT}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button className="btn bs" type="button" disabled={running} onClick={() => onRun(true)}>
+              {running ? 'Running…' : 'Run again'}
+            </button>
+            <span style={{ fontSize: 11.5, color: FAINT }}>
+              Add a source that covers this, then run it again.
+            </span>
+          </div>
+          <p style={{ margin: '10px 0 0', fontSize: 11.5, color: FAINT }}>
+            This section is left out of the finished report.
+          </p>
+        </div>
+        {runError && (
+          <div role="alert" style={{ fontSize: 12, color: DANGER, fontWeight: 700, marginTop: 9 }}>
+            {runError}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (hasContent) {
     return (

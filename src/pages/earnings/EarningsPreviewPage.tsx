@@ -13,7 +13,9 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useRememberStep, reachedStepNumber } from './earnings-resume';
 import { earnings, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
@@ -25,9 +27,11 @@ import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnal
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
+import { PreviewSkeleton } from '@/components/earnings/PreviewSkeleton';
+import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
-import { isNoDataPlaceholder } from './preview-helpers';
+import { isNoDataPlaceholder, noDataMessage } from './preview-helpers';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
@@ -49,6 +53,12 @@ const PRODUCE_TIPS = [
 
 export default function EarningsFiguresPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'preview');
+  // How far the REPORT has got, so the stepper does not grey out a step this
+  // user has already been to — see earnings-resume.
+  const reached = reachedStepNumber(reportId, 3);
   const navigate = useNavigate();
 
   const [sections, setSections] = useState<EarningsFigureSection[] | null>(null);
@@ -192,7 +202,7 @@ export default function EarningsFiguresPage() {
       section_code: s.section_code,
       title: s.title,
       content: p?.content ?? null,
-      analysis: (p as { analysis?: unknown } | undefined)?.analysis ?? null,
+      analysis: p?.analysis ?? null,
     } as never;
   };
 
@@ -305,7 +315,17 @@ export default function EarningsFiguresPage() {
     setContinueError(null);
     try {
       const handle = await earnings.produceEarningsReport(reportId);
-      setProduceRun({ run_id: handle.run_id, poll_url: handle.poll_url });
+      // Nothing to build: every section is already produced and unchanged, so the
+      // server started no run and says so with a null handle. Raising the loader
+      // over a poll that can never resolve is a wait with no end -- which is
+      // exactly what it was, until somebody reloaded the page. Go straight on.
+      // The Outline's Continue has always done this; this screen never learned it.
+      const started = startedRun(handle);
+      if (!started) {
+        navigate(`/earnings/${reportId}/report`);
+        return;
+      }
+      setProduceRun(started);
     } catch (e) {
       setContinueError(
         e instanceof ApiError ? e.message : "Couldn't start generating. Try again in a moment.",
@@ -327,23 +347,40 @@ export default function EarningsFiguresPage() {
     [produced],
   );
 
+  // Figures are filed here, but the section never became content -- so it will
+  // not appear on the Report screen or in the exported file. Read from `produced`,
+  // which this page already loads; no extra request.
+  const isStalled = useCallback(
+    (code: string, total: number) => {
+      if (total <= 0) return false;   // nothing filed yet is the ordinary not-done
+      const p = produced.find((x) => x.section_code === code);
+      if (!p) return true;
+      if (p.status === 'needs_input' || p.status === 'empty') return true;
+      return !(p.content || '').trim();
+    },
+    [produced],
+  );
+
   const railItems: RailItem[] = useMemo(() => {
     const fin: RailItem[] = (sections ?? []).map((s) => ({
       code: s.section_code,
       title: s.title,
       kind: 'financial',
       figures: s.total,
+      stalled: isStalled(s.section_code, s.total),
     }));
     const nar: RailItem[] = narrative.map((p) => ({
       code: p.section_code,
       title: p.title || p.section_code,
       kind: 'narrative',
-      // A "no data found" boilerplate sentence isn't real content — the rail
-      // should read it the same as never having been run.
+      // Three states, not two: written, un-run, and ran-and-found-nothing. The
+      // last used to be folded into un-run, which is why a finished section sat
+      // here saying "not run" with a Run button that changed nothing.
       written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
+      noData: noDataMessage(p) !== null,
     }));
     return [...fin, ...nar];
-  }, [sections, narrative]);
+  }, [sections, narrative, isStalled]);
 
   // What a figure-grounded section is waiting on, named so the user can go and do
   // it rather than being told no.
@@ -362,13 +399,48 @@ export default function EarningsFiguresPage() {
 
   // Editing a produced section in place. Optimistic, because it is the user's own
   // words going back on their own screen.
+  // Accept a section's ungrounded numbers as they stand. Mirrors the Report
+  // screen's handler — acknowledging IS a save that re-sends the same content
+  // with the flag set, which is the only thing that clears the approve blocker.
+  const acknowledgeNarrative = async (code: string) => {
+    if (!reportId) return;
+    const prior = produced.find((p) => p.section_code === code) ?? null;
+    if (!prior) return;
+    setProduced((list) =>
+      list.map((p) => (p.section_code === code ? { ...p, grounding_acknowledged: true } : p)),
+    );
+    try {
+      await earnings.patchEarningsSectionContent(reportId, code, {
+        content: prior.content ?? '',
+        acknowledge: true,
+      });
+    } catch {
+      setProduced((list) => list.map((p) => (p.section_code === code ? prior : p)));
+    }
+  };
+
   const saveNarrative = async (code: string, content: string) => {
     if (!reportId) return;
     setProduced((prev) =>
       prev.map((p) => (p.section_code === code ? { ...p, content } : p)),
     );
     try {
-      await earnings.patchEarningsSectionContent(reportId, code, { content });
+      // The response carries the grounding verdict on what was just saved, and
+      // this used to throw it away — so an edit that introduced an ungrounded
+      // number said nothing here, and the user first met it as a 409 on Approve
+      // two screens later. The refine path already reads it; this now matches.
+      const patch = await earnings.patchEarningsSectionContent(reportId, code, { content });
+      setProduced((prev) =>
+        prev.map((p) =>
+          p.section_code === code
+            ? {
+                ...p,
+                grounding_flag: (patch.grounding_violations ?? []).join(', ') || null,
+                grounding_acknowledged: false,
+              }
+            : p,
+        ),
+      );
     } catch (e) {
       setRunErrors((p) => ({
         ...p,
@@ -376,6 +448,31 @@ export default function EarningsFiguresPage() {
           e instanceof ApiError ? e.message : "That edit didn't save. Try again.",
       }));
     }
+  };
+
+  // Have the model re-word a section the user is looking at. Deliberately does
+  // not catch: SectionRefineChat shows the rejection in its own banner and keeps
+  // what the user typed, which is more useful than a message in the run-error row.
+  //
+  // Merges only the three fields the response actually carries. Spreading the
+  // whole thing is what makes Regenerate blank the badge and the title -- the
+  // narrow endpoint has no mode/source_type to give, so the normaliser would
+  // invent them.
+  const refineNarrative = async (code: string, instruction: string) => {
+    if (!reportId) return;
+    const res = await earnings.refineEarningsSection(reportId, code, instruction);
+    setProduced((prev) =>
+      prev.map((p) =>
+        p.section_code === code
+          ? {
+              ...p,
+              content: res.content,
+              status: res.status as typeof p.status,
+              grounding_flag: res.grounding_violations[0] ?? p.grounding_flag,
+            }
+          : p,
+      ),
+    );
   };
 
   const runSection = async (code: string, regenerate: boolean) => {
@@ -423,7 +520,9 @@ export default function EarningsFiguresPage() {
 
   // Producing takes over the page, the same handoff the outline used to own.
   if (produceRun) {
-    const phase = producePoll.phase === 'idle' ? 'running' : producePoll.phase;
+    // No idle-as-running here any more. `idle` means the hook is watching nothing,
+    // and painting that as progress is what made this screen wait forever.
+    const phase = producePoll.phase;
     if (phase === 'failed' || phase === 'timeout') {
       return (
         <GeneratingScreen
@@ -464,7 +563,7 @@ export default function EarningsFiguresPage() {
         height: '100%',
       }}
     >
-      <EarningsStepper activeStep={3} reportId={reportId} />
+      <EarningsStepper activeStep={3} reportId={reportId} reachedStep={reached} />
 
       <header style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>
@@ -486,13 +585,9 @@ export default function EarningsFiguresPage() {
       )}
 
       {sections === null ? (
-        // A load that failed has already said so above; a spinner underneath it
+        // A load that failed has already said so above; a skeleton underneath it
         // would claim something is still coming.
-        loadError ? null : (
-          <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <Spinner />
-          </div>
-        )
+        loadError ? null : <PreviewSkeleton />
       ) : sections.length === 0 ? (
         // Reachable only by unticking every section that carries figures. It is a
         // choice, not a fault, so it says what is true and offers the way back
@@ -584,15 +679,16 @@ export default function EarningsFiguresPage() {
             })()}
 
             {activeNarrative && (() => {
-              // A "no data found" boilerplate sentence isn't real content — show
-              // this section as blank (not-yet-written) rather than printing it,
-              // in Preview and everywhere else the frontend controls. The
-              // exported PDF/DOCX is generated server-side from the same raw
-              // `content` field, so this alone can't blank it there too — see
-              // .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
-              const displayNarrative = isNoDataPlaceholder(activeNarrative.content)
-                ? { ...activeNarrative, content: '' }
-                : activeNarrative;
+              // The "nothing found" sentence is no longer blanked here —
+              // NarrativePane states it as the finding it is, and the Report
+              // screen still drops the section entirely (isHiddenWhenOmitted),
+              // so it never reaches a published release. Blanking it on Preview
+              // made a finished section read as un-run.
+              //
+              // The exported PDF/DOCX still prints the sentence: export renders
+              // server-side from the same `content` field, out of reach from
+              // here — see .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
+              const displayNarrative = activeNarrative;
               return (
                 <section className="card" style={{ padding: '18px 22px 20px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
@@ -616,8 +712,24 @@ export default function EarningsFiguresPage() {
                       coverTemplateKey={null}
                       locked={false}
                       onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
+                      // Without this the banner rendered with no way to act on it:
+                      // the one screen that surfaced the flag offered only text.
+                      onAcknowledgeFlag={() => void acknowledgeNarrative(activeNarrative.section_code)}
                     />
                   </NarrativePane>
+                  {/* Only over prose that exists. A section still showing "Run this
+                      section" has nothing to refine, and offering the box there
+                      would read as a second way to write it. Gated on
+                      displayNarrative, not activeNarrative, so a no-data
+                      placeholder counts as empty here exactly as it does above. */}
+                  {!!(displayNarrative.content || '').trim() && (
+                    <SectionRefineChat
+                      key={activeNarrative.section_code}
+                      onSend={(instruction) =>
+                        refineNarrative(activeNarrative.section_code, instruction)
+                      }
+                    />
+                  )}
                 </section>
               );
             })()}
@@ -673,6 +785,29 @@ export default function EarningsFiguresPage() {
                       </span>
                     )}
                   </div>
+
+                  {isStalled(s.section_code, s.total) && (
+                    // The figures are here and the section still is not in the
+                    // report. Said plainly, because the alternative is what
+                    // happened: a green tick on the left, thirty-one rows on the
+                    // right, and nothing in the exported file.
+                    <div
+                      role="status"
+                      style={{
+                        marginBottom: 14,
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        background: 'rgba(245,158,11,.08)',
+                        border: '1px solid rgba(245,158,11,.22)',
+                        fontSize: 12.5,
+                        color: '#B45309',
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      These figures have not been built into the report yet, so this
+                      section will not appear in it. Press Continue to build it.
+                    </div>
+                  )}
 
                   {(prompts[s.section_code] || '').trim() && (
                     // What was asked for, on the Outline. Read-only here: this

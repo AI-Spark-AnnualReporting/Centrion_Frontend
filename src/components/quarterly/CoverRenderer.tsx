@@ -1,5 +1,13 @@
 import type { BrandColors } from '@/types/quarterly';
 
+// The width every assembled report renders its document at — cover and body
+// share it so the two line up as one sheet rather than two stacked panels.
+// Lives beside CoverRenderer because that is the piece every report screen
+// already imports from here (quarterly, earnings, board, the reviewer view);
+// the number was otherwise being copy-pasted per screen and had already drifted
+// into four places.
+export const DOC_WIDTH = 820;
+
 // The cover section's rendered design. Accents (rules, title, badge) use the
 // brand color via var(--brand-primary); the company name and body text stay
 // dark and readable. Shows REAL company + period — never a placeholder.

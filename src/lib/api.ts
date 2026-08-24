@@ -86,6 +86,7 @@ import type {
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
+  EarningsSectionPatch,
   EarningsSectionsResponse,
   EarningsSectionStatus,
   EarningsProduceHandle,
@@ -2570,12 +2571,82 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
     source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
     confidence: earnNum(o.confidence),
     flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
-    grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
-    grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
+    // One readable line, whatever shape it arrived in. Several ungrounded
+    // numbers in one section is the normal case, and naming all of them is the
+    // difference between a targeted edit and guesswork.
+    grounding_flag: readGroundingViolations(o).join(", ") || null,
+    // edit_acknowledged is the field the backend actually stores (inside
+    // feeder); the two client-side spellings are kept as fallbacks.
+    grounding_acknowledged:
+      earnBool(earnRecord(o.feeder).edit_acknowledged) ||
+      earnBool(o.grounding_acknowledged) ||
+      earnBool(o.acknowledged),
     edited: earnBool(o.edited) || earnBool(o.is_edited),
+    // Built field-by-field, so anything not listed here is silently dropped --
+    // which is exactly what happened to the analysis. GET /sections has always
+    // sent it, the exporters have always rendered it, and this mapper threw it
+    // away, so the Report screen showed none and Preview lost it on reload.
+    // Quarterly hit the identical bug in AssembledReportPage.
+    analysis: (o.analysis && typeof o.analysis === "object" && !Array.isArray(o.analysis)
+      ? (o.analysis as EarningsProducedSection["analysis"])
+      : null),
   };
 }
-function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
+// The produce response is a PATCH, not a section. It carries status/content/error
+// for one section and nothing else, so it is read as exactly that — running it
+// through normalizeEarningsSection built a whole section around those four
+// fields, defaulting the title to the section code, display_order to 0 and mode
+// to 'generate'. Spread over the real section by the caller, those defaults won.
+// Every shape the backend expresses "these numbers are not in the figures" in.
+// GET /sections nests it as feeder.grounding_violations; the PATCH and refine
+// responses put grounding_violations at the top level. Both are LISTS, and the
+// mapper below used to read three singular STRING keys the backend has never
+// sent — so section.grounding_flag was always null, the amber banner never
+// rendered, and the only thing the user ever saw was the 409 on approve.
+function readGroundingViolations(o: Record<string, unknown>): string[] {
+  const feeder = earnRecord(o.feeder);
+  for (const v of [o.grounding_violations, feeder.grounding_violations]) {
+    if (Array.isArray(v)) {
+      // Numbers are accepted as well as strings: the backend sends regex matches
+      // (strings today), but a token is a token, and silently dropping a numeric
+      // one would under-report which figures are at fault.
+      const items = v
+        .map((x) => (typeof x === "number" && Number.isFinite(x) ? String(x) : earnStr(x)))
+        .filter((x): x is string => !!x);
+      if (items.length) return items;
+    }
+  }
+  // The singular string keys are kept as a fallback: nothing observed sends
+  // them, but reading them costs nothing and removing them could only break
+  // something unseen.
+  const single =
+    earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message);
+  return single ? [single] : [];
+}
+
+function readEarningsSectionPatch(raw: unknown): EarningsSectionPatch | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  const rawContent = o.content ?? o.body ?? o.text;
+  return {
+    section_code: code,
+    status: (earnStr(o.status) ?? "pending") as EarningsSectionPatch["status"],
+    content:
+      rawContent == null
+        ? null
+        : typeof rawContent === "string"
+          ? rawContent
+          : JSON.stringify(rawContent),
+    error: earnStr(o.error),
+    grounding_violations: readGroundingViolations(o),
+  };
+}
+
+// Exported for the same reason normalizeEarningsSources is: this mapper is where
+// the wire shape becomes the screen's shape, and the page tests all mock above it
+// — which is exactly how a grounding flag that never rendered shipped green.
+export function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
   const rec = earnRecord(raw);
   const arr: unknown[] = Array.isArray(raw)
     ? raw
@@ -2599,6 +2670,12 @@ function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
   const o = earnRecord(raw);
   const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
   const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  // Nothing to do: the report is already built and unchanged, so no run was
+  // started. A handle with nothing to poll is the honest answer here, not a
+  // failure — the caller navigates straight on and never raises a loader.
+  if (earnStr(o.status) === "completed" && !runId) {
+    return { run_id: null, poll_url: null };
+  }
   if (!runId || !pollUrl) {
     throw new Error("Produce earnings report: response did not include run_id/poll_url.");
   }
@@ -3002,14 +3079,14 @@ export const earnings = {
     reportId: string,
     sectionCode: string,
     regenerate = false,
-  ): Promise<EarningsProducedSection> =>
+  ): Promise<EarningsSectionPatch> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
       { method: "POST", body: { regenerate } },
     ).then((raw) => {
-      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
-      if (!sec) throw new Error("Run earnings section: response was not a section.");
-      return sec;
+      const patch = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
+      if (!patch) throw new Error("Run earnings section: response was not a section.");
+      return patch;
     }),
 
   // Save a user's manual input for a needs_input section (typed directly, or
@@ -3060,14 +3137,57 @@ export const earnings = {
     reportId: string,
     sectionCode: string,
     body: SaveEarningsSectionContentPayload,
-  ): Promise<EarningsProducedSection> =>
+    // A PATCH answers for the fields it owns — content, status, violations. Read
+    // as a whole section it invented a title (falling back to the section CODE),
+    // display_order 0 and mode 'generate' for everything absent, and the caller
+    // spread those over the real section. Same defect the run endpoint had.
+  ): Promise<EarningsSectionPatch> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/content`,
       { method: "PATCH", body },
     ).then((raw) => {
-      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      const sec = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
       if (!sec) throw new Error("Edit earnings section: response was not a section.");
       return sec;
+    }),
+
+  // Have the model rewrite one narrative section from a free-text instruction.
+  // One LLM call server-side, and it only re-words the prose already stored --
+  // producing the section again is what Regenerate is for. 422 the section is a
+  // table (nothing to rewrite) or the instruction is missing/too long · 409 the
+  // section is empty, or the report is locked · 502 the model returned nothing,
+  // in which case the stored text is untouched and a retry is safe.
+  //
+  // Deliberately NOT run through normalizeEarningsSection: the response carries
+  // only what changed, and the normaliser would default mode/source_type/title
+  // back over the real ones (the trap EarningsReportPage.tsx documents). The
+  // caller merges these three fields and nothing else.
+  refineEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    instruction: string,
+  ): Promise<{
+    section_code: string;
+    content: string | null;
+    status: string;
+    grounding_violations: string[];
+  }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then((raw) => {
+      const o = earnRecord(raw).section ? earnRecord(earnRecord(raw).section) : earnRecord(raw);
+      const code = earnStr(o.section_code) ?? sectionCode;
+      const content = typeof o.content === "string" ? o.content : null;
+      if (content == null) throw new Error("Refine: the server returned no text.");
+      return {
+        section_code: code,
+        content,
+        status: earnStr(o.status) ?? "produced",
+        grounding_violations: Array.isArray(o.grounding_violations)
+          ? o.grounding_violations.filter((v): v is string => typeof v === "string")
+          : [],
+      };
     }),
 
   // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body
@@ -3523,6 +3643,10 @@ export interface ThreadlessReport {
   period: string;
   status: string;
   created_at: string;
+  // One general thread and one private thread per person, per report.
+  // Which flag disables the row depends on the Private tickbox.
+  has_general_thread: boolean;
+  has_my_private_thread: boolean;
 }
 
 export interface ThreadlessReportsResponse {

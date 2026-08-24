@@ -29,6 +29,7 @@ const h = vi.hoisted(() => {
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
     produceEarningsReport: vi.fn(),
+    refineEarningsSection: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
     getEarningsCoverTemplates: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('@/lib/api', () => ({
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
+    refineEarningsSection: (...a: unknown[]) => h.refineEarningsSection(...a),
     getEarningsCoverTemplates: (...a: unknown[]) => h.getEarningsCoverTemplates(...a),
     getEarningsColorPalettes: (...a: unknown[]) => h.getEarningsColorPalettes(...a),
     getEarningsCoverSelection: (...a: unknown[]) => h.getEarningsCoverSelection(...a),
@@ -336,6 +338,75 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText('Revenue rose.')).toBeInTheDocument();
   });
 
+  // Reported live on s11_guidance: the section sat at "not run" with a Run
+  // button, and pressing it changed nothing — no prose, no error, no
+  // explanation. It HAD run. The backend answers "your documents say nothing
+  // about this" with a fixed sentence, and Preview blanked that sentence, so a
+  // finished section was indistinguishable from one nobody had run.
+  const NO_DATA = JSON.stringify({
+    heading: null,
+    content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+  });
+
+  const withGuidance = (content: string | null) => [
+    ...NARRATIVE,
+    { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
+      source_type: 'AI-written', status: 'produced', included: true, content },
+  ];
+
+  it('a section that ran and found nothing says so, instead of looking un-run', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(NO_DATA) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Guidance/ }));
+
+    // The finding itself, stated…
+    expect(await screen.findByText(/No forward-looking guidance was disclosed/)).toBeInTheDocument();
+    // …not a Run button implying it was never attempted.
+    expect(screen.queryByRole('button', { name: 'Run this section' })).toBeNull();
+    // Running it again is still offered, for when a source is added.
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeInTheDocument();
+    // And it says what happens to it.
+    expect(screen.getByText(/left out of the finished report/)).toBeInTheDocument();
+  });
+
+  it('the rail calls that its own state, not "not run"', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(NO_DATA) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    const row = screen.getByRole('button', { name: /Guidance/ });
+    expect(row).toHaveTextContent('nothing to report');
+    expect(row).not.toHaveTextContent('not run');
+  });
+
+  it('a section that genuinely has not run still says not run', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(null) });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    expect(screen.getByRole('button', { name: /Guidance/ })).toHaveTextContent('not run');
+  });
+
+  // The produce endpoint returns four fields — section_code, status, content,
+  // error. It was being normalised into a WHOLE section first, which invented a
+  // title (falling back to the section code), display_order 0 and mode
+  // 'generate' for everything missing; merged over the real section, those won.
+  // Running a section renamed it to its own code.
+  it('running a section does not rename it to its own section code', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: withGuidance(null) });
+    h.runEarningsSection.mockResolvedValue({
+      section_code: 's11_guidance', status: 'produced', content: 'Guidance follows.', error: null,
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getByRole('button', { name: /Guidance/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run this section' }));
+
+    expect(await screen.findByText('Guidance follows.')).toBeInTheDocument();
+    // The title survives the run — in the pane and in the rail.
+    expect(screen.getByRole('heading', { name: 'Guidance / Outlook' })).toBeInTheDocument();
+    expect(screen.queryByText('s11_guidance')).toBeNull();
+  });
+
   it('a run that comes back empty is a reason, not a dead end', async () => {
     h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
     h.runEarningsSection.mockResolvedValue({ ...NARRATIVE[1], content: '' });
@@ -583,6 +654,295 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText('Revenue')).toBeInTheDocument();
 
     expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
+  });
+
+  it('replays a stored analysis on load, without anyone clicking Analyse', async () => {
+    // This is the half the normaliser bug hid. The in-session path above worked,
+    // so the feature looked fine; a reload lost the bullets, and clicking Analyse
+    // again returned instantly from the server cache, which made it look like
+    // they had never gone.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: null, total: 1, finalised: true,
+          figures: [fig('qf_1', 'Revenue')] },
+      ],
+    });
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true,
+          content: '{"tables":[]}',
+          analysis: { text: '- Revenue is the largest line in the section.',
+                      generated_at: '2026-08-24T08:18:10Z', model: 'gpt-4.1',
+                      fingerprint: 'FP' } },
+      ],
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
+    expect(h.analyseEarningsSection).not.toHaveBeenCalled();
+  });
+
+
+  // ── The refine bar ──────────────────────────────────────────────────────────
+  //
+  // Edit retypes the section and Regenerate throws it away and rebuilds it. This
+  // is the middle option that was missing: say what you want changed and keep
+  // everything else.
+
+  const WRITTEN = [
+    { section_code: 's03_exec_summary', title: 'Executive Summary', mode: 'generate',
+      source_type: 'Hybrid', status: 'produced', included: true,
+      content: 'Net income was SAR 103,365 million, a 15.4% decrease.' },
+    { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
+      source_type: 'AI-written', status: 'pending', included: true, content: null },
+  ];
+
+  const openWritten = async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getAllByRole('button', { name: /Executive Summary/ })[0]);
+    return screen.findByText(/Refine this section/i);
+  };
+
+  it('a chip fills the box rather than sending on its own', async () => {
+    await openWritten();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Make it concise' }));
+
+    expect(screen.getByPlaceholderText(/Tell the agent how to adjust/)).toHaveValue('Make it concise');
+    expect(h.refineEarningsSection).not.toHaveBeenCalled();
+  });
+
+  it('sending an instruction puts the rewritten text on screen', async () => {
+    await openWritten();
+    h.refineEarningsSection.mockResolvedValue({
+      section_code: 's03_exec_summary', status: 'produced',
+      content: 'Net income fell 15.4% to SAR 103,365 million.',
+      grounding_violations: [],
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/Tell the agent how to adjust/),
+                     { target: { value: 'Make it concise' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    await waitFor(() => expect(h.refineEarningsSection).toHaveBeenCalledWith(
+      'rep-1', 's03_exec_summary', 'Make it concise'));
+    expect(await screen.findByText(/Net income fell 15.4%/)).toBeInTheDocument();
+  });
+
+  it('a refine that fails keeps the text that was already there', async () => {
+    await openWritten();
+    h.refineEarningsSection.mockRejectedValue(new h.MockApiError(502, 'The rewrite came back empty.'));
+
+    fireEvent.change(screen.getByPlaceholderText(/Tell the agent how to adjust/),
+                     { target: { value: 'Make it concise' } });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    expect(await screen.findByText('The rewrite came back empty.')).toBeInTheDocument();
+    expect(screen.getByText(/Net income was SAR 103,365 million/)).toBeInTheDocument();
+  });
+
+  it('a section nobody has run yet is offered Run, not a rewrite', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getAllByRole('button', { name: /Guidance/ })[0]);
+
+    expect(await screen.findByRole('button', { name: 'Run this section' })).toBeInTheDocument();
+    expect(screen.queryByText(/Refine this section/i)).not.toBeInTheDocument();
+  });
+
+  it('a figures table has no rewrite bar — there is no prose in it', async () => {
+    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    expect(screen.queryByText(/Refine this section/i)).not.toBeInTheDocument();
+  });
+
+  // ── A section that never became content ─────────────────────────────────────
+  //
+  // Filing figures is the work on this screen, so the rail ticked a section the
+  // moment it had any. Non-IFRS Reconciliations had thirty-one, ticked green,
+  // counted toward the total, produced nothing, and was dropped from the export
+  // without a word. Figures filed is not the same as section built, and the rail
+  // now says which one it means.
+
+  const STALLED_SECTIONS = {
+    sections: [
+      { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+        prompt: null, total: 2, finalised: false,
+        figures: [fig('qf_1', 'Free cash flow'), fig('qf_2', 'EBIT')] },
+      { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+        prompt: null, total: 1, finalised: false, figures: [fig('qf_3', 'Revenue')] },
+    ],
+  };
+
+  it('says so when figures were filed but the section never got built', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'needs_input', included: true, content: null },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.getByText(/not in report/)).toBeInTheDocument();
+    expect(await screen.findByText(/will not appear in it/)).toBeInTheDocument();
+  });
+
+  it('does not count a section that never got built as done', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'needs_input', included: true, content: null },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    // one of the two, not two of two
+    expect(screen.getByText(/1\/2/)).toBeInTheDocument();
+  });
+
+  it('says nothing at all about a section that built normally', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'produced', included: true,
+          content: '{"rows":[{"label":"Free cash flow"}]}' },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.queryByText(/not in report/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will not appear in it/)).not.toBeInTheDocument();
+    expect(screen.getByText(/2\/2/)).toBeInTheDocument();
+  });
+
+  it('a section with no figures yet is just not started, not stalled', async () => {
+    // It has nothing filed, so "not built" is not news -- the ordinary empty
+    // state already says what to do.
+    h.getEarningsFigureSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          prompt: null, total: 0, finalised: false, figures: [] },
+      ],
+    });
+    h.getEarningsSections.mockResolvedValue({ sections: [] });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.queryByText(/not in report/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will not appear in it/)).not.toBeInTheDocument();
+  });
+
+  // ── What the screen shows before the data arrives ──────────────────────────
+  //
+  // The loader would hand over and the page would be blank for a second or two --
+  // a small centred spinner in a full-width empty page reads as nothing at all.
+  // The structure arrives first now, and only the values are missing.
+
+  it('draws the page structure while the figures are still loading', async () => {
+    let release: (v: unknown) => void = () => {};
+    h.getEarningsFigureSections.mockReturnValue(new Promise((r) => { release = r; }));
+    renderPage();
+
+    // Present before anything resolves: the rail, its header, and the table frame.
+    expect(await screen.findByRole('status', { name: /loading the report preview/i }))
+      .toBeInTheDocument();
+    expect(screen.getByText('Sections')).toBeInTheDocument();
+    expect(screen.getByText('LINE')).toBeInTheDocument();
+    expect(screen.getByText('VALUE')).toBeInTheDocument();
+
+    release(SECTIONS);
+    expect(await screen.findByRole('heading', { name: 'Financial Highlights' })).toBeInTheDocument();
+    // …and it gets out of the way once the real thing is there.
+    expect(screen.queryByRole('status', { name: /loading the report preview/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it('shows no skeleton when the load failed — nothing is coming', async () => {
+    h.getEarningsFigureSections.mockRejectedValue(new h.MockApiError(500));
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: /loading the report preview/i }))
+        .not.toBeInTheDocument());
+  });
+
+  it('still shows a nothing-to-report section on Preview, with the reason and a way to retry', async () => {
+    // Hidden on the Report screen and absent from the file, but this is where it
+    // can be acted on, so here it stays — with the finding stated rather than a
+    // blank panel and a Run button that explains nothing.
+    const SENTENCE = 'No forward-looking guidance was disclosed in the uploaded documents for this period.';
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
+          source_type: 'AI-written', status: 'produced', included: true,
+          // Already normalised: this suite mocks @/lib/api, so the mapping from
+          // feeder.status is not in play here. It is covered against the real
+          // module in earnings-analysis-survives-the-normaliser.test.ts.
+          content: null, feeder_status: 'no_data', feeder_message: SENTENCE },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getAllByRole('button', { name: /Guidance/ })[0]);
+
+    expect(await screen.findByText(SENTENCE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeInTheDocument();
+    expect(screen.getByText(/left out of the finished report/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing to report/)).toBeInTheDocument();
+  });
+
+  // ── Continue when there is nothing left to build ────────────────────────────
+  //
+  // The server answers "nothing to do" with a null handle and starts no run. This
+  // screen raised its full-screen loader anyway and polled a URL that did not
+  // exist, so it sat there until the user reloaded the page — five minutes, on a
+  // report where every section was already produced and unchanged. The Outline's
+  // Continue has always handled this; this one never learned.
+
+  it('goes straight to the report when the server started no run', async () => {
+    h.produceEarningsReport.mockResolvedValue({ run_id: null, poll_url: null });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    await waitFor(() =>
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/report'));
+    expect(screen.queryByText(/Composing your report/)).not.toBeInTheDocument();
+  });
+
+  it('still raises the loader when there IS a run to wait for', async () => {
+    h.produceEarningsReport.mockResolvedValue({ run_id: 'run-9', poll_url: '/api/v1/agent_runs/run-9' });
+    h.getByPollUrl.mockResolvedValue({ status: 'running' });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    expect(await screen.findByText(/Composing your report/)).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalledWith('/earnings/rep-1/report');
   });
 
 });

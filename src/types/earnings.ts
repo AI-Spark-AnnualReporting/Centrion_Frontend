@@ -1,3 +1,5 @@
+import type { SectionAnalysis } from '@/types/quarterly';
+
 // ─── Earnings report — Part 1 (Setup) types ──────────────────────────────────
 // Contracts captured from the live FastAPI OpenAPI schema:
 //   GET  /api/v1/earnings/sources?company_id&period   → untyped 200 (read defensively)
@@ -335,6 +337,11 @@ export interface EarningsProducedSection {
   grounding_flag: string | null; // grounding-violation message from a PATCH, when present
   grounding_acknowledged: boolean; // client marker: the user acknowledged the flag
   edited: boolean; // client marker: content was manually PATCHed
+  // The Analyse button's last result, replayed by GET /sections so it survives a
+  // reload. The backend has always sent it; nothing here declared it, so
+  // normalizeEarningsSection dropped it and both the Report screen and a
+  // reloaded Preview showed no analysis at all. Same shape quarterly stores.
+  analysis?: SectionAnalysis | null;
 }
 
 export interface EarningsSectionsResponse {
@@ -344,14 +351,41 @@ export interface EarningsSectionsResponse {
 }
 
 // POST /produce async handle (mirrors the quarterly ProduceAllHandle).
+// A produce request's outcome. `run_id`/`poll_url` are null when the server
+// found nothing to do and started no run at all — a report that is already built
+// and unchanged. There is nothing to poll and no loader to show; the caller just
+// carries on. See _nothing_to_produce on the backend.
+// What POST .../sections/{code}/produce actually returns: the four fields that
+// endpoint owns, and nothing else. Deliberately NOT an EarningsProducedSection —
+// running a section used to be normalised into a whole one, which invented a
+// title (falling back to the section CODE), a display_order of 0 and a mode of
+// 'generate' for the fields the response never carried. Merged over the real
+// section, those invented values won, and a Run renamed the section to its own
+// code and sent it to the top of the rail.
+export interface EarningsSectionPatch {
+  section_code: string;
+  status: EarningsSectionStatus;
+  content: string | null;
+  error?: string | null;
+  /** Numbers in the saved prose that match no resolved figure. Empty after a
+   *  save that grounds cleanly — which is what clears the approve blocker. */
+  grounding_violations?: string[];
+}
+
 export interface EarningsProduceHandle {
-  run_id: string;
-  poll_url: string;
+  run_id: string | null;
+  poll_url: string | null;
 }
 
 // PATCH .../content body.
 export interface SaveEarningsSectionContentPayload {
   content: string;
+  /** Accept the section's ungrounded numbers as they stand, clearing the flag
+   *  that blocks Approve & lock. The backend has read this since the gate was
+   *  written (routes/earnings.py, save_section_content) — the field simply did
+   *  not exist here, so nothing ever sent it and the flag could never be
+   *  cleared by acknowledging. Optional: every existing caller is unaffected. */
+  acknowledge?: boolean;
 }
 
 export type EarningsExportFormat = 'pdf' | 'docx';

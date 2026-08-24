@@ -16,19 +16,28 @@ type StepState = 'done' | 'active' | 'upcoming';
 // The 4-step progress bar shown at the top of every earnings screen except
 // Setup itself (step 1) — Setup is where the user lands, not somewhere they
 // need to be told they've arrived. Done/active steps are clickable (jump back
-// to something already reached); an upcoming step is disabled — it can only
-// be reached by actually completing the current screen's Continue action, not
-// by skipping ahead via the stepper. Once the report is approved & locked,
-// EVERY step besides the current one is disabled — an approved report is
-// final, so there's no going back to re-edit Setup/Outline/Preview either.
+// to something already reached); a step the report has not reached is disabled —
+// it can only be reached by actually completing the current screen's Continue
+// action, not by skipping ahead. Once the report is approved & locked, EVERY
+// step besides the current one is disabled — an approved report is final, so
+// there's no going back to re-edit Setup/Outline/Preview either.
+//
+// `reachedStep` is how far the REPORT has got, which is not the same as which
+// screen you happen to be looking at. Without it "reached" was inferred from the
+// current URL alone, so opening a finished report at Preview greyed out Report —
+// the user could not click through to the thing they had already built, and the
+// only way forward was to re-run the whole build. Omitted, it falls back to the
+// old URL-derived behaviour.
 export function EarningsStepper({
   activeStep,
   reportId,
   locked = false,
+  reachedStep,
 }: {
   activeStep: number;
   reportId?: string | null;
   locked?: boolean;
+  reachedStep?: number;
 }) {
   const navigate = useNavigate();
   const activeIndex = activeStep - 1; // 0-based
@@ -41,7 +50,9 @@ export function EarningsStepper({
           const circleBg = state === 'active' ? ACCENT : state === 'done' ? ACCENT_TINT : '#F1F2F6';
           const circleColor = state === 'active' ? '#fff' : state === 'done' ? ACCENT : FAINT;
           const titleColor = state === 'upcoming' ? FAINT : INK;
-          const disabled = locked ? i !== activeIndex : (i > 0 && !reportId) || state === 'upcoming';
+          const reachedIndex = Math.max(activeIndex, (reachedStep ?? activeStep) - 1);
+          const beyondReport = i > reachedIndex;
+          const disabled = locked ? i !== activeIndex : (i > 0 && !reportId) || beyondReport;
 
           return (
             <div
@@ -54,7 +65,7 @@ export function EarningsStepper({
                 title={
                   locked && i !== activeIndex
                     ? 'This report is approved and locked — it can no longer be edited.'
-                    : state === 'upcoming'
+                    : beyondReport
                       ? 'Complete the current step to continue'
                       : undefined
                 }

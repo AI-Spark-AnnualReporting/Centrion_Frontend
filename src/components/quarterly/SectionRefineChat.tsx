@@ -1,6 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { quarterlyReports } from '@/lib/api';
-import type { ProducedSection } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const DARK = '#1F2340';
@@ -10,18 +8,15 @@ const RED = '#EF4444';
 // Same chips as the old whole-report refine chat.
 const SUGGESTIONS = ['Make it concise', 'More formal tone', 'Expand detail'];
 
-// Per-section refine bar — chips + free text + Send → refineSection. On success
-// hands the updated section back to the parent (which swaps the content + flashes).
+// Per-section refine bar — chips + free text + Send. Purely presentational: the
+// caller owns the request and the state update, which is what lets quarterly and
+// earnings share one bar over two different endpoints and two different section
+// shapes. A rejected `onSend` shows in the banner below and the input is kept, so
+// the user can fix the wording rather than retype it.
 export function SectionRefineChat({
-  companyId,
-  reportId,
-  sectionCode,
-  onRefined,
+  onSend,
 }: {
-  companyId: string;
-  reportId: string;
-  sectionCode: string;
-  onRefined: (section: ProducedSection) => void;
+  onSend: (instruction: string) => Promise<void>;
 }) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -42,16 +37,15 @@ export function SectionRefineChat({
     setSending(true);
     setError(null);
     try {
-      const res = await quarterlyReports.refineSection(companyId, reportId, sectionCode, text);
+      await onSend(text);
       if (!mountedRef.current) return;
       setInput('');
-      onRefined(res);
     } catch (err: unknown) {
       if (mountedRef.current) setError(err instanceof Error ? err.message : 'Refine failed. Please try again.');
     } finally {
       if (mountedRef.current) setSending(false);
     }
-  }, [companyId, reportId, sectionCode, input, sending, onRefined]);
+  }, [input, sending, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {

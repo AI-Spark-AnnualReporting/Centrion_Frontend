@@ -941,7 +941,15 @@ function SectionPanel({
           />
         )}
         {canRefine && !editing && companyId && reportId && (
-          <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
+          // Keyed on the section: without it the instruction typed for one
+          // section is still sitting in the box after switching to the next.
+          <SectionRefineChat
+            key={section.section_code}
+            onSend={async (instruction) => {
+              onRefined(await quarterlyReports.refineSection(
+                companyId, reportId, section.section_code, instruction));
+            }}
+          />
         )}
       </>
     );
