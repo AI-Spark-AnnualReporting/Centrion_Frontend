@@ -335,12 +335,27 @@ export default function EarningsFiguresPage() {
     [produced],
   );
 
+  // Figures are filed here, but the section never became content -- so it will
+  // not appear on the Report screen or in the exported file. Read from `produced`,
+  // which this page already loads; no extra request.
+  const isStalled = useCallback(
+    (code: string, total: number) => {
+      if (total <= 0) return false;   // nothing filed yet is the ordinary not-done
+      const p = produced.find((x) => x.section_code === code);
+      if (!p) return true;
+      if (p.status === 'needs_input' || p.status === 'empty') return true;
+      return !(p.content || '').trim();
+    },
+    [produced],
+  );
+
   const railItems: RailItem[] = useMemo(() => {
     const fin: RailItem[] = (sections ?? []).map((s) => ({
       code: s.section_code,
       title: s.title,
       kind: 'financial',
       figures: s.total,
+      stalled: isStalled(s.section_code, s.total),
     }));
     const nar: RailItem[] = narrative.map((p) => ({
       code: p.section_code,
@@ -351,7 +366,7 @@ export default function EarningsFiguresPage() {
       written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
     }));
     return [...fin, ...nar];
-  }, [sections, narrative]);
+  }, [sections, narrative, isStalled]);
 
   // What a figure-grounded section is waiting on, named so the user can go and do
   // it rather than being told no.
@@ -719,6 +734,29 @@ export default function EarningsFiguresPage() {
                       </span>
                     )}
                   </div>
+
+                  {isStalled(s.section_code, s.total) && (
+                    // The figures are here and the section still is not in the
+                    // report. Said plainly, because the alternative is what
+                    // happened: a green tick on the left, thirty-one rows on the
+                    // right, and nothing in the exported file.
+                    <div
+                      role="status"
+                      style={{
+                        marginBottom: 14,
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        background: 'rgba(245,158,11,.08)',
+                        border: '1px solid rgba(245,158,11,.22)',
+                        fontSize: 12.5,
+                        color: '#B45309',
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      These figures have not been built into the report yet, so this
+                      section will not appear in it. Press Continue to build it.
+                    </div>
+                  )}
 
                   {(prompts[s.section_code] || '').trim() && (
                     // What was asked for, on the Outline. Read-only here: this

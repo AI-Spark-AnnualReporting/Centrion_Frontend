@@ -21,6 +21,11 @@ export interface RailItem {
   figures?: number;
   /** narrative: has it been written yet. financial: undefined. */
   written?: boolean;
+  /** financial: figures are filed here, but the section did not produce, so it
+   *  will not reach the Report screen or the exported file. Ticking on figure
+   *  count alone is how Non-IFRS Reconciliations sat here green, counted in the
+   *  total, and was silently absent from the PDF. */
+  stalled?: boolean;
 }
 
 function Dot({ done }: { done: boolean }) {
@@ -70,9 +75,13 @@ export function PreviewRail({
   /** Back to the Outline — the only place the section set is decided. */
   onAddSection?: () => void;
 }) {
-  const done = items.filter((i) =>
-    i.kind === 'financial' ? (i.figures ?? 0) > 0 : !!i.written,
-  ).length;
+  // A financial section counts as done when its figures are filed AND those
+  // figures actually became a section. Filing is the work on this screen, but a
+  // section that never produced is not finished by any reading a user would
+  // recognise -- it does not appear in the report they are about to send.
+  const isDone = (i: RailItem) =>
+    i.kind === 'financial' ? (i.figures ?? 0) > 0 && !i.stalled : !!i.written;
+  const done = items.filter(isDone).length;
 
   const row = (
     key: string,
@@ -170,18 +179,26 @@ export function PreviewRail({
             i.code,
             i.title,
             activeCode === i.code,
-            <Dot done={i.kind === 'financial' ? (i.figures ?? 0) > 0 : !!i.written} />,
+            <Dot done={isDone(i)} />,
             i.kind === 'financial' ? (
-              <span
-                style={{
-                  flexShrink: 0,
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  color: (i.figures ?? 0) > 0 ? ACCENT : FAINT,
-                }}
-              >
-                {i.figures ?? 0}
+              <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {i.stalled && (
+                  // Same shape as the narrative lane's 'not run' below, so the
+                  // rail reads as one convention rather than two.
+                  <span style={{ fontSize: 10, color: '#B45309', fontWeight: 600 }}>
+                    not in report
+                  </span>
+                )}
+                <span
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: i.stalled ? '#B45309' : (i.figures ?? 0) > 0 ? ACCENT : FAINT,
+                  }}
+                >
+                  {i.figures ?? 0}
+                </span>
               </span>
             ) : (
               <span style={{ flexShrink: 0, fontSize: 10, color: FAINT }}>

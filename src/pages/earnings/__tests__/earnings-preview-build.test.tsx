@@ -697,4 +697,92 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByText(/Refine this section/i)).not.toBeInTheDocument();
   });
 
+  // ── A section that never became content ─────────────────────────────────────
+  //
+  // Filing figures is the work on this screen, so the rail ticked a section the
+  // moment it had any. Non-IFRS Reconciliations had thirty-one, ticked green,
+  // counted toward the total, produced nothing, and was dropped from the export
+  // without a word. Figures filed is not the same as section built, and the rail
+  // now says which one it means.
+
+  const STALLED_SECTIONS = {
+    sections: [
+      { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+        prompt: null, total: 2, finalised: false,
+        figures: [fig('qf_1', 'Free cash flow'), fig('qf_2', 'EBIT')] },
+      { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+        prompt: null, total: 1, finalised: false, figures: [fig('qf_3', 'Revenue')] },
+    ],
+  };
+
+  it('says so when figures were filed but the section never got built', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'needs_input', included: true, content: null },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.getByText(/not in report/)).toBeInTheDocument();
+    expect(await screen.findByText(/will not appear in it/)).toBeInTheDocument();
+  });
+
+  it('does not count a section that never got built as done', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'needs_input', included: true, content: null },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    // one of the two, not two of two
+    expect(screen.getByText(/1\/2/)).toBeInTheDocument();
+  });
+
+  it('says nothing at all about a section that built normally', async () => {
+    h.getEarningsFigureSections.mockResolvedValue(STALLED_SECTIONS);
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          mode: 'table', status: 'produced', included: true,
+          content: '{"rows":[{"label":"Free cash flow"}]}' },
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true, content: '{"rows":[]}' },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.queryByText(/not in report/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will not appear in it/)).not.toBeInTheDocument();
+    expect(screen.getByText(/2\/2/)).toBeInTheDocument();
+  });
+
+  it('a section with no figures yet is just not started, not stalled', async () => {
+    // It has nothing filed, so "not built" is not news -- the ordinary empty
+    // state already says what to do.
+    h.getEarningsFigureSections.mockResolvedValue({
+      sections: [
+        { section_code: 's15_non_ifrs_recon', title: 'Non-IFRS Reconciliations',
+          prompt: null, total: 0, finalised: false, figures: [] },
+      ],
+    });
+    h.getEarningsSections.mockResolvedValue({ sections: [] });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Non-IFRS Reconciliations' });
+
+    expect(screen.queryByText(/not in report/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will not appear in it/)).not.toBeInTheDocument();
+  });
+
 });
