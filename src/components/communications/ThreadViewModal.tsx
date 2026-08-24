@@ -452,9 +452,13 @@ export function ThreadViewModal({
       .catch(() => {});
   };
 
-  // On open → load thread + members in parallel, and fire read (idempotent).
+  // On open → load the thread, then its members, and fire read (idempotent).
   // With initialPayload the thread is already painted; we still refresh members
-  // for the mention picker and mark the thread read.
+  // for the mention/add-people picker and mark the thread read.
+  //
+  // Members are fetched AFTER the thread rather than beside it because the list
+  // is scoped to the thread's report — offering someone who cannot open the
+  // report is offering an add that fails.
   useEffect(() => {
     let cancelled = false;
     const skipThreadFetch = !!initialPayload;
@@ -463,17 +467,20 @@ export function ThreadViewModal({
       setError(null);
     }
 
-    Promise.all([
-      skipThreadFetch ? Promise.resolve(null) : communications.getThread(threadId),
-      // A members failure shouldn't block the thread from rendering.
-      communications.members().catch(() => ({ members: [] as CommunicationMember[] })),
-    ])
-      .then(([detail, membersRes]) => {
+    (skipThreadFetch ? Promise.resolve(null) : communications.getThread(threadId))
+      .then(async (detail) => {
         if (cancelled) return;
         if (detail) {
           setThread(detail.thread);
           setMessages(detail.messages);
         }
+        // Ad-hoc threads have no report — everyone in the company is fair game.
+        const reportId = (detail ?? initialPayload)?.thread.report?.id;
+        // A members failure shouldn't block the thread from rendering.
+        const membersRes = await communications
+          .members(reportId)
+          .catch(() => ({ members: [] as CommunicationMember[] }));
+        if (cancelled) return;
         setMembers(membersRes.members);
       })
       .catch((e) => {
@@ -635,7 +642,7 @@ export function ThreadViewModal({
             variant: 'destructive',
           });
           communications
-            .members()
+            .members(thread?.report?.id)
             .then((r) => setMembers(r.members))
             .catch(() => {});
           setSending(false);

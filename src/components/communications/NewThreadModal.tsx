@@ -149,17 +149,18 @@ export function NewThreadModal({
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // On open → load reports + members in parallel.
+  // On open → load the reports to choose from. Members come from the effect
+  // below, which re-runs as the chosen report changes.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([communications.threadlessReports(), communications.members()])
-      .then(([reportsRes, membersRes]) => {
+    communications
+      .threadlessReports()
+      .then((reportsRes) => {
         if (cancelled) return;
         setTypes(reportsRes.types);
         setReports(reportsRes.reports);
-        setMembers(membersRes.members);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -174,6 +175,22 @@ export function NewThreadModal({
       cancelled = true;
     };
   }, []);
+
+  // Only people who can open the chosen report may be mentioned into a thread
+  // about it — the same rule the share modal applies to reviewers. No report
+  // picked yet (or an ad-hoc thread): everyone active in the company.
+  useEffect(() => {
+    let cancelled = false;
+    communications
+      .members(reportId ?? undefined)
+      .then((res) => {
+        if (!cancelled) setMembers(res.members);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId]);
 
   // Re-pull the threadless list after a stale-data error (404/409). Pills come
   // back from the same call, so the bar stays authoritative.
@@ -190,21 +207,42 @@ export function NewThreadModal({
 
   const refreshMembers = () => {
     communications
-      .members()
+      .members(reportId ?? undefined)
       .then((res) => setMembers(res.members))
       .catch(() => {});
   };
 
-  // Pills stay constant across filters (from `types`); only the list narrows.
   // Only reports you can actually start this kind of conversation on — the tab
   // picks which flag rules a report out.
-  const visibleReports = useMemo(
-    () =>
-      reports
-        .filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread))
-        .filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
-    [reports, typeFilter, isPrivate],
+  const availableReports = useMemo(
+    () => reports.filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread)),
+    [reports, isPrivate],
   );
+
+  const visibleReports = useMemo(
+    () => availableReports.filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
+    [availableReports, typeFilter],
+  );
+
+  // Counted here rather than taken from the API's `types`: the backend counts a
+  // report that can still take EITHER kind of thread, so a report that already
+  // has a general one was still adding to its pill on the General tab — a "· 1"
+  // over an empty list. A type with nothing left to start on drops out.
+  const typePills = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of availableReports) counts.set(r.report_type, (counts.get(r.report_type) ?? 0) + 1);
+    return types
+      .filter((t) => counts.has(t.code))
+      .map((t) => ({ ...t, count: counts.get(t.code) as number }));
+  }, [types, availableReports]);
+
+  // Switching tabs can empty the type you had picked — fall back to All rather
+  // than leaving a filter selected that rules everything out.
+  useEffect(() => {
+    if (typeFilter !== ALL_FILTER && !typePills.some((t) => t.code === typeFilter)) {
+      setTypeFilter(ALL_FILTER);
+    }
+  }, [typePills, typeFilter]);
 
   // report_type code → human label for the "ESG · FY-2023" row text.
   const labelForCode = (code: string) =>
@@ -558,6 +596,9 @@ export function NewThreadModal({
                         setFormError(null);
                         // The list is about to change under it.
                         setReportId(null);
+                        // A general thread carries no guest list — don't send
+                        // one picked while the Private tab was open.
+                        if (!tab.priv) setMentions([]);
                       }}
                       style={{
                         flex: 1,
@@ -589,10 +630,11 @@ export function NewThreadModal({
                 })}
               </div>
 
-              {/* Report type pills — always from `types`; "All" clears the filter. */}
+              {/* Report type pills — counted over what this tab can start on;
+                  "All" clears the filter. */}
               <div style={SECTION_LABEL}>REPORT TYPE</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginBottom: 20 }}>
-                {[{ code: ALL_FILTER, label: 'All', count: null as number | null }, ...types].map((t) => {
+                {[{ code: ALL_FILTER, label: 'All', count: null as number | null }, ...typePills].map((t) => {
                   const active = t.code === typeFilter;
                   return (
                     <button
@@ -684,33 +726,37 @@ export function NewThreadModal({
                 )}
               </div>
 
-              {/* Who's in the thread — its own field with its own picker. The message box
-                  is plain text; nobody is added by typing in it. */}
-              <div style={SECTION_LABEL}>PARTICIPANTS</div>
-
-              <MentionChips mentions={mentions} onMentionsChange={setMentions} />
-
-              <MemberPicker
-                options={addableMembers}
-                onPick={(m) => {
-                  setMentions([...mentions, m]);
-                  if (formError) setFormError(null);
-                }}
-                label={
-                  addableMembers.length === 0
-                    ? mentions.length === 0
-                      ? 'No one else in your company yet'
-                      : 'Everyone is already added'
-                    : 'Add someone…'
-                }
-              />
-
+              {/* Participants are a PRIVATE thread's guest list — on a general
+                  thread there is nobody to pick: everyone who can open the
+                  report is in it already. Its own field with its own picker;
+                  the message box is plain text, nobody is added by typing. */}
               {isPrivate && (
-                <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: privateNeedsMentions ? '#B45309' : '#5A6080' }}>
-                  {privateNeedsMentions
-                    ? 'Add at least one participant — a private conversation needs someone in it.'
-                    : privateRoster(mentions.map((m) => m.full_name))}
-                </div>
+                <>
+                  <div style={SECTION_LABEL}>PARTICIPANTS</div>
+
+                  <MentionChips mentions={mentions} onMentionsChange={setMentions} />
+
+                  <MemberPicker
+                    options={addableMembers}
+                    onPick={(m) => {
+                      setMentions([...mentions, m]);
+                      if (formError) setFormError(null);
+                    }}
+                    label={
+                      addableMembers.length === 0
+                        ? mentions.length === 0
+                          ? 'No one else in your company yet'
+                          : 'Everyone is already added'
+                        : 'Add someone…'
+                    }
+                  />
+
+                  <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: privateNeedsMentions ? '#B45309' : '#5A6080' }}>
+                    {privateNeedsMentions
+                      ? 'Add at least one participant — a private conversation needs someone in it.'
+                      : privateRoster(mentions.map((m) => m.full_name))}
+                  </div>
+                </>
               )}
 
               <div style={{ ...SECTION_LABEL, marginTop: 20 }}>MESSAGE</div>

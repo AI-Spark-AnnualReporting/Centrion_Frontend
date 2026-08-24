@@ -1,5 +1,5 @@
 import type { ThreadReport } from '@/lib/api';
-import { statusPill } from '@/components/dashboard/report-status';
+import { statusPill, isInReview } from '@/components/dashboard/report-status';
 
 /* The report a review is about — linked, never copied.
 
@@ -64,7 +64,7 @@ export function AttachedReportCard({
           <span style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E' }}>{reportHeadline(report)}</span>
           {/* "In review" is what the thread itself already says — every other
               status (draft, approved, locked, published…) is news, so show it. */}
-          {report.status?.trim().toLowerCase() !== 'in_review' && (
+          {!isInReview(report.status) && (
             <span
               style={{
                 display: 'inline-flex',
