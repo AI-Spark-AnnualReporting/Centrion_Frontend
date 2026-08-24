@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useRememberStep, reachedStepNumber } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsOutlineSection, EarningsOutlineResponse } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
@@ -314,12 +315,13 @@ export default function EarningsOutlinePage() {
       // unchanged, and started no run. Go straight through — raising a loader to
       // wait for work that will not happen is the whole reason coming back to a
       // finished report felt slow.
-      if (!handle.run_id || !handle.poll_url) {
+      const started = startedRun(handle);
+      if (!started) {
         setSaving(false);
         navigate(`/earnings/${reportId}/preview`);
         return;
       }
-      setProduceRun(handle);
+      setProduceRun(started);
     } catch (err: unknown) {
       setSaveError(apiErrorMessage(err, "Couldn't start building the report."));
       setSaving(false);
@@ -331,7 +333,8 @@ export default function EarningsOutlinePage() {
   // Outline → Preview handoff uses. Takes over as soon as produce is kicked;
   // the outline UI underneath is irrelevant once we're here.
   if (produceRun) {
-    const phase = producePoll.phase === 'idle' ? 'running' : producePoll.phase;
+    // See EarningsPreviewPage: `idle` is "watching nothing", never "working".
+    const phase = producePoll.phase;
     if (phase === 'failed' || phase === 'timeout') {
       return (
         <GeneratingScreen

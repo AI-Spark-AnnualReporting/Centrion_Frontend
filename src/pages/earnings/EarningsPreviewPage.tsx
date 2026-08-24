@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRememberStep, reachedStepNumber } from './earnings-resume';
 import { earnings, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
@@ -319,11 +320,12 @@ export default function EarningsFiguresPage() {
       // over a poll that can never resolve is a wait with no end -- which is
       // exactly what it was, until somebody reloaded the page. Go straight on.
       // The Outline's Continue has always done this; this screen never learned it.
-      if (!handle.run_id || !handle.poll_url) {
+      const started = startedRun(handle);
+      if (!started) {
         navigate(`/earnings/${reportId}/report`);
         return;
       }
-      setProduceRun({ run_id: handle.run_id, poll_url: handle.poll_url });
+      setProduceRun(started);
     } catch (e) {
       setContinueError(
         e instanceof ApiError ? e.message : "Couldn't start generating. Try again in a moment.",
@@ -483,7 +485,9 @@ export default function EarningsFiguresPage() {
 
   // Producing takes over the page, the same handoff the outline used to own.
   if (produceRun) {
-    const phase = producePoll.phase === 'idle' ? 'running' : producePoll.phase;
+    // No idle-as-running here any more. `idle` means the hook is watching nothing,
+    // and painting that as progress is what made this screen wait forever.
+    const phase = producePoll.phase;
     if (phase === 'failed' || phase === 'timeout') {
       return (
         <GeneratingScreen

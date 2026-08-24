@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useRememberStep } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, agentRuns, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
@@ -246,11 +247,12 @@ export default function EarningsReportPage() {
       // Same null handle as above: no run was started because there was nothing to
       // start. Holding a generating state open for it would stall this screen the
       // way it stalled Preview.
-      if (!handle.run_id || !handle.poll_url) {
+      const started = startedRun(handle);
+      if (!started) {
         applyResponse(await earnings.getEarningsSections(reportId, true));
         return;
       }
-      setRunInfo(handle);
+      setRunInfo(started);
     } catch (err: unknown) {
       setError(apiErrorMessage(err, 'Could not start generation.'));
     }
