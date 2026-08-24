@@ -1,182 +1,144 @@
-import { useState, useEffect, useCallback } from 'react';
+// Step 3 — Figures.
+//
+// A user-metrics quarterly report is built from the company's own workbook, so
+// its lines carry the workbook's labels and nothing canonical. There is no
+// registry to match them against, and 933 of them is far too many to read.
+//
+// So the user says what they want in a section, in their own words, and the model
+// is asked FOR THAT SECTION with those words in the call. Nothing runs until they
+// ask — a section they never touch stays empty and costs nothing.
+//
+// The figures themselves render as a statement extract rather than a list: the
+// form these numbers take in the document they came from. See FigureLedger.
+
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
-import { earnings, agentRuns, ApiError } from '@/lib/api';
+import { useRememberStep, reachedStepNumber } from './earnings-resume';
+import { earnings, ApiError } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
-import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
-import { byDisplayOrder } from '@/components/quarterly/sectionState';
-import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
-import { isTableOfContentsSection } from './helpers';
-import { SectionRail } from '@/components/earnings/SectionRail';
-import { EditableProse } from '@/components/earnings/EditableProse';
-import { GenerateProgress } from '@/components/earnings/GenerateProgress';
-import { PublishBar } from '@/components/earnings/PublishBar';
+import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
 import { EarningsStepper } from '@/components/earnings/EarningsStepper';
-import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { FigureChecklist } from '@/components/earnings/FigureChecklist';
+import { FigureDialog } from '@/components/earnings/FigureDialog';
+import { FigureLedger } from '@/components/earnings/FigureLedger';
+import { ConsensusLedger } from '@/components/earnings/ConsensusLedger';
+import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
+import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
+import type { RailItem } from '@/components/earnings/PreviewRail';
+import { NarrativePane } from '@/components/earnings/NarrativePane';
+import { PreviewSkeleton } from '@/components/earnings/PreviewSkeleton';
+import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
+import { EditableProse } from '@/components/earnings/EditableProse';
+import { SectionRenderer } from '@/components/earnings/SectionRenderer';
+import { isNoDataPlaceholder, noDataMessage } from './preview-helpers';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
-import { INK, MUTED, FAINT, BRAND } from '@/components/earnings/tokens';
+import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
+import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
+import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
+import { GeneratingScreen } from '@/components/reports/GeneratingScreen';
+import { computeProgress } from '@/components/reports/QuarterlyGeneratingScreen';
 
-const POLL_INTERVAL_MS = 3000;
+const PRODUCE_MILESTONES = [
+  'Composing narrative sections',
+  'Filling the report tables',
+  'Applying your tone and voice',
+  'Checking every number against your figures',
+];
+const PRODUCE_TIPS = [
+  'Every number is read from the figures you chose — nothing is invented.',
+  'A section with no figures is left out rather than padded.',
+];
 
-// ApiError.message already carries the backend's `detail` (or a generic
-// message for 429/5xx infra failures) — read it rather than re-parsing
-// `err.body.detail` directly, which would bypass that sanitization.
-function apiErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message || fallback : fallback;
-}
-
-// Read an approve 409 blocker list defensively from the ApiError body.
-function readBlockers(body: unknown): EarningsApproveBlocker[] {
-  const rec = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-  const detail = rec.detail;
-  const arr: unknown[] = Array.isArray(rec.blockers)
-    ? (rec.blockers as unknown[])
-    : Array.isArray(detail)
-      ? (detail as unknown[])
-      : Array.isArray((detail as Record<string, unknown>)?.blockers)
-        ? ((detail as Record<string, unknown>).blockers as unknown[])
-        : [];
-  if (arr.length === 0) {
-    // A plain string detail becomes a single blocker.
-    if (typeof detail === 'string' && detail) return [{ section_code: null, message: detail }];
-    return [];
-  }
-  return arr
-    .map((b): EarningsApproveBlocker | null => {
-      if (typeof b === 'string') return { section_code: null, message: b };
-      if (b && typeof b === 'object') {
-        const o = b as Record<string, unknown>;
-        const msg = o.message ?? o.reason ?? o.detail;
-        if (typeof msg === 'string') {
-          return { section_code: typeof o.section_code === 'string' ? o.section_code : null, message: msg };
-        }
-      }
-      return null;
-    })
-    .filter((b): b is EarningsApproveBlocker => b !== null);
-}
-
-// A report is done-and-locked once it's reached any of these statuses — same
-// set the dashboard cards already use to decide "View" vs "Continue".
-const FINISHED_STATUSES = ['approved', 'locked', 'published', 'complete', 'completed'];
-
-export default function EarningsPreviewPage() {
+export default function EarningsFiguresPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // So reopening this report from the list comes back HERE, rather than to the
+  // middle of the flow — see earnings-resume.
+  useRememberStep(reportId, 'preview');
+  // How far the REPORT has got, so the stepper does not grey out a step this
+  // user has already been to — see earnings-resume.
+  const reached = reachedStepNumber(reportId, 3);
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const companyId = user?.company_id ?? null;
 
-  const [sections, setSections] = useState<EarningsProducedSection[]>([]);
-  const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
-  // GET /sections doesn't carry the report's true approval status at all
-  // (confirmed live — it returns only {report_id, sections}); `sectionsLocked`
-  // is kept in case a future backend response starts including it, but
-  // `reportStatus` (fetched separately below, from the one place status
-  // actually lives today) is the real source of truth.
-  const [sectionsLocked, setSectionsLocked] = useState(false);
-  const [reportStatus, setReportStatus] = useState<EarningsReportSummary | null>(null);
-  const locked = sectionsLocked || FINISHED_STATUSES.includes(reportStatus?.status ?? '');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
+  const [sections, setSections] = useState<EarningsFigureSection[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [sectionError, setSectionError] = useState<Record<string, string>>({});
+  // Which sections just landed, so the ledger staggers in once and not on every
+  // unrelated re-render.
+  // What the last ask actually added, so "it did nothing" is never the impression.
 
-  const [runInfo, setRunInfo] = useState<{ run_id: string; poll_url: string } | null>(null);
+  // The report's own line labels, used as the material for the reading state.
+
   const [activeCode, setActiveCode] = useState<string | null>(null);
-  const [approving, setApproving] = useState(false);
-  const [blockers, setBlockers] = useState<EarningsApproveBlocker[] | null>(null);
+  // Which section the analyser is reading, so its table can dim and take the
+  // band travelling down it.
+  const [analysing, setAnalysing] = useState<string | null>(null);
+  // The content column is its own scrollport now, so switching sections has to put
+  // it back to the top -- otherwise the next section opens halfway down.
+  const paneRef = useRef<HTMLDivElement | null>(null);
+
+  // Expectations the user has typed but not yet committed, keyed section -> figure
+  // -> value. They live here rather than going to the server as they are typed:
+  // a consensus table gets a dozen forecasts entered and half of them changed on
+  // the way, and none of it is meant until the user finalises the section. Held
+  // in state rather than a ref so the count can be shown -- an unsaved number
+  // that looks saved is the whole failure mode this replaces.
+  const [unsaved, setUnsaved] = useState<Record<string, Record<string, number | null>>>({});
+
+  const [picking, setPicking] = useState<EarningsFigureSection | null>(null);
+  const [pickLines, setPickLines] = useState<EarningsSourceLine[] | null>(null);
+  const [pickBusy, setPickBusy] = useState(false);
+
+  // The narrative half of the report. The figure-free ones were produced while
+  // the user watched the loading screen after the Outline, so most of these
+  // arrive already written.
+  const [produced, setProduced] = useState<EarningsProducedSection[]>([]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
+
+  const [produceRun, setProduceRun] = useState<{ run_id: string; poll_url: string } | null>(null);
+  const [continueError, setContinueError] = useState<string | null>(null);
 
   // ── Cover design + brand color (mirrors the quarterly picker) ──
+  const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [brand, setBrand] = useState<BrandColors | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coverApplying, setCoverApplying] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
-
-  const applyResponse = useCallback(
-    (res: { sections: EarningsProducedSection[]; cover_template_key: string | null; locked: boolean }) => {
-      // Table of Contents is dropped from the earnings UI entirely — never
-      // shown on Preview even if a report's backend data already has it.
-      const sorted = res.sections
-        .filter((s) => !isTableOfContentsSection(s.section_code))
-        .sort(byDisplayOrder);
-      setSections(sorted);
-      setCoverTemplateKey(res.cover_template_key);
-      setSectionsLocked(res.locked);
-      setActiveCode((cur) => cur ?? sorted[0]?.section_code ?? null);
-    },
-    [],
+  const { state: producePoll, restart: restartProduce } = usePipelinePoll(
+    produceRun?.run_id ?? null,
+    produceRun?.poll_url ?? null,
   );
 
-  // ── Load produced sections ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!reportId) {
-      setError('Missing report id.');
-      setLoading(false);
-      return;
+  const load = useCallback(async () => {
+    if (!reportId) return;
+    try {
+      const [res, prod] = await Promise.all([
+        earnings.getEarningsFigureSections(reportId),
+        // Never fatal on its own: a report whose narrative sections fail to load
+        // is still a report whose figures can be chosen.
+        earnings.getEarningsSections(reportId, true).catch(() => ({ sections: [] })),
+      ]);
+      setSections(res.sections);
+      setProduced(prod.sections ?? []);
+      if ('cover_template_key' in prod) setCoverTemplateKey(prod.cover_template_key ?? null);
+      setPrompts(Object.fromEntries(res.sections.map((s) => [s.section_code, s.prompt ?? ''])));
+      setActiveCode((prev) => prev ?? res.sections[0]?.section_code ?? null);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(
+        e instanceof ApiError ? e.message : "Couldn't load this report's sections. Try reloading.",
+      );
     }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    earnings
-      // included_only → the preview shows only the user's selected sections.
-      .getEarningsSections(reportId, true)
-      .then((res) => {
-        if (!cancelled) applyResponse(res);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(apiErrorMessage(err, 'Failed to load the report.'));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reportId, retryKey, applyResponse]);
+  }, [reportId]);
 
-  // ── Load the report's real status (approved/locked/etc.) ────────────────────
-  // Refetched on retryKey too, in case the same bump that reloads sections
-  // should also pick up an approval that just landed.
   useEffect(() => {
-    if (!reportId || !companyId) return;
-    let cancelled = false;
-    earnings
-      .getEarningsReportSummary(companyId, reportId)
-      .then((summary) => {
-        if (!cancelled) setReportStatus(summary);
-      })
-      .catch(() => {
-        /* status just won't upgrade past whatever sectionsLocked already says */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reportId, companyId, retryKey]);
-
-  // ── Poll while a produce run is active ──────────────────────────────────────
-  useEffect(() => {
-    if (!runInfo || !reportId) return;
-    let cancelled = false;
-    const tick = async () => {
-      const run = await agentRuns.getByPollUrl(runInfo.poll_url).catch(() => null);
-      const res = await earnings.getEarningsSections(reportId, true).catch(() => null);
-      if (cancelled) return;
-      if (res) applyResponse(res);
-      const status = run?.status;
-      if (status === 'completed' || status === 'failed') {
-        setRunInfo(null);
-        if (status === 'failed') setError('Generation failed. Please try again.');
-      }
-    };
-    const id = setInterval(tick, POLL_INTERVAL_MS);
-    void tick();
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [runInfo, reportId, applyResponse]);
+    void load();
+  }, [load]);
 
   // ── Load cover templates + palettes + the saved selection (pre-select) ──────
   useEffect(() => {
@@ -222,7 +184,7 @@ export default function EarningsPreviewPage() {
         setBrand(res?.brand ?? payload.brand);
         setPickerOpen(false);
       } catch (err: unknown) {
-        setCoverError(apiErrorMessage(err, 'Could not save the cover selection.'));
+        setCoverError(err instanceof ApiError ? err.message : 'Could not save the cover selection.');
       } finally {
         setCoverApplying(false);
       }
@@ -230,295 +192,851 @@ export default function EarningsPreviewPage() {
     [reportId],
   );
 
-  // ── Generate (produce all) ──────────────────────────────────────────────────
-  const handleGenerate = async () => {
+
+  // SectionAnalysis reads a produced section's content (to spot a table edited
+  // after the analysis was written) and its stored analysis. The figures screen
+  // carries neither, so it is stitched from the produced half.
+  const analysisSection = (s: EarningsFigureSection) => {
+    const p = produced.find((x) => x.section_code === s.section_code);
+    return {
+      section_code: s.section_code,
+      title: s.title,
+      content: p?.content ?? null,
+      analysis: p?.analysis ?? null,
+    } as never;
+  };
+
+  const replaceSection = (code: string, figures: EarningsFigureSection['figures']) =>
+    setSections((prev) =>
+      (prev ?? []).map((s) =>
+        s.section_code === code ? { ...s, figures, total: figures.length } : s,
+      ),
+    );
+
+  // A bookmark, not a lock -- it hides Edit and counts toward the footer tally.
+  //
+  // It is also the moment this section's typed expectations are written. One
+  // request, one moment: the user says the section is done and everything they
+  // entered goes in together. Optimistic on the flag, and if the write does not
+  // land the flag goes back AND the typed numbers are kept pending, so pressing
+  // it again sends them rather than having quietly dropped them.
+  const setFinalised = async (code: string, finalised: boolean) => {
     if (!reportId) return;
-    setError(null);
+    const pending = finalised ? unsaved[code] : undefined;
+    const apply = (v: boolean) =>
+      setSections((prev) =>
+        (prev ?? []).map((x) => (x.section_code === code ? { ...x, finalised: v } : x)),
+      );
+    apply(finalised);
+    setSectionError((p) => ({ ...p, [code]: '' }));
+    try {
+      await earnings.finaliseEarningsSectionFigures(
+        reportId, code, finalised,
+        pending && Object.keys(pending).length ? pending : undefined,
+      );
+      if (pending) setUnsaved((p) => ({ ...p, [code]: {} }));
+    } catch (e) {
+      apply(!finalised);
+      setSectionError((p) => ({
+        ...p,
+        [code]: e instanceof ApiError
+          ? `That didn't save — ${e.message}. Your figures are still here; try again.`
+          : "That didn't save. Check your connection and try again — your figures are still here.",
+      }));
+    }
+  };
+
+  // Local only. Typing a forecast changes the table and nothing else -- the
+  // verdict updates as you type, and the numbers go to the server in one write
+  // when the section is finalised. Nothing here can fail, so nothing here can
+  // take a number back off the screen after showing it.
+  const setExpected = (
+    section: EarningsFigureSection,
+    figureId: string,
+    expected: number | null,
+  ) => {
+    replaceSection(
+      section.section_code,
+      section.figures.map((f) =>
+        f.id === figureId ? { ...f, expected_value: expected } : f,
+      ),
+    );
+    // Exactly what the user touched, so finalising writes their edits and
+    // leaves every other row alone.
+    setUnsaved((p) => ({
+      ...p,
+      [section.section_code]: { ...(p[section.section_code] ?? {}), [figureId]: expected },
+    }));
+  };
+
+  const removeFigure = async (section: EarningsFigureSection, figureId: string) => {
+    if (!reportId) return;
+    const before = section.figures;
+    const keep = before.filter((f) => f.id !== figureId);
+    replaceSection(section.section_code, keep);
+    try {
+      const res = await earnings.setSectionFigures(
+        reportId,
+        section.section_code,
+        keep.map((f) => f.id),
+      );
+      replaceSection(section.section_code, res.figures);
+    } catch {
+      replaceSection(section.section_code, before); // put it back rather than lie
+    }
+  };
+
+  const openPicker = async (section: EarningsFigureSection) => {
+    if (!reportId) return;
+    setPicking(section);
+    setPickLines(null);
+    try {
+      const res = await earnings.getEarningsSourceLines(reportId, section.section_code);
+      setPickLines(res.lines);
+    } catch {
+      setPickLines([]);
+    }
+  };
+
+  const savePicked = async (lineIds: string[]) => {
+    if (!reportId || !picking) return;
+    setPickBusy(true);
+    try {
+      const res = await earnings.setSectionFigures(reportId, picking.section_code, lineIds);
+      replaceSection(picking.section_code, res.figures);
+      setPicking(null);
+    } finally {
+      setPickBusy(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!reportId) return;
+    setContinueError(null);
     try {
       const handle = await earnings.produceEarningsReport(reportId);
-      setRunInfo(handle);
-    } catch (err: unknown) {
-      setError(apiErrorMessage(err, 'Could not start generation.'));
+      // Nothing to build: every section is already produced and unchanged, so the
+      // server started no run and says so with a null handle. Raising the loader
+      // over a poll that can never resolve is a wait with no end -- which is
+      // exactly what it was, until somebody reloaded the page. Go straight on.
+      // The Outline's Continue has always done this; this screen never learned it.
+      const started = startedRun(handle);
+      if (!started) {
+        navigate(`/earnings/${reportId}/report`);
+        return;
+      }
+      setProduceRun(started);
+    } catch (e) {
+      setContinueError(
+        e instanceof ApiError ? e.message : "Couldn't start generating. Try again in a moment.",
+      );
     }
   };
 
-  // ── Inline edit (optimistic + rollback) ─────────────────────────────────────
-  const handleSaveSection = useCallback(
-    async (code: string, content: string) => {
-      if (!reportId) return;
-      const prev = sections.find((s) => s.section_code === code) ?? null;
-      setSections((list) =>
-        list.map((s) => (s.section_code === code ? { ...s, content, edited: true } : s)),
-      );
-      try {
-        const updated = await earnings.patchEarningsSectionContent(reportId, code, { content });
-        // Preserve client-only inclusion; take the server's authoritative content + flags.
-        setSections((list) =>
-          list.map((s) => (s.section_code === code ? { ...updated, included: s.included, edited: true } : s)),
-        );
-      } catch (err) {
-        setSections((list) => list.map((s) => (s.section_code === code && prev ? prev : s)));
-        throw err;
-      }
-    },
-    [reportId, sections],
+  // Every section, financial and narrative, in report order. The rail reads this;
+  // the pane below renders whichever one is active.
+  const narrative = useMemo(
+    () =>
+      produced.filter(
+        (p) =>
+          p.mode !== 'table' &&
+          p.mode !== 'kpi' &&
+          p.section_code !== 's01_cover' &&
+          p.section_code !== 's02_toc',
+      ),
+    [produced],
   );
 
-  // ── Needs-input: save the user's text (typed or extracted-then-edited) ──────
-  // Reuses the section-produce route with user_input — the backend turns it
-  // into real, mode-appropriate content and updates the section's feeder.
-  // Confirmed live: this response is minimal (section_code/status/content/
-  // error only) — no title/mode/source_type — so only the fields it actually
-  // carries are merged in; everything else (title, mode, …) keeps its prior,
-  // known-good value instead of being overwritten with the normalizer's
-  // code-as-title fallback.
-  const handleSaveSectionInput = useCallback(
-    async (code: string, text: string) => {
-      if (!reportId) return;
-      const updated = await earnings.produceEarningsSection(reportId, code, { user_input: text });
-      setSections((list) =>
-        list.map((s) =>
-          s.section_code === code
+  // Figures are filed here, but the section never became content -- so it will
+  // not appear on the Report screen or in the exported file. Read from `produced`,
+  // which this page already loads; no extra request.
+  const isStalled = useCallback(
+    (code: string, total: number) => {
+      if (total <= 0) return false;   // nothing filed yet is the ordinary not-done
+      const p = produced.find((x) => x.section_code === code);
+      if (!p) return true;
+      if (p.status === 'needs_input' || p.status === 'empty') return true;
+      return !(p.content || '').trim();
+    },
+    [produced],
+  );
+
+  const railItems: RailItem[] = useMemo(() => {
+    const fin: RailItem[] = (sections ?? []).map((s) => ({
+      code: s.section_code,
+      title: s.title,
+      kind: 'financial',
+      figures: s.total,
+      stalled: isStalled(s.section_code, s.total),
+    }));
+    const nar: RailItem[] = narrative.map((p) => ({
+      code: p.section_code,
+      title: p.title || p.section_code,
+      kind: 'narrative',
+      // Three states, not two: written, un-run, and ran-and-found-nothing. The
+      // last used to be folded into un-run, which is why a finished section sat
+      // here saying "not run" with a Run button that changed nothing.
+      written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
+      noData: noDataMessage(p) !== null,
+    }));
+    return [...fin, ...nar];
+  }, [sections, narrative, isStalled]);
+
+  // What a figure-grounded section is waiting on, named so the user can go and do
+  // it rather than being told no.
+  const emptySections = useMemo(
+    () =>
+      (sections ?? [])
+        .filter((s) => s.total === 0)
+        .map((s) => ({ section_code: s.section_code, title: s.title })),
+    [sections],
+  );
+
+  const activeNarrative = useMemo(
+    () => narrative.find((p) => p.section_code === activeCode) ?? null,
+    [narrative, activeCode],
+  );
+
+  // Editing a produced section in place. Optimistic, because it is the user's own
+  // words going back on their own screen.
+  // Accept a section's ungrounded numbers as they stand. Mirrors the Report
+  // screen's handler — acknowledging IS a save that re-sends the same content
+  // with the flag set, which is the only thing that clears the approve blocker.
+  const acknowledgeNarrative = async (code: string) => {
+    if (!reportId) return;
+    const prior = produced.find((p) => p.section_code === code) ?? null;
+    if (!prior) return;
+    setProduced((list) =>
+      list.map((p) => (p.section_code === code ? { ...p, grounding_acknowledged: true } : p)),
+    );
+    try {
+      await earnings.patchEarningsSectionContent(reportId, code, {
+        content: prior.content ?? '',
+        acknowledge: true,
+      });
+    } catch {
+      setProduced((list) => list.map((p) => (p.section_code === code ? prior : p)));
+    }
+  };
+
+  const saveNarrative = async (code: string, content: string) => {
+    if (!reportId) return;
+    setProduced((prev) =>
+      prev.map((p) => (p.section_code === code ? { ...p, content } : p)),
+    );
+    try {
+      // The response carries the grounding verdict on what was just saved, and
+      // this used to throw it away — so an edit that introduced an ungrounded
+      // number said nothing here, and the user first met it as a 409 on Approve
+      // two screens later. The refine path already reads it; this now matches.
+      const patch = await earnings.patchEarningsSectionContent(reportId, code, { content });
+      setProduced((prev) =>
+        prev.map((p) =>
+          p.section_code === code
             ? {
-                ...s,
-                content: updated.content,
-                status: updated.status,
-                feeder_status: updated.feeder_status,
-                feeder_message: updated.feeder_message,
-                source_label: updated.source_label,
-                source_ref: updated.source_ref,
-                confidence: updated.confidence,
-                flag: updated.flag,
-                edited: true,
+                ...p,
+                grounding_flag: (patch.grounding_violations ?? []).join(', ') || null,
+                grounding_acknowledged: false,
               }
-            : s,
+            : p,
         ),
       );
-    },
-    [reportId],
-  );
+    } catch (e) {
+      setRunErrors((p) => ({
+        ...p,
+        [code]:
+          e instanceof ApiError ? e.message : "That edit didn't save. Try again.",
+      }));
+    }
+  };
 
-  // Extract text from an uploaded file to prefill the needs-input textarea —
-  // never touches section state itself; the form owns the draft until Save.
-  const handleExtractSectionInput = useCallback(
-    (code: string, file: File) => {
-      if (!reportId) return Promise.reject(new Error('Missing report id.'));
-      return earnings.extractSectionInput(reportId, code, file);
-    },
-    [reportId],
-  );
-
-  const acknowledgeFlag = useCallback((code: string) => {
-    setSections((list) =>
-      list.map((s) => (s.section_code === code ? { ...s, grounding_acknowledged: true } : s)),
-    );
-  }, []);
-
-  // ── Export ──────────────────────────────────────────────────────────────────
-  const handleExport = useCallback(
-    async (format: EarningsExportFormat) => {
-      if (!reportId) return;
-      await earnings.downloadEarningsExport(reportId, format);
-    },
-    [reportId],
-  );
-
-  // ── Approve & lock ──────────────────────────────────────────────────────────
-  const handleApprove = async () => {
+  // Have the model re-word a section the user is looking at. Deliberately does
+  // not catch: SectionRefineChat shows the rejection in its own banner and keeps
+  // what the user typed, which is more useful than a message in the run-error row.
+  //
+  // Merges only the three fields the response actually carries. Spreading the
+  // whole thing is what makes Regenerate blank the badge and the title -- the
+  // narrow endpoint has no mode/source_type to give, so the normaliser would
+  // invent them.
+  const refineNarrative = async (code: string, instruction: string) => {
     if (!reportId) return;
-    // Client-side gate: an unacknowledged grounding flag blocks approval.
-    const flagged = sections.filter((s) => s.grounding_flag && !s.grounding_acknowledged);
-    if (flagged.length > 0) {
-      setBlockers(
-        flagged.map((s) => ({
-          section_code: s.section_code,
-          message: `${s.title} has an unacknowledged figure flag`,
-        })),
-      );
-      return;
-    }
-    setApproving(true);
-    setBlockers(null);
-    setError(null);
+    const res = await earnings.refineEarningsSection(reportId, code, instruction);
+    setProduced((prev) =>
+      prev.map((p) =>
+        p.section_code === code
+          ? {
+              ...p,
+              content: res.content,
+              status: res.status as typeof p.status,
+              grounding_flag: res.grounding_violations[0] ?? p.grounding_flag,
+            }
+          : p,
+      ),
+    );
+  };
+
+  const runSection = async (code: string, regenerate: boolean) => {
+    if (!reportId) return;
+    setRunning(code);
+    setRunErrors((p) => ({ ...p, [code]: '' }));
     try {
-      await earnings.approveEarningsReport(reportId);
-      setSectionsLocked(true);
-    } catch (err: unknown) {
-      if (err instanceof ApiError && err.status === 409) {
-        const list = readBlockers(err.body);
-        setBlockers(list.length ? list : [{ section_code: null, message: 'This report cannot be approved yet.' }]);
-      } else {
-        setError(apiErrorMessage(err, 'Failed to approve the report.'));
+      const sec = await earnings.runEarningsSection(reportId, code, regenerate);
+      setProduced((prev) =>
+        prev.map((p) => (p.section_code === code ? { ...p, ...sec } : p)),
+      );
+      // A section can come back with no usable content -- the backend rejects
+      // prose carrying a number that is not among the figures. That is not an
+      // error to apologise for, it is a reason, so say it and leave Run there.
+      if (!(sec.content || '').trim()) {
+        setRunErrors((p) => ({
+          ...p,
+          [code]:
+            (sec as { error?: string }).error ||
+            'It came back empty. Adding figures to the sections above usually fixes it.',
+        }));
       }
+    } catch (e) {
+      setRunErrors((p) => ({
+        ...p,
+        [code]:
+          e instanceof ApiError
+            ? e.message
+            : "That didn't reach the server. Check your connection and try again.",
+      }));
     } finally {
-      setApproving(false);
+      setRunning(null);
     }
   };
 
-  const selectSection = (code: string) => {
-    setActiveCode(code);
-    document.getElementById(`earnings-sec-${code}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  useEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = 0;
+  }, [activeCode]);
 
-  // ── Loading / error ─────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div>
-        <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
-        <div className="card" style={{ padding: 0 }}>
-          <Spinner pad={80} />
-        </div>
-      </div>
-    );
-  }
 
-  if (error && sections.length === 0) {
-    return (
-      <div>
-        <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
-        <div
-          className="card"
-          role="alert"
-          style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
-        >
-          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
-          <button className="btn bs bsm" onClick={() => setRetryKey((k) => k + 1)}>
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Sections that vanish entirely when omitted by design (quote/trend) — no
-  // card, no rail entry, no gating on a section that will never produce
-  // content. Returning null from the leaf renderer alone isn't enough; the
-  // outer numbered card would still render around an empty body.
-  const visibleSections = sections.filter(
-    (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
+  const emptyCount = useMemo(
+    () => (sections ?? []).filter((s) => s.total === 0).length,
+    [sections],
   );
-  const included = visibleSections.filter((s) => s.included);
-  // "Has this report been generated at all" — not "is every section fully
-  // produced". Once real content exists anywhere (excluding the cover, which
-  // is template-driven and doesn't indicate the narrative pipeline ran), the
-  // report counts as generated and the banner never comes back, even if an
-  // individual section is still gap-flagged (needs_input) or its status field
-  // was reset by the outline-save bug (content-first via earningsSectionState,
-  // so real content still reads 'produced' regardless of that corruption).
-  // Per-section gaps stay visible inline on each section, just not as a
-  // blanket "generate everything" prompt.
-  const substantiveIncluded = included.filter((s) => !isCoverMode(s));
-  const needsGenerate =
-    substantiveIncluded.length > 0 && !substantiveIncluded.some((s) => earningsSectionState(s) === 'produced');
-  const generating = runInfo !== null;
+
+  // Producing takes over the page, the same handoff the outline used to own.
+  if (produceRun) {
+    // No idle-as-running here any more. `idle` means the hook is watching nothing,
+    // and painting that as progress is what made this screen wait forever.
+    const phase = producePoll.phase;
+    if (phase === 'failed' || phase === 'timeout') {
+      return (
+        <GeneratingScreen
+          phase={phase}
+          errorMessage={phase === 'failed' ? producePoll.run?.error_message ?? null : null}
+          onCancel={() => setProduceRun(null)}
+          onRetry={() => {
+            setProduceRun(null);
+            void handleContinue();
+          }}
+          onKeepWaiting={restartProduce}
+        />
+      );
+    }
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 1400 }}>
+        <AiLoadingScreen
+          title="Composing your report"
+          subtitle="Writing each section from the figures you chose."
+          milestones={PRODUCE_MILESTONES}
+          tips={PRODUCE_TIPS}
+          controlledProgress={computeProgress(
+            phase === 'completed' ? 'completed' : 'running',
+            producePoll.nodes,
+          )}
+          done={phase === 'completed'}
+          onDone={() => navigate(`/earnings/${reportId}/report`)}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <EarningsStepper activeStep={4} reportId={reportId} locked={locked} />
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: '0 0 4px' }}>
-          Preview your earnings report
-        </h1>
-        <p style={{ margin: 0, fontSize: 12, color: MUTED, maxWidth: 620 }}>
-          This is the assembled report, generated from your extracted data. Edit any section inline,
-          then export or approve.
-        </p>
-      </div>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+      }}
+    >
+      <EarningsStepper activeStep={3} reportId={reportId} reachedStep={reached} />
 
-      {error && sections.length > 0 && (
-        <div className="card" role="alert" style={{ padding: '12px 16px', marginBottom: 14 }}>
-          <span style={{ fontSize: 12.5, color: '#DC2626' }}>{error}</span>
+      <header style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 800, color: INK, margin: 0, letterSpacing: '-.3px' }}>
+          Report preview
+        </h1>
+        <p style={{ fontSize: 12, color: MUTED, margin: '4px 0 0' }}>
+          Pick a section on the left. Tell the financial ones what belongs in them; read and
+          edit the written ones.
+        </p>
+      </header>
+
+      {loadError && (
+        <div
+          role="alert"
+          style={{ color: DANGER, fontSize: 13, fontWeight: 700, marginBottom: 14 }}
+        >
+          {loadError}
         </div>
       )}
 
-      {visibleSections.length === 0 ? (
-        <div
-          className="card"
-          style={{ padding: '40px 20px', textAlign: 'center', color: MUTED, fontSize: 13 }}
-        >
-          No sections to preview yet.
-          <div style={{ marginTop: 16 }}>
-            <button className="btn bs" onClick={() => navigate(`/earnings/${reportId}/outline`)}>
-              ← Back to outline
-            </button>
+      {sections === null ? (
+        // A load that failed has already said so above; a skeleton underneath it
+        // would claim something is still coming.
+        loadError ? null : <PreviewSkeleton />
+      ) : sections.length === 0 ? (
+        // Reachable only by unticking every section that carries figures. It is a
+        // choice, not a fault, so it says what is true and offers the way back
+        // rather than looking like a screen that failed to load.
+        <div className="card" style={{ padding: '44px 28px', textAlign: 'center' }}>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: INK }}>
+            No sections to fill in
           </div>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '200px minmax(0, 1fr) 290px', gap: 18, alignItems: 'start' }}>
-          {/* Left — section rail */}
-          <SectionRail sections={visibleSections} activeCode={activeCode} onSelect={selectSection} />
-
-          {/* Center — generate state or the assembled document. The chosen brand
-              color drives report-content accents (cover, headings) via
-              --brand-primary; product-UI chrome stays indigo. */}
-          <div
+          <p
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 16,
-              minWidth: 0,
-              ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
-              ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+              fontSize: 13,
+              color: MUTED,
+              lineHeight: 1.6,
+              margin: '8px auto 18px',
+              maxWidth: 420,
             }}
           >
-            {generating ? (
-              <GenerateProgress sections={sections} />
-            ) : (
-              <>
-                {needsGenerate && (
-                  <div
-                    className="card"
-                    style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
-                  >
-                    <span style={{ fontSize: 13, color: INK }}>
-                      Some sections aren't produced yet. Generate the report to assemble them.
-                    </span>
-                    <button className="btn bp" onClick={handleGenerate}>
-                      Generate report
+            Your report has no sections that carry figures. Add one on the Outline and
+            it will appear here.
+          </p>
+          <button
+            type="button"
+            className="btn bp"
+            onClick={() => navigate(`/earnings/${reportId}/outline`)}
+          >
+            Choose sections
+          </button>
+        </div>
+      ) : (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'grid',
+            gridTemplateColumns: '280px 1fr',
+            gap: 16,
+            padding: '0 28px 16px',
+            alignItems: 'stretch',
+          }}
+        >
+            <PreviewRail
+              items={railItems}
+              activeCode={activeCode}
+              onSelect={setActiveCode}
+            />
+
+          {/* Its own scrollport, so choosing a section never moves the rail or the
+              footer. */}
+          <div
+            ref={paneRef}
+            style={{
+              minWidth: 0,
+              minHeight: 0,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            {activeCode === COVER_CODE && (() => {
+              const coverSection = produced.find((p) => p.section_code === 's01_cover') ?? null;
+              return (
+                <section
+                  className="card"
+                  style={{
+                    padding: '24px 28px',
+                    ['--brand-primary' as string]: brand?.primary ?? '#4040C8',
+                    ['--brand-secondary' as string]: brand?.secondary ?? '#4040C8',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+                    <h2 style={{ fontSize: 18, fontWeight: 800, color: INK, margin: 0 }}>
+                      Cover &amp; colours
+                    </h2>
+                    <button type="button" className="btn bp bsm" onClick={() => setPickerOpen(true)}>
+                      Choose cover design &amp; colors
                     </button>
                   </div>
-                )}
-                {visibleSections.map((s, i) => (
-                  <div key={s.section_code} id={`earnings-sec-${s.section_code}`} className="card" style={{ padding: '18px 22px' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: FAINT, fontVariantNumeric: 'tabular-nums' }}>
-                        {String(i + 1).padStart(2, '0')}
-                      </span>
-                      <h2 style={{ fontSize: 16, fontWeight: 800, color: BRAND, margin: 0 }}>{s.title}</h2>
-                    </div>
-                    <EditableProse
-                      section={s}
-                      coverTemplateKey={coverTemplateKey}
-                      locked={locked}
-                      onSave={(content) => handleSaveSection(s.section_code, content)}
-                      onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
-                      onExtractInput={(file) => handleExtractSectionInput(s.section_code, file)}
-                      onAcknowledgeFlag={() => acknowledgeFlag(s.section_code)}
-                    />
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
+                  {coverSection ? (
+                    <SectionRenderer section={coverSection} coverTemplateKey={coverTemplateKey} />
+                  ) : (
+                    <p style={{ fontSize: 12.5, color: MUTED, lineHeight: 1.6, margin: 0, maxWidth: 520 }}>
+                      The cover hasn't been produced yet — it will show here once the report is
+                      generated. You can still pick a design and colours now.
+                    </p>
+                  )}
+                </section>
+              );
+            })()}
 
-          {/* Right — publish bar, then the review/share panel below so
-              "Share for review" is the bottom-most action (in place of the
-              hidden Approve & lock). The 4-state review status radios are hidden
-              here; the Publish bar's status chip is the single source of truth. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <PublishBar
-              locked={locked}
-              approvedAt={reportStatus?.approved_at ?? null}
-              blockers={blockers}
-              approving={approving}
-              onApprove={handleApprove}
-              onExport={handleExport}
-              onOpenCoverPicker={() => setPickerOpen(true)}
-              showApprove={false}
-            />
-            {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
+            {activeNarrative && (() => {
+              // The "nothing found" sentence is no longer blanked here —
+              // NarrativePane states it as the finding it is, and the Report
+              // screen still drops the section entirely (isHiddenWhenOmitted),
+              // so it never reaches a published release. Blanking it on Preview
+              // made a finished section read as un-run.
+              //
+              // The exported PDF/DOCX still prints the sentence: export renders
+              // server-side from the same `content` field, out of reach from
+              // here — see .claude/specs/Earnings/NoDataPlaceholder(Backend).md.
+              const displayNarrative = activeNarrative;
+              return (
+                <section className="card" style={{ padding: '18px 22px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                    <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>
+                      {activeNarrative.title || activeNarrative.section_code}
+                    </h2>
+                    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: FAINT }}>
+                      {activeNarrative.source_type ?? 'Written'}
+                    </span>
+                  </div>
+                  <NarrativePane
+                    section={displayNarrative}
+                    emptySections={emptySections}
+                    running={running === activeNarrative.section_code}
+                    runError={runErrors[activeNarrative.section_code] || null}
+                    onRun={(regen) => void runSection(activeNarrative.section_code, regen)}
+                    onJumpTo={setActiveCode}
+                  >
+                    <EditableProse
+                      section={displayNarrative}
+                      coverTemplateKey={null}
+                      locked={false}
+                      onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
+                      // Without this the banner rendered with no way to act on it:
+                      // the one screen that surfaced the flag offered only text.
+                      onAcknowledgeFlag={() => void acknowledgeNarrative(activeNarrative.section_code)}
+                    />
+                  </NarrativePane>
+                  {/* Only over prose that exists. A section still showing "Run this
+                      section" has nothing to refine, and offering the box there
+                      would read as a second way to write it. Gated on
+                      displayNarrative, not activeNarrative, so a no-data
+                      placeholder counts as empty here exactly as it does above. */}
+                  {!!(displayNarrative.content || '').trim() && (
+                    <SectionRefineChat
+                      key={activeNarrative.section_code}
+                      onSend={(instruction) =>
+                        refineNarrative(activeNarrative.section_code, instruction)
+                      }
+                    />
+                  )}
+                </section>
+              );
+            })()}
+
+            {(sections ?? []).filter((s) => s.section_code === activeCode).map((s) => {
+              const finalised = !!s.finalised;
+              const pendingCount = Object.keys(unsaved[s.section_code] ?? {}).length;
+              return (
+                <section
+                  key={s.section_code}
+                  className="card"
+                  style={{ padding: '24px 28px' }}
+                >
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <h2
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 800,
+                        color: INK,
+                        margin: 0,
+                        letterSpacing: '-.1px',
+                      }}
+                    >
+                      {s.title}
+                    </h2>
+                    {s.total > 0 ? (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          padding: '2px 9px',
+                          borderRadius: 20,
+                          background: '#EEEEFF',
+                          color: ACCENT,
+                          fontFamily: "'DM Mono', monospace",
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {s.total}
+                      </span>
+                    ) : (
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: FAINT }}>
+                        Tell us what belongs here
+                      </span>
+                    )}
+                  </div>
+
+                  {isStalled(s.section_code, s.total) && (
+                    // The figures are here and the section still is not in the
+                    // report. Said plainly, because the alternative is what
+                    // happened: a green tick on the left, thirty-one rows on the
+                    // right, and nothing in the exported file.
+                    <div
+                      role="status"
+                      style={{
+                        marginBottom: 14,
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        background: 'rgba(245,158,11,.08)',
+                        border: '1px solid rgba(245,158,11,.22)',
+                        fontSize: 12.5,
+                        color: '#B45309',
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      These figures have not been built into the report yet, so this
+                      section will not appear in it. Press Continue to build it.
+                    </div>
+                  )}
+
+                  {(prompts[s.section_code] || '').trim() && (
+                    // What was asked for, on the Outline. Read-only here: this
+                    // screen curates what came back, it does not re-ask.
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: MUTED,
+                        fontStyle: 'italic',
+                        marginTop: 2,
+                      }}
+                    >
+                      “{prompts[s.section_code]}”
+                    </div>
+                  )}
+
+                  {sectionError[s.section_code] && (
+                    <div
+                      role="alert"
+                      style={{
+                        fontSize: 12,
+                        color: DANGER,
+                        fontWeight: 700,
+                        marginTop: 10,
+                      }}
+                    >
+                      {sectionError[s.section_code]}
+                    </div>
+                  )}
+
+                  {/* The band travels over the table while the analyser reads it,
+                      so it wraps the content and sits OUTSIDE any scroller of the
+                      table's own, which would clip a vertically-moving band. */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      overflow: analysing === s.section_code ? 'hidden' : undefined,
+                    }}
+                  >
+                    <div
+                      className={
+                        analysing === s.section_code ? 'analysis-reading' : undefined
+                      }
+                    >
+                      {s.section_code === 's12_consensus' ? (
+                        // The beat/miss section: what landed against what was
+                        // expected. Its own table because it asks a question of
+                        // every row rather than just reporting one.
+                        <ConsensusLedger
+                          figures={s.figures}
+                          onSetExpected={(id, v) => setExpected(s, id, v)}
+                          onRemove={(id) => void removeFigure(s, id)}
+                        />
+                      ) : (
+                        <FigureLedger
+                          figures={s.figures}
+                          onRemove={(id) => void removeFigure(s, id)}
+                          animate={false}
+                        />
+                      )}
+                    </div>
+                    {analysing === s.section_code && <ReadingBand />}
+                  </div>
+
+                  {/* Two actions, and they are different things. Edit opens the
+                      full tick-list -- which is what "Add figure" always actually
+                      did. Finalise is a bookmark: it hides Edit and counts toward
+                      the tally, and locks nothing. */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      gap: 9,
+                      marginTop: 16,
+                    }}
+                  >
+                    {finalised ? (
+                      <>
+                        {/* Where a line of green text saying "finalised" used to
+                            sit. Once the figures are settled the useful next thing
+                            is the commentary that goes under them. */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <SectionAnalysis
+                            // Remounts on every rail switch, deliberately: it is
+                            // what stops one section's in-flight request and open
+                            // dialog leaking onto the next.
+                            key={s.section_code}
+                            companyId=""
+                            reportId={reportId ?? ''}
+                            section={analysisSection(s)}
+                            analyse={(code, opts) =>
+                              earnings.analyseEarningsSection(
+                                reportId ?? '', code, opts) as Promise<never>
+                            }
+                            saveAnalysis={(code, text) =>
+                              earnings.saveEarningsSectionAnalysis(
+                                reportId ?? '', code, text) as Promise<never>
+                            }
+                            onBusyChange={(busy) =>
+                              setAnalysing(busy ? s.section_code : null)
+                            }
+                            // A remount re-seeds from section.analysis, so a fresh
+                            // result has to land HERE. Without this, analysing a
+                            // section and switching away threw the analysis away
+                            // until a reload -- it was written and stored, and the
+                            // screen just stopped knowing about it.
+                            onAnalysis={(a) =>
+                              setProduced((prev) =>
+                                prev.some((x) => x.section_code === s.section_code)
+                                  ? prev.map((x) =>
+                                      x.section_code === s.section_code
+                                        ? ({ ...x, analysis: a } as typeof x)
+                                        : x,
+                                    )
+                                  : // A section with no produced row yet still has
+                                    // somewhere to keep its analysis, or mapping over
+                                    // a list that does not contain it would drop the
+                                    // result on the floor exactly as before.
+                                    [
+                                      ...prev,
+                                      {
+                                        section_code: s.section_code,
+                                        title: s.title,
+                                        analysis: a,
+                                      } as unknown as (typeof prev)[number],
+                                    ],
+                              )
+                            }
+                          />
+                        </div>
+                        {/* A one-way door with no lock behind it would only be a
+                            nuisance the first time somebody spots a mistake. */}
+                        <button
+                          type="button"
+                          className="btn bs bsm"
+                          onClick={() => void setFinalised(s.section_code, false)}
+                        >
+                          Change
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {/* Typed expectations are not stored until this button is
+                            pressed, so the screen has to say so. Silence here is
+                            what turns "I typed it" into "it was saved". */}
+                        {pendingCount > 0 && (
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: MUTED }}>
+                            {pendingCount} expectation{pendingCount === 1 ? '' : 's'} typed —
+                            finalise to save {pendingCount === 1 ? 'it' : 'them'}.
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn bs bsm"
+                          onClick={() => void openPicker(s)}
+                        >
+                          Add figures
+                        </button>
+                        <button
+                          type="button"
+                          className="btn bp bsm"
+                          onClick={() => void setFinalised(s.section_code, true)}
+                        >
+                          Finalise figures
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
           </div>
         </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 14,
+          flexShrink: 0,
+          background: '#fff',
+          borderTop: `1px solid ${BORDER_SOFT}`,
+          padding: '12px 28px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <button
+          type="button"
+          className="btn bs"
+          onClick={() => navigate(`/earnings/${reportId}/outline`)}
+        >
+          ← Back
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {(sections ?? []).length > 0 && (
+            <span style={{ fontSize: 12, color: MUTED }}>
+              {(sections ?? []).filter((x) => x.finalised).length} of{' '}
+              {(sections ?? []).length} sections finalised
+            </span>
+          )}
+          {continueError && (
+            <span role="alert" style={{ fontSize: 12, color: DANGER, fontWeight: 700 }}>
+              {continueError}
+            </span>
+          )}
+          <button type="button" className="btn bp" onClick={() => void handleContinue()}>
+            Continue →
+          </button>
+        </div>
+      </div>
+
+      {picking && (
+        <FigureDialog title={`Add a figure to ${picking.title}`} onClose={() => setPicking(null)}>
+          {pickLines === null ? (
+            <div style={{ padding: 60, textAlign: 'center' }}>
+              <Spinner />
+            </div>
+          ) : (
+            <FigureChecklist
+              lines={pickLines}
+              sectionTitle={picking.title}
+              busy={pickBusy}
+              onSave={savePicked}
+            />
+          )}
+        </FigureDialog>
       )}
 
       {pickerOpen && (

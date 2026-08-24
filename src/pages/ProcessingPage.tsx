@@ -6,7 +6,7 @@ import {
   saveActivePipeline,
 } from "@/lib/active-pipeline";
 import { reports as reportsApi, quarterlyReports, ApiError } from "@/lib/api";
-import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
+import { GeneratingScreen, type GeneratingPhase } from "@/components/reports/GeneratingScreen";
 import {
   QuarterlyGeneratingScreen,
   computeProgress,
@@ -143,6 +143,10 @@ export interface ProcessingPageState {
   };
 }
 
+// Long enough for a real outline save + lock + produce kick on a slow connection,
+// short enough that nobody sits watching a bar that will never move.
+const BOOTSTRAP_DEADLINE_MS = 45_000;
+
 export default function ProcessingPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -163,6 +167,20 @@ export default function ProcessingPage() {
   // Tells a "already locked" 409 apart from a "your save was rejected" 409.
   const lockAttempted = useRef(false);
   const [bootError, setBootError] = useState<string | null>(null);
+
+  // Bootstrap has to actually produce a run to poll. If it never does -- the effect
+  // below returns early on a missing companyId/reportId, and has no other way to
+  // report that -- nothing further happens: no url, so the poll hook never starts,
+  // so none of its timeouts exist, and the loader stays up until the tab is closed.
+  // Give that window an end.
+  useEffect(() => {
+    if (!state?.bootstrap || pollUrl || bootError) return;
+    const id = window.setTimeout(
+      () => setBootError("Generation did not start"),
+      BOOTSTRAP_DEADLINE_MS,
+    );
+    return () => window.clearTimeout(id);
+  }, [state?.bootstrap, pollUrl, bootError]);
   useEffect(() => {
     const boot = state?.bootstrap;
     if (!boot || !state?.companyId || !state?.reportId) return;
@@ -389,7 +407,14 @@ export default function ProcessingPage() {
     );
   }
 
-  const phase = poll.phase === "idle" ? "running" : poll.phase;
+  // Still "running" while bootstrapping, and only then. A bootstrapping run has no
+  // pollUrl yet by design -- the loader goes up first, on purpose, because locking
+  // the outline takes seconds -- so `idle` here is legitimate. Everywhere else it
+  // means the hook is watching nothing, and painting that as progress is what left
+  // a loading screen up over a job that was never started. The deadline above is
+  // what stops even this window running forever.
+  const phase: GeneratingPhase =
+    poll.phase !== "idle" ? poll.phase : state.bootstrap ? "running" : "failed";
 
   // Quarterly reports. The running/completing state uses the onboarding workspace
   // loader (AiLoadingScreen). Hard failure / timeout keep the detailed

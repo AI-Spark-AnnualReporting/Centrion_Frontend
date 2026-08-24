@@ -26,6 +26,7 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
+import { statusPill } from '@/components/dashboard/report-status';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
 import { SendExternalModal } from '@/components/communications/SendExternalModal';
@@ -137,6 +138,13 @@ const ICON_PUBLISH = (
     <path d="M2.5 9.5v1.4a.9.9 0 0 0 .9.9h7.2a.9.9 0 0 0 .9-.9V9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
   </svg>
 );
+const ICON_EXTERNAL = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 const ICON_PAPERCLIP = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <path
@@ -215,6 +223,7 @@ function ThreadRow({
   onOpen,
   onExternal,
   onPublish,
+  onReview,
   onAttached,
 }: {
   thread: ThreadSummary;
@@ -222,13 +231,21 @@ function ThreadRow({
   onOpen: (thread: ThreadSummary) => void;
   onExternal: (thread: ThreadSummary) => void;
   onPublish: () => void;
+  // Opens the reviewer view straight from the row — same action the thread
+  // modal's footer button fires. Only rendered while the report is actually
+  // out for review; the view itself self-gates approve/reassign on can_act.
+  onReview: (thread: ThreadSummary) => void;
   // Fired after a successful quick-attach so the parent can refresh the row's
   // internal_count / last_message / updated_at without a full page reload.
   onAttached: () => void;
 }) {
-  const { report, subject, owner, last_message, updated_at, unread_count, internal_count } = thread;
+  const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread;
   const { toast } = useToast();
   const title = report ? report.title : (subject?.trim() || 'Discussion');
+
+  // Review is only live while the report is out for review — once it's
+  // approved (or locked/published) there's nothing left to review.
+  const inReview = report?.status?.trim().toLowerCase() === 'in_review';
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? ' (you)' : ''}`
@@ -275,7 +292,30 @@ function ThreadRow({
           <span style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E', letterSpacing: '-.1px' }}>
             {title}
           </span>
-          {report && (
+          {/* Only "In review" earns a pill in the list — every other status is
+              noise next to the thread's own activity line. */}
+          {inReview && (() => {
+            const pill = statusPill(report.status, report.status_label);
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '2px 9px',
+                  borderRadius: 20,
+                  background: pill.bg,
+                  color: pill.color,
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: pill.color }} />
+                {pill.text}
+              </span>
+            );
+          })()}
+          {is_private && (
             <span
               style={{
                 display: 'inline-flex',
@@ -283,14 +323,30 @@ function ThreadRow({
                 gap: 5,
                 padding: '2px 9px',
                 borderRadius: 20,
-                background: 'rgba(245,158,11,.12)',
-                color: '#B45309',
+                background: '#EFF0F7',
+                color: '#5A6080',
                 fontSize: 11,
                 fontWeight: 700,
               }}
             >
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B' }} />
-              {report.status_label}
+              {ICON_LOCK}
+              Private
+            </span>
+          )}
+          {removed_at && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: '#FDF2F2',
+                color: '#B4232A',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Removed
             </span>
           )}
         </div>
@@ -367,8 +423,21 @@ function ThreadRow({
           {ICON_PAPERCLIP}
         </button>
         <ChannelBtn icon={ICON_LOCK} label="Internal" count={internal_count} tone="internal" onClick={() => onOpen(thread)} />
-        <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        {!removed_at && (
+          <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
+        {inReview && assignment && !removed_at && (
+          <button
+            type="button"
+            className="btn bp"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', fontSize: 12 }}
+            onClick={() => onReview(thread)}
+          >
+            Open review
+            {ICON_EXTERNAL}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2605,6 +2674,7 @@ export default function CommunicationHubPage() {
                   onOpen={openThread}
                   onExternal={(t) => (t.report ? setExternalThread(t) : setSendExternalTarget(t))}
                   onPublish={() => setShowPublish(true)}
+                  onReview={(t) => setReviewThreadId(t.thread_id)}
                   onAttached={() => void fetchThreads()}
                 />
               ))}

@@ -9,7 +9,7 @@ import {
   type ThreadlessReport,
   type ThreadlessReportType,
 } from '@/lib/api';
-import { MentionComposer } from './MentionComposer';
+import { MentionComposer, MentionChips, MemberPicker } from './MentionComposer';
 import { RecipientChip } from './RecipientChip';
 import { ALL_FILTER, SECTION_LABEL } from './helpers';
 
@@ -84,6 +84,20 @@ const MODES: { key: Mode; label: string; icon: React.ReactNode }[] = [
   { key: 'ai', label: 'Announcement', icon: ICON_SPARKLE },
 ];
 
+// "Only you and Noura Al Fahad will see this" — the reader must know who can
+// see a private thread before sending, not after.
+function privateRoster(names: string[]): string {
+  const who =
+    names.length === 0
+      ? 'you'
+      : names.length === 1
+        ? `you and ${names[0]}`
+        : names.length === 2
+          ? `you, ${names[0]} and ${names[1]}`
+          : `you, ${names[0]}, ${names[1]} and ${names.length - 2} others`;
+  return `Only ${who} will see this`;
+}
+
 export function NewThreadModal({
   onClose,
   onCreated,
@@ -108,6 +122,9 @@ export function NewThreadModal({
 
   // Ad-hoc-only.
   const [subject, setSubject] = useState('');
+
+  // Report mode only — the thread is visible to the mentioned people alone.
+  const [isPrivate, setIsPrivate] = useState(false);
 
   // Shared "first message" across all three modes.
   const [message, setMessage] = useState('');
@@ -179,17 +196,25 @@ export function NewThreadModal({
   };
 
   // Pills stay constant across filters (from `types`); only the list narrows.
+  // Only reports you can actually start this kind of conversation on — the tab
+  // picks which flag rules a report out.
   const visibleReports = useMemo(
     () =>
-      typeFilter === ALL_FILTER
-        ? reports
-        : reports.filter((r) => r.report_type === typeFilter),
-    [reports, typeFilter],
+      reports
+        .filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread))
+        .filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
+    [reports, typeFilter, isPrivate],
   );
 
   // report_type code → human label for the "ESG · FY-2023" row text.
   const labelForCode = (code: string) =>
     types.find((t) => t.code === code)?.label ?? code;
+
+  // People not already added — the picker's options. Self is excluded: the
+  // backend drops a self-mention anyway.
+  const addableMembers = members.filter(
+    (m) => m.user_id !== user?.user_id && !mentions.some((x) => x.id === m.id),
+  );
 
   const messageEmpty = message.trim().length === 0;
   const subjectEmpty = subject.trim().length === 0;
@@ -198,15 +223,20 @@ export function NewThreadModal({
   const hasSource = sourceText.trim().length > 0 || !!aiDocument;
   const needsExternalRecipient =
     mode === 'ai' && shareExternally && externalRecipients.length === 0 && !externalDraft.trim();
-  // @mention is an optional notify, not a requirement to start a thread.
+  // @mention is an optional notify, not a requirement to start a thread —
+  // except on a private thread, where the mentions ARE the member list.
+  const privateNeedsMentions = isPrivate && mentions.length === 0;
   const canSubmit =
     mode === 'report'
-      ? !!reportId && !messageEmpty && !submitting
+      ? !!reportId && !messageEmpty && !submitting && !privateNeedsMentions
       : !subjectEmpty && !messageEmpty && !submitting && !needsExternalRecipient;
 
   const switchMode = (next: Mode) => {
     setMode(next);
     setFormError(null);
+    // Private is report-only — an announcement can also fire a tracked external
+    // email, which a private thread must never do.
+    if (next !== 'report') setIsPrivate(false);
   };
 
   const submit = async () => {
@@ -220,8 +250,14 @@ export function NewThreadModal({
         // Members' UUID `id`s — NOT their usr_ `user_id`. Backend dedupes +
         // drops any self-mention, so no client-side cleanup needed.
         mentioned_user_ids: mentions.map((m) => m.id),
+        ...(isPrivate ? { is_private: true } : {}),
       });
-      toast({ title: 'Thread started', description: 'Your team has been briefed.' });
+      toast({
+        title: isPrivate ? 'Private thread started' : 'Thread started',
+        description: isPrivate
+          ? 'Only the people you mentioned can see it.'
+          : 'Your team has been briefed.',
+      });
       onCreated?.(res.thread.id);
       onClose();
     } catch (e) {
@@ -232,16 +268,26 @@ export function NewThreadModal({
       }
       switch (e.status) {
         case 422:
-          setFormError("Message can't be empty");
+          // Covers both "message empty" and the private-thread "needs at least
+          // one person" detail, which is written to be shown as-is.
+          setFormError(e.message || "Message can't be empty");
           break;
         case 404:
           toast({ title: 'That report is no longer available', variant: 'destructive' });
           refreshReports();
           break;
         case 409:
-          toast({ title: 'A conversation already exists for this report', variant: 'destructive' });
-          setReports((prev) => prev.filter((r) => r.id !== reportId));
-          setReportId(null);
+          // The slot filled up (or the flags were stale). Recoverable: refetch so
+          // the row greys out, and leave the form and the typed message alone.
+          toast({
+            title:
+              e.message ||
+              (isPrivate
+                ? 'You already have a private conversation on this report'
+                : 'This report already has a conversation'),
+            variant: 'destructive',
+          });
+          refreshReports();
           break;
         case 403:
           toast({ title: 'One of the mentioned people is no longer available', variant: 'destructive' });
@@ -494,6 +540,55 @@ export function NewThreadModal({
             </div>
           ) : mode === 'report' ? (
             <>
+              {/* General vs private is the first choice — it changes which reports
+                  you can even start on, so the list below follows it. */}
+              <div style={SECTION_LABEL}>CONVERSATION</div>
+              <div style={{ display: 'flex', gap: 9, marginBottom: 20 }}>
+                {[
+                  { priv: false, label: 'General', hint: 'everyone in the company' },
+                  { priv: true, label: 'Private', hint: 'only the people you add' },
+                ].map((tab) => {
+                  const active = tab.priv === isPrivate;
+                  return (
+                    <button
+                      key={tab.label}
+                      type="button"
+                      onClick={() => {
+                        setIsPrivate(tab.priv);
+                        setFormError(null);
+                        // The list is about to change under it.
+                        setReportId(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        borderRadius: 12,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        transition: '.15s',
+                        border: active ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
+                        background: active ? '#F5F4FF' : '#fff',
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: active ? '#4040C8' : '#1A1D2E',
+                        }}
+                      >
+                        {tab.label}
+                      </span>
+                      <span style={{ display: 'block', fontSize: 11.5, color: '#8890AE', marginTop: 1 }}>
+                        {tab.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* Report type pills — always from `types`; "All" clears the filter. */}
               <div style={SECTION_LABEL}>REPORT TYPE</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginBottom: 20 }}>
@@ -529,7 +624,9 @@ export function NewThreadModal({
               </div>
 
               {/* Reports without a thread yet */}
-              <div style={SECTION_LABEL}>REPORTS WITHOUT A THREAD YET</div>
+              <div style={SECTION_LABEL}>
+                {isPrivate ? 'REPORTS YOU CAN START A PRIVATE CONVERSATION ON' : 'REPORTS WITHOUT A CONVERSATION YET'}
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                 {visibleReports.length === 0 ? (
                   <div
@@ -542,7 +639,9 @@ export function NewThreadModal({
                       color: '#9BA3C4',
                     }}
                   >
-                    No reports without a thread yet.
+                    {isPrivate
+                      ? 'You already have a private conversation on every report.'
+                      : 'Every report already has a conversation.'}
                   </div>
                 ) : (
                   visibleReports.map((r) => {
@@ -585,20 +684,48 @@ export function NewThreadModal({
                 )}
               </div>
 
-              {/* First message + @mention picker */}
-              <div style={SECTION_LABEL}>START THE THREAD WITH A MESSAGE</div>
+              {/* Who's in the thread — its own field with its own picker. The message box
+                  is plain text; nobody is added by typing in it. */}
+              <div style={SECTION_LABEL}>PARTICIPANTS</div>
 
-              <MentionComposer
-                members={members}
-                currentUserId={user?.user_id}
-                message={message}
-                onMessageChange={(v) => {
-                  setMessage(v);
+              <MentionChips mentions={mentions} onMentionsChange={setMentions} />
+
+              <MemberPicker
+                options={addableMembers}
+                onPick={(m) => {
+                  setMentions([...mentions, m]);
                   if (formError) setFormError(null);
                 }}
-                mentions={mentions}
-                onMentionsChange={setMentions}
-                placeholder="Write the first message to the team...  (type @ to mention)"
+                label={
+                  addableMembers.length === 0
+                    ? mentions.length === 0
+                      ? 'No one else in your company yet'
+                      : 'Everyone is already added'
+                    : 'Add someone…'
+                }
+              />
+
+              {isPrivate && (
+                <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: privateNeedsMentions ? '#B45309' : '#5A6080' }}>
+                  {privateNeedsMentions
+                    ? 'Add at least one participant — a private conversation needs someone in it.'
+                    : privateRoster(mentions.map((m) => m.full_name))}
+                </div>
+              )}
+
+              <div style={{ ...SECTION_LABEL, marginTop: 20 }}>MESSAGE</div>
+
+              {/* Plain textarea — participants are picked in their own field above,
+                  so there's no "@" picker to run here. */}
+              <textarea
+                className="inp"
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                  if (formError) setFormError(null);
+                }}
+                placeholder="Write the first message to the team…"
+                style={{ minHeight: 92, resize: 'vertical', lineHeight: 1.5 }}
               />
 
               {formError && (

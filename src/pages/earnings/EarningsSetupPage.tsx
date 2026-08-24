@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { reportHref, resumeHref } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { useFeaturePermissions } from '@/lib/features';
 import { earnings, ApiError } from '@/lib/api';
@@ -164,7 +165,15 @@ export default function EarningsSetupPage() {
   const ready =
     !!sessionReportId ||
     (!!companyId &&
-      canContinue({ variant, fiscalYear, quarter, tone, sourceIds, pendingUploadCount: uploadFiles.length }));
+      canContinue({
+        variant,
+        fiscalYear,
+        quarter,
+        tone,
+        sourceIds,
+        pendingUploadCount: uploadFiles.length,
+        uploadedDocumentCount: sourceSplit.source_document_ids.length,
+      }));
 
   const handleVariant = (v: EarningsVariant) => {
     setVariant(v);
@@ -186,7 +195,7 @@ export default function EarningsSetupPage() {
         await earnings.uploadEarningsSources(reportId, uploadFiles);
         setUploadFiles([]);
       }
-      navigate(`/earnings/${reportId}/extract`);
+      navigate(`/earnings/${reportId}/outline`);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         setConflict(readConflict(err));
@@ -329,7 +338,7 @@ export default function EarningsSetupPage() {
               <button
                 type="button"
                 className="btn bs bsm"
-                onClick={() => navigate(`/earnings/${conflict.reportId}/extract`)}
+                onClick={() => navigate(resumeHref(conflict.reportId))}
               >
                 Open existing draft
               </button>
@@ -381,8 +390,10 @@ export default function EarningsSetupPage() {
       </div>
       )}
 
-      {/* Your earnings reports — dashboard tiles. Each opens the preview screen. */}
-      {canRead && (
+      {/* Your earnings reports — dashboard tiles. Each reopens the report at the
+          step its owner was last on (see earnings-resume).
+          Hidden entirely once we know there are none — no empty-state card. */}
+      {canRead && (reportsLoading || reportsError || reports.length > 0) && (
       <div style={{ marginTop: 28 }}>
         <div style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your earnings reports</h2>
@@ -397,20 +408,18 @@ export default function EarningsSetupPage() {
           <div className="card" role="alert" style={{ padding: '14px 18px', fontSize: 12.5, color: '#DC2626' }}>
             {reportsError}
           </div>
-        ) : reports.length === 0 ? (
-          <div
-            className="card"
-            style={{ padding: '28px 20px', textAlign: 'center', fontSize: 12.5, color: FAINT }}
-          >
-            No earnings reports yet. Create one above to get started.
-          </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             {reports.map((r) => (
               <EarningsReportCard
                 key={r.report_id}
                 report={r}
-                onOpen={(rep) => navigate(`/earnings/${rep.report_id}/preview`)}
+                // Back to where they left off, not to the middle of the flow.
+                // This was hardcoded to /preview, so someone who had finished a
+                // report and gone to read it landed a step short — and could not
+                // even click forward, since the stepper greys a step it thinks
+                // is ahead of you.
+                onOpen={(rep) => navigate(reportHref(rep))}
               />
             ))}
           </div>

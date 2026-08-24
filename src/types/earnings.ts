@@ -1,3 +1,5 @@
+import type { SectionAnalysis } from '@/types/quarterly';
+
 // ─── Earnings report — Part 1 (Setup) types ──────────────────────────────────
 // Contracts captured from the live FastAPI OpenAPI schema:
 //   GET  /api/v1/earnings/sources?company_id&period   → untyped 200 (read defensively)
@@ -137,6 +139,89 @@ export interface EditEarningsFigurePayload {
   unit?: string | null;
 }
 
+// One line of the source quarterly report, offered in the step-2 picker. Only
+// primary-statement tables are offered — a figure bound from a note schedule is
+// exactly the mistake the auto-matcher refuses to make on its own.
+export interface EarningsSourceLine {
+  id: string;
+  label: string | null;
+  // The line's own column in a multi-column table. A changes-in-equity statement
+  // repeats one label down every column, so seven rows read "Balance at September
+  // 30, 2023" with seven different values — this is what tells them apart.
+  column: string | null;
+  group: string | null;
+  display_label: string; // label + column; also what the figure is keyed on
+  value: number | null;
+  unit: string | null;
+  table: string | null; // the source table's own name, e.g. "Balance Sheet"
+  source_ref: string | null;
+  source_report_id: string | null;
+  selected: boolean; // already in the section the picker was opened for
+  memory_key: string; // stable across quarters; qr_figures ids are not
+}
+
+// One figure as it appears under a section on the Figures screen. The value is
+// read through the link to the quarterly report, never copied.
+export interface EarningsSectionFigure {
+  id: string; // the qr_figures row this points at
+  display_label: string; // label + column; the column is what tells repeated labels apart
+  value: number | null;
+  unit: string | null;
+  table: string | null; // the source table's own name, e.g. "Balance Sheet"
+  /**
+   * The sub-heading this line sits under, e.g. "MEMORANDUM — FREE CASH FLOW".
+   * Not decoration: a label is not an identity, and this is usually the only
+   * thing separating two rows that read identically.
+   */
+  group: string | null;
+  /**
+   * What the market expected for this line. null = no expectation, which
+   * omits the beat/miss entirely — never a zero, never a made-up verdict.
+   */
+  expected_value?: number | null;
+  memory_key: string; // stable across quarters; source ids are not
+}
+
+// One table section on the Figures screen: what the user asked for, and what they
+// got. `prompt` is null until they write one.
+export interface EarningsFigureSection {
+  section_code: string;
+  title: string;
+  prompt: string | null;
+  figures: EarningsSectionFigure[];
+  total: number;
+  /** The user has finished curating this section's figures. UI only. */
+  finalised?: boolean;
+}
+
+export interface EarningsFigureSectionsResponse {
+  report_id: string;
+  sections: EarningsFigureSection[];
+  // How many figures were brought over from the company's last earnings report on
+  // this first visit. 0 for a first-ever report, which opens empty by design.
+  carried_over: number;
+}
+
+// The response to searching or setting one section's figures.
+export interface EarningsSectionFiguresResponse {
+  report_id: string;
+  section_code: string;
+  prompt?: string | null;
+  found?: number; // search only: how many are NEW this time, not the section's total
+  /** Search only: why nothing came back, when the model was never asked. */
+  note?: string;
+  figures: EarningsSectionFigure[];
+  total: number;
+  removed?: number; // set only
+}
+
+export interface EarningsSourceLinesResponse {
+  report_id: string;
+  section_code: string | null;
+  lines: EarningsSourceLine[];
+  selected_count: number;
+}
+
 // ─── Part 3 — Arrange Outline ─────────────────────────────────────────────────
 // Contracts from OpenAPI are UNTYPED (200 → {}), and the PUT body is undocumented,
 // so field names below follow the spec and are read defensively at the api layer.
@@ -165,7 +250,16 @@ export interface EarningsSectionFeeder {
 // silently addable (D-12). Required sections are always included regardless.
 export interface EarningsOutlineSection {
   section_code: string;
+  /** What THIS report calls it — the rename when there is one. */
   title: string;
+  /**
+   * The section catalogue's own name. What Reset puts back, and what the figure
+   * picker is prompted with — renaming a section deliberately cannot reach it.
+   * Null on a payload that predates renaming.
+   */
+  title_original: string | null;
+  /** The brief for this section, typed on the Outline. Financial only. */
+  prompt: string | null;
   description: string | null;
   section_number: number | null; // display number on the card, when provided
   display_order: number; // authoritative sort key; array order on save
@@ -180,6 +274,11 @@ export interface EarningsOutlineSection {
   // resolved" (produced/needs_input) WITHOUT a separate GET /sections call —
   // used to skip a redundant POST /produce when nothing has changed.
   status: EarningsSectionStatus | null;
+  // How many of the user's own report lines are filed under this section. Comes
+  // on the outline itself so the section badge is right on first paint — reading
+  // it off the figure picker's response instead meant every section showed blank
+  // until the user opened the picker. null on a payload that predates the field.
+  figure_count: number | null;
   // Which real source backs this section right now, when the backend supplies
   // it — null on older payloads that predate this field (read defensively,
   // never fabricated).
@@ -238,6 +337,11 @@ export interface EarningsProducedSection {
   grounding_flag: string | null; // grounding-violation message from a PATCH, when present
   grounding_acknowledged: boolean; // client marker: the user acknowledged the flag
   edited: boolean; // client marker: content was manually PATCHed
+  // The Analyse button's last result, replayed by GET /sections so it survives a
+  // reload. The backend has always sent it; nothing here declared it, so
+  // normalizeEarningsSection dropped it and both the Report screen and a
+  // reloaded Preview showed no analysis at all. Same shape quarterly stores.
+  analysis?: SectionAnalysis | null;
 }
 
 export interface EarningsSectionsResponse {
@@ -247,14 +351,41 @@ export interface EarningsSectionsResponse {
 }
 
 // POST /produce async handle (mirrors the quarterly ProduceAllHandle).
+// A produce request's outcome. `run_id`/`poll_url` are null when the server
+// found nothing to do and started no run at all — a report that is already built
+// and unchanged. There is nothing to poll and no loader to show; the caller just
+// carries on. See _nothing_to_produce on the backend.
+// What POST .../sections/{code}/produce actually returns: the four fields that
+// endpoint owns, and nothing else. Deliberately NOT an EarningsProducedSection —
+// running a section used to be normalised into a whole one, which invented a
+// title (falling back to the section CODE), a display_order of 0 and a mode of
+// 'generate' for the fields the response never carried. Merged over the real
+// section, those invented values won, and a Run renamed the section to its own
+// code and sent it to the top of the rail.
+export interface EarningsSectionPatch {
+  section_code: string;
+  status: EarningsSectionStatus;
+  content: string | null;
+  error?: string | null;
+  /** Numbers in the saved prose that match no resolved figure. Empty after a
+   *  save that grounds cleanly — which is what clears the approve blocker. */
+  grounding_violations?: string[];
+}
+
 export interface EarningsProduceHandle {
-  run_id: string;
-  poll_url: string;
+  run_id: string | null;
+  poll_url: string | null;
 }
 
 // PATCH .../content body.
 export interface SaveEarningsSectionContentPayload {
   content: string;
+  /** Accept the section's ungrounded numbers as they stand, clearing the flag
+   *  that blocks Approve & lock. The backend has read this since the gate was
+   *  written (routes/earnings.py, save_section_content) — the field simply did
+   *  not exist here, so nothing ever sent it and the flag could never be
+   *  cleared by acknowledging. Optional: every existing caller is unaffected. */
+  acknowledge?: boolean;
 }
 
 export type EarningsExportFormat = 'pdf' | 'docx';

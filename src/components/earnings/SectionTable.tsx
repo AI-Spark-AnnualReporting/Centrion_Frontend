@@ -4,34 +4,198 @@ import {
   cell,
   stringifyCell,
   rowBlankState,
+  isUnresolvableRow,
   gapReason,
   rowCitation,
+  matrixCell,
 } from '@/pages/earnings/preview-helpers';
+import type { NormTable } from '@/pages/earnings/preview-helpers';
+import { deriveUnits, gridValue, unitsCaption } from '@/components/quarterly/figureUnits';
+import type { FigureUnits } from '@/components/quarterly/figureUnits';
 import { INK, MUTED, BRAND } from './tokens';
 
 // ConfidenceBadge's established amber — within-feature consistency.
 const GAP_AMBER = { color: '#B45309', bg: 'rgba(245,158,11,.12)' };
+
+// The denomination a flat line-item table is priced in, or null when no single
+// sentence would be true of it (see deriveUnits). Read off the same three fields
+// the value cells print, so the caption can never claim a unit no cell carries.
+// Memoised per table object: this is called once for the caption and once per row.
+const _flatUnitsCache = new WeakMap<NormTable, FigureUnits | null>();
+
+function flatUnits(table: NormTable): FigureUnits | null {
+  const cached = _flatUnitsCache.get(table);
+  if (cached !== undefined) return cached;
+  const units = deriveUnits(
+    table.rows.map((r) => stringifyCell(cell(r, 'current_display', 'current', 'value'))),
+  );
+  _flatUnitsCache.set(table, units);
+  return units;
+}
+
+// One value cell: the currency dropped when it is the table's own (stated once in
+// the caption instead), a nil printed as a dash, and anything in another unit — a
+// rate, a per-share figure — left exactly as it is. That last part is what the
+// caption's "unless otherwise stated" is promising.
+function flatValue(row: unknown, units: FigureUnits | null): string {
+  const raw = stringifyCell(cell(row as never, 'current_display', 'current', 'value'));
+  if (!units) return raw || '—';
+  return gridValue(raw, units.currency);
+}
+
+// A section the source printed as a GRID — line items down the side, categories
+// across the top. Flattened to Metric/Value it became "External revenue —
+// Upstream" repeated once per segment: the same table with its shape thrown away
+// and three times the rows. The columns come from the producer, which reads them
+// off each figure\'s own position in its source table.
+function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
+  const cols = table.matrixColumns ?? [];
+  // A grid repeated the currency in every one of its cells — eight categories wide,
+  // that is most of the table. Stated once above instead, exactly as the file does.
+  const units = deriveUnits(
+    table.rows.flatMap((r) => cols.map((c) => matrixCell(r, c.key))),
+  );
+  return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <thead>
+        <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
+          <th style={{ ...TH, textAlign: 'left' }}>Line item</th>
+          {cols.map((c) => (
+            <th key={c.key} style={{ ...TH, textAlign: 'right' }}>
+              {c.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {table.rows.map((r, i) => (
+          <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
+            <td style={{ padding: '9px 10px', color: INK }}>
+              {stringifyCell(cell(r, 'label', 'metric', 'name'))}
+            </td>
+            {cols.map((c) => (
+              <td
+                key={c.key}
+                style={{
+                  padding: '9px 10px',
+                  textAlign: 'right',
+                  fontFamily: "'DM Mono', 'Courier New', monospace",
+                  color: BRAND,
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {/* A blank cell is information — this line does not exist for
+                    that category — so it reads as a dash, not as missing data. */}
+                {(units ? gridValue(matrixCell(r, c.key), units.currency)
+                        : matrixCell(r, c.key)) ?? '—'}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    </>
+  );
+}
+
+// A section that prints its own named columns, with each row keyed BY those names.
+// Consensus vs Actual is the one: Line, Actual, Expected, Result. Rendered here as
+// well as in the exporter, from the identical `columns` shape, so what is on screen
+// and what is in the PDF cannot drift apart.
+//
+// Without this branch such a section fell through to the Metric/Value renderer,
+// which looks for `label` and `current_display` — found neither, and drew a table of
+// blank rows all reading "Pending".
+function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties }) {
+  const cols = table.columns ?? [];
+  // Consensus vs Actual prices its Actual/Expected columns in one currency and was
+  // repeating it in every cell. Same rule as everywhere else: state it once above,
+  // bare the cells. deriveUnits finds nothing in the board's text columns, so those
+  // tables come back untouched.
+  const units = deriveUnits(table.rows.flatMap((r) => cols.map((c) => stringifyCell(r[c]))));
+  return (
+    <>
+    {units && (
+      <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>{unitsCaption(units)}</p>
+    )}
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <thead>
+        <tr style={{ borderBottom: `2px solid ${BRAND}` }}>
+          {cols.map((c, i) => (
+            <th key={c} style={{ ...TH, textAlign: i === 0 ? 'left' : 'right' }}>
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {table.rows.map((r, i) => (
+          <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
+            {cols.map((c, ci) => (
+              <td
+                key={c}
+                style={{
+                  padding: '9px 10px',
+                  textAlign: ci === 0 ? 'left' : 'right',
+                  color: ci === 0 ? INK : BRAND,
+                  fontWeight: ci === 0 ? 400 : 700,
+                  fontFamily: ci === 0 ? undefined : "'DM Mono', 'Courier New', monospace",
+                  whiteSpace: ci === 0 ? undefined : 'nowrap',
+                }}
+              >
+                {(units ? gridValue(stringifyCell(r[c]), units.currency)
+                        : stringifyCell(r[c])) || '—'}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+    </>
+  );
+}
 
 // Renders an earnings table/kpi envelope as Metric | Value — `label` +
 // `current_display` ONLY. No Prior/Change columns are ever rendered: earnings data
 // has no comparatives, and we never show a fabricated or blank delta column (D-12).
 // Operational KPIs (S06): an out-of-catalog row shows its gap reason instead of a
 // value, and a still-producing row shows "Pending" — never the same grey dash.
-export function SectionTable({ content }: { content: string | null }) {
+export function SectionTable({
+  content,
+  deliverable = false,
+}: {
+  content: string | null;
+  /** Rendering the finished report rather than the workbench — see
+   *  isUnresolvableRow. Preview leaves these rows in; the Report screen and the
+   *  exported file do not. */
+  deliverable?: boolean;
+}) {
   const parsed = content ? tryParseJson(content) : undefined;
   if (parsed === undefined) {
     // Not valid JSON — treat as prose upstream; here just show nothing structured.
     return null;
   }
   const tables = normalizeTables(parsed)
-    .map((t) => ({ ...t, rows: t.rows.filter((r) => rowBlankState(r) !== 'omitted') }))
+    // A grid row has no single value to be blank, so the omitted-row filter is
+    // for line-item tables only.
+    .map((t) => (t.matrixColumns || t.columns
+      ? t
+      : { ...t, rows: t.rows.filter(
+          (r) => rowBlankState(r) !== 'omitted' && !(deliverable && isUnresolvableRow(r))) }))
     .filter((t) => t.rows.length > 0);
   if (tables.length === 0) {
     return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>;
   }
   // A Source column only appears when at least one row actually carries a
   // citation — existing sections with no citation fields render unchanged.
-  const showSource = tables.some((t) => t.rows.some((r) => rowCitation(r) != null));
+  const showSource = tables.some(
+    (t) => !t.matrixColumns && !t.columns && t.rows.some((r) => rowCitation(r) != null),
+  );
 
   const TH: React.CSSProperties = {
     padding: '8px 10px',
@@ -48,6 +212,20 @@ export function SectionTable({ content }: { content: string | null }) {
         <div key={ti} style={{ marginBottom: 20, overflowX: 'auto' }}>
           {tables.length > 1 && t.title && (
             <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 700, color: BRAND }}>{t.title}</h3>
+          )}
+          {t.columns ? (
+            <ColumnsTable table={t} TH={TH} />
+          ) : t.matrixColumns ? (
+            <MatrixTable table={t} TH={TH} />
+          ) : (
+          <>
+          {/* The currency is stated once here and dropped from every cell below —
+              the same rule, off the same helper, that report_export applies to the
+              exported file. A table repeating "SAR" forty times reads as noise. */}
+          {flatUnits(t) && (
+            <p style={{ margin: '0 0 6px', fontSize: 11.5, color: MUTED }}>
+              {unitsCaption(flatUnits(t) as FigureUnits)}
+            </p>
           )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -96,7 +274,7 @@ export function SectionTable({ content }: { content: string | null }) {
                           fontWeight: 700,
                         }}
                       >
-                        {stringifyCell(cell(r, 'current_display', 'current', 'value')) || '—'}
+                        {flatValue(r, flatUnits(t))}
                       </td>
                     )}
                     {showSource && (
@@ -107,6 +285,8 @@ export function SectionTable({ content }: { content: string | null }) {
               })}
             </tbody>
           </table>
+          </>
+          )}
         </div>
       ))}
     </>

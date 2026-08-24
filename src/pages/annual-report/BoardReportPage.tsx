@@ -816,7 +816,6 @@ function ReportSection({
           editing={editing}
           saving={saving}
           error={error}
-          markdown
           onSave={onSave}
           onCancel={onCancel}
         />

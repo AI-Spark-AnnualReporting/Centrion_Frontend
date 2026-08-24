@@ -30,13 +30,10 @@ const BRAND = 'var(--brand-primary, #4040C8)';
 // This renderer branches on mode and NEVER prints a raw JSON blob.
 export function SectionContent({
   section,
-  markdown = false,
   showAnalysis = false,
   companyId,
 }: {
   section: ProducedSection;
-  /** Render prose as Markdown — see MarkdownProse. */
-  markdown?: boolean;
   // The Analyse button's commentary, printed under the table(s) — it is part of
   // the report. Off by default because on Preview the SectionAnalysis control
   // renders it instead, so it can own the edit state; the read-only report view
@@ -48,7 +45,7 @@ export function SectionContent({
   companyId?: string | null;
 }) {
   const analysis = showAnalysis ? (section.analysis?.text ?? '').trim() : '';
-  const body = <SectionBody section={section} markdown={markdown} companyId={companyId} />;
+  const body = <SectionBody section={section} companyId={companyId} />;
   if (!analysis) return body;
   return (
     <>
@@ -62,11 +59,9 @@ export function SectionContent({
 // same section it holds for the earnings renderer without a cast.
 function SectionBody({
   section,
-  markdown,
   companyId,
 }: {
   section: Pick<ProducedSection, 'mode' | 'content'>;
-  markdown: boolean;
   companyId?: string | null;
 }) {
   const { mode } = section;
@@ -120,7 +115,7 @@ function SectionBody({
           {tables.map((t, i) => (
             <TableBlock key={i} table={t} showTitle={tables.length > 1} />
           ))}
-          {narrativeItems ? <Bullets items={narrativeItems} /> : narrativeText && <Prose text={narrativeText} />}
+          {narrativeItems ? <Bullets items={narrativeItems} /> : narrativeText && <MarkdownProse text={narrativeText} />}
         </>
       );
     }
@@ -143,11 +138,11 @@ function SectionBody({
       return <NoData />;
     }
     // Not valid JSON — treat the string as prose.
-    return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
+    return <MarkdownProse text={content} />;
   }
 
   // generate / template / anything else → prose.
-  return markdown ? <MarkdownProse text={content} /> : <Prose text={content} />;
+  return <MarkdownProse text={content} />;
 }
 
 // Honest empty state — shown when a section produced no usable content.
@@ -230,7 +225,7 @@ function AttachedPdf({ documentId, companyId }: { documentId: string; companyId?
 // means it arrives as Markdown — headings, bullets, GFM tables. Rendered as
 // plain text it reads as "## Heading" and "| a | b |". Off by default so the
 // quarterly and earnings payloads, which are plain prose, are untouched.
-function MarkdownProse({ text }: { text: string }) {
+export function MarkdownProse({ text }: { text: string }) {
   return (
     <div className="md-prose">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{expandInlineBullets(text)}</ReactMarkdown>

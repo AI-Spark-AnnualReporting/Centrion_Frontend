@@ -63,17 +63,19 @@ export function ShareReportModal({
     setLoading(true);
     setLoadError(null);
     communications
-      .members()
+      // Scoped to this report — only people who can open it can review it.
+      .members(reportId)
       .then((res) => setMembers(res.members))
       .catch((e) => {
         // 401 → the request layer already ran the session-expired flow.
         if (e instanceof ApiError && e.status === 401) return;
-        setLoadError('Could not load members. Please try again.');
+        // 404 ("Report not found") carries a user-facing detail; keep it.
+        setLoadError(detailMessage(e, 'Could not load members. Please try again.'));
       })
       .finally(() => setLoading(false));
   };
 
-  useEffect(loadMembers, []);
+  useEffect(loadMembers, [reportId]);
 
 
   // An authority card is presentation; the assignment is what the API needs.
@@ -185,6 +187,12 @@ export function ShareReportModal({
 
               {/* The assignment — always a real person. */}
               <div style={SECTION_LABEL}>ASSIGN TO</div>
+              {assignableMembers.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: '#8890AE', lineHeight: 1.5, marginBottom: 20 }}>
+                  No one in your company has access to this report yet — an admin can grant it in
+                  Admin Console.
+                </div>
+              ) : (
               <select
                 className="inp"
                 value={assignedTo ?? ''}
@@ -201,6 +209,7 @@ export function ShareReportModal({
                   </option>
                 ))}
               </select>
+              )}
 
               <div style={SECTION_LABEL}>COMMENT (OPTIONAL)</div>
               <textarea
@@ -214,7 +223,7 @@ export function ShareReportModal({
               {formError && (
                 <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#DC2626' }}>{formError}</div>
               )}
-              {!formError && !assignedTo && (
+              {!formError && !assignedTo && assignableMembers.length > 0 && (
                 <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#9BA3C4' }}>
                   Choose a person to assign the review to.
                 </div>

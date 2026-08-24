@@ -1013,7 +1013,6 @@ function SectionPanel({
               editing={editing}
               saving={saving}
               error={editing ? error : null}
-              markdown
               onSave={(content) => onSave(s.section_code, content)}
               onCancel={() => onEdit(false)}
             />
