@@ -367,6 +367,9 @@ export interface EarningsSectionPatch {
   status: EarningsSectionStatus;
   content: string | null;
   error?: string | null;
+  /** Numbers in the saved prose that match no resolved figure. Empty after a
+   *  save that grounds cleanly — which is what clears the approve blocker. */
+  grounding_violations?: string[];
 }
 
 export interface EarningsProduceHandle {
@@ -377,6 +380,12 @@ export interface EarningsProduceHandle {
 // PATCH .../content body.
 export interface SaveEarningsSectionContentPayload {
   content: string;
+  /** Accept the section's ungrounded numbers as they stand, clearing the flag
+   *  that blocks Approve & lock. The backend has read this since the gate was
+   *  written (routes/earnings.py, save_section_content) — the field simply did
+   *  not exist here, so nothing ever sent it and the flag could never be
+   *  cleared by acknowledging. Optional: every existing caller is unaffected. */
+  acknowledge?: boolean;
 }
 
 export type EarningsExportFormat = 'pdf' | 'docx';

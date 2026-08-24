@@ -709,24 +709,71 @@ describe('EarningsReportPage', () => {
     expect(screen.queryByPlaceholderText(/Type the missing information/)).not.toBeInTheDocument();
   });
 
-  it('editing a section calls patchEarningsSectionContent and surfaces a returned grounding flag with acknowledge', async () => {
-    h.patchEarningsSectionContent.mockResolvedValueOnce(
-      sec({ ...OVERVIEW, content: 'Edited overview.', grounding_flag: 'Revenue not grounded in a source', edited: true }),
-    );
+  // The endpoint answers with a PATCH — section_code, content, status and the
+  // grounding verdict — not a whole section. This used to assert against a
+  // hand-built section with `grounding_flag` already set, a shape the API never
+  // produces, which is why a feature that could not work shipped green.
+  it('editing a section saves it and names the numbers that did not ground', async () => {
+    h.patchEarningsSectionContent.mockResolvedValueOnce({
+      section_code: 'overview_highlights',
+      status: 'produced',
+      content: 'Edited overview.',
+      grounding_violations: ['15.4%', '1.9%'],
+    });
     renderPage();
     await screen.findByText(/resilient full-year performance/);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const ta = screen.getByRole('textbox');
-    fireEvent.change(ta, { target: { value: 'Edited overview.' } });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Edited overview.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(h.patchEarningsSectionContent).toHaveBeenCalledWith('rep-1', 'overview_highlights', {
         content: 'Edited overview.',
       }),
     );
-    expect(await screen.findByText(/Grounding check:/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
-    await waitFor(() => expect(screen.queryByText(/Grounding check:/)).not.toBeInTheDocument());
+    // Both offending numbers, so the fix is a targeted edit rather than guesswork.
+    expect(await screen.findByText(/15\.4%, 1\.9%/)).toBeInTheDocument();
+  });
+
+  it('saving a section does not rename it to its own section code', async () => {
+    // The PATCH response has no title. Read as a whole section it invented one
+    // from the section code, and the caller spread that over the real section.
+    h.patchEarningsSectionContent.mockResolvedValueOnce({
+      section_code: 'overview_highlights',
+      status: 'produced',
+      content: 'Edited overview.',
+      grounding_violations: [],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Edited overview.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Edited overview.');
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.queryByText('overview_highlights')).toBeNull();
+  });
+
+  it('Acknowledge tells the SERVER, which is the only thing that unblocks approve', async () => {
+    // It used to set React state and nothing else: the banner vanished, a reload
+    // brought it back, and Approve & lock went on failing with no explanation.
+    h.getEarningsSections.mockResolvedValue({
+      // Post-mapper shape: getEarningsSections is mocked here, so the wire→state
+      // translation is covered separately in src/test/earnings-grounding-flag.test.ts.
+      sections: [COVER, { ...OVERVIEW, grounding_flag: '15.4%' }, PERFORMANCE],
+    });
+    h.patchEarningsSectionContent.mockResolvedValue({
+      section_code: 'overview_highlights', status: 'produced',
+      content: OVERVIEW.content, grounding_violations: ['15.4%'],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+    await waitFor(() =>
+      expect(h.patchEarningsSectionContent).toHaveBeenCalledWith('rep-1', 'overview_highlights', {
+        content: OVERVIEW.content,
+        acknowledge: true,
+      }),
+    );
   });
 
   it('Export is hidden until the report is approved & locked', async () => {

@@ -267,10 +267,26 @@ export default function EarningsReportPage() {
         list.map((s) => (s.section_code === code ? { ...s, content, edited: true } : s)),
       );
       try {
-        const updated = await earnings.patchEarningsSectionContent(reportId, code, { content });
-        // Preserve client-only inclusion; take the server's authoritative content + flags.
+        const patch = await earnings.patchEarningsSectionContent(reportId, code, { content });
+        // MERGE, never replace. The response answers for content/status/violations
+        // and nothing else, so replacing the section dropped its title (which fell
+        // back to the raw section code), its display_order and its mode.
         setSections((list) =>
-          list.map((s) => (s.section_code === code ? { ...updated, included: s.included, edited: true } : s)),
+          list.map((s) =>
+            s.section_code === code
+              ? {
+                  ...s,
+                  content: patch.content,
+                  status: patch.status,
+                  edited: true,
+                  // A save that grounds cleanly clears the flag on the server, so
+                  // it has to clear here too — otherwise the banner outlives the
+                  // thing it is reporting.
+                  grounding_flag: (patch.grounding_violations ?? []).join(', ') || null,
+                  grounding_acknowledged: false,
+                }
+              : s,
+          ),
         );
       } catch (err) {
         setSections((list) => list.map((s) => (s.section_code === code && prev ? prev : s)));
@@ -324,11 +340,37 @@ export default function EarningsReportPage() {
     [reportId],
   );
 
-  const acknowledgeFlag = useCallback((code: string) => {
-    setSections((list) =>
-      list.map((s) => (s.section_code === code ? { ...s, grounding_acknowledged: true } : s)),
-    );
-  }, []);
+  // Accept a section's ungrounded numbers as they stand, which is what clears the
+  // approve blocker. This used to set local state and nothing else, so the banner
+  // disappeared, the next reload brought it back, and Approve & lock went on
+  // failing with no indication why — the server was never told.
+  //
+  // The content is re-sent unchanged: the backend re-validates on every save and
+  // sets edit_acknowledged alongside whatever violations it finds, so acknowledging
+  // IS a save. Optimistic, and rolled back if the request fails, the way
+  // handleSaveSection already does.
+  const acknowledgeFlag = useCallback(
+    async (code: string) => {
+      if (!reportId) return;
+      const prev = sections.find((s) => s.section_code === code) ?? null;
+      if (!prev) return;
+      setSections((list) =>
+        list.map((s) => (s.section_code === code ? { ...s, grounding_acknowledged: true } : s)),
+      );
+      try {
+        await earnings.patchEarningsSectionContent(reportId, code, {
+          content: prev.content ?? '',
+          acknowledge: true,
+        });
+        // The gate is judged server-side, so a stale blocker list would keep
+        // showing a resolved problem.
+        setBlockers([]);
+      } catch {
+        setSections((list) => list.map((s) => (s.section_code === code && prev ? prev : s)));
+      }
+    },
+    [reportId, sections],
+  );
 
   // ── Export ──────────────────────────────────────────────────────────────────
   const handleExport = useCallback(

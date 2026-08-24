@@ -399,13 +399,48 @@ export default function EarningsFiguresPage() {
 
   // Editing a produced section in place. Optimistic, because it is the user's own
   // words going back on their own screen.
+  // Accept a section's ungrounded numbers as they stand. Mirrors the Report
+  // screen's handler — acknowledging IS a save that re-sends the same content
+  // with the flag set, which is the only thing that clears the approve blocker.
+  const acknowledgeNarrative = async (code: string) => {
+    if (!reportId) return;
+    const prior = produced.find((p) => p.section_code === code) ?? null;
+    if (!prior) return;
+    setProduced((list) =>
+      list.map((p) => (p.section_code === code ? { ...p, grounding_acknowledged: true } : p)),
+    );
+    try {
+      await earnings.patchEarningsSectionContent(reportId, code, {
+        content: prior.content ?? '',
+        acknowledge: true,
+      });
+    } catch {
+      setProduced((list) => list.map((p) => (p.section_code === code ? prior : p)));
+    }
+  };
+
   const saveNarrative = async (code: string, content: string) => {
     if (!reportId) return;
     setProduced((prev) =>
       prev.map((p) => (p.section_code === code ? { ...p, content } : p)),
     );
     try {
-      await earnings.patchEarningsSectionContent(reportId, code, { content });
+      // The response carries the grounding verdict on what was just saved, and
+      // this used to throw it away — so an edit that introduced an ungrounded
+      // number said nothing here, and the user first met it as a 409 on Approve
+      // two screens later. The refine path already reads it; this now matches.
+      const patch = await earnings.patchEarningsSectionContent(reportId, code, { content });
+      setProduced((prev) =>
+        prev.map((p) =>
+          p.section_code === code
+            ? {
+                ...p,
+                grounding_flag: (patch.grounding_violations ?? []).join(', ') || null,
+                grounding_acknowledged: false,
+              }
+            : p,
+        ),
+      );
     } catch (e) {
       setRunErrors((p) => ({
         ...p,
@@ -677,6 +712,9 @@ export default function EarningsFiguresPage() {
                       coverTemplateKey={null}
                       locked={false}
                       onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
+                      // Without this the banner rendered with no way to act on it:
+                      // the one screen that surfaced the flag offered only text.
+                      onAcknowledgeFlag={() => void acknowledgeNarrative(activeNarrative.section_code)}
                     />
                   </NarrativePane>
                   {/* Only over prose that exists. A section still showing "Run this
