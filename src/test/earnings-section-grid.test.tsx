@@ -187,3 +187,40 @@ describe('SectionTable — no storage token survives any shape', () => {
     expect(container.textContent).toMatch(/unless otherwise stated/);
   });
 });
+
+// s06_operational_kpis produces a row per registry KPI whether or not one can
+// ever exist. Six are bank measures (NPL ratio, CASA ratio, customer deposits) on
+// a company that is not a bank; four are metrics the extractor has no catalogue
+// entry for. Each printed its own gap reason as its value, so the finished report
+// carried a line reading "NPL ratio: sector_excluded".
+describe('SectionTable — rows that can never carry a figure', () => {
+  const KPIS = JSON.stringify({
+    title: 'Operational Highlights / KPIs',
+    tables: [{ title: 'Operational Highlights / KPIs', rows: [
+      { code: 'production_volume', label: 'Production / sales volume', gap_reason: 'not_in_catalog' },
+      { code: 'npl_ratio', label: 'NPL ratio', gap_reason: 'sector_excluded' },
+      { code: 'throughput', label: 'Refinery throughput', gap_reason: 'not_resolved' },
+      { code: 'solar', label: 'Solar capacity', current_display: '5.5' },
+    ] }],
+  });
+
+  it('the finished report leaves them out', () => {
+    const { container } = render(<SectionTable content={KPIS} deliverable />);
+    expect(container.textContent).not.toMatch(/NPL ratio/);
+    expect(container.textContent).not.toMatch(/Production \/ sales volume/);
+    expect(container.textContent).not.toMatch(/sector_excluded|not_in_catalog/);
+  });
+
+  it('a genuine gap this period still shows — it is information', () => {
+    // not_resolved means the line WAS expected and the figure did not arrive.
+    const { container } = render(<SectionTable content={KPIS} deliverable />);
+    expect(container.textContent).toContain('Refinery throughput');
+    expect(container.textContent).toContain('Solar capacity');
+  });
+
+  it('the workbench still shows everything, so the gaps stay visible while curating', () => {
+    const { container } = render(<SectionTable content={KPIS} />);
+    expect(container.textContent).toContain('NPL ratio');
+    expect(container.textContent).toContain('Production / sales volume');
+  });
+});

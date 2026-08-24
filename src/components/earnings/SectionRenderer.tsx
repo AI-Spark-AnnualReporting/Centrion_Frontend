@@ -29,10 +29,14 @@ function Prose({ text }: { text: string }) {
 export function SectionRenderer({
   section,
   coverTemplateKey,
+  deliverable = false,
   showAnalysis = false,
 }: {
   section: EarningsProducedSection;
   coverTemplateKey?: string | null;
+  /** Forwarded to SectionTable — the finished report drops rows that can never
+   *  carry a figure, the workbench keeps them. */
+  deliverable?: boolean;
   /** Print the section's stored analysis under its body. Off by default: Preview
    *  owns the interactive Analyse control, and only the Report screen prints the
    *  finished result — the same split quarterly draws between Preview and the
@@ -101,7 +105,7 @@ export function SectionRenderer({
     // Table mode but non-JSON content → treat the string as prose; otherwise render
     // the metric/value table.
     if (tryParseJson(content) === undefined) return withAnalysis(<Prose text={content} />);
-    return withAnalysis(<SectionTable content={content} />);
+    return withAnalysis(<SectionTable content={content} deliverable={deliverable} />);
   }
 
   // A `{heading, content}` narrative envelope (Financial Review/MD&A, Executive
@@ -130,7 +134,7 @@ export function SectionRenderer({
   // to an object/array, so it still falls through to <Prose>.
   const parsed = tryParseJson(content);
   if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
-    return withAnalysis(<SectionTable content={content} />);
+    return withAnalysis(<SectionTable content={content} deliverable={deliverable} />);
   }
 
   return withAnalysis(<Prose text={content} />);

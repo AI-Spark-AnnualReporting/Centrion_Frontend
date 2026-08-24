@@ -290,6 +290,30 @@ export function gapReason(row: LooseRow): string | null {
   return typeof v === 'string' && v ? v : null;
 }
 
+// Gap reasons that can NEVER resolve, however many times the report is run.
+//
+//   sector_excluded — the line belongs to another kind of issuer. NPL ratio and
+//     CASA ratio are bank measures; an oil company does not have one.
+//   not_in_catalog  — the extractor has no metric for this line at all. Every one
+//     of s06's ten KPI rows is seeded in_catalog=FALSE today.
+//
+// Distinct from `not_resolved`, which IS worth printing: that one means the line
+// was expected this period and the figure did not arrive, which is information.
+const PERMANENT_GAPS = new Set(['sector_excluded', 'not_in_catalog']);
+
+/**
+ * A row that cannot ever carry a figure, so it does not belong in the finished
+ * report — it was printing its own gap reason as the value, giving an oil
+ * company's published release a row reading "NPL ratio: sector_excluded".
+ *
+ * Preview keeps showing these: while curating, "these ten KPIs are not tracked
+ * yet" is worth knowing. The Report screen and the exported file drop them.
+ */
+export function isUnresolvableRow(row: LooseRow): boolean {
+  const reason = gapReason(row);
+  return reason != null && PERMANENT_GAPS.has(reason);
+}
+
 export function rowBlankState(row: LooseRow): RowBlankState {
   const status = cell(row, 'row_status', 'status');
   if (status === 'omitted') return 'omitted';

@@ -536,6 +536,7 @@ export default function EarningsReportPage() {
                   <div id={`earnings-sec-${coverSection.section_code}`}>
                     <EditableProse
                       section={coverSection}
+                      deliverable
                       coverTemplateKey={coverTemplateKey}
                       locked={locked}
                       onSave={(content) => handleSaveSection(coverSection.section_code, content)}
@@ -568,6 +569,11 @@ export default function EarningsReportPage() {
                         </div>
                         <EditableProse
                           section={s}
+                          // The finished report, not the workbench: rows that can
+                          // never carry a figure are left out. They were printing
+                          // their own gap reason as the value, so an oil company's
+                          // release carried "NPL ratio: sector_excluded".
+                          deliverable
                           coverTemplateKey={coverTemplateKey}
                           // The finished report prints the analysis; it does not
                           // offer to rewrite it. The Analyse / Re-analyse control

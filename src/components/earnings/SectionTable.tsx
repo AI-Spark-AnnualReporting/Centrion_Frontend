@@ -4,6 +4,7 @@ import {
   cell,
   stringifyCell,
   rowBlankState,
+  isUnresolvableRow,
   gapReason,
   rowCitation,
   matrixCell,
@@ -164,7 +165,16 @@ function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties
 // has no comparatives, and we never show a fabricated or blank delta column (D-12).
 // Operational KPIs (S06): an out-of-catalog row shows its gap reason instead of a
 // value, and a still-producing row shows "Pending" — never the same grey dash.
-export function SectionTable({ content }: { content: string | null }) {
+export function SectionTable({
+  content,
+  deliverable = false,
+}: {
+  content: string | null;
+  /** Rendering the finished report rather than the workbench — see
+   *  isUnresolvableRow. Preview leaves these rows in; the Report screen and the
+   *  exported file do not. */
+  deliverable?: boolean;
+}) {
   const parsed = content ? tryParseJson(content) : undefined;
   if (parsed === undefined) {
     // Not valid JSON — treat as prose upstream; here just show nothing structured.
@@ -175,7 +185,8 @@ export function SectionTable({ content }: { content: string | null }) {
     // for line-item tables only.
     .map((t) => (t.matrixColumns || t.columns
       ? t
-      : { ...t, rows: t.rows.filter((r) => rowBlankState(r) !== 'omitted') }))
+      : { ...t, rows: t.rows.filter(
+          (r) => rowBlankState(r) !== 'omitted' && !(deliverable && isUnresolvableRow(r))) }))
     .filter((t) => t.rows.length > 0);
   if (tables.length === 0) {
     return <p style={{ margin: 0, fontSize: 13, color: MUTED }}>No data available for this section.</p>;
