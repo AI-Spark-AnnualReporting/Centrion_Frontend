@@ -15,6 +15,7 @@ import { ApiError, boardReports } from '@/lib/api';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
+import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import type { BoardOutlineSection, BoardSection } from '@/types/board';
 import {
   BOARD_COMPANY_VOICE,
@@ -28,6 +29,7 @@ import {
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
+import { useBoardCover } from './useBoardCover';
 import { useFitFrame } from './useFitFrame';
 import { BoardRefinePanel } from './BoardRefinePanel';
 import {
@@ -52,6 +54,11 @@ const GREEN_LIGHT = '#D1FAE5';
 const AMBER_LIGHT = '#FEF3C7';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
+
+// The cover isn't a produced section — it has no content to edit or refine —
+// but it is the first page of the document, so it gets the first rail row and
+// its own panel rather than being invisible until the Report step.
+const COVER_ROW = '__cover__';
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   pending: { label: 'Not produced', color: '#9BA3C4', bg: '#F2F3FA' },
@@ -81,6 +88,7 @@ export default function BoardPreviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [activeCode, setActiveCode] = useState<string | null>(null);
+  const cover = useBoardCover(reportId);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -291,7 +299,10 @@ export default function BoardPreviewPage() {
     [sections],
   );
   const byCode = useMemo(() => new Map(outline.map((s) => [s.section_code, s])), [outline]);
-  const active = visible.find((s) => s.section_code === activeCode) ?? visible[0] ?? null;
+  const coverActive = activeCode === COVER_ROW;
+  const active = coverActive
+    ? null
+    : (visible.find((s) => s.section_code === activeCode) ?? visible[0] ?? null);
 
   // Every section opens read-only, rendered — click the pencil to edit.
   // Cancel returns to the rendered view; an unwritten section keeps its
@@ -374,7 +385,7 @@ export default function BoardPreviewPage() {
         >
           <SectionRail
             sections={visible}
-            activeCode={active?.section_code ?? null}
+            activeCode={coverActive ? COVER_ROW : (active?.section_code ?? null)}
             readyCount={readyCount}
             onSelect={(code) => {
               setActiveCode(code);
@@ -384,6 +395,16 @@ export default function BoardPreviewPage() {
 
           {/* Scrolls on its own, so the rail and the footer never move. */}
           <div style={{ minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+            {coverActive && (
+              <CoverPanel
+                companyName={cover.companyName}
+                period={period}
+                templateKey={cover.templateKey}
+                brand={cover.brand}
+                locked={locked}
+                onChoose={cover.openPicker}
+              />
+            )}
             {active && (
               <SectionPanel
                 key={active.section_code}
@@ -414,6 +435,8 @@ export default function BoardPreviewPage() {
           </div>
         </div>
       )}
+
+      {cover.picker}
 
       {/* Sits below the frame, so it never scrolls away. */}
       <div
@@ -548,6 +571,7 @@ function SectionRail({
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+        <CoverRailItem isCurrent={activeCode === COVER_ROW} onClick={() => onSelect(COVER_ROW)} />
         {sections.map((s, i) => (
           <RailItem
             key={s.section_code}
@@ -557,6 +581,109 @@ function SectionRail({
             onClick={() => onSelect(s.section_code)}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+// The cover's own rail row. No status circle — there is nothing to fill in,
+// only a design to choose — so it gets the page icon instead.
+function CoverRailItem({ isCurrent, onClick }: { isCurrent: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 10px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: isCurrent ? ACCENT_LIGHT : 'transparent',
+        border: isCurrent ? `1.5px solid ${ACCENT_RING}` : '1.5px solid transparent',
+        marginBottom: 2,
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#F1F2F6',
+          color: MUTED,
+          border: '1px solid #E5E7EF',
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 14 14" fill="none">
+          <rect x="2.5" y="1.5" width="9" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M5 5h4M5 7.5h4M5 10h2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12,
+          fontWeight: isCurrent ? 700 : 500,
+          color: isCurrent ? INK : '#374151',
+        }}
+      >
+        Cover / Title page
+      </div>
+    </div>
+  );
+}
+
+// The cover panel: the title page as it will print, and the one control it has.
+function CoverPanel({
+  companyName,
+  period,
+  templateKey,
+  brand,
+  locked,
+  onChoose,
+}: {
+  companyName: string | null;
+  period: string;
+  templateKey: string | null;
+  brand: { primary?: string | null } | null;
+  locked: boolean;
+  onChoose: () => void;
+}) {
+  return (
+    <div className="card" style={{ padding: '20px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: INK, flex: 1, minWidth: 0 }}>
+          Cover / Title page
+        </h2>
+        {!locked && (
+          <button
+            type="button"
+            className="btn bs"
+            onClick={onChoose}
+            style={{ padding: '8px 14px', fontSize: 12.5, fontWeight: 700 }}
+          >
+            Choose cover design &amp; colors
+          </button>
+        )}
+      </div>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: MUTED }}>
+        The first page of the document. Company name and period come from the report itself — the
+        design and colours are yours to pick, and they carry into the export.
+      </p>
+      <div style={{ ['--brand-primary' as string]: brand?.primary ?? ACCENT }}>
+        <CoverRenderer
+          companyName={companyName}
+          period={period || null}
+          title="Board of Directors’ Report"
+          preparedOn={null}
+          templateKey={templateKey}
+          maxWidth={420}
+        />
       </div>
     </div>
   );
@@ -886,7 +1013,6 @@ function SectionPanel({
               editing={editing}
               saving={saving}
               error={editing ? error : null}
-              markdown
               onSave={(content) => onSave(s.section_code, content)}
               onCancel={() => onEdit(false)}
             />
@@ -941,6 +1067,25 @@ function SectionPanel({
           onSave={onSave}
           onUploadFile={onUploadFile}
         />
+      )}
+
+      {/* A written section keeps the upload too — replacing the document it was
+          read from is the fix when the wrong one fed it, and re-reading beats
+          retyping. `NeedsInput` renders its own, so this covers the rest. */}
+      {!readOnly && (produced || s.status === 'empty') && !editing && (
+        working ? (
+          <WorkingLine text={working} />
+        ) : (
+          <div>
+            <AttachDocument
+              code={s.section_code}
+              slot={slot}
+              label="Replace the supporting document"
+              disabled={!!busy}
+              onUploadFile={onUploadFile}
+            />
+          </div>
+        )
       )}
 
       {error && !editing && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
@@ -1073,6 +1218,97 @@ function MarkdownHelpModal({ onClose }: { onClose: () => void }) {
 // into, offer a document to fill that field from, and one Save. Matches the
 // quarterly Preview's needs-input panel.
 
+// A document is being read, or the section is being written from it. Same line
+// wherever it happens — an empty section shows it in place of the form, a
+// written one under the content it is about to replace.
+function WorkingLine({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '24px 4px',
+        fontSize: 13,
+        fontWeight: 600,
+        color: ACCENT,
+      }}
+    >
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
+      >
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+      {text} — this section fills in when it lands.
+    </div>
+  );
+}
+
+// Files a document against the section's own slot. Offered on every section,
+// not only the empty ones: a produced section is often wrong because the wrong
+// document fed it, and the fix is the right document — not retyping the text.
+function AttachDocument({
+  code,
+  slot,
+  label,
+  disabled,
+  onUploadFile,
+}: {
+  code: string;
+  slot: string | null;
+  label: string;
+  disabled?: boolean;
+  onUploadFile: (code: string, slot: string, file: File) => void;
+}) {
+  const usable = !!slot && !disabled;
+  return (
+    <label
+      style={{
+        marginTop: 12,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '9px 14px',
+        borderRadius: 8,
+        border: '1.5px dashed #C9CDE4',
+        background: '#fff',
+        cursor: usable ? 'pointer' : 'not-allowed',
+        opacity: usable ? 1 : 0.55,
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: '#5A6080',
+      }}
+      title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
+    >
+      <input
+        type="file"
+        disabled={!usable}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && slot) onUploadFile(code, slot, f);
+          e.target.value = '';
+        }}
+      />
+      <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+        <path d="M10 4v8M6 8l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
+        <path
+          d="M4 14v1a2 2 0 002 2h8a2 2 0 002-2v-1"
+          stroke="#9BA3C4"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      {label}
+    </label>
+  );
+}
+
 function NeedsInput({
   section: s,
   slot,
@@ -1097,33 +1333,7 @@ function NeedsInput({
   const [draft, setDraft] = useState('');
   const need = s.feeder?.message?.trim() || 'the content for this section';
 
-  if (working) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '24px 4px',
-          fontSize: 13,
-          fontWeight: 600,
-          color: ACCENT,
-        }}
-      >
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}
-        >
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-        </svg>
-        {working} — this section fills in when it lands.
-      </div>
-    );
-  }
+  if (working) return <WorkingLine text={working} />;
 
   return (
     <div>
@@ -1173,45 +1383,12 @@ function NeedsInput({
 
           {/* Files the section's own slot, so there is no trip back to Sources
               to work out which document it was waiting on. */}
-          <label
-            style={{
-              marginTop: 12,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '9px 14px',
-              borderRadius: 8,
-              border: '1.5px dashed #C9CDE4',
-              background: '#fff',
-              cursor: slot ? 'pointer' : 'not-allowed',
-              opacity: slot ? 1 : 0.55,
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: '#5A6080',
-            }}
-            title={slot ? `Files under "${slot}"` : 'This section has no document slot'}
-          >
-            <input
-              type="file"
-              disabled={!slot}
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f && slot) onUploadFile(s.section_code, slot, f);
-                e.target.value = '';
-              }}
-            />
-            <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
-              <path d="M10 4v8M6 8l4-4 4 4" stroke="#9BA3C4" strokeWidth="1.5" strokeLinecap="round" />
-              <path
-                d="M4 14v1a2 2 0 002 2h8a2 2 0 002-2v-1"
-                stroke="#9BA3C4"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            Attach a supporting document
-          </label>
+          <AttachDocument
+            code={s.section_code}
+            slot={slot}
+            label="Attach a supporting document"
+            onUploadFile={onUploadFile}
+          />
 
           {error && <div style={{ marginTop: 8, fontSize: 12, color: RED }}>{error}</div>}
 

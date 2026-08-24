@@ -29,9 +29,12 @@ const h = vi.hoisted(() => {
     setSectionFigures: vi.fn(),
     getEarningsSourceLines: vi.fn(),
     produceEarningsReport: vi.fn(),
-    refineEarningsSection: vi.fn(),
     getByPollUrl: vi.fn(),
     getNodes: vi.fn(),
+    getEarningsCoverTemplates: vi.fn(),
+    getEarningsColorPalettes: vi.fn(),
+    getEarningsCoverSelection: vi.fn(),
+    saveEarningsCoverSelection: vi.fn(),
     MockApiError,
   };
 });
@@ -53,7 +56,10 @@ vi.mock('@/lib/api', () => ({
     setSectionFigures: (...a: unknown[]) => h.setSectionFigures(...a),
     getEarningsSourceLines: (...a: unknown[]) => h.getEarningsSourceLines(...a),
     produceEarningsReport: (...a: unknown[]) => h.produceEarningsReport(...a),
-    refineEarningsSection: (...a: unknown[]) => h.refineEarningsSection(...a),
+    getEarningsCoverTemplates: (...a: unknown[]) => h.getEarningsCoverTemplates(...a),
+    getEarningsColorPalettes: (...a: unknown[]) => h.getEarningsColorPalettes(...a),
+    getEarningsCoverSelection: (...a: unknown[]) => h.getEarningsCoverSelection(...a),
+    saveEarningsCoverSelection: (...a: unknown[]) => h.saveEarningsCoverSelection(...a),
   },
   agentRuns: {
     getByPollUrl: (...a: unknown[]) => h.getByPollUrl(...a),
@@ -117,6 +123,9 @@ beforeEach(() => {
   h.produceEarningsReport.mockResolvedValue({ run_id: 'run-1', poll_url: '/api/v1/agent_runs/run-1' });
   h.getByPollUrl.mockResolvedValue({ run_id: 'run-1', status: 'completed', error_message: null });
   h.getNodes.mockResolvedValue({ nodes: [] });
+  h.getEarningsCoverTemplates.mockResolvedValue({ cover_templates: [] });
+  h.getEarningsColorPalettes.mockResolvedValue({ color_palettes: [] });
+  h.getEarningsCoverSelection.mockResolvedValue({ cover_template_key: null, brand: null });
 });
 
 describe('EarningsPreviewPage', () => {
@@ -259,11 +268,10 @@ describe('EarningsPreviewPage', () => {
     expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
   });
 
-  it('offers a way back to add a section', async () => {
+  it('does not offer an "Add a section" button on the rail', async () => {
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getByRole('button', { name: '+ Add a section' }));
-    expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/outline');
+    expect(screen.queryByRole('button', { name: '+ Add a section' })).not.toBeInTheDocument();
   });
 
   // ── The narrative half ──────────────────────────────────────────────────────
@@ -287,14 +295,14 @@ describe('EarningsPreviewPage', () => {
     expect(screen.getByRole('button', { name: /Executive Summary/ })).toBeInTheDocument();
   });
 
-  it('shows a produced narrative section, with a way to run it again', async () => {
+  it('shows a produced narrative section, with no Regenerate button', async () => {
     h.getEarningsSections.mockResolvedValue({ sections: NARRATIVE });
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
     fireEvent.click(screen.getByRole('button', { name: /CEO Commentary/ }));
 
     expect(await screen.findByText(/reinforce our ability to deliver/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).not.toBeInTheDocument();
   });
 
   it('an un-run section names what it is waiting on, and links to it', async () => {
@@ -575,84 +583,6 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText('Revenue')).toBeInTheDocument();
 
     expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
-  });
-
-  // ── The refine bar ──────────────────────────────────────────────────────────
-  //
-  // Edit retypes the section and Regenerate throws it away and rebuilds it. This
-  // is the middle option that was missing: say what you want changed and keep
-  // everything else.
-
-  const WRITTEN = [
-    { section_code: 's03_exec_summary', title: 'Executive Summary', mode: 'generate',
-      source_type: 'Hybrid', status: 'produced', included: true,
-      content: 'Net income was SAR 103,365 million, a 15.4% decrease.' },
-    { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
-      source_type: 'AI-written', status: 'pending', included: true, content: null },
-  ];
-
-  const openWritten = async () => {
-    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: /Executive Summary/ })[0]);
-    return screen.findByText(/Refine this section/i);
-  };
-
-  it('a chip fills the box rather than sending on its own', async () => {
-    await openWritten();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Make it concise' }));
-
-    expect(screen.getByPlaceholderText(/Tell the agent how to adjust/)).toHaveValue('Make it concise');
-    expect(h.refineEarningsSection).not.toHaveBeenCalled();
-  });
-
-  it('sending an instruction puts the rewritten text on screen', async () => {
-    await openWritten();
-    h.refineEarningsSection.mockResolvedValue({
-      section_code: 's03_exec_summary', status: 'produced',
-      content: 'Net income fell 15.4% to SAR 103,365 million.',
-      grounding_violations: [],
-    });
-
-    fireEvent.change(screen.getByPlaceholderText(/Tell the agent how to adjust/),
-                     { target: { value: 'Make it concise' } });
-    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
-
-    await waitFor(() => expect(h.refineEarningsSection).toHaveBeenCalledWith(
-      'rep-1', 's03_exec_summary', 'Make it concise'));
-    expect(await screen.findByText(/Net income fell 15.4%/)).toBeInTheDocument();
-  });
-
-  it('a refine that fails keeps the text that was already there', async () => {
-    await openWritten();
-    h.refineEarningsSection.mockRejectedValue(new h.MockApiError(502, 'The rewrite came back empty.'));
-
-    fireEvent.change(screen.getByPlaceholderText(/Tell the agent how to adjust/),
-                     { target: { value: 'Make it concise' } });
-    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
-
-    expect(await screen.findByText('The rewrite came back empty.')).toBeInTheDocument();
-    expect(screen.getByText(/Net income was SAR 103,365 million/)).toBeInTheDocument();
-  });
-
-  it('a section nobody has run yet is offered Run, not a rewrite', async () => {
-    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-    fireEvent.click(screen.getAllByRole('button', { name: /Guidance/ })[0]);
-
-    expect(await screen.findByRole('button', { name: 'Run this section' })).toBeInTheDocument();
-    expect(screen.queryByText(/Refine this section/i)).not.toBeInTheDocument();
-  });
-
-  it('a figures table has no rewrite bar — there is no prose in it', async () => {
-    h.getEarningsSections.mockResolvedValue({ sections: WRITTEN });
-    renderPage();
-    await screen.findByRole('heading', { name: 'Financial Highlights' });
-
-    expect(screen.queryByText(/Refine this section/i)).not.toBeInTheDocument();
   });
 
 });

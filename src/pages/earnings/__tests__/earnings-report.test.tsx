@@ -73,7 +73,7 @@ vi.mock('@/lib/api', () => ({
 
 import EarningsReportPage from '../EarningsReportPage';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
-import { earningsSectionState } from '../preview-helpers';
+import { earningsSectionState, isNoDataPlaceholder } from '../preview-helpers';
 import type { EarningsProducedSection } from '@/types/earnings';
 
 const sec = (over: Partial<EarningsProducedSection>): EarningsProducedSection => ({
@@ -194,6 +194,13 @@ const TREND_DEFERRED = sec({
   mode: 'trend',
   display_order: 6,
   content: null,
+});
+const GUIDANCE_NO_DATA = sec({
+  section_code: 'guidance_outlook',
+  title: 'Guidance / Outlook',
+  mode: 'generate',
+  display_order: 5.5,
+  content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
 });
 const KPI_TABLE = sec({
   section_code: 'operational_kpis',
@@ -422,6 +429,43 @@ describe('earningsSectionState', () => {
   });
   it('real prose reports produced', () => {
     expect(earningsSectionState(OVERVIEW)).toBe('produced');
+  });
+});
+
+describe('isNoDataPlaceholder', () => {
+  it('recognises the confirmed live "no guidance" boilerplate', () => {
+    expect(
+      isNoDataPlaceholder('No forward-looking guidance was disclosed in the uploaded documents for this period.'),
+    ).toBe(true);
+  });
+  it('recognises the confirmed live "no IR contact" boilerplate', () => {
+    expect(
+      isNoDataPlaceholder(
+        'No investor-relations calendar or contact information was found in the uploaded documents for this period.',
+      ),
+    ).toBe(true);
+  });
+  it('recognises it inside a {heading, content} envelope too', () => {
+    expect(
+      isNoDataPlaceholder(
+        JSON.stringify({
+          heading: 'Guidance',
+          content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+        }),
+      ),
+    ).toBe(true);
+  });
+  it('never matches real content that happens to start with "No"', () => {
+    expect(
+      isNoDataPlaceholder('No dividends were declared this quarter, in line with the prior year.'),
+    ).toBe(false);
+  });
+  it('never matches real multi-paragraph prose', () => {
+    expect(isNoDataPlaceholder(OVERVIEW.content)).toBe(false);
+  });
+  it('false for null/empty content', () => {
+    expect(isNoDataPlaceholder(null)).toBe(false);
+    expect(isNoDataPlaceholder('')).toBe(false);
   });
 });
 
@@ -754,6 +798,21 @@ describe('EarningsReportPage', () => {
     await screen.findByText(/resilient full-year performance/);
     expect(screen.queryByText('Trend')).not.toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+  });
+
+  it('a "no data found" section is absent entirely — no card, no boilerplate sentence on screen', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, { ...GUIDANCE_NO_DATA, included: true }],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Guidance / Outlook')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/No forward-looking guidance was disclosed/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
   });
 });

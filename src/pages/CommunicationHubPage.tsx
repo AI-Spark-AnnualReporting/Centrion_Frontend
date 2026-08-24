@@ -226,7 +226,7 @@ function ThreadRow({
   // internal_count / last_message / updated_at without a full page reload.
   onAttached: () => void;
 }) {
-  const { report, subject, owner, last_message, updated_at, unread_count, internal_count } = thread;
+  const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at } = thread;
   const { toast } = useToast();
   const title = report ? report.title : (subject?.trim() || 'Discussion');
 
@@ -291,6 +291,40 @@ function ThreadRow({
             >
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B' }} />
               {report.status_label}
+            </span>
+          )}
+          {is_private && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: '#EFF0F7',
+                color: '#5A6080',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {ICON_LOCK}
+              Private
+            </span>
+          )}
+          {removed_at && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: '#FDF2F2',
+                color: '#B4232A',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Removed
             </span>
           )}
         </div>
@@ -367,7 +401,9 @@ function ThreadRow({
           {ICON_PAPERCLIP}
         </button>
         <ChannelBtn icon={ICON_LOCK} label="Internal" count={internal_count} tone="internal" onClick={() => onOpen(thread)} />
-        <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        {!removed_at && (
+          <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
       </div>
     </div>

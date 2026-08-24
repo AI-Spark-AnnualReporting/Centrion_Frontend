@@ -397,10 +397,18 @@ export default function EarningsReportPage() {
     );
   }
 
-  // Sections that vanish entirely when omitted by design (quote/trend) — no
-  // card, no rail entry, no gating on a section that will never produce
-  // content. Returning null from the leaf renderer alone isn't enough; the
-  // outer numbered card would still render around an empty body.
+  // Sections that vanish entirely when omitted by design (quote/trend, or a
+  // "no data found" boilerplate section) — no card, no rail entry, no gating
+  // on a section that will never produce content. Returning null from the
+  // leaf renderer alone isn't enough; the outer numbered card would still
+  // render around an empty body.
+  //
+  // A needs_input section stays visible here on purpose: this screen (Report,
+  // formerly "Preview" — see "Rename the last two earnings steps") is where
+  // its manual text/upload form actually lives. Today's Preview page is a
+  // different, unrelated screen (financial figure-picking, inherited from the
+  // old Figures step) that was never built to host it — hiding it here would
+  // leave no way to ever complete the section.
   const visibleSections = sections.filter(
     (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
   );

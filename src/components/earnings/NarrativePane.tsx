@@ -50,26 +50,12 @@ export function NarrativePane({
         {children}
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
             marginTop: 16,
             paddingTop: 13,
             borderTop: `1px solid ${BORDER_SOFT}`,
           }}
         >
-          <span style={{ fontSize: 11.5, color: FAINT }}>
-            Written from your figures. Change them and run it again.
-          </span>
-          <button
-            type="button"
-            className="btn bs bsm"
-            disabled={running}
-            onClick={() => onRun(true)}
-          >
-            {running ? 'Running…' : 'Regenerate'}
-          </button>
+          <span style={{ fontSize: 11.5, color: FAINT }}>Written from your figures.</span>
         </div>
         {runError && (
           <div role="alert" style={{ fontSize: 12, color: DANGER, fontWeight: 700, marginTop: 9 }}>

@@ -17,7 +17,6 @@ export function EditableSectionContent({
   editing,
   saving,
   error,
-  markdown = false,
   onSave,
   onCancel,
   showAnalysis = false,
@@ -27,8 +26,6 @@ export function EditableSectionContent({
   editing: boolean;
   saving: boolean;
   error: string | null;
-  /** Render the read-only view as Markdown — see SectionContent. */
-  markdown?: boolean;
   onSave: (content: string) => void;
   onCancel: () => void;
   // Print the Analyse button's paragraphs under the table(s). The report view
@@ -44,7 +41,7 @@ export function EditableSectionContent({
   // content (`{document_id}`) has no text form to edit — the file IS the
   // content — so it always renders read-only regardless of `editing`.
   if (!editing || section.mode === 'attach') {
-    return <SectionContent section={section} markdown={markdown} showAnalysis={showAnalysis} companyId={companyId} />;
+    return <SectionContent section={section} showAnalysis={showAnalysis} companyId={companyId} />;
   }
 
   // Detect a tabular shape from the content itself (not just `mode`) — hybrid

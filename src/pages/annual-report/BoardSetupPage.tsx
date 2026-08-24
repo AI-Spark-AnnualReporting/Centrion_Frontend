@@ -24,7 +24,6 @@ import type { BoardIssuerProfile, BoardReportSummary } from '@/types/board';
 import { errorMessage, profileFromCompany, readBoardConflict } from './board-helpers';
 import {
   Block,
-  FAINT,
   INK,
   MUTED,
   Notice,
@@ -263,7 +262,7 @@ export default function BoardSetupPage() {
       </>
       )}
 
-      {canRead && (
+      {canRead && !(!listLoading && !listError && reports.length === 0) && (
       <div style={{ marginTop: 28 }}>
         <div style={{ marginBottom: 12 }}>
           <h2 style={{ fontSize: 15, fontWeight: 800, color: INK, margin: 0 }}>Your board reports</h2>
@@ -278,17 +277,19 @@ export default function BoardSetupPage() {
           <div className="card" role="alert" style={{ padding: '14px 18px', fontSize: 12.5, color: '#DC2626' }}>
             {listError}
           </div>
-        ) : reports.length === 0 ? (
-          <div className="card" style={{ padding: '28px 20px', textAlign: 'center', fontSize: 12.5, color: FAINT }}>
-            No board reports yet. Create one above to get started.
-          </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
             {reports.map((r) => (
               <BoardReportCard
                 key={r.report_id}
                 report={r}
-                onOpen={(rep) => navigate(`/board-report/${rep.report_id}/sources`)}
+                // Approved reports are read-only — land on the Report step
+                // where they're exported, not at the start of the build.
+                onOpen={(rep) =>
+                  navigate(
+                    `/board-report/${rep.report_id}/${rep.status === 'draft' ? 'sources' : 'report'}`,
+                  )
+                }
               />
             ))}
           </div>
