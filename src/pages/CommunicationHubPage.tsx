@@ -26,6 +26,7 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
+import { statusPill } from '@/components/dashboard/report-status';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
 import { SendExternalModal } from '@/components/communications/SendExternalModal';
@@ -231,9 +232,8 @@ function ThreadRow({
   onExternal: (thread: ThreadSummary) => void;
   onPublish: () => void;
   // Opens the reviewer view straight from the row — same action the thread
-  // modal's footer button fires. Only rendered once the report has actually
-  // been sent for review (`assignment` non-null); the view itself self-gates
-  // approve/reassign on can_act.
+  // modal's footer button fires. Only rendered while the report is actually
+  // out for review; the view itself self-gates approve/reassign on can_act.
   onReview: (thread: ThreadSummary) => void;
   // Fired after a successful quick-attach so the parent can refresh the row's
   // internal_count / last_message / updated_at without a full page reload.
@@ -242,6 +242,10 @@ function ThreadRow({
   const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread;
   const { toast } = useToast();
   const title = report ? report.title : (subject?.trim() || 'Discussion');
+
+  // Review is only live while the report is out for review — once it's
+  // approved (or locked/published) there's nothing left to review.
+  const inReview = report?.status?.trim().toLowerCase() === 'in_review';
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? ' (you)' : ''}`
@@ -288,24 +292,29 @@ function ThreadRow({
           <span style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E', letterSpacing: '-.1px' }}>
             {title}
           </span>
-          {report && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '2px 9px',
-                borderRadius: 20,
-                background: 'rgba(245,158,11,.12)',
-                color: '#B45309',
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B' }} />
-              {report.status_label}
-            </span>
-          )}
+          {/* Only "In review" earns a pill in the list — every other status is
+              noise next to the thread's own activity line. */}
+          {inReview && (() => {
+            const pill = statusPill(report.status, report.status_label);
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '2px 9px',
+                  borderRadius: 20,
+                  background: pill.bg,
+                  color: pill.color,
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: pill.color }} />
+                {pill.text}
+              </span>
+            );
+          })()}
           {is_private && (
             <span
               style={{
@@ -418,7 +427,7 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {assignment && !removed_at && (
+        {inReview && assignment && !removed_at && (
           <button
             type="button"
             className="btn bp"
