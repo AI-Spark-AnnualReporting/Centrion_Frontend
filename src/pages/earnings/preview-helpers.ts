@@ -139,9 +139,15 @@ export function isTableMode(section: Pick<EarningsProducedSection, 'mode'>): boo
   return section.mode === 'table' || section.mode === 'kpi' || section.mode === 'trend';
 }
 
-// Management commentary (S05) — a quote block: verbatim text + attribution.
+// A quote block: verbatim text + attribution.
+//
+// Matching on the section CODE as well was right when s05_management_commentary
+// was Release/quote. D-31 moved it to AI-written/generate, producing through the
+// shared RAG composer and storing {heading, content} -- so QuoteBlock found no
+// `quote` key, returned null, and the CEO Commentary panel rendered completely
+// blank. The mode is the only honest signal for what the content actually is.
 export function isQuoteMode(section: Pick<EarningsProducedSection, 'mode' | 'section_code'>): boolean {
-  return section.mode === 'quote' || /commentary/i.test(section.section_code);
+  return section.mode === 'quote';
 }
 
 // Non-IFRS reconciliation (S15) — reported → adjustments → adjusted, per line.

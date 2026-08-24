@@ -3071,6 +3071,45 @@ export const earnings = {
       return sec;
     }),
 
+  // Have the model rewrite one narrative section from a free-text instruction.
+  // One LLM call server-side, and it only re-words the prose already stored --
+  // producing the section again is what Regenerate is for. 422 the section is a
+  // table (nothing to rewrite) or the instruction is missing/too long · 409 the
+  // section is empty, or the report is locked · 502 the model returned nothing,
+  // in which case the stored text is untouched and a retry is safe.
+  //
+  // Deliberately NOT run through normalizeEarningsSection: the response carries
+  // only what changed, and the normaliser would default mode/source_type/title
+  // back over the real ones (the trap EarningsReportPage.tsx documents). The
+  // caller merges these three fields and nothing else.
+  refineEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    instruction: string,
+  ): Promise<{
+    section_code: string;
+    content: string | null;
+    status: string;
+    grounding_violations: string[];
+  }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then((raw) => {
+      const o = earnRecord(raw).section ? earnRecord(earnRecord(raw).section) : earnRecord(raw);
+      const code = earnStr(o.section_code) ?? sectionCode;
+      const content = typeof o.content === "string" ? o.content : null;
+      if (content == null) throw new Error("Refine: the server returned no text.");
+      return {
+        section_code: code,
+        content,
+        status: earnStr(o.status) ?? "produced",
+        grounding_violations: Array.isArray(o.grounding_violations)
+          ? o.grounding_violations.filter((v): v is string => typeof v === "string")
+          : [],
+      };
+    }),
+
   // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body
   // carries the blocker list (read defensively in the UI).
   approveEarningsReport: (reportId: string): Promise<unknown> =>

@@ -26,6 +26,7 @@ import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnal
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
+import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
@@ -317,6 +318,31 @@ export default function EarningsFiguresPage() {
     }
   };
 
+  // Have the model re-word a section the user is looking at. Deliberately does
+  // not catch: SectionRefineChat shows the rejection in its own banner and keeps
+  // what the user typed, which is more useful than a message in the run-error row.
+  //
+  // Merges only the three fields the response actually carries. Spreading the
+  // whole thing is what makes Regenerate blank the badge and the title -- the
+  // narrow endpoint has no mode/source_type to give, so the normaliser would
+  // invent them.
+  const refineNarrative = async (code: string, instruction: string) => {
+    if (!reportId) return;
+    const res = await earnings.refineEarningsSection(reportId, code, instruction);
+    setProduced((prev) =>
+      prev.map((p) =>
+        p.section_code === code
+          ? {
+              ...p,
+              content: res.content,
+              status: res.status as typeof p.status,
+              grounding_flag: res.grounding_violations[0] ?? p.grounding_flag,
+            }
+          : p,
+      ),
+    );
+  };
+
   const runSection = async (code: string, regenerate: boolean) => {
     if (!reportId) return;
     setRunning(code);
@@ -545,6 +571,17 @@ export default function EarningsFiguresPage() {
                     onSave={(content) => saveNarrative(activeNarrative.section_code, content)}
                   />
                 </NarrativePane>
+                {/* Only over prose that exists. A section still showing "Run this
+                    section" has nothing to refine, and offering the box there
+                    would read as a second way to write it. */}
+                {!!(activeNarrative.content || '').trim() && (
+                  <SectionRefineChat
+                    key={activeNarrative.section_code}
+                    onSend={(instruction) =>
+                      refineNarrative(activeNarrative.section_code, instruction)
+                    }
+                  />
+                )}
               </section>
             )}
 
