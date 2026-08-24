@@ -94,7 +94,7 @@ export function SectionRenderer({
       <>
         {narrative.heading && (
           <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 800, color: INK }}>
-            {canonicalMoneyInText(narrative.heading)}
+            {narrative.heading}
           </h3>
         )}
         <Prose text={narrative.body} />
