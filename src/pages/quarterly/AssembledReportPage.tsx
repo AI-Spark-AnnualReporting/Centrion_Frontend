@@ -99,6 +99,9 @@ export default function AssembledReportPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  // Approve & Lock is admin-only — a non-admin has nothing to do with the
+  // button, so it isn't there at all rather than sitting greyed out.
+  const isAdmin = user?.role === 'admin';
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -305,14 +308,16 @@ export default function AssembledReportPage() {
               >
                 Choose cover design & colors
               </button>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={() => setApproveDialogOpen(true)}
-                style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 18px' }}
-              >
-                Approve & Lock
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn bp"
+                  onClick={() => setApproveDialogOpen(true)}
+                  style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 18px' }}
+                >
+                  Approve & Lock
+                </button>
+              )}
             </>
           )}
         </div>

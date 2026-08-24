@@ -612,7 +612,6 @@ export default function EarningsReportPage() {
               approving={approving}
               onApprove={handleApprove}
               onExport={handleExport}
-              showApprove={false}
             />
             {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
           </div>
