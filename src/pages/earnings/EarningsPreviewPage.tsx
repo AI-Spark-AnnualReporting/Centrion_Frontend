@@ -26,6 +26,7 @@ import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnal
 import { PreviewRail, COVER_CODE } from '@/components/earnings/PreviewRail';
 import type { RailItem } from '@/components/earnings/PreviewRail';
 import { NarrativePane } from '@/components/earnings/NarrativePane';
+import { PreviewSkeleton } from '@/components/earnings/PreviewSkeleton';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
@@ -536,13 +537,9 @@ export default function EarningsFiguresPage() {
       )}
 
       {sections === null ? (
-        // A load that failed has already said so above; a spinner underneath it
+        // A load that failed has already said so above; a skeleton underneath it
         // would claim something is still coming.
-        loadError ? null : (
-          <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <Spinner />
-          </div>
-        )
+        loadError ? null : <PreviewSkeleton />
       ) : sections.length === 0 ? (
         // Reachable only by unticking every section that carries figures. It is a
         // choice, not a fault, so it says what is true and offers the way back

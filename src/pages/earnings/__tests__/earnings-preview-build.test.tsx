@@ -854,4 +854,38 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByText(/will not appear in it/)).not.toBeInTheDocument();
   });
 
+  // ── What the screen shows before the data arrives ──────────────────────────
+  //
+  // The loader would hand over and the page would be blank for a second or two --
+  // a small centred spinner in a full-width empty page reads as nothing at all.
+  // The structure arrives first now, and only the values are missing.
+
+  it('draws the page structure while the figures are still loading', async () => {
+    let release: (v: unknown) => void = () => {};
+    h.getEarningsFigureSections.mockReturnValue(new Promise((r) => { release = r; }));
+    renderPage();
+
+    // Present before anything resolves: the rail, its header, and the table frame.
+    expect(await screen.findByRole('status', { name: /loading the report preview/i }))
+      .toBeInTheDocument();
+    expect(screen.getByText('Sections')).toBeInTheDocument();
+    expect(screen.getByText('LINE')).toBeInTheDocument();
+    expect(screen.getByText('VALUE')).toBeInTheDocument();
+
+    release(SECTIONS);
+    expect(await screen.findByRole('heading', { name: 'Financial Highlights' })).toBeInTheDocument();
+    // …and it gets out of the way once the real thing is there.
+    expect(screen.queryByRole('status', { name: /loading the report preview/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it('shows no skeleton when the load failed — nothing is coming', async () => {
+    h.getEarningsFigureSections.mockRejectedValue(new h.MockApiError(500));
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: /loading the report preview/i }))
+        .not.toBeInTheDocument());
+  });
+
 });
