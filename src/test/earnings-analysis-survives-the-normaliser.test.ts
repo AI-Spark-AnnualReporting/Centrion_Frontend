@@ -83,3 +83,34 @@ describe("getEarningsSections", () => {
     expect(res.sections[1].analysis).toBeNull();
   });
 });
+
+describe("getEarningsSections — the no-data flag", () => {
+  it("maps feeder.status and feeder.message onto the section", async () => {
+    // The backend flags a section that found nothing instead of writing a sentence
+    // into its content, and the whole chain — the Report screen hiding it, Preview
+    // stating the reason — hangs off this one mapping arriving intact.
+    stubFetch([
+      { section_code: "s11_guidance", title: "Guidance / Outlook", mode: "generate",
+        status: "produced", content: null,
+        feeder: { status: "no_data", message: "No forward-looking guidance was disclosed." } },
+    ]);
+
+    const res = await earnings.getEarningsSections("rep-1");
+
+    expect(res.sections[0].feeder_status).toBe("no_data");
+    expect(res.sections[0].feeder_message).toBe("No forward-looking guidance was disclosed.");
+    expect(res.sections[0].content).toBeNull();
+  });
+
+  it("leaves an ordinary produced section unflagged", async () => {
+    stubFetch([
+      { section_code: "s03_exec_summary", title: "Executive Summary", mode: "generate",
+        status: "produced", content: "Real prose.", feeder: { citations: {} } },
+    ]);
+
+    const res = await earnings.getEarningsSections("rep-1");
+
+    expect(res.sections[0].feeder_status).toBeNull();
+    expect(res.sections[0].content).toBe("Real prose.");
+  });
+});

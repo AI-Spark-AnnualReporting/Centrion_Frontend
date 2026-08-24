@@ -873,3 +873,66 @@ describe('EarningsReportPage — section analysis', () => {
     expect(await screen.findByText(/concentrated in two lines/)).toBeInTheDocument();
   });
 });
+
+// ── A section with nothing to report ────────────────────────────────────────
+//
+// Preview said "This section is left out of the finished report" and the Report
+// screen showed it anyway, as did the exported PDF. This screen now shows exactly
+// the set the export contains.
+
+describe('EarningsReportPage — sections with nothing to report', () => {
+  const SENTENCE = 'No forward-looking guidance was disclosed in the uploaded documents for this period.';
+
+  const guidance = (over: Partial<EarningsProducedSection>) =>
+    sec({ section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate', display_order: 3, ...over });
+
+  it('hides a section the backend flagged as having nothing to report', async () => {
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({
+        content: null, status: 'produced', feeder_status: 'no_data', feeder_message: SENTENCE,
+      })],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+
+    expect(screen.queryByRole('heading', { name: 'Guidance / Outlook' })).not.toBeInTheDocument();
+    expect(screen.queryByText(SENTENCE)).not.toBeInTheDocument();
+  });
+
+  it('hides one produced before the flag existed, which still holds the sentence', async () => {
+    // content_hash fingerprints inputs, so flagging it invalidated nothing — these
+    // rows survive until somebody presses Regenerate, and must not print meanwhile.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: SENTENCE, status: 'produced' })],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+
+    expect(screen.queryByText(SENTENCE)).not.toBeInTheDocument();
+  });
+
+  it('keeps a real sentence that merely begins with "No"', async () => {
+    const real = 'No dividends were declared this quarter, in line with the prior year.';
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: real, status: 'produced' })],
+    });
+    renderPage();
+
+    expect(await screen.findByText(real)).toBeInTheDocument();
+  });
+
+  it('still shows a needs_input section, which is a gap the user can close', async () => {
+    // Deliberately not hidden: this screen is where its manual entry form lives,
+    // so hiding it would leave no way to ever complete the section.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: null, status: 'needs_input' })],
+    });
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Guidance / Outlook' })).toBeInTheDocument();
+  });
+});

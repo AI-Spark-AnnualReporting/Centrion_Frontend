@@ -43,7 +43,7 @@ export function NarrativePane({
   children?: React.ReactNode;
 }) {
   const [showWhy, setShowWhy] = useState(false);
-  const finding = noDataMessage(section.content);
+  const finding = noDataMessage(section);
   const hasContent = !!(section.content || '').trim() && !finding;
 
   // It ran, and the answer is that the documents say nothing on this. That is a

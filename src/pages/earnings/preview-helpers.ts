@@ -160,11 +160,12 @@ export function readNarrativeEnvelope(content: string): NarrativeEnvelope | null
 // short, starts with "No", ends with the fixed tail — so real content that
 // happens to start with "No" (e.g. "No dividends were declared this
 // quarter, in line with the prior year.") is never swept up by mistake.
-// TODO(backend): this is a stopgap. The real fix is a backend flag (see
-// .claude/specs/Earnings/NoDataPlaceholder(Backend).md) so the frontend
-// reads an explicit signal instead of pattern-matching the sentence — and so
-// the EXPORTED PDF/DOCX (server-rendered, entirely out of the frontend's
-// control) can also blank it, not just the Preview screen.
+// LEGACY. The backend flag this asked for exists — a no-data section now stores
+// content: null and feeder {status: 'no_data', message}, and the exporter drops
+// it server-side, which is the half no amount of frontend cleverness could ever
+// have reached. What is left here reads rows produced BEFORE that flag, which
+// still hold the sentence and whose content_hash never moved. Delete this, and
+// the sentences below it, once no live report predates the flag.
 const NO_DATA_TAIL = /in the uploaded documents for this period\.?\s*$/i;
 
 /**
@@ -177,10 +178,19 @@ const NO_DATA_TAIL = /in the uploaded documents for this period\.?\s*$/i;
  * still drops the section entirely (see isHiddenWhenOmitted) — a published
  * release does not carry a paragraph explaining what it does not say.
  */
-export function noDataMessage(content: string | null): string | null {
-  if (!isNoDataPlaceholder(content)) return null;
-  const envelope = readNarrativeEnvelope(content as string);
-  return (envelope ? envelope.body : (content as string)).trim();
+export function noDataMessage(
+  section: Pick<EarningsProducedSection, 'content' | 'feeder_status' | 'feeder_message'>,
+): string | null {
+  // The backend states this now: content comes back null and the explanation
+  // rides on the feeder. The sentence match below is only for rows produced
+  // before that flag existed.
+  if (section.feeder_status === 'no_data') {
+    return (section.feeder_message || '').trim()
+      || 'Nothing was found for this section in the uploaded documents.';
+  }
+  if (!isNoDataPlaceholder(section.content)) return null;
+  const envelope = readNarrativeEnvelope(section.content as string);
+  return (envelope ? envelope.body : (section.content as string)).trim();
 }
 
 export function isNoDataPlaceholder(content: string | null): boolean {
@@ -327,6 +337,10 @@ function hasRealContent(
 
 export function earningsSectionState(section: EarningsProducedSection): EarningsRenderState {
   if (hasRealContent(section)) return 'produced';
+  // Stated rather than inferred. A flagged section reaches 'omitted' by
+  // elimination anyway, but only for as long as nobody changes the status it is
+  // stored with.
+  if (section.feeder_status === 'no_data') return 'omitted';
   if (
     section.status === 'needs_input' ||
     section.feeder_status === 'needs_input' ||

@@ -888,4 +888,29 @@ describe('EarningsPreviewPage', () => {
         .not.toBeInTheDocument());
   });
 
+  it('still shows a nothing-to-report section on Preview, with the reason and a way to retry', async () => {
+    // Hidden on the Report screen and absent from the file, but this is where it
+    // can be acted on, so here it stays — with the finding stated rather than a
+    // blank panel and a Run button that explains nothing.
+    const SENTENCE = 'No forward-looking guidance was disclosed in the uploaded documents for this period.';
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate',
+          source_type: 'AI-written', status: 'produced', included: true,
+          // Already normalised: this suite mocks @/lib/api, so the mapping from
+          // feeder.status is not in play here. It is covered against the real
+          // module in earnings-analysis-survives-the-normaliser.test.ts.
+          content: null, feeder_status: 'no_data', feeder_message: SENTENCE },
+      ],
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+    fireEvent.click(screen.getAllByRole('button', { name: /Guidance/ })[0]);
+
+    expect(await screen.findByText(SENTENCE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeInTheDocument();
+    expect(screen.getByText(/left out of the finished report/)).toBeInTheDocument();
+    expect(screen.getByText(/nothing to report/)).toBeInTheDocument();
+  });
+
 });

@@ -30,7 +30,7 @@ import { PreviewSkeleton } from '@/components/earnings/PreviewSkeleton';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
-import { isNoDataPlaceholder } from './preview-helpers';
+import { isNoDataPlaceholder, noDataMessage } from './preview-helpers';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload } from '@/types/quarterly';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
@@ -366,7 +366,7 @@ export default function EarningsFiguresPage() {
       // last used to be folded into un-run, which is why a finished section sat
       // here saying "not run" with a Run button that changed nothing.
       written: !!(p.content || '').trim() && !isNoDataPlaceholder(p.content),
-      noData: isNoDataPlaceholder(p.content),
+      noData: noDataMessage(p) !== null,
     }));
     return [...fin, ...nar];
   }, [sections, narrative, isStalled]);

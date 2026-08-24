@@ -7,7 +7,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsProducedSection, EarningsApproveBlocker, EarningsExportFormat, EarningsReportSummary } from '@/types/earnings';
 import { byDisplayOrder } from '@/components/quarterly/sectionState';
 import { DOC_WIDTH } from '@/components/quarterly/CoverRenderer';
-import { earningsSectionState, isHiddenWhenOmitted, isCoverMode } from './preview-helpers';
+import { earningsSectionState, isCoverMode } from './preview-helpers';
 import { isTableOfContentsSection } from './helpers';
 import { EditableProse } from '@/components/earnings/EditableProse';
 import { GenerateProgress } from '@/components/earnings/GenerateProgress';
@@ -409,8 +409,17 @@ export default function EarningsReportPage() {
   // different, unrelated screen (financial figure-picking, inherited from the
   // old Figures step) that was never built to host it — hiding it here would
   // leave no way to ever complete the section.
+  // Show exactly what the file will contain. The export drops any section with
+  // no real content -- it always has -- while this screen showed them, so a
+  // section could sit here looking like part of the report and be absent from
+  // every delivered copy. Guidance / Outlook was the live case: Preview said
+  // "left out of the finished report" and the PDF printed it anyway.
+  //
+  // needs_input stays, deliberately. This screen is where its manual text/upload
+  // form lives, so hiding those would leave no way to ever complete them: a gap
+  // the user can close is not the same as a finding they cannot.
   const visibleSections = sections.filter(
-    (s) => !isHiddenWhenOmitted(s) || earningsSectionState(s) !== 'omitted',
+    (s) => earningsSectionState(s) !== 'omitted',
   );
   // The cover renders as a page in its own right, ahead of the body sheet —
   // see the layout below for why it must not be wrapped in a card.
