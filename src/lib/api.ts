@@ -2573,6 +2573,14 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
     grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
     grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
     edited: earnBool(o.edited) || earnBool(o.is_edited),
+    // Built field-by-field, so anything not listed here is silently dropped --
+    // which is exactly what happened to the analysis. GET /sections has always
+    // sent it, the exporters have always rendered it, and this mapper threw it
+    // away, so the Report screen showed none and Preview lost it on reload.
+    // Quarterly hit the identical bug in AssembledReportPage.
+    analysis: (o.analysis && typeof o.analysis === "object" && !Array.isArray(o.analysis)
+      ? (o.analysis as EarningsProducedSection["analysis"])
+      : null),
   };
 }
 function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {

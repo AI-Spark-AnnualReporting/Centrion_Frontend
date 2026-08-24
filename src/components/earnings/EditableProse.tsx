@@ -23,10 +23,13 @@ export function EditableProse({
   onSaveInput,
   onExtractInput,
   onAcknowledgeFlag,
+  showAnalysis = false,
 }: {
   section: EarningsProducedSection;
   coverTemplateKey?: string | null;
   locked: boolean;
+  /** Forwarded to SectionRenderer — see there. */
+  showAnalysis?: boolean;
   onSave: (content: string) => Promise<void>;
   onSaveInput?: (text: string) => Promise<void>;
   onExtractInput?: (file: File) => Promise<string>;
@@ -176,7 +179,7 @@ export function EditableProse({
           </div>
         </div>
       ) : (
-        <SectionRenderer section={section} coverTemplateKey={coverTemplateKey} />
+        <SectionRenderer section={section} coverTemplateKey={coverTemplateKey} showAnalysis={showAnalysis} />
       )}
 
       {/* Grounding-violation flag → acknowledge (blocks approve until acknowledged). */}

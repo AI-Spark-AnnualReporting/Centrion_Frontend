@@ -585,4 +585,35 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
   });
 
+  it('replays a stored analysis on load, without anyone clicking Analyse', async () => {
+    // This is the half the normaliser bug hid. The in-session path above worked,
+    // so the feature looked fine; a reload lost the bullets, and clicking Analyse
+    // again returned instantly from the server cache, which made it look like
+    // they had never gone.
+    h.getEarningsFigureSections.mockResolvedValue({
+      ...SECTIONS,
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          prompt: null, total: 1, finalised: true,
+          figures: [fig('qf_1', 'Revenue')] },
+      ],
+    });
+    h.getEarningsSections.mockResolvedValue({
+      sections: [
+        { section_code: 's04_financial_highlights', title: 'Financial Highlights',
+          mode: 'table', status: 'produced', included: true,
+          content: '{"tables":[]}',
+          analysis: { text: '- Revenue is the largest line in the section.',
+                      generated_at: '2026-08-24T08:18:10Z', model: 'gpt-4.1',
+                      fingerprint: 'FP' } },
+      ],
+    });
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    expect(await screen.findByText(/largest line in the section/)).toBeInTheDocument();
+    expect(h.analyseEarningsSection).not.toHaveBeenCalled();
+  });
+
 });

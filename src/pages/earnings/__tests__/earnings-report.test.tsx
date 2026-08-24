@@ -816,3 +816,60 @@ describe('EarningsReportPage', () => {
     expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
   });
 });
+
+// ── The analysis on the finished report ─────────────────────────────────────
+//
+// The Analyse button writes bullets that ARE part of the report — the exporter
+// has always printed them under the section's table. The Report screen showed
+// none of them, because normalizeEarningsSection built its object field by field
+// and `analysis` was not one of the fields, so the backend's payload was dropped
+// before it ever reached React.
+
+describe('EarningsReportPage — section analysis', () => {
+  const withAnalysis = (text: string) =>
+    sec({
+      ...OVERVIEW,
+      analysis: {
+        text,
+        generated_at: '2026-08-24T08:18:10Z',
+        model: 'gpt-4.1',
+        fingerprint: 'fp-1',
+      },
+    });
+
+  it('prints a stored analysis under the section', async () => {
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, withAnalysis('- Revenue of SAR 416,628M is the largest line in the table.'), PERFORMANCE],
+    });
+    renderPage();
+
+    expect(await screen.findByText(/largest line in the table/)).toBeInTheDocument();
+  });
+
+  it('renders the prose exactly as before when there is no analysis', async () => {
+    renderPage();
+
+    expect(await screen.findByText(/resilient full-year performance/)).toBeInTheDocument();
+    // No stray heading, rule or empty block where the analysis would have gone.
+    expect(screen.queryByText(/largest line in the table/)).not.toBeInTheDocument();
+  });
+
+  it('shows the analysis on a table section too', async () => {
+    // The analysis belongs to the SECTION, not to one content shape — the
+    // exporter appends it outside its own mode branches for the same reason.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, sec({
+        ...PERFORMANCE,
+        analysis: {
+          text: '- The table is concentrated in two lines.',
+          generated_at: '2026-08-24T08:18:10Z', model: 'gpt-4.1', fingerprint: 'fp-2',
+        },
+      })],
+    });
+    renderPage();
+
+    expect(await screen.findByText(/concentrated in two lines/)).toBeInTheDocument();
+  });
+});

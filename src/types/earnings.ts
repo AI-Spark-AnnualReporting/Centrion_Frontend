@@ -1,3 +1,5 @@
+import type { SectionAnalysis } from '@/types/quarterly';
+
 // ─── Earnings report — Part 1 (Setup) types ──────────────────────────────────
 // Contracts captured from the live FastAPI OpenAPI schema:
 //   GET  /api/v1/earnings/sources?company_id&period   → untyped 200 (read defensively)
@@ -335,6 +337,11 @@ export interface EarningsProducedSection {
   grounding_flag: string | null; // grounding-violation message from a PATCH, when present
   grounding_acknowledged: boolean; // client marker: the user acknowledged the flag
   edited: boolean; // client marker: content was manually PATCHed
+  // The Analyse button's last result, replayed by GET /sections so it survives a
+  // reload. The backend has always sent it; nothing here declared it, so
+  // normalizeEarningsSection dropped it and both the Report screen and a
+  // reloaded Preview showed no analysis at all. Same shape quarterly stores.
+  analysis?: SectionAnalysis | null;
 }
 
 export interface EarningsSectionsResponse {

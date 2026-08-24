@@ -200,7 +200,7 @@ export default function EarningsFiguresPage() {
       section_code: s.section_code,
       title: s.title,
       content: p?.content ?? null,
-      analysis: (p as { analysis?: unknown } | undefined)?.analysis ?? null,
+      analysis: p?.analysis ?? null,
     } as never;
   };
 

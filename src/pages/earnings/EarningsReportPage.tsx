@@ -551,6 +551,10 @@ export default function EarningsReportPage() {
                         <EditableProse
                           section={s}
                           coverTemplateKey={coverTemplateKey}
+                          // The finished report prints the analysis; it does not
+                          // offer to rewrite it. The Analyse / Re-analyse control
+                          // stays on Preview, where the figures are still editable.
+                          showAnalysis
                           locked={locked}
                           onSave={(content) => handleSaveSection(s.section_code, content)}
                           onSaveInput={(text) => handleSaveSectionInput(s.section_code, text)}
