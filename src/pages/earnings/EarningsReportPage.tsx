@@ -243,6 +243,13 @@ export default function EarningsReportPage() {
     setError(null);
     try {
       const handle = await earnings.produceEarningsReport(reportId);
+      // Same null handle as above: no run was started because there was nothing to
+      // start. Holding a generating state open for it would stall this screen the
+      // way it stalled Preview.
+      if (!handle.run_id || !handle.poll_url) {
+        applyResponse(await earnings.getEarningsSections(reportId, true));
+        return;
+      }
       setRunInfo(handle);
     } catch (err: unknown) {
       setError(apiErrorMessage(err, 'Could not start generation.'));

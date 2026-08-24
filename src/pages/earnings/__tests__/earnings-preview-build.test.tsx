@@ -913,4 +913,36 @@ describe('EarningsPreviewPage', () => {
     expect(screen.getByText(/nothing to report/)).toBeInTheDocument();
   });
 
+  // ── Continue when there is nothing left to build ────────────────────────────
+  //
+  // The server answers "nothing to do" with a null handle and starts no run. This
+  // screen raised its full-screen loader anyway and polled a URL that did not
+  // exist, so it sat there until the user reloaded the page — five minutes, on a
+  // report where every section was already produced and unchanged. The Outline's
+  // Continue has always handled this; this one never learned.
+
+  it('goes straight to the report when the server started no run', async () => {
+    h.produceEarningsReport.mockResolvedValue({ run_id: null, poll_url: null });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    await waitFor(() =>
+      expect(h.navigateMock).toHaveBeenCalledWith('/earnings/rep-1/report'));
+    expect(screen.queryByText(/Composing your report/)).not.toBeInTheDocument();
+  });
+
+  it('still raises the loader when there IS a run to wait for', async () => {
+    h.produceEarningsReport.mockResolvedValue({ run_id: 'run-9', poll_url: '/api/v1/agent_runs/run-9' });
+    h.getByPollUrl.mockResolvedValue({ status: 'running' });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+
+    expect(await screen.findByText(/Composing your report/)).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalledWith('/earnings/rep-1/report');
+  });
+
 });

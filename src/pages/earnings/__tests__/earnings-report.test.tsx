@@ -936,3 +936,24 @@ describe('EarningsReportPage — sections with nothing to report', () => {
     expect(await screen.findByRole('heading', { name: 'Guidance / Outlook' })).toBeInTheDocument();
   });
 });
+
+describe('EarningsReportPage — Generate with nothing to generate', () => {
+  it('refreshes instead of holding a generating state open forever', async () => {
+    // Same null handle as Preview's Continue: no run was started because there was
+    // nothing to start, so there is nothing to poll.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, sec({ ...OVERVIEW, content: null, status: 'pending' })],
+    });
+    h.produceEarningsReport.mockResolvedValue({ run_id: null, poll_url: null });
+    renderPage();
+
+    const generate = await screen.findByRole('button', { name: /Generate/ });
+    h.getEarningsSections.mockResolvedValue(PRODUCED);
+    fireEvent.click(generate);
+
+    // It re-read the report rather than sitting on a run that does not exist.
+    await waitFor(() => expect(h.getEarningsSections).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/resilient full-year performance/)).toBeInTheDocument();
+  });
+});

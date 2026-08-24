@@ -314,6 +314,15 @@ export default function EarningsFiguresPage() {
     setContinueError(null);
     try {
       const handle = await earnings.produceEarningsReport(reportId);
+      // Nothing to build: every section is already produced and unchanged, so the
+      // server started no run and says so with a null handle. Raising the loader
+      // over a poll that can never resolve is a wait with no end -- which is
+      // exactly what it was, until somebody reloaded the page. Go straight on.
+      // The Outline's Continue has always done this; this screen never learned it.
+      if (!handle.run_id || !handle.poll_url) {
+        navigate(`/earnings/${reportId}/report`);
+        return;
+      }
       setProduceRun({ run_id: handle.run_id, poll_url: handle.poll_url });
     } catch (e) {
       setContinueError(
