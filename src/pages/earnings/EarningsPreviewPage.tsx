@@ -501,10 +501,9 @@ export default function EarningsPreviewPage() {
             )}
           </div>
 
-          {/* Right — publish bar, then the review/share panel below so
-              "Share for review" is the bottom-most action (in place of the
-              hidden Approve & lock). The 4-state review status radios are hidden
-              here; the Publish bar's status chip is the single source of truth. */}
+          {/* Right — publish bar (Approve & lock), then the review/share
+              panel below. The 4-state review status radios are hidden here;
+              the Publish bar's status chip is the single source of truth. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <PublishBar
               locked={locked}
@@ -514,7 +513,6 @@ export default function EarningsPreviewPage() {
               onApprove={handleApprove}
               onExport={handleExport}
               onOpenCoverPicker={() => setPickerOpen(true)}
-              showApprove={false}
             />
             {reportId && <ReportHubPanel reportId={reportId} showStatus={false} readOnly={locked} />}
           </div>
