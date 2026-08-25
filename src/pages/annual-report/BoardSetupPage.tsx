@@ -167,6 +167,7 @@ export default function BoardSetupPage() {
       <SetupCard
         title="Generate Board Report"
         sub="Board of Directors&rsquo; Report for a single financial year"
+        collapsible
       >
         <Block n={1} title="Financial year" hint="appears on the cover">
           <label htmlFor="board-fiscal-year" className="fl-label">

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { boardReports } from '@/lib/api';
+import { startedRun } from '@/lib/run-handle';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
@@ -155,7 +156,12 @@ export default function BoardSourcesPage() {
     setDupeSlots([]);
     try {
       const handle = await boardReports.uploadSources(reportId, batch);
-      setRun({ run_id: handle.run_id, poll_url: handle.poll_url });
+      const started = startedRun(handle);
+      if (!started) {
+        await refetch();
+        return;
+      }
+      setRun(started);
       setStaged({});
     } catch (err: unknown) {
       // Another tab already started a job — adopt it rather than showing an

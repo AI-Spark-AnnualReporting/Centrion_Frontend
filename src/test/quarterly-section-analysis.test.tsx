@@ -149,8 +149,12 @@ describe('sending the figures needs consent', () => {
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Analyse' }));
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveTextContent('2 lines');
+    // No line count: it described the produced table, which is a different
+    // number from the figures the section holds, and it was wrong whenever the
+    // section had been re-picked since it was last produced.
+    expect(dialog).not.toHaveTextContent('2 lines');
     expect(dialog).toHaveTextContent('Income & Comprehensive Income');
+    expect(dialog).toHaveTextContent('Nothing else from your report is sent');
     expect(dialog).toHaveTextContent(/printed under this table in the report you export/);
   });
 

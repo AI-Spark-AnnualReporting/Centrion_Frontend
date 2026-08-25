@@ -80,9 +80,13 @@ import type {
   EditEarningsFigurePayload,
   EarningsOutlineSection,
   EarningsOutlineResponse,
+  EarningsSourceLinesResponse,
+  EarningsFigureSectionsResponse,
+  EarningsSectionFiguresResponse,
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
+  EarningsSectionPatch,
   EarningsSectionsResponse,
   EarningsSectionStatus,
   EarningsProduceHandle,
@@ -2492,6 +2496,10 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
   return {
     section_code: code,
     title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    // The catalogue's own name for it, so the panel can offer Reset and say what
+    // it would go back to. Null on a payload that predates renaming.
+    title_original: earnStr(o.title_original),
+    prompt: earnStr(o.prompt),
     description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
     section_number: earnNum(o.section_number) ?? earnNum(o.number),
     display_order: displayOrder,
@@ -2505,6 +2513,9 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
     page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
     status: earnStr(o.status) as EarningsSectionStatus | null,
+    // How many of the user's own lines are filed under this section. On the
+    // outline response so the badge is right on first paint.
+    figure_count: earnNum(o.figure_count) ?? null,
     feeder: normalizeEarningsSectionFeeder(o.feeder),
   };
 }
@@ -2560,12 +2571,82 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
     source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
     confidence: earnNum(o.confidence),
     flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
-    grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
-    grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
+    // One readable line, whatever shape it arrived in. Several ungrounded
+    // numbers in one section is the normal case, and naming all of them is the
+    // difference between a targeted edit and guesswork.
+    grounding_flag: readGroundingViolations(o).join(", ") || null,
+    // edit_acknowledged is the field the backend actually stores (inside
+    // feeder); the two client-side spellings are kept as fallbacks.
+    grounding_acknowledged:
+      earnBool(earnRecord(o.feeder).edit_acknowledged) ||
+      earnBool(o.grounding_acknowledged) ||
+      earnBool(o.acknowledged),
     edited: earnBool(o.edited) || earnBool(o.is_edited),
+    // Built field-by-field, so anything not listed here is silently dropped --
+    // which is exactly what happened to the analysis. GET /sections has always
+    // sent it, the exporters have always rendered it, and this mapper threw it
+    // away, so the Report screen showed none and Preview lost it on reload.
+    // Quarterly hit the identical bug in AssembledReportPage.
+    analysis: (o.analysis && typeof o.analysis === "object" && !Array.isArray(o.analysis)
+      ? (o.analysis as EarningsProducedSection["analysis"])
+      : null),
   };
 }
-function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
+// The produce response is a PATCH, not a section. It carries status/content/error
+// for one section and nothing else, so it is read as exactly that — running it
+// through normalizeEarningsSection built a whole section around those four
+// fields, defaulting the title to the section code, display_order to 0 and mode
+// to 'generate'. Spread over the real section by the caller, those defaults won.
+// Every shape the backend expresses "these numbers are not in the figures" in.
+// GET /sections nests it as feeder.grounding_violations; the PATCH and refine
+// responses put grounding_violations at the top level. Both are LISTS, and the
+// mapper below used to read three singular STRING keys the backend has never
+// sent — so section.grounding_flag was always null, the amber banner never
+// rendered, and the only thing the user ever saw was the 409 on approve.
+function readGroundingViolations(o: Record<string, unknown>): string[] {
+  const feeder = earnRecord(o.feeder);
+  for (const v of [o.grounding_violations, feeder.grounding_violations]) {
+    if (Array.isArray(v)) {
+      // Numbers are accepted as well as strings: the backend sends regex matches
+      // (strings today), but a token is a token, and silently dropping a numeric
+      // one would under-report which figures are at fault.
+      const items = v
+        .map((x) => (typeof x === "number" && Number.isFinite(x) ? String(x) : earnStr(x)))
+        .filter((x): x is string => !!x);
+      if (items.length) return items;
+    }
+  }
+  // The singular string keys are kept as a fallback: nothing observed sends
+  // them, but reading them costs nothing and removing them could only break
+  // something unseen.
+  const single =
+    earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message);
+  return single ? [single] : [];
+}
+
+function readEarningsSectionPatch(raw: unknown): EarningsSectionPatch | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  const rawContent = o.content ?? o.body ?? o.text;
+  return {
+    section_code: code,
+    status: (earnStr(o.status) ?? "pending") as EarningsSectionPatch["status"],
+    content:
+      rawContent == null
+        ? null
+        : typeof rawContent === "string"
+          ? rawContent
+          : JSON.stringify(rawContent),
+    error: earnStr(o.error),
+    grounding_violations: readGroundingViolations(o),
+  };
+}
+
+// Exported for the same reason normalizeEarningsSources is: this mapper is where
+// the wire shape becomes the screen's shape, and the page tests all mock above it
+// — which is exactly how a grounding flag that never rendered shipped green.
+export function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
   const rec = earnRecord(raw);
   const arr: unknown[] = Array.isArray(raw)
     ? raw
@@ -2589,6 +2670,12 @@ function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
   const o = earnRecord(raw);
   const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
   const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  // Nothing to do: the report is already built and unchanged, so no run was
+  // started. A handle with nothing to poll is the honest answer here, not a
+  // failure — the caller navigates straight on and never raises a loader.
+  if (earnStr(o.status) === "completed" && !runId) {
+    return { run_id: null, poll_url: null };
+  }
   if (!runId || !pollUrl) {
     throw new Error("Produce earnings report: response did not include run_id/poll_url.");
   }
@@ -2790,6 +2877,78 @@ export const earnings = {
       { method: "PUT", body: payload },
     ).then(normalizeEarningsOutline),
 
+  // Rename one FINANCIAL section for this report — the name then appears on the
+  // Outline, on Figures, and as the heading and table-of-contents entry in the
+  // exported PDF. An empty title clears the rename and puts the catalogue name
+  // back. It cannot change which figures the section gets: the picker is prompted
+  // with the catalogue name, never this one. Returns the rebuilt outline.
+  renameEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
+    ).then(normalizeEarningsOutline),
+
+  // ── Figures (user-metrics lane) ──
+  // A user-metrics quarterly report is built from the company's own workbook, so
+  // its lines carry the workbook's labels and nothing canonical. Figures get into
+  // an earnings report one way: the user asks for them, per section, in their own
+  // words. Nothing is picked on their behalf.
+
+  // The Figures screen: every table section with its prompt and its figures.
+  getEarningsFigureSections: (
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsFigureSectionsResponse> =>
+    request<EarningsFigureSectionsResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/sections`,
+      { signal },
+    ),
+
+  // Runs the model for ONE section with the user's prompt in the call. Results are
+  // added to what the section already has, so searching again broadens it.
+  searchSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    prompt: string,
+  ): Promise<EarningsSectionFiguresResponse> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/search-figures`,
+      { method: "POST", body: { prompt } },
+    ),
+
+  // Sets exactly which lines a section carries — what the Add-figure picker saves,
+  // and how one figure is removed. Scoped to the section.
+  setSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    lineIds: string[],
+  ): Promise<EarningsSectionFiguresResponse> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/figures`,
+      { method: "PUT", body: { line_ids: lineIds } },
+    ),
+
+  // Every line in the source report, for the Add-figure picker. A plain read —
+  // sectionCode ticks what that section already holds.
+  getEarningsSourceLines: (
+    reportId: string,
+    sectionCode?: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsSourceLinesResponse> => {
+    const qs = sectionCode ? `?section_code=${encodeURIComponent(sectionCode)}` : "";
+    return request<EarningsSourceLinesResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines${qs}`,
+      { signal },
+    );
+  },
+
   // ── Cover template + brand colors ──
   // Same contract style as the quarterly picker, but earnings splits the current
   // selection into its own report-scoped GET (quarterly folds it into
@@ -2845,6 +3004,91 @@ export const earnings = {
       { method: "POST", body: {} },
     ).then(readEarningsProduceHandle),
 
+  // Build the whole report: search every financial section with the brief typed
+  // on the Outline, then produce every section. One job, one poll, one loader --
+  // this is what the Outline's Continue fires, and Preview opens finished.
+  buildEarningsReport: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { search_figures: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Write the short commentary under one section's figures, or re-write it.
+  // Cached server-side on a fingerprint of the table, model, prompt, tone and
+  // language, so re-opening a section costs nothing; force is "write it again".
+  analyseEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
+
+  // Save an edited analysis, or clear it with an empty string. Marks it edited,
+  // which stops the cache serving our words over the user's.
+  saveEarningsSectionAnalysis: (
+    reportId: string,
+    sectionCode: string,
+    text: string,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
+  // Mark a section's figures as done with, or undo it — and store the
+  // expectations typed against them, all in this one request.
+  //
+  // The expectations ride along here rather than having an endpoint of their
+  // own. Preview holds them locally while the user types, because a consensus
+  // table gets a dozen numbers entered and half of them changed, and none of it
+  // is meant until the user says the section is done. One write at that moment.
+  //
+  // `expectations` maps a figure id to its expected value, or to null to clear
+  // one. Omit it entirely when only the bookmark is moving.
+  finaliseEarningsSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    finalised: boolean,
+    expectations?: Record<string, number | null>,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/finalise-figures`,
+      { method: "PATCH", body: { finalised, ...(expectations ? { expectations } : {}) } },
+    ),
+
+  // Produce ONLY the sections that can be built before a figure exists — the
+  // CEO quote, guidance, the disclaimer, the IR calendar. This is what the
+  // Outline's Continue fires, so the wait before Preview buys the user readable
+  // narrative instead of buying nothing. Same 202 + poll shape as produce-all.
+  produceEarningsFigureFreeSections: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { figure_free_only: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Run (or re-run) one section, synchronously. Backs both the Run button on a
+  // section that has never been produced and Regenerate on one that has;
+  // `regenerate` bypasses the produce cache so a re-run is a real re-run.
+  runEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    regenerate = false,
+  ): Promise<EarningsSectionPatch> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
+      { method: "POST", body: { regenerate } },
+    ).then((raw) => {
+      const patch = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
+      if (!patch) throw new Error("Run earnings section: response was not a section.");
+      return patch;
+    }),
+
   // Save a user's manual input for a needs_input section (typed directly, or
   // edited after extractSectionInput prefilled it from an uploaded file).
   // Reuses the section-produce route — the backend turns the raw text into
@@ -2893,14 +3137,57 @@ export const earnings = {
     reportId: string,
     sectionCode: string,
     body: SaveEarningsSectionContentPayload,
-  ): Promise<EarningsProducedSection> =>
+    // A PATCH answers for the fields it owns — content, status, violations. Read
+    // as a whole section it invented a title (falling back to the section CODE),
+    // display_order 0 and mode 'generate' for everything absent, and the caller
+    // spread those over the real section. Same defect the run endpoint had.
+  ): Promise<EarningsSectionPatch> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/content`,
       { method: "PATCH", body },
     ).then((raw) => {
-      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      const sec = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
       if (!sec) throw new Error("Edit earnings section: response was not a section.");
       return sec;
+    }),
+
+  // Have the model rewrite one narrative section from a free-text instruction.
+  // One LLM call server-side, and it only re-words the prose already stored --
+  // producing the section again is what Regenerate is for. 422 the section is a
+  // table (nothing to rewrite) or the instruction is missing/too long · 409 the
+  // section is empty, or the report is locked · 502 the model returned nothing,
+  // in which case the stored text is untouched and a retry is safe.
+  //
+  // Deliberately NOT run through normalizeEarningsSection: the response carries
+  // only what changed, and the normaliser would default mode/source_type/title
+  // back over the real ones (the trap EarningsReportPage.tsx documents). The
+  // caller merges these three fields and nothing else.
+  refineEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    instruction: string,
+  ): Promise<{
+    section_code: string;
+    content: string | null;
+    status: string;
+    grounding_violations: string[];
+  }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then((raw) => {
+      const o = earnRecord(raw).section ? earnRecord(earnRecord(raw).section) : earnRecord(raw);
+      const code = earnStr(o.section_code) ?? sectionCode;
+      const content = typeof o.content === "string" ? o.content : null;
+      if (content == null) throw new Error("Refine: the server returned no text.");
+      return {
+        section_code: code,
+        content,
+        status: earnStr(o.status) ?? "produced",
+        grounding_violations: Array.isArray(o.grounding_violations)
+          ? o.grounding_violations.filter((v): v is string => typeof v === "string")
+          : [],
+      };
     }),
 
   // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body

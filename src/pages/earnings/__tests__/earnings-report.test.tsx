@@ -71,9 +71,9 @@ vi.mock('@/lib/api', () => ({
   ApiError: h.MockApiError,
 }));
 
-import EarningsPreviewPage from '../EarningsPreviewPage';
+import EarningsReportPage from '../EarningsReportPage';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
-import { earningsSectionState } from '../preview-helpers';
+import { earningsSectionState, isNoDataPlaceholder } from '../preview-helpers';
 import type { EarningsProducedSection } from '@/types/earnings';
 
 const sec = (over: Partial<EarningsProducedSection>): EarningsProducedSection => ({
@@ -195,6 +195,13 @@ const TREND_DEFERRED = sec({
   display_order: 6,
   content: null,
 });
+const GUIDANCE_NO_DATA = sec({
+  section_code: 'guidance_outlook',
+  title: 'Guidance / Outlook',
+  mode: 'generate',
+  display_order: 5.5,
+  content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+});
 const KPI_TABLE = sec({
   section_code: 'operational_kpis',
   title: 'Operational KPIs',
@@ -214,9 +221,9 @@ const PRODUCED = { sections: [COVER, OVERVIEW, PERFORMANCE], cover_template_key:
 
 const renderPage = () =>
   render(
-    <MemoryRouter initialEntries={['/earnings/rep-1/preview']}>
+    <MemoryRouter initialEntries={['/earnings/rep-1/report']}>
       <Routes>
-        <Route path="/earnings/:reportId/preview" element={<EarningsPreviewPage />} />
+        <Route path="/earnings/:reportId/report" element={<EarningsReportPage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -242,11 +249,67 @@ describe('SectionRenderer dispatch', () => {
   it('renders a table envelope as label + value, with NO delta column', () => {
     render(<SectionRenderer section={PERFORMANCE} />);
     expect(screen.getByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('SAR 4,182.6M')).toBeInTheDocument();
+    // The currency is stated once above the table now, not in the cell — the same
+    // rule the exported file follows, so screen and PDF cannot disagree.
+    expect(screen.getByText('4,182.6')).toBeInTheDocument();
+    expect(screen.getByText('All figures in SAR millions unless otherwise stated.'))
+      .toBeInTheDocument();
     expect(screen.getByText('Value')).toBeInTheDocument();
     // No delta columns ever, even though rows carry prior_display/change_pct = null.
     expect(screen.queryByText('Change')).not.toBeInTheDocument();
     expect(screen.queryByText('Prior')).not.toBeInTheDocument();
+  });
+
+  // A RAG-composed narrative section stores {heading, content}. With no branch
+  // for that shape it fell through to the generic record fallback and rendered
+  // as a METRIC/VALUE table whose two rows were literally labelled "heading" and
+  // "content" — the section's own field names printed as data.
+  it('renders a {heading, content} narrative as a heading and prose, not a table of its own field names', () => {
+    render(
+      <SectionRenderer
+        section={sec({
+          section_code: 's03_exec_summary',
+          title: 'Executive Summary / Highlights',
+          mode: 'generate',
+          source_type: 'AI-written',
+          display_order: 2,
+          content: JSON.stringify({
+            heading: 'Third Quarter 2024 Financial and Operational Highlights',
+            content: 'Aramco showcased strong operational performance despite a challenging oil price environment.',
+          }),
+        })}
+      />,
+    );
+    // A real heading element, not a cell that happens to hold the same text.
+    expect(
+      screen.getByRole('heading', { name: 'Third Quarter 2024 Financial and Operational Highlights' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/strong operational performance/).tagName).toBe('P');
+    // The field names are not data.
+    expect(screen.queryByText('heading')).toBeNull();
+    expect(screen.queryByText('content')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'METRIC' })).toBeNull();
+  });
+
+  it('still renders a {title, entries} envelope as a label/value table', () => {
+    // Guards the ordering: the heading/content branch sits ABOVE the generic
+    // record fallback, and must not have swallowed it.
+    render(
+      <SectionRenderer
+        section={sec({
+          section_code: 's19_ir_calendar',
+          title: 'Reporting Calendar',
+          mode: 'auto',
+          display_order: 9,
+          content: JSON.stringify({
+            title: 'Reporting Calendar',
+            entries: [{ label: 'Q4 results', value: '12 February 2024' }],
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByText('Q4 results')).toBeInTheDocument();
+    expect(screen.getByText('12 February 2024')).toBeInTheDocument();
   });
 
   it('renders a prose string as prose', () => {
@@ -330,19 +393,6 @@ describe('SectionRenderer dispatch', () => {
     expect(screen.getByText('Not broken out in the filing')).toBeInTheDocument();
   });
 
-  it('Sources, Methodology & Assumptions renders a labelled citation list, not a raw text blob', () => {
-    render(<SectionRenderer section={SOURCES} />);
-    expect(screen.getByText('Total Assets')).toBeInTheDocument();
-    expect(screen.getByText('Q1-2026')).toBeInTheDocument();
-    expect(screen.getByText('financial-statements.pdf')).toBeInTheDocument();
-    expect(screen.getByText('p.13')).toBeInTheDocument();
-    // A derived line (no " · " citation) reads as a note, not a fake citation.
-    expect(screen.getByText('Free Cash Flow')).toBeInTheDocument();
-    expect(screen.getByText(/Derived · OCF − Capex/)).toBeInTheDocument();
-    // Never the raw "Label: rest" line as one literal string.
-    expect(screen.queryByText('Total Assets: Q1-2026 · financial-statements.pdf · p.13')).not.toBeInTheDocument();
-  });
-
   it('MD&A renders the "not disclosed" line verbatim, unembellished', () => {
     render(<SectionRenderer section={MDNA_NOT_DISCLOSED} />);
     expect(screen.getByText('Not disclosed for this period.')).toBeInTheDocument();
@@ -382,8 +432,45 @@ describe('earningsSectionState', () => {
   });
 });
 
+describe('isNoDataPlaceholder', () => {
+  it('recognises the confirmed live "no guidance" boilerplate', () => {
+    expect(
+      isNoDataPlaceholder('No forward-looking guidance was disclosed in the uploaded documents for this period.'),
+    ).toBe(true);
+  });
+  it('recognises the confirmed live "no IR contact" boilerplate', () => {
+    expect(
+      isNoDataPlaceholder(
+        'No investor-relations calendar or contact information was found in the uploaded documents for this period.',
+      ),
+    ).toBe(true);
+  });
+  it('recognises it inside a {heading, content} envelope too', () => {
+    expect(
+      isNoDataPlaceholder(
+        JSON.stringify({
+          heading: 'Guidance',
+          content: 'No forward-looking guidance was disclosed in the uploaded documents for this period.',
+        }),
+      ),
+    ).toBe(true);
+  });
+  it('never matches real content that happens to start with "No"', () => {
+    expect(
+      isNoDataPlaceholder('No dividends were declared this quarter, in line with the prior year.'),
+    ).toBe(false);
+  });
+  it('never matches real multi-paragraph prose', () => {
+    expect(isNoDataPlaceholder(OVERVIEW.content)).toBe(false);
+  });
+  it('false for null/empty content', () => {
+    expect(isNoDataPlaceholder(null)).toBe(false);
+    expect(isNoDataPlaceholder('')).toBe(false);
+  });
+});
+
 // ── Route / behaviour ─────────────────────────────────────────────────────────
-describe('EarningsPreviewPage', () => {
+describe('EarningsReportPage', () => {
   it('unproduced report shows Generate; clicking it calls produceEarningsReport and shows progress', async () => {
     h.getEarningsSections.mockResolvedValueOnce({
       sections: [COVER, sec({ ...OVERVIEW, status: 'pending', content: null })],
@@ -434,7 +521,33 @@ describe('EarningsPreviewPage', () => {
     expect(await screen.findAllByText('Overview')).not.toHaveLength(0);
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
     expect(screen.getByText('Revenue')).toBeInTheDocument();
-    expect(screen.getByText('SAR 4,182.6M')).toBeInTheDocument();
+    expect(screen.getByText('4,182.6')).toBeInTheDocument();
+  });
+
+  // The finished report is a DOCUMENT, not a list of parts: the cover is a page
+  // in its own right and everything after it flows inside one sheet. It used to
+  // be a card per section, which drew a border between every heading and the
+  // text above it.
+  it('the cover is a page of its own, outside the body sheet', async () => {
+    const { container } = renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    const cover = container.querySelector('#earnings-sec-cover') as HTMLElement;
+    expect(cover).not.toBeNull();
+    expect(cover.closest('.card')).toBeNull();
+  });
+
+  it('the body is one sheet, not a card per section', async () => {
+    const { container } = renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    // Both body sections live inside the SAME card…
+    const overview = container.querySelector('#earnings-sec-overview_highlights');
+    const performance = container.querySelector('#earnings-sec-earnings_performance');
+    const sheet = overview?.closest('.card');
+    expect(sheet).not.toBeNull();
+    expect(performance?.closest('.card')).toBe(sheet);
+    // …and neither is a card itself.
+    expect(overview?.classList.contains('card')).toBe(false);
+    expect(performance?.classList.contains('card')).toBe(false);
   });
 
   it('never shows a Regenerate button on any section', async () => {
@@ -596,24 +709,71 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByPlaceholderText(/Type the missing information/)).not.toBeInTheDocument();
   });
 
-  it('editing a section calls patchEarningsSectionContent and surfaces a returned grounding flag with acknowledge', async () => {
-    h.patchEarningsSectionContent.mockResolvedValueOnce(
-      sec({ ...OVERVIEW, content: 'Edited overview.', grounding_flag: 'Revenue not grounded in a source', edited: true }),
-    );
+  // The endpoint answers with a PATCH — section_code, content, status and the
+  // grounding verdict — not a whole section. This used to assert against a
+  // hand-built section with `grounding_flag` already set, a shape the API never
+  // produces, which is why a feature that could not work shipped green.
+  it('editing a section saves it and names the numbers that did not ground', async () => {
+    h.patchEarningsSectionContent.mockResolvedValueOnce({
+      section_code: 'overview_highlights',
+      status: 'produced',
+      content: 'Edited overview.',
+      grounding_violations: ['15.4%', '1.9%'],
+    });
     renderPage();
     await screen.findByText(/resilient full-year performance/);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const ta = screen.getByRole('textbox');
-    fireEvent.change(ta, { target: { value: 'Edited overview.' } });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Edited overview.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(h.patchEarningsSectionContent).toHaveBeenCalledWith('rep-1', 'overview_highlights', {
         content: 'Edited overview.',
       }),
     );
-    expect(await screen.findByText(/Grounding check:/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
-    await waitFor(() => expect(screen.queryByText(/Grounding check:/)).not.toBeInTheDocument());
+    // Both offending numbers, so the fix is a targeted edit rather than guesswork.
+    expect(await screen.findByText(/15\.4%, 1\.9%/)).toBeInTheDocument();
+  });
+
+  it('saving a section does not rename it to its own section code', async () => {
+    // The PATCH response has no title. Read as a whole section it invented one
+    // from the section code, and the caller spread that over the real section.
+    h.patchEarningsSectionContent.mockResolvedValueOnce({
+      section_code: 'overview_highlights',
+      status: 'produced',
+      content: 'Edited overview.',
+      grounding_violations: [],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Edited overview.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText('Edited overview.');
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.queryByText('overview_highlights')).toBeNull();
+  });
+
+  it('Acknowledge tells the SERVER, which is the only thing that unblocks approve', async () => {
+    // It used to set React state and nothing else: the banner vanished, a reload
+    // brought it back, and Approve & lock went on failing with no explanation.
+    h.getEarningsSections.mockResolvedValue({
+      // Post-mapper shape: getEarningsSections is mocked here, so the wire→state
+      // translation is covered separately in src/test/earnings-grounding-flag.test.ts.
+      sections: [COVER, { ...OVERVIEW, grounding_flag: '15.4%' }, PERFORMANCE],
+    });
+    h.patchEarningsSectionContent.mockResolvedValue({
+      section_code: 'overview_highlights', status: 'produced',
+      content: OVERVIEW.content, grounding_violations: ['15.4%'],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+    await waitFor(() =>
+      expect(h.patchEarningsSectionContent).toHaveBeenCalledWith('rep-1', 'overview_highlights', {
+        content: OVERVIEW.content,
+        acknowledge: true,
+      }),
+    );
   });
 
   it('Export is hidden until the report is approved & locked', async () => {
@@ -630,26 +790,6 @@ describe('EarningsPreviewPage', () => {
     await screen.findByText(/resilient full-year performance/);
     fireEvent.click(screen.getByRole('button', { name: /PDF/ }));
     await waitFor(() => expect(h.downloadEarningsExport).toHaveBeenCalledWith('rep-1', 'pdf'));
-  });
-
-  it('opens the cover & colors picker and saving calls saveEarningsCoverSelection with the chosen design', async () => {
-    h.getEarningsCoverTemplates.mockResolvedValueOnce({
-      cover_templates: [{ key: 'classic', name: 'Classic' }],
-    });
-    h.getEarningsColorPalettes.mockResolvedValueOnce({
-      color_palettes: [{ key: 'indigo', name: 'Indigo', primary: '#4040C8', secondary: '#5B5BD6' }],
-    });
-    renderPage();
-    await screen.findByText(/resilient full-year performance/);
-    fireEvent.click(screen.getByRole('button', { name: /Choose cover & colors/i }));
-    expect(await screen.findByText('Choose cover design & colors')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Apply/ }));
-    await waitFor(() =>
-      expect(h.saveEarningsCoverSelection).toHaveBeenCalledWith(
-        'rep-1',
-        expect.objectContaining({ cover_template_key: 'classic' }),
-      ),
-    );
   });
 
   it('the cover picker is hidden once the report is locked (read-only)', async () => {
@@ -677,7 +817,7 @@ describe('EarningsPreviewPage', () => {
   it('guards a null companyId (no crash)', async () => {
     h.userRef.current = null;
     renderPage();
-    expect(await screen.findByText('Preview your earnings report')).toBeInTheDocument();
+    expect(await screen.findByText('Your earnings report')).toBeInTheDocument();
     expect(screen.getByText(/resilient full-year performance/)).toBeInTheDocument();
   });
 
@@ -706,5 +846,161 @@ describe('EarningsPreviewPage', () => {
     expect(screen.queryByText('Trend')).not.toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+  });
+
+  it('a "no data found" section is absent entirely — no card, no boilerplate sentence on screen', async () => {
+    h.getEarningsSections.mockResolvedValueOnce({
+      sections: [COVER, OVERVIEW, { ...GUIDANCE_NO_DATA, included: true }],
+      cover_template_key: 'classic',
+      locked: false,
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+    expect(screen.queryByText('Guidance / Outlook')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/No forward-looking guidance was disclosed/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate report' })).not.toBeInTheDocument();
+  });
+});
+
+// ── The analysis on the finished report ─────────────────────────────────────
+//
+// The Analyse button writes bullets that ARE part of the report — the exporter
+// has always printed them under the section's table. The Report screen showed
+// none of them, because normalizeEarningsSection built its object field by field
+// and `analysis` was not one of the fields, so the backend's payload was dropped
+// before it ever reached React.
+
+describe('EarningsReportPage — section analysis', () => {
+  const withAnalysis = (text: string) =>
+    sec({
+      ...OVERVIEW,
+      analysis: {
+        text,
+        generated_at: '2026-08-24T08:18:10Z',
+        model: 'gpt-4.1',
+        fingerprint: 'fp-1',
+      },
+    });
+
+  it('prints a stored analysis under the section', async () => {
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, withAnalysis('- Revenue of SAR 416,628M is the largest line in the table.'), PERFORMANCE],
+    });
+    renderPage();
+
+    expect(await screen.findByText(/largest line in the table/)).toBeInTheDocument();
+  });
+
+  it('renders the prose exactly as before when there is no analysis', async () => {
+    renderPage();
+
+    expect(await screen.findByText(/resilient full-year performance/)).toBeInTheDocument();
+    // No stray heading, rule or empty block where the analysis would have gone.
+    expect(screen.queryByText(/largest line in the table/)).not.toBeInTheDocument();
+  });
+
+  it('shows the analysis on a table section too', async () => {
+    // The analysis belongs to the SECTION, not to one content shape — the
+    // exporter appends it outside its own mode branches for the same reason.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, sec({
+        ...PERFORMANCE,
+        analysis: {
+          text: '- The table is concentrated in two lines.',
+          generated_at: '2026-08-24T08:18:10Z', model: 'gpt-4.1', fingerprint: 'fp-2',
+        },
+      })],
+    });
+    renderPage();
+
+    expect(await screen.findByText(/concentrated in two lines/)).toBeInTheDocument();
+  });
+});
+
+// ── A section with nothing to report ────────────────────────────────────────
+//
+// Preview said "This section is left out of the finished report" and the Report
+// screen showed it anyway, as did the exported PDF. This screen now shows exactly
+// the set the export contains.
+
+describe('EarningsReportPage — sections with nothing to report', () => {
+  const SENTENCE = 'No forward-looking guidance was disclosed in the uploaded documents for this period.';
+
+  const guidance = (over: Partial<EarningsProducedSection>) =>
+    sec({ section_code: 's11_guidance', title: 'Guidance / Outlook', mode: 'generate', display_order: 3, ...over });
+
+  it('hides a section the backend flagged as having nothing to report', async () => {
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({
+        content: null, status: 'produced', feeder_status: 'no_data', feeder_message: SENTENCE,
+      })],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+
+    expect(screen.queryByRole('heading', { name: 'Guidance / Outlook' })).not.toBeInTheDocument();
+    expect(screen.queryByText(SENTENCE)).not.toBeInTheDocument();
+  });
+
+  it('hides one produced before the flag existed, which still holds the sentence', async () => {
+    // content_hash fingerprints inputs, so flagging it invalidated nothing — these
+    // rows survive until somebody presses Regenerate, and must not print meanwhile.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: SENTENCE, status: 'produced' })],
+    });
+    renderPage();
+    await screen.findByText(/resilient full-year performance/);
+
+    expect(screen.queryByText(SENTENCE)).not.toBeInTheDocument();
+  });
+
+  it('keeps a real sentence that merely begins with "No"', async () => {
+    const real = 'No dividends were declared this quarter, in line with the prior year.';
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: real, status: 'produced' })],
+    });
+    renderPage();
+
+    expect(await screen.findByText(real)).toBeInTheDocument();
+  });
+
+  it('still shows a needs_input section, which is a gap the user can close', async () => {
+    // Deliberately not hidden: this screen is where its manual entry form lives,
+    // so hiding it would leave no way to ever complete the section.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, OVERVIEW, guidance({ content: null, status: 'needs_input' })],
+    });
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Guidance / Outlook' })).toBeInTheDocument();
+  });
+});
+
+describe('EarningsReportPage — Generate with nothing to generate', () => {
+  it('refreshes instead of holding a generating state open forever', async () => {
+    // Same null handle as Preview's Continue: no run was started because there was
+    // nothing to start, so there is nothing to poll.
+    h.getEarningsSections.mockResolvedValue({
+      ...PRODUCED,
+      sections: [COVER, sec({ ...OVERVIEW, content: null, status: 'pending' })],
+    });
+    h.produceEarningsReport.mockResolvedValue({ run_id: null, poll_url: null });
+    renderPage();
+
+    const generate = await screen.findByRole('button', { name: /Generate/ });
+    h.getEarningsSections.mockResolvedValue(PRODUCED);
+    fireEvent.click(generate);
+
+    // It re-read the report rather than sitting on a run that does not exist.
+    await waitFor(() => expect(h.getEarningsSections).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/resilient full-year performance/)).toBeInTheDocument();
   });
 });

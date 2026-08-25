@@ -117,6 +117,32 @@ function isQuarterlyReport(r: ReportSummary): boolean {
   return /^Q[1-4][\s-]/i.test(r.period);
 }
 
+// Annual Report (Spark Studio / SAR — its own dashboard, but a stray
+// questionnaire/kickoff row can still land in this shared reports table) and
+// Board Report (its own /board-report/* feature) both write into the same
+// table this page lists, so they'd otherwise leak into the ESG gallery below
+// alongside real ESG Validator runs.
+function isAnnualReport(r: ReportSummary): boolean {
+  return (r.report_type ?? '').toLowerCase() === 'annual' || /annual report/i.test(r.title ?? '');
+}
+
+function isBoardReport(r: ReportSummary): boolean {
+  const t = (r.report_type ?? '').toLowerCase();
+  return t === 'board_report' || t === 'board_pack' || /board report/i.test(r.title ?? '');
+}
+
+// A report actually belongs in the ESG Validator gallery/year-picker only once
+// every other feature that shares this table has been ruled out.
+function isEsgReport(r: ReportSummary): boolean {
+  return (
+    !isQuarterlyReport(r) &&
+    !isEarningsReport(r) &&
+    !isIRBriefingReport(r) &&
+    !isAnnualReport(r) &&
+    !isBoardReport(r)
+  );
+}
+
 // Approved/locked quarterly reports open straight on the read-only Assembled
 // Report screen instead of the Outline — there's nothing left to configure.
 function isApprovedReport(r: ReportSummary): boolean {
@@ -361,7 +387,7 @@ export default function ReportsPage() {
         setExistingReports(list);
         // If the company has no ESG reports yet, jump straight to the year
         // picker (quarterly reports live in their own tab/dropdown).
-        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r) && !isEarningsReport(r)));
+        setIsAddingNewPeriod(!list.some(isEsgReport));
       })
       .catch(() => {
         if (!cancelled) {
@@ -437,7 +463,7 @@ export default function ReportsPage() {
 
   // ESG reports only — the ESG year dropdown and gallery must not surface
   // quarterly reports (those have their own tab and dropdown).
-  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r) && !isEarningsReport(r));
+  const esgReports = existingReports.filter(isEsgReport);
 
   // Years already taken by an existing ESG report — blocked in the year picker
   // so one ESG report per year is enforced.

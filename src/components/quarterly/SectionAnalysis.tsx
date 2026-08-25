@@ -104,9 +104,8 @@ function ConfirmDialog({
             {redo ? 'Write this analysis again?' : 'Analyse this section?'}
           </div>
           <p style={{ margin: '10px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
-            This sends the <strong>{lines} {lines === 1 ? 'line' : 'lines'}</strong> of figures in{' '}
-            <strong>{title}</strong> to AI to be read and summarised. Nothing else from your
-            report is sent.
+            This sends the figures in <strong>{title}</strong> to AI to be read and
+            summarised. Nothing else from your report is sent.
           </p>
           <p style={{ margin: '8px 0 0', fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             {redo
@@ -189,11 +188,20 @@ function Reading({ lines, labels, slow }: { lines: number; labels: string[]; slo
 
 // ── The whole control ────────────────────────────────────────────────────────
 export default function SectionAnalysis({
-  companyId, reportId, section, onBusyChange, onAnalysis,
+  companyId, reportId, section, onBusyChange, onAnalysis, analyse, saveAnalysis,
 }: {
   companyId: string;
   reportId: string;
   section: ProducedSection;
+  // The two API calls, injected. Everything else here — the confirm dialog, the
+  // pencil, the "write it again" warning, the stale-table detection, the slow and
+  // timeout handling — is report-family-agnostic, and earnings needs all of it.
+  // Quarterly passes what it always called, so its behaviour does not move.
+  analyse?: (
+    sectionCode: string,
+    opts: { force?: boolean; signal?: AbortSignal },
+  ) => Promise<Analysis>;
+  saveAnalysis?: (sectionCode: string, text: string) => Promise<Analysis>;
   // Lets the Preview dim the table and paint the reading band over it — the band
   // must sit outside the table's own overflow scroller to avoid being clipped.
   onBusyChange?: (busy: boolean) => void;
@@ -255,9 +263,11 @@ export default function SectionAnalysis({
     const killTimer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      const res = await quarterlyReports.analyseSection(companyId, reportId, section.section_code, {
-        force, signal: controller.signal,
-      });
+      const res = analyse
+        ? await analyse(section.section_code, { force, signal: controller.signal })
+        : await quarterlyReports.analyseSection(companyId, reportId, section.section_code, {
+            force, signal: controller.signal,
+          });
       if (!mounted.current) return;
       contentAtRun.current = section.content ?? null;
       setAnalysis(res);
@@ -276,15 +286,17 @@ export default function SectionAnalysis({
         setSlow(false);
       }
     }
-  }, [companyId, reportId, section.section_code, section.content]);
+  }, [analyse, companyId, reportId, section.section_code, section.content]);
 
   const save = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
-      const res = await quarterlyReports.saveSectionAnalysis(
-        companyId, reportId, section.section_code, draft,
-      );
+      const res = saveAnalysis
+        ? await saveAnalysis(section.section_code, draft)
+        : await quarterlyReports.saveSectionAnalysis(
+            companyId, reportId, section.section_code, draft,
+          );
       if (!mounted.current) return;
       setAnalysis(draft.trim() ? res : null);
       setEditing(false);
@@ -295,7 +307,7 @@ export default function SectionAnalysis({
     } finally {
       if (mounted.current) setSaving(false);
     }
-  }, [companyId, reportId, section.section_code, draft]);
+  }, [saveAnalysis, companyId, reportId, section.section_code, draft]);
 
   // The arrival sequence: the rule draws, then the byline, then the prose behind
   // it. Applied only on a fresh result — a stored analysis is simply there.
