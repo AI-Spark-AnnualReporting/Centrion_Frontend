@@ -5,6 +5,7 @@ import { Topbar } from './Topbar';
 import { FloatingChatbot } from '../shared/FloatingChatbot';
 import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
 import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
+import { BackToOrigin } from '../shared/BackToOrigin';
 
 const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
@@ -118,6 +119,10 @@ export function AppLayout() {
                   : 'content'
             }
           >
+            {/* Renders only when the reader was sent here from somewhere with
+                its own way back — a thread's report card. One bar above every
+                page beats teaching each module page about threads. */}
+            <BackToOrigin />
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

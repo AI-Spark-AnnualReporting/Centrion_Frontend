@@ -27,6 +27,7 @@ import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
 import { statusPill, isInReview } from '@/components/dashboard/report-status';
+import { hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
 import { SendExternalModal } from '@/components/communications/SendExternalModal';
@@ -429,7 +430,7 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && (
+        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             className="btn bp"

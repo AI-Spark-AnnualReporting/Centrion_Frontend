@@ -21,6 +21,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
 import ReportsPage from "./pages/ReportsPage";
+import TokenHandoffPage from "./pages/TokenHandoffPage";
 import ReportDetailPage from "./pages/ReportDetailPage";
 import ProcessingPage from "./pages/ProcessingPage";
 import KPIPage from "./pages/KPIPage";
@@ -119,6 +120,9 @@ const App = () => (
     <Toaster />
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Session handoff from the SAR app — the token in the query string IS
+          the session, so this is public by necessity, exactly like /login. */}
+      <Route path="/auth/token" element={<TokenHandoffPage />} />
       <Route path="/register" element={<SignupPage />} />
       {/* Public by necessity — a user who can't sign in has no session to
           protect these with. /reset-password is the target of the emailed

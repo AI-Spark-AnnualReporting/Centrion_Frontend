@@ -20,6 +20,7 @@ import { isBoardCoverSection, numberBoardHeadings } from '@/pages/annual-report/
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
+import { isTableOfContentsSection } from '@/pages/earnings/helpers';
 import { isCoverSection } from '@/components/quarterly/sectionState';
 import { initials, relativeTime } from './helpers';
 
@@ -59,6 +60,8 @@ const sectionDomId = (sectionId: string) => `review-sec-${sectionId}`;
 // other type reads through the earnings sections endpoint. `board_pack` is the
 // older type string for the same report.
 const QUARTERLY = 'quarterly';
+const EARNINGS = 'earnings';
+const ANNUAL = 'annual';
 const BOARD = ['board_report', 'board_pack'];
 
 // Document presentation, matched to AssembledReportPage so the reviewer reads
@@ -301,6 +304,15 @@ export function ReviewerView({
   // A type neither branch resolves still renders its headings without a body.
   const reportId = data?.report?.id;
   const reportType = data?.report?.report_type;
+  // Types whose written body this screen can actually fetch — see the effect
+  // below. Annual is written in the reporting-cycles system and ESG has no
+  // sections at all, so for those the headings are all there is to show, and
+  // saying "not generated yet" about them would be a lie.
+  const hasBodySource =
+    BOARD.includes(reportType ?? '') ||
+    reportType === QUARTERLY ||
+    reportType === EARNINGS ||
+    reportType === ANNUAL;
 
   // The reassign dropdown needs the member list — scoped to this report, so
   // only people who can open it are offered.
@@ -314,6 +326,8 @@ export function ReviewerView({
   // Read off `data` here, not inside the effect, so re-fetching the review (a
   // posted comment reloads it) doesn't re-pull the whole document body.
   const userCompanyName = user?.company_name ?? null;
+  const annualPeriod = data?.report?.period ?? null;
+  const annualTitle = data?.report?.title ?? null;
   useEffect(() => {
     if (!reportId || !reportType) return;
     let cancelled = false;
@@ -357,8 +371,33 @@ export function ReviewerView({
               cover_template_key: res.cover?.cover_template_key ?? null,
             };
           })
-        : earnings.getEarningsSections(reportId);
+        : reportType === EARNINGS
+          ? earnings.getEarningsSections(reportId)
+          : reportType === ANNUAL
+            // Written in the reporting-cycles system, so it comes from the
+            // Hub's own endpoint rather than a per-report module table. Its
+            // cover page has no /assemble call behind it either — the report's
+            // own meta is the header, which is what the cycle prints too.
+            ? communications.reviewAnnualSections(reportId).then((res) => {
+                if (!cancelled) {
+                  setCover({
+                    companyName: userCompanyName,
+                    period: annualPeriod,
+                    title: annualTitle,
+                    preparedOn: null,
+                  });
+                }
+                return res;
+              })
+            // ESG keeps metrics, not sections. This used to fall through to
+            // earnings, which answered "Earnings report <id> not found" — an
+            // error about the wrong report, on a report that is fine.
+            : null;
     setBodyError(null);
+    if (!load) {
+      setBodies({});
+      return;
+    }
     load
       .then((res) => {
         if (cancelled) return;
@@ -373,13 +412,14 @@ export function ReviewerView({
     return () => {
       cancelled = true;
     };
-  }, [reportId, reportType, companyId, userCompanyName]);
+  }, [reportId, reportType, companyId, userCompanyName, annualPeriod, annualTitle]);
 
-  // Earnings brand accents. Quarterly gets its brand from /assemble above;
-  // earnings keeps it behind the cover-template endpoint, which is the same
-  // source EarningsPreviewPage reads and works on locked reports.
+  // Earnings brand accents. Quarterly and board get their brand from the
+  // /assemble calls above; earnings keeps it behind the cover-template
+  // endpoint, which is the same source EarningsPreviewPage reads and works on
+  // locked reports. Every other type has no earnings cover to ask for.
   useEffect(() => {
-    if (!reportId || !reportType || reportType === QUARTERLY) return;
+    if (reportType !== EARNINGS || !reportId) return;
     let cancelled = false;
     earnings
       .getEarningsCoverSelection(reportId)
@@ -455,17 +495,14 @@ export function ReviewerView({
     }
   };
 
-  const runPanelAction = async () => {
-    if (busy || !panel) return;
-    // Send-back's note is required (422 if blank) — gate it here too.
-    if (panel === 'send_back' && !note.trim()) {
-      setActionError('Add a note explaining what needs to change.');
-      return;
-    }
+  // `kind` is passed explicitly by the send-back button, which fires without a
+  // panel: reading `panel` there would read the state before React commits it.
+  const runPanelAction = async (kind: 'approve' | 'send_back' | null = panel) => {
+    if (busy || !kind) return;
     setBusy(true);
     setActionError(null);
     try {
-      if (panel === 'approve') {
+      if (kind === 'approve') {
         const res = await communications.approveReview(threadId, note.trim() || undefined);
         toast({ title: 'Report approved', description: res.status_label });
       } else {
@@ -498,7 +535,11 @@ export function ReviewerView({
   const canAct = data?.can_act ?? false;
   // Removed from the thread → read the record, add nothing to it. can_act
   // already folds in the removal, so the approve/reassign buttons need nothing.
-  const canComment = data?.can_comment ?? true;
+  // No assignment means nobody was asked to review this — the screen is here to
+  // be read. The reviewer furniture (the brief, the comment controls, the
+  // assignment/comments rail) is all about a review that isn't happening.
+  const viewOnly = !data?.assignment;
+  const canComment = !viewOnly && (data?.can_comment ?? true);
   const removedAt = data?.removed_at ?? null;
   const canApprove = data?.can_approve ?? false;
   // The review payload's section list is earnings-only on the backend — it comes
@@ -517,16 +558,24 @@ export function ReviewerView({
   // tables through the quarterly renderer — so they render the same way. Board
   // content is the one difference: it's Markdown, and needs parsing.
   const isBoard = BOARD.includes(reportType ?? '');
-  const isDocument = reportType === QUARTERLY || isBoard;
+  // Annual too: what the reviewer signs off is the assembled report, so it
+  // renders as one — cover as its own page, prose typeset down the page —
+  // rather than as a stack of cards.
+  const isDocument = reportType === QUARTERLY || isBoard || reportType === ANNUAL;
   // The board cover's code is BR01, which the quarterly /cover/i test misses —
   // it would then render as an empty body section under the cover CoverRenderer
   // already drew. Use the board's own detector for board reports.
   const sections = isDocument
-    ? allSections.filter((s) =>
-        isBoard
-          ? !isBoardCoverSection({ section_code: s.id, content: bodies[s.id]?.content })
-          : !isCoverSection({ section_code: s.id }),
-      )
+    ? allSections.filter((s) => {
+        if (isBoard) {
+          return !isBoardCoverSection({ section_code: s.id, content: bodies[s.id]?.content });
+        }
+        // A cycle's contents page is generated at export from the sections
+        // themselves — as a section here it is an empty card in the middle of
+        // the document.
+        if (reportType === ANNUAL && isTableOfContentsSection(s.id)) return false;
+        return !isCoverSection({ section_code: s.id });
+      })
     : allSections;
   // Once the report is approved (or otherwise finished) the review is over —
   // reassign / request-changes no longer make sense even though the backend
@@ -593,9 +642,13 @@ export function ReviewerView({
             {ICON_SHARE}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15.5, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.2px' }}>Review report</div>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: '#1A1D2E', letterSpacing: '-.2px' }}>
+              {viewOnly ? report?.title ?? 'Report' : 'Review report'}
+            </div>
             <div style={{ fontSize: 12, color: '#8890AE', marginTop: 1 }}>
-              {!assignedName ? (
+              {viewOnly ? (
+                report?.type_label ?? 'Read-only'
+              ) : !assignedName ? (
                 'Unassigned'
               ) : assignment?.is_you ? (
                 <>
@@ -627,28 +680,6 @@ export function ReviewerView({
               </span>
             );
           })()}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              flexShrink: 0,
-              width: 28,
-              height: 28,
-              border: 'none',
-              background: 'transparent',
-              color: '#9BA3C4',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 8,
-            }}
-          >
-            <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
         </div>
 
         {loading ? (
@@ -664,9 +695,20 @@ export function ReviewerView({
             </button>
           </div>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px' }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'grid',
+              gridTemplateColumns: viewOnly ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 340px',
+            }}
+          >
             {/* Report + sections */}
             <div style={{ overflowY: 'auto', padding: '18px 24px 24px', background: '#F4F5FA', minWidth: 0 }}>
+              {/* Reviewing instructions, so only where a review is happening.
+                  The exception is the removal notice: someone reading a thread
+                  they were taken out of needs to know why it is read-only. */}
+              {(!viewOnly || removedAt) && (
               <div
                 style={{
                   padding: '13px 16px',
@@ -690,6 +732,7 @@ export function ReviewerView({
                   </>
                 )}
               </div>
+              )}
 
               {/* The headings come from the review payload, the content from the
                   report's own endpoint — so the content can fail on its own.
@@ -844,7 +887,9 @@ export function ReviewerView({
                         )
                       ) : (
                         <div style={{ fontSize: 12.5, color: '#9BA3C4', fontStyle: 'italic' }}>
-                          This section hasn't been generated yet.
+                          {hasBodySource
+                            ? "This section hasn't been generated yet."
+                            : 'This report keeps no section text — open the report to see its data.'}
                         </div>
                       )}
 
@@ -881,6 +926,7 @@ export function ReviewerView({
               </div>
 
               {/* Report-level comments (section_id: null) */}
+              {!viewOnly && (
               <div className="card" style={{ padding: '16px 20px', maxWidth: isDocument ? DOC_WIDTH : undefined, margin: isDocument ? '16px auto 0' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: '#1A1D2E' }}>
@@ -944,9 +990,11 @@ export function ReviewerView({
                   </div>
                 )}
               </div>
+              )}
             </div>
 
-            {/* Right rail */}
+            {/* Right rail — the review's own controls, so it goes with it. */}
+            {!viewOnly && (
             <div
               style={{
                 borderLeft: '1px solid #ECEEF8',
@@ -1162,9 +1210,9 @@ export function ReviewerView({
                           className="btn bp"
                           style={{
                             flex: 1,
-                            opacity: busy || (panel === 'send_back' && !note.trim()) ? 0.6 : 1,
+                            opacity: busy ? 0.6 : 1,
                           }}
-                          disabled={busy || (panel === 'send_back' && !note.trim())}
+                          disabled={busy}
                           onClick={() => void runPanelAction()}
                         >
                           {busy ? 'Working…' : panel === 'approve' ? 'Approve' : 'Send back'}
@@ -1214,22 +1262,30 @@ export function ReviewerView({
                         className="btn bs"
                         style={{ width: '100%', gap: 8, padding: '12px 16px', opacity: reassigning ? 0.55 : 1 }}
                         disabled={reassigning}
+                        // Straight to it: what needs changing is in the section
+                        // comments this reviewer has been leaving, and a second
+                        // required box only got "see comments" typed into it.
                         onClick={() => {
-                          setPanel('send_back');
                           setNote('');
                           setActionError(null);
+                          void runPanelAction('send_back');
                         }}
                       >
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                           <path d="M9.5 1.9l2.6 2.6-7 7-3.1.5.5-3.1 7-7z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
                         </svg>
-                        Request changes &amp; reassign
+                        {/* It goes to the report's creator — nobody is
+                            reassigned, the assignment is simply cleared. */}
+                        {data?.owner?.full_name
+                          ? `Send back to ${data.owner.full_name}`
+                          : 'Send back to the creator'}
                       </button>
                     </>
                   )}
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
       </div>
