@@ -26,7 +26,8 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
-import { statusPill } from '@/components/dashboard/report-status';
+import { statusPill, isInReview } from '@/components/dashboard/report-status';
+import { hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
 import { SendExternalModal } from '@/components/communications/SendExternalModal';
@@ -138,7 +139,7 @@ const ICON_PUBLISH = (
     <path d="M2.5 9.5v1.4a.9.9 0 0 0 .9.9h7.2a.9.9 0 0 0 .9-.9V9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
   </svg>
 );
-const ICON_EXTERNAL = (
+const ICON_OPEN_REVIEW = (
   <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
     <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -245,7 +246,9 @@ function ThreadRow({
 
   // Review is only live while the report is out for review — once it's
   // approved (or locked/published) there's nothing left to review.
-  const inReview = report?.status?.trim().toLowerCase() === 'in_review';
+  // The report's status, shown only on the thread that IS the review — a
+  // general thread about the same report is not under review itself.
+  const inReview = isInReview(report?.status) && !!assignment;
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? ' (you)' : ''}`
@@ -427,7 +430,7 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && (
+        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             className="btn bp"
@@ -435,7 +438,7 @@ function ThreadRow({
             onClick={() => onReview(thread)}
           >
             Open review
-            {ICON_EXTERNAL}
+            {ICON_OPEN_REVIEW}
           </button>
         )}
       </div>

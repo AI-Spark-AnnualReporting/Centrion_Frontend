@@ -13,6 +13,8 @@ import {
 } from '@/lib/api';
 import { MentionComposer, MemberPicker } from './MentionComposer';
 import { AttachedReportCard } from './AttachedReportCard';
+import { Link } from 'react-router-dom';
+import { hasSomethingToReview, generationHref, opensModulePage } from '@/lib/reportRoutes';
 import { SendExternalModal } from './SendExternalModal';
 import {
   ATTACHMENT_ACCEPT,
@@ -452,9 +454,13 @@ export function ThreadViewModal({
       .catch(() => {});
   };
 
-  // On open → load thread + members in parallel, and fire read (idempotent).
+  // On open → load the thread, then its members, and fire read (idempotent).
   // With initialPayload the thread is already painted; we still refresh members
-  // for the mention picker and mark the thread read.
+  // for the mention/add-people picker and mark the thread read.
+  //
+  // Members are fetched AFTER the thread rather than beside it because the list
+  // is scoped to the thread's report — offering someone who cannot open the
+  // report is offering an add that fails.
   useEffect(() => {
     let cancelled = false;
     const skipThreadFetch = !!initialPayload;
@@ -463,17 +469,20 @@ export function ThreadViewModal({
       setError(null);
     }
 
-    Promise.all([
-      skipThreadFetch ? Promise.resolve(null) : communications.getThread(threadId),
-      // A members failure shouldn't block the thread from rendering.
-      communications.members().catch(() => ({ members: [] as CommunicationMember[] })),
-    ])
-      .then(([detail, membersRes]) => {
+    (skipThreadFetch ? Promise.resolve(null) : communications.getThread(threadId))
+      .then(async (detail) => {
         if (cancelled) return;
         if (detail) {
           setThread(detail.thread);
           setMessages(detail.messages);
         }
+        // Ad-hoc threads have no report — everyone in the company is fair game.
+        const reportId = (detail ?? initialPayload)?.thread.report?.id;
+        // A members failure shouldn't block the thread from rendering.
+        const membersRes = await communications
+          .members(reportId)
+          .catch(() => ({ members: [] as CommunicationMember[] }));
+        if (cancelled) return;
         setMembers(membersRes.members);
       })
       .catch((e) => {
@@ -635,7 +644,7 @@ export function ThreadViewModal({
             variant: 'destructive',
           });
           communications
-            .members()
+            .members(thread?.report?.id)
             .then((r) => setMembers(r.members))
             .catch(() => {});
           setSending(false);
@@ -655,6 +664,21 @@ export function ThreadViewModal({
   const isAdHoc = !!thread && !report;
   const title = report ? report.title : (thread?.subject?.trim() || 'Discussion');
   const assignment = thread?.assignment ?? null;
+  // Where the report itself lives, when that is where this thread's controls
+  // should go: an unapproved report has nothing settled to read in the review
+  // screen, and ESG keeps no sections to render there at all.
+  const isEsg = report?.generation?.target.kind === 'esg_page';
+  // Same gate the card applies: an annual report offers nothing until it has
+  // been approved.
+  const offerable = hasSomethingToReview(report?.generation, report?.status);
+  const reportHref =
+    offerable && report?.generation && opensModulePage(report.generation)
+      ? generationHref(report.generation)
+      : null;
+  // The card beside this button computes the same href, so the two must not
+  // land in different places. The one exception is a review thread, where this
+  // button is "Open review" — a different action, under a different label.
+  const moduleHref = reportHref && (!assignment || isEsg) ? reportHref : null;
   // The person is the identity; `label` is the authority they sign off as
   // ("Board Chairman"), so it must not stand in for their name.
   const assignedName = assignment ? (assignment.full_name || assignment.label) : null;
@@ -769,10 +793,21 @@ export function ThreadViewModal({
               {/* The report under review — clicking opens the reviewer screen. */}
               {report && (
                 <div style={{ marginTop: 14 }}>
+                  {/* On a REVIEW thread the card is a summary and nothing
+                      more: the footer's "Open review" is the way in, and a
+                      second click target beside it that goes somewhere else
+                      only invites the wrong one. A general thread keeps it. */}
                   <AttachedReportCard
                     report={report}
-                    subtitle={openReview ? 'Linked · click to open in review' : 'Linked · read-only snapshot'}
-                    onClick={openReview}
+                    // The thread's own URL, so "back" from the report returns
+                    // to this conversation instead of a list.
+                    backTo={`/communications/threads/${threadId}`}
+                    subtitle={
+                      assignment || !openReview
+                        ? 'Linked · read-only snapshot'
+                        : 'Linked · click to open in review'
+                    }
+                    onClick={assignment ? undefined : openReview}
                   />
                 </div>
               )}
@@ -1134,9 +1169,33 @@ export function ThreadViewModal({
                 Send externally
               </button>
             )}
-            {openReview && thread && !loading && !error && (
+            {moduleHref && thread && !loading && !error && (
+              <Link
+                to={moduleHref}
+                // Same return address the card sends, so "Back to the
+                // conversation" shows on the report page either way in.
+                state={{ backTo: `/communications/threads/${threadId}`, backLabel: 'Back to the conversation' }}
+                onClick={onClose}
+                className="btn bp"
+                style={{ gap: 8, textDecoration: 'none' }}
+              >
+                {isEsg ? 'View ESG data' : 'View report'}
+                {ICON_EXTERNAL}
+              </Link>
+            )}
+            {/* Nothing written yet means an empty review screen — see
+                hasSomethingToReview. The module lanes keep it: for them
+                `not_ready` is exactly the report that is out for review now. */}
+            {!moduleHref && openReview && thread && !loading && !error && offerable && (
               <button type="button" className="btn bp" style={{ gap: 8 }} onClick={openReview}>
-                {thread.can_review ? 'Open as reviewer' : 'Open review'}
+                {/* Without an assignment this thread is a conversation about
+                    the report, not a review of it — the same screen, but the
+                    reader is only here to read. */}
+                {!assignment
+                  ? 'View report'
+                  : thread.can_review
+                    ? 'Open as reviewer'
+                    : 'Open review'}
                 {ICON_EXTERNAL}
               </button>
             )}

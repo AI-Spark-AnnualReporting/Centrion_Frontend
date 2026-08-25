@@ -33,6 +33,13 @@ const UNKNOWN = { color: '#5A6080', bg: '#E8EAF5' };
  * `label` overrides the displayed text: pass the backend's `status_label` where one is
  * available (the Communication Hub sends one) so wording stays server-owned.
  */
+export const isInReview = (status?: string | null): boolean =>
+  (status ?? '').trim().toLowerCase() === 'in_review';
+
+/** Signed off and out of the author's hands — approved, locked or published. */
+export const isClosed = (status?: string | null): boolean =>
+  ['approved', 'locked', 'published'].includes((status ?? '').trim().toLowerCase());
+
 export function statusPill(status?: string | null, label?: string | null): StatusPill {
   const key = (status ?? '').trim().toLowerCase();
   const known = key ? STATUS_PILL[key] : STATUS_PILL.draft;
