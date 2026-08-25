@@ -6,6 +6,7 @@
 // The card / block / pill styling matches the Earnings setup form, so the two
 // generate screens read as one design.
 
+import { useState } from 'react';
 import type { Sector } from '@/types/company';
 import type { BoardIssuerProfile } from '@/types/board';
 import { ISSUER_TYPES } from './board-helpers';
@@ -28,11 +29,20 @@ export function SetupCard({
   title,
   sub,
   children,
+  // Opt-in: the ESG Validator / Quarterly / Earnings "Generate…" cards all
+  // collapse on a header click (see ReportsPage.tsx's genOpen and
+  // EarningsSetupPage.tsx's formOpen) — the board report's setup form gets
+  // the same behaviour when this is set. Off by default so the other
+  // SetupCard usages (Resolved sections, sources) stay exactly as they were.
+  collapsible = false,
 }: {
   title: string;
   sub: string;
   children: React.ReactNode;
+  collapsible?: boolean;
 }) {
+  const [open, setOpen] = useState(true);
+  const showBody = !collapsible || open;
   return (
     <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
       <div
@@ -40,32 +50,51 @@ export function SetupCard({
           padding: '16px 20px',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: 10,
-          borderBottom: `1px solid ${BORDER_SOFT}`,
+          cursor: collapsible ? 'pointer' : undefined,
+          borderBottom: showBody ? `1px solid ${BORDER_SOFT}` : 'none',
         }}
+        onClick={collapsible ? () => setOpen((o) => !o) : undefined}
       >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
-            background: ACCENT,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" />
-          </svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: ACCENT,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1l1.1 3.3H11L8.5 6.4l1.1 3.3L6 7.8l-3.6 2 1.1-3.3L1 4.3h3.9z" fill="white" />
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{title}</div>
+            <div style={{ fontSize: 11, color: MUTED }}>{sub}</div>
+          </div>
         </div>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: INK }}>{title}</div>
-          <div style={{ fontSize: 11, color: MUTED }}>{sub}</div>
-        </div>
+        {collapsible && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: ACCENT }}>AI Powered</span>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              style={{ transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: '.2s' }}
+            >
+              <path d="M3 5l4 4 4-4" stroke="#5A6080" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        )}
       </div>
-      <div style={{ padding: '18px 20px' }}>{children}</div>
+      {showBody && <div style={{ padding: '18px 20px' }}>{children}</div>}
     </div>
   );
 }
