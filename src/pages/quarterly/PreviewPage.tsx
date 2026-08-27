@@ -430,8 +430,19 @@ export default function PreviewPage() {
       try {
         const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
         patchSection(code, res);
-        setInputText((m) => ({ ...m, [code]: '' }));
-        setSectionFile((m) => ({ ...m, [code]: null }));
+        // If the produce came back still needing input (RAG found nothing AND the
+        // typed text was too thin to synthesize from), keep the textarea so the
+        // user isn't left staring at a blank field, and surface the producer's
+        // reason so they know why nothing was written.
+        if (res.status === 'needs_input') {
+          setErrors((e) => ({
+            ...e,
+            [code]: res.error || 'This section still needs input — try adding more detail or attaching a source document.',
+          }));
+        } else {
+          setInputText((m) => ({ ...m, [code]: '' }));
+          setSectionFile((m) => ({ ...m, [code]: null }));
+        }
       } catch (err: unknown) {
         setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not save this section.' }));
       } finally {

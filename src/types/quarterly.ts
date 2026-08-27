@@ -549,6 +549,10 @@ export interface ProducedSection {
   feeder_status: FeederStatus;
   // Carried through so needs_input sections can show what they require.
   message?: string;
+  // Producer's explanation when status is needs_input/empty (e.g. "No relevant
+  // information found in the uploaded documents …"). The Preview surfaces this so
+  // the user knows why a Save left the section still empty.
+  error?: string;
   // False when re-producing yields nothing fresh (Template/External, or content
   // the user supplied verbatim) — the Preview hides Regenerate. Undefined = show.
   regeneratable?: boolean;
