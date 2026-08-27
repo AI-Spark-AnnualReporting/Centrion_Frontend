@@ -663,7 +663,7 @@ export default function QuarterlyReportForm({
   // System vs Custom metrics. system (default) = map the sheet to our standard
   // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
   // Both modes take their figures from the Financial Data field.
-  const [metricsMode, setMetricsMode] = useState<MetricsMode>('system');
+  const [metricsMode, setMetricsMode] = useState<MetricsMode>('user');
   // Which "?" panel is open, by id — one slot, so opening one closes the others.
   const [helpOpen, setHelpOpen] = useState<string | null>(null);
   // The standard metric catalogue behind the "System metrics" hover list. null
@@ -1756,7 +1756,9 @@ export default function QuarterlyReportForm({
             </label>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
-              {(['system', 'custom', 'user'] as const).map((m) => {
+              {/* Only 'Sections from my files' is offered. The other two modes still
+                  work end to end -- put them back in this list to re-enable them. */}
+              {(['user'] as MetricsMode[]).map((m) => {
                 const radio = (
                   <label
                     style={{
