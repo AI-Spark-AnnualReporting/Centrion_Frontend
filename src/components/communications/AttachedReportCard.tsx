@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { ThreadReport, ReportGeneration } from '@/lib/api';
-import { generationHref, hasSomethingToReview, opensModulePage } from '@/lib/reportRoutes';
+import { canOpenReport, generationHref, hasSomethingToReview, opensModulePage } from '@/lib/reportRoutes';
+import { useAuth } from '@/context/AuthContext';
 import { statusPill, isInReview, isClosed } from '@/components/dashboard/report-status';
 
 /* The report a review is about — linked, never copied.
@@ -50,12 +51,18 @@ export function AttachedReportCard({
   // they came from, rather than whatever list the destination defaults to.
   backTo?: string;
 }) {
+  const { user } = useAuth();
   const pill = statusPill(report.status, report.status_label);
-  // An annual report that isn't written through yet leads nowhere: its cycle
-  // is still being drafted, and there is no review to open either — the card
-  // sits inert until it's approved. Every other type is a link to the report
-  // while it isn't approved, and opens the review once it is.
-  const inert = disabled || !hasSomethingToReview(report.generation, report.status);
+  // An annual report that isn't approved yet leads nowhere: its cycle is still
+  // being written, and there is no review to open either. Only the annual lane
+  // reports a section count, so this is only ever false for annual.
+  const notReady = !hasSomethingToReview(report.generation, report.status);
+  // Anyone in the company can be in the thread; only someone with the report's
+  // module can open the report. Without it the card is a label — following it
+  // would just bounce them to /dashboard. Asked second, so an unapproved annual
+  // is reported as unfinished rather than as somebody's permission problem.
+  const noAccess = !notReady && !canOpenReport(user, report.generation);
+  const inert = disabled || notReady || noAccess;
   // An unapproved report has nothing settled to read in the review screen, so
   // the card goes to the report's own page — that holds on a review thread too,
   // where the footer's "Open review" is the separate, deliberate action.
@@ -106,7 +113,13 @@ export function AttachedReportCard({
           )}
         </span>
         <span style={{ display: 'block', fontSize: 12, color: '#8890AE', marginTop: 2 }}>
-          {inert || (!reportHref && !onClick)
+          {disabled
+            ? 'Linked'
+            : notReady
+              ? "Linked · this report isn't approved yet"
+            : noAccess
+            ? "Linked · you don't have access to this report"
+            : inert || (!reportHref && !onClick)
             ? 'Linked'
             : !reportHref
               ? subtitle

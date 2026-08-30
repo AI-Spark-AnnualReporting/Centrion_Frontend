@@ -1,5 +1,8 @@
 import type { ReportGeneration } from '@/lib/api';
+import type { FeatureKey } from '@/constants/features';
+import type { AuthUser } from '@/types/auth';
 import { isClosed } from '@/components/dashboard/report-status';
+import { isFeatureVisible } from '@/lib/features';
 
 /* Where a thread's report card sends the reader.
 
@@ -34,6 +37,42 @@ const ROUTE: Record<
   // there is one per report (FY-2024 GRI, FY-2023 GRI…), not one per company.
   esg_page: (t) => (t.report_id ? `/reports/${t.report_id}` : '/reports'),
 };
+
+// The module each report lane lives in — the same keys App.tsx sets as
+// `requiredFeature` on these very routes. Kept beside ROUTE so a card can
+// never offer a door ProtectedRoute then slams: without the feature the user
+// lands back on /dashboard.
+const FEATURE: Record<NonNullable<Target['kind']>, FeatureKey> = {
+  quarterly_report: 'quarterly_report',
+  board_report: 'board_report',
+  earnings_report: 'earnings_report',
+  annual_cycle: 'annual_report',
+  esg_page: 'esg_validator',
+};
+
+/** Whether this user may open the report a thread is about.
+
+    Membership in a thread is open to the whole company — access is enforced
+    here, at the report itself, rather than by hiding people from the pickers.
+    Asks exactly what the router asks, so the two can't disagree. */
+export function canOpenReport(
+  user: AuthUser | null | undefined,
+  generation?: Generation | null,
+): boolean {
+  const kind = generation?.target?.kind;
+  if (!kind) return false;
+  // Annual is settled by the report, not by the reader: once it is approved,
+  // anyone in the conversation may read it. Whether it IS approved is
+  // hasSomethingToReview's question — an unapproved annual is inert there — so
+  // nothing here needs to ask about status.
+  //
+  // This does not dead-end the way a feature check would: an approved annual
+  // has state 'ready', so opensModulePage is false and the card opens the
+  // reviewer screen inside the Hub. It never navigates to /annual-report,
+  // which is still admin + IR only.
+  if (kind === 'annual_cycle') return true;
+  return isFeatureVisible(user, FEATURE[kind]);
+}
 
 /** Whether the thread's controls should leave for the report's own page.
 

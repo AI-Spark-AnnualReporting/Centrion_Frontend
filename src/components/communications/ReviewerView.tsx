@@ -23,6 +23,7 @@ import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { isTableOfContentsSection } from '@/pages/earnings/helpers';
 import { isCoverSection } from '@/components/quarterly/sectionState';
 import { initials, relativeTime } from './helpers';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /* Reviewer screen — the "Open as reviewer" destination.
 
@@ -219,6 +220,20 @@ function CommentRow({
 }
 
 // "23 Aug 2026" for the removed-from-thread banner.
+/* Placeholder lines while a section's body is still in flight.
+
+   Ragged widths on purpose: three equal bars read as a table, not as text
+   about to arrive. */
+function SectionBodySkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }} aria-busy="true" aria-label="Loading section content">
+      <Skeleton style={{ height: 11, width: '92%' }} />
+      <Skeleton style={{ height: 11, width: '100%' }} />
+      <Skeleton style={{ height: 11, width: '78%' }} />
+    </div>
+  );
+}
+
 function formatRemovedOn(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
@@ -259,6 +274,11 @@ export function ReviewerView({
 
   // Report body, keyed by section_code (== the review payload's section.id).
   const [bodies, setBodies] = useState<Record<string, EarningsProducedSection>>({});
+  // The bodies arrive in their own request, after the headings. Until it lands
+  // every section rendered "hasn't been generated yet", which is a lie about a
+  // report that is merely still loading — and the reviewer's first impression
+  // of it was an empty document.
+  const [bodiesLoading, setBodiesLoading] = useState(false);
   // Why the document came back empty. Swallowing this is what made a permission
   // failure look like "nothing has been written yet" — two very different things
   // to the reviewer looking at the screen.
@@ -396,8 +416,10 @@ export function ReviewerView({
     setBodyError(null);
     if (!load) {
       setBodies({});
+      setBodiesLoading(false);
       return;
     }
+    setBodiesLoading(true);
     load
       .then((res) => {
         if (cancelled) return;
@@ -408,6 +430,9 @@ export function ReviewerView({
       })
       .catch((e: unknown) => {
         if (!cancelled) setBodyError(detailMessage(e, 'Could not load the report content.'));
+      })
+      .finally(() => {
+        if (!cancelled) setBodiesLoading(false);
       });
     return () => {
       cancelled = true;
@@ -885,6 +910,8 @@ export function ReviewerView({
                         ) : (
                           <SectionRenderer section={body} coverTemplateKey={coverTemplateKey} />
                         )
+                      ) : bodiesLoading ? (
+                        <SectionBodySkeleton />
                       ) : (
                         <div style={{ fontSize: 12.5, color: '#9BA3C4', fontStyle: 'italic' }}>
                           {hasBodySource

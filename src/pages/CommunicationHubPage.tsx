@@ -27,7 +27,7 @@ import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
 import { statusPill, isInReview } from '@/components/dashboard/report-status';
-import { hasSomethingToReview } from '@/lib/reportRoutes';
+import { canOpenReport, hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
 import { SendExternalModal } from '@/components/communications/SendExternalModal';
@@ -242,6 +242,8 @@ function ThreadRow({
 }) {
   const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread;
   const { toast } = useToast();
+  // Reviewing means reading the report — only for someone with its module.
+  const { user } = useAuth();
   const title = report ? report.title : (subject?.trim() || 'Discussion');
 
   // Review is only live while the report is out for review — once it's
@@ -318,6 +320,12 @@ function ThreadRow({
               </span>
             );
           })()}
+          {/* A review thread is private too, so "Private" alone left it looking
+              like a second private discussion on the same report — and it does
+              sit beside one, since a review does not eat the owner's own slot.
+              The assignment is what makes it a review, whatever the report's
+              status happens to be now; "In review" above only speaks while the
+              report is still out for review. */}
           {is_private && (
             <span
               style={{
@@ -326,14 +334,14 @@ function ThreadRow({
                 gap: 5,
                 padding: '2px 9px',
                 borderRadius: 20,
-                background: '#EFF0F7',
-                color: '#5A6080',
+                background: assignment ? '#EDEAFB' : '#EFF0F7',
+                color: assignment ? '#5B34D6' : '#5A6080',
                 fontSize: 11,
                 fontWeight: 700,
               }}
             >
               {ICON_LOCK}
-              Private
+              {assignment ? 'Review' : 'Private'}
             </span>
           )}
           {removed_at && (
@@ -430,7 +438,7 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && hasSomethingToReview(report?.generation, report?.status) && (
+        {inReview && assignment && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             className="btn bp"
