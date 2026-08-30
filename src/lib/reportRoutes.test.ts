@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generationHref, hasSomethingToReview, opensModulePage } from './reportRoutes';
+import { canOpenReport, generationHref, hasSomethingToReview, opensModulePage } from './reportRoutes';
+import type { AuthUser } from '@/types/auth';
 import { safePath } from '@/pages/TokenHandoffPage';
 
 describe('generationHref', () => {
@@ -166,5 +167,44 @@ describe('hasSomethingToReview', () => {
         'draft',
       ),
     ).toBe(true);
+  });
+});
+
+describe('canOpenReport', () => {
+  const who = (role: AuthUser['role'], features: string[] | null): AuthUser =>
+    ({ user_id: 'usr_1', email: 'a@b.c', full_name: 'A B', role, visible_features: features }) as AuthUser;
+
+  const quarterly = {
+    state: 'not_ready' as const,
+    target: { kind: 'quarterly_report' as const, company_id: 'cmp_1', report_id: 'rep_1' },
+  };
+  const annual = {
+    state: 'in_progress' as const,
+    target: { kind: 'annual_cycle' as const, company_id: 'cmp_1', cycle_id: 'cyc_1' },
+  };
+
+  it('follows the module the report lives in', () => {
+    expect(canOpenReport(who('department_user', ['board_report']), quarterly)).toBe(false);
+    expect(canOpenReport(who('department_user', ['quarterly_report']), quarterly)).toBe(true);
+  });
+
+  it('leaves annual to the report, not the reader', () => {
+    // An approved annual opens for anyone in the conversation: it is read in
+    // the Hub's own reviewer screen, not behind the admin+IR annual routes.
+    // Whether it is approved at all is hasSomethingToReview's question.
+    expect(canOpenReport(who('department_user', []), annual)).toBe(true);
+    expect(canOpenReport(who('project_manager', null), annual)).toBe(true);
+    expect(canOpenReport(who('admin', ['annual_report']), annual)).toBe(true);
+  });
+
+  it('fails closed everywhere else', () => {
+    expect(canOpenReport(who('admin', null), quarterly)).toBe(false);
+    expect(canOpenReport(null, quarterly)).toBe(false);
+    expect(
+      canOpenReport(who('admin', ['quarterly_report']), {
+        state: 'not_applicable',
+        target: { kind: null, company_id: 'cmp_1' },
+      }),
+    ).toBe(false);
   });
 });

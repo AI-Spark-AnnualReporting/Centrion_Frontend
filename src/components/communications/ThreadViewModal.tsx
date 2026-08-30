@@ -14,7 +14,7 @@ import {
 import { MentionComposer, MemberPicker } from './MentionComposer';
 import { AttachedReportCard } from './AttachedReportCard';
 import { Link } from 'react-router-dom';
-import { hasSomethingToReview, generationHref, opensModulePage } from '@/lib/reportRoutes';
+import { canOpenReport, hasSomethingToReview, generationHref, opensModulePage } from '@/lib/reportRoutes';
 import { SendExternalModal } from './SendExternalModal';
 import {
   ATTACHMENT_ACCEPT,
@@ -458,9 +458,9 @@ export function ThreadViewModal({
   // With initialPayload the thread is already painted; we still refresh members
   // for the mention/add-people picker and mark the thread read.
   //
-  // Members are fetched AFTER the thread rather than beside it because the list
-  // is scoped to the thread's report — offering someone who cannot open the
-  // report is offering an add that fails.
+  // Every active person in the company is addable, whoever can open the report:
+  // being in the conversation and being able to read the report are separate
+  // things now — the report itself is what checks the permission.
   useEffect(() => {
     let cancelled = false;
     const skipThreadFetch = !!initialPayload;
@@ -476,11 +476,9 @@ export function ThreadViewModal({
           setThread(detail.thread);
           setMessages(detail.messages);
         }
-        // Ad-hoc threads have no report — everyone in the company is fair game.
-        const reportId = (detail ?? initialPayload)?.thread.report?.id;
         // A members failure shouldn't block the thread from rendering.
         const membersRes = await communications
-          .members(reportId)
+          .members()
           .catch(() => ({ members: [] as CommunicationMember[] }));
         if (cancelled) return;
         setMembers(membersRes.members);
@@ -644,7 +642,7 @@ export function ThreadViewModal({
             variant: 'destructive',
           });
           communications
-            .members(thread?.report?.id)
+            .members()
             .then((r) => setMembers(r.members))
             .catch(() => {});
           setSending(false);
@@ -668,9 +666,10 @@ export function ThreadViewModal({
   // should go: an unapproved report has nothing settled to read in the review
   // screen, and ESG keeps no sections to render there at all.
   const isEsg = report?.generation?.target.kind === 'esg_page';
-  // Same gate the card applies: an annual report offers nothing until it has
-  // been approved.
-  const offerable = hasSomethingToReview(report?.generation, report?.status);
+  // Same gates the card applies: an annual report offers nothing until it has
+  // been approved, and the report only opens for someone with its module.
+  const canOpen = canOpenReport(user, report?.generation);
+  const offerable = canOpen && hasSomethingToReview(report?.generation, report?.status);
   const reportHref =
     offerable && report?.generation && opensModulePage(report.generation)
       ? generationHref(report.generation)
@@ -684,7 +683,9 @@ export function ThreadViewModal({
   const assignedName = assignment ? (assignment.full_name || assignment.label) : null;
   // Review actions never apply to an ad-hoc thread — the review endpoints
   // themselves 422 on those, so don't offer a way to call them.
-  const openReview = onOpenReview && report && !readOnly ? () => onOpenReview(threadId) : undefined;
+  // canOpen too: the reviewer screen shows the report's own sections, so it is
+  // the same door under a different label.
+  const openReview = onOpenReview && report && canOpen && !readOnly ? () => onOpenReview(threadId) : undefined;
 
   return (
     <div className="modal-overlay" onClick={onClose}>

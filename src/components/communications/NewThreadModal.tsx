@@ -176,13 +176,14 @@ export function NewThreadModal({
     };
   }, []);
 
-  // Only people who can open the chosen report may be mentioned into a thread
-  // about it — the same rule the share modal applies to reviewers. No report
-  // picked yet (or an ad-hoc thread): everyone active in the company.
+  // Everyone active in the company, whatever the chosen report is: a private
+  // conversation can include anyone, and whether they can open the report is
+  // answered at the report itself (see canOpenReport) — not by leaving them
+  // out of the picker.
   useEffect(() => {
     let cancelled = false;
     communications
-      .members(reportId ?? undefined)
+      .members()
       .then((res) => {
         if (!cancelled) setMembers(res.members);
       })
@@ -190,7 +191,7 @@ export function NewThreadModal({
     return () => {
       cancelled = true;
     };
-  }, [reportId]);
+  }, []);
 
   // Re-pull the threadless list after a stale-data error (404/409). Pills come
   // back from the same call, so the bar stays authoritative.
@@ -207,21 +208,27 @@ export function NewThreadModal({
 
   const refreshMembers = () => {
     communications
-      .members(reportId ?? undefined)
+      .members()
       .then((res) => setMembers(res.members))
       .catch(() => {});
   };
 
-  // Only reports you can actually start this kind of conversation on — the tab
-  // picks which flag rules a report out.
-  const availableReports = useMemo(
-    () => reports.filter((r) => (isPrivate ? !r.has_my_private_thread : !r.has_general_thread)),
-    [reports, isPrivate],
-  );
+  // Which flag rules a report out on THIS tab. Taken rows are still listed —
+  // greyed, with the reason — because dropping them made a report you had just
+  // started a conversation on look like it had fallen out of the list.
+  const isTaken = (r: ThreadlessReport) =>
+    isPrivate ? r.has_my_private_thread : r.has_general_thread;
 
   const visibleReports = useMemo(
-    () => availableReports.filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
-    [availableReports, typeFilter],
+    () => reports.filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
+    [reports, typeFilter],
+  );
+
+  // What you can actually start on — the pill counts, not the list.
+  const startableReports = useMemo(
+    () => reports.filter((r) => !isTaken(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reports, isPrivate],
   );
 
   // Counted here rather than taken from the API's `types`: the backend counts a
@@ -229,12 +236,16 @@ export function NewThreadModal({
   // has a general one was still adding to its pill on the General tab — a "· 1"
   // over an empty list. A type with nothing left to start on drops out.
   const typePills = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of availableReports) counts.set(r.report_type, (counts.get(r.report_type) ?? 0) + 1);
+    const startable = new Map<string, number>();
+    for (const r of startableReports) startable.set(r.report_type, (startable.get(r.report_type) ?? 0) + 1);
+    // Every type with rows keeps its pill, or the filter could not reach the
+    // greyed ones; the count is what you can still start on, so it reads as an
+    // invitation rather than a total.
+    const present = new Set(reports.map((r) => r.report_type));
     return types
-      .filter((t) => counts.has(t.code))
-      .map((t) => ({ ...t, count: counts.get(t.code) as number }));
-  }, [types, availableReports]);
+      .filter((t) => present.has(t.code))
+      .map((t) => ({ ...t, count: startable.get(t.code) ?? 0 }));
+  }, [types, reports, startableReports]);
 
   // Switching tabs can empty the type you had picked — fall back to All rather
   // than leaving a filter selected that rules everything out.
@@ -264,9 +275,13 @@ export function NewThreadModal({
   // @mention is an optional notify, not a requirement to start a thread —
   // except on a private thread, where the mentions ARE the member list.
   const privateNeedsMentions = isPrivate && mentions.length === 0;
+  // A report thread can start with no message, WhatsApp-style — the report,
+  // and on a private one its people, are what it actually needs. An
+  // announcement still needs a message: that mode can fire a tracked external
+  // email off it.
   const canSubmit =
     mode === 'report'
-      ? !!reportId && !messageEmpty && !submitting && !privateNeedsMentions
+      ? !!reportId && !submitting && !privateNeedsMentions
       : !subjectEmpty && !messageEmpty && !submitting && !needsExternalRecipient;
 
   const switchMode = (next: Mode) => {
@@ -278,7 +293,7 @@ export function NewThreadModal({
   };
 
   const submit = async () => {
-    if (!reportId || messageEmpty) return;
+    if (!reportId) return;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -290,11 +305,15 @@ export function NewThreadModal({
         mentioned_user_ids: mentions.map((m) => m.id),
         ...(isPrivate ? { is_private: true } : {}),
       });
+      // Say what actually happened: a thread can now start with nothing said,
+      // and claiming a briefing that never went out is worse than saying less.
       toast({
         title: isPrivate ? 'Private thread started' : 'Thread started',
         description: isPrivate
-          ? 'Only the people you mentioned can see it.'
-          : 'Your team has been briefed.',
+          ? 'Only the people you added can see it.'
+          : messageEmpty
+            ? 'Your team can see it and reply.'
+            : 'Your team has been briefed.',
       });
       onCreated?.(res.thread.id);
       onClose();
@@ -659,7 +678,9 @@ export function NewThreadModal({
                       }}
                     >
                       {t.label}
-                      {t.count != null && ` · ${t.count}`}
+                      {/* 0 startable is not worth printing — the rows below are
+                          all greyed and say so themselves. */}
+                      {t.count != null && t.count > 0 && ` · ${t.count}`}
                     </button>
                   );
                 })}
@@ -667,9 +688,26 @@ export function NewThreadModal({
 
               {/* Reports without a thread yet */}
               <div style={SECTION_LABEL}>
-                {isPrivate ? 'REPORTS YOU CAN START A PRIVATE CONVERSATION ON' : 'REPORTS WITHOUT A CONVERSATION YET'}
+                {isPrivate
+                  ? 'REPORTS YOU CAN START A PRIVATE CONVERSATION ON'
+                  : 'REPORTS YOU CAN START A GENERAL CONVERSATION ON'}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              {/* Scrolls on its own past ~4 rows: a company with a dozen
+                  threadless reports was pushing MESSAGE and Start thread below
+                  the fold. The 2px of padding keeps the selected row's ring
+                  from being clipped by the overflow. */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  marginBottom: 20,
+                  maxHeight: 268,
+                  overflowY: 'auto',
+                  padding: 2,
+                  margin: '-2px -2px 18px',
+                }}
+              >
                 {visibleReports.length === 0 ? (
                   <div
                     style={{
@@ -681,18 +719,31 @@ export function NewThreadModal({
                       color: '#9BA3C4',
                     }}
                   >
-                    {isPrivate
-                      ? 'You already have a private conversation on every report.'
-                      : 'Every report already has a conversation.'}
+                    No reports here yet.
                   </div>
                 ) : (
                   visibleReports.map((r) => {
-                    const selected = r.id === reportId;
+                    const taken = isTaken(r);
+                    const selected = !taken && r.id === reportId;
+                    // The tab's own slot is why a row is dead; the other slot is
+                    // just context. Both are worth saying — the two are
+                    // independent, and silence is what made this confusing.
+                    const note = taken
+                      ? isPrivate
+                        ? 'You already have a private conversation on this report'
+                        : 'This report already has a general conversation'
+                      : (isPrivate ? r.has_general_thread : r.has_my_private_thread)
+                        ? isPrivate
+                          ? 'Has a general conversation'
+                          : 'You have a private conversation on this'
+                        : null;
                     return (
                       <button
                         key={r.id}
                         type="button"
+                        disabled={taken}
                         onClick={() => setReportId(r.id)}
+                        title={taken ? note ?? undefined : undefined}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -700,11 +751,11 @@ export function NewThreadModal({
                           textAlign: 'left',
                           padding: '14px 16px',
                           borderRadius: 12,
-                          cursor: 'pointer',
+                          cursor: taken ? 'not-allowed' : 'pointer',
                           fontFamily: 'inherit',
                           transition: '.15s',
                           border: selected ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
-                          background: selected ? '#F5F4FF' : '#fff',
+                          background: taken ? '#F7F8FC' : selected ? '#F5F4FF' : '#fff',
                         }}
                       >
                         <span
@@ -714,11 +765,19 @@ export function NewThreadModal({
                             borderRadius: '50%',
                             flexShrink: 0,
                             border: selected ? '5px solid #4040C8' : '1.6px solid #CBD0E4',
+                            opacity: taken ? 0.5 : 1,
                             transition: '.15s',
                           }}
                         />
-                        <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>
-                          {labelForCode(r.report_type)} · {r.period}
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: taken ? '#9BA3C4' : '#1A1D2E' }}>
+                            {labelForCode(r.report_type)} · {r.period}
+                          </span>
+                          {note && (
+                            <span style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: taken ? '#A9B0C8' : '#8890AE', marginTop: 2 }}>
+                              {note}
+                            </span>
+                          )}
                         </span>
                       </button>
                     );
@@ -727,9 +786,9 @@ export function NewThreadModal({
               </div>
 
               {/* Participants are a PRIVATE thread's guest list — on a general
-                  thread there is nobody to pick: everyone who can open the
-                  report is in it already. Its own field with its own picker;
-                  the message box is plain text, nobody is added by typing. */}
+                  thread there is nobody to pick: everyone in the company is in
+                  it already. Its own field with its own picker; the message box
+                  is plain text, nobody is added by typing. */}
               {isPrivate && (
                 <>
                   <div style={SECTION_LABEL}>PARTICIPANTS</div>
