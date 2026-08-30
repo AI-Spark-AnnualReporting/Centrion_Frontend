@@ -1726,34 +1726,7 @@ export default function QuarterlyReportForm({
             Financial Data (Excel/CSV) field is shown. */}
         {!isOpenMode && !isUploadMode && (
           <div ref={metricsBlockRef} style={{ marginBottom: 18, position: 'relative' }}>
-            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              Metrics
-              <LabelHelp
-                id="metrics"
-                openId={helpOpen}
-                onOpenChange={setHelpOpen}
-                ariaLabel="How should we read your figures?"
-                panelLabel="How we read your figures"
-              >
-                <div style={{ marginBottom: 8 }}>
-                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
-                  {' — we map your data to our standard set of metrics and lay it out in the '}
-                  standard report template. Upload the statements below.
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
-                  {' — your own line items, printed as-is. On the next screen you pick the '}
-                  sections you want and upload one statement into each, so every figure lands
-                  where you put it.
-                </div>
-                <div>
-                  <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Sections from my files</strong>
-                  {' — your own line items again, but you upload everything at once and each '}
-                  table in your files becomes a section of the report, named after that table.
-                  Tables covering the same thing are printed together.
-                </div>
-              </LabelHelp>
-            </label>
+            <label className="fl-label">Metrics</label>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
               {/* Only 'Sections from my files' is offered. The other two modes still
