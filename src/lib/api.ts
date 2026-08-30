@@ -320,6 +320,34 @@ export function rateLimitDetailOf(err: unknown): RateLimitDetail | null {
   return null;
 }
 
+// Earnings Analyse returns HTTP 409 with `detail: {code: "STALE_CONTENT",
+// message}` when the section's figures have changed since produce last ran --
+// e.g. the user added a figure without a re-Finalise, or the chained produce
+// silently failed. Callers check with this helper and steer the user to
+// re-finalise instead of showing an analysis of stale content.
+export function isEarningsStaleContentError(
+  err: unknown,
+): { message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body as { detail?: unknown } | null;
+  const detail =
+    body && typeof body === "object" ? (body as { detail?: unknown }).detail : null;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    (detail as { code?: unknown }).code === "STALE_CONTENT"
+  ) {
+    const d = detail as { message?: unknown };
+    return {
+      message:
+        typeof d.message === "string" && d.message
+          ? d.message
+          : "Figures have changed since this section was last built. Finalise the section again to refresh, then analyse.",
+    };
+  }
+  return null;
+}
+
 type QueryParams = object;
 
 function buildQuery(params?: QueryParams): string {
@@ -3016,6 +3044,13 @@ export const earnings = {
   // Write the short commentary under one section's figures, or re-write it.
   // Cached server-side on a fingerprint of the table, model, prompt, tone and
   // language, so re-opening a section costs nothing; force is "write it again".
+  //
+  // Backend gates on a staleness precondition and returns HTTP 409 with
+  // `detail.code === "STALE_CONTENT"` when the section's figures have moved
+  // since produce last ran (Add-figures without a re-Finalise, or a chained
+  // produce that failed and never refreshed `content`). Callers detect this
+  // via `isEarningsStaleContentError` and prompt the user to re-finalise
+  // rather than serve a confidently-wrong analysis.
   analyseEarningsSection: (
     reportId: string,
     sectionCode: string,
@@ -3055,12 +3090,47 @@ export const earnings = {
     sectionCode: string,
     finalised: boolean,
     expectations?: Record<string, number | null>,
-  ): Promise<unknown> =>
+  ): Promise<{
+    report_id: string;
+    section_code: string;
+    figures_finalised: boolean;
+    expectations_saved: number;
+    // The backend chains a per-section produce when finalising true so the
+    // section's content is written in the same round-trip -- otherwise the
+    // Analyse control renders (the button is inside the finalised block) but
+    // has no built content to read against. Three shapes:
+    //   * a section patch  -> merge into `produced` state, Analyse works
+    //   * { error: string } -> figures + expectations were saved but the build
+    //                          failed; the section stays finalised and the UI
+    //                          offers a Retry via runEarningsSection
+    //   * null              -> undo path (finalised=false), nothing built
+    produce: EarningsSectionPatch | { error: string } | null;
+  }> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
         `/sections/${encodeURIComponent(sectionCode)}/finalise-figures`,
       { method: "PATCH", body: { finalised, ...(expectations ? { expectations } : {}) } },
-    ),
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      const rawProduce = o.produce;
+      let produce: EarningsSectionPatch | { error: string } | null = null;
+      if (rawProduce != null) {
+        const patch = readEarningsSectionPatch(rawProduce);
+        if (patch) {
+          produce = patch;
+        } else {
+          const err = earnStr(earnRecord(rawProduce).error);
+          if (err) produce = { error: err };
+        }
+      }
+      return {
+        report_id: earnStr(o.report_id) ?? reportId,
+        section_code: earnStr(o.section_code) ?? sectionCode,
+        figures_finalised: o.figures_finalised === true,
+        expectations_saved: typeof o.expectations_saved === "number" ? o.expectations_saved : 0,
+        produce,
+      };
+    }),
 
   // Produce ONLY the sections that can be built before a figure exists — the
   // CEO quote, guidance, the disclaimer, the IR calendar. This is what the
