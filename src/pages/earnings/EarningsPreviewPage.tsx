@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRememberStep, reachedStepNumber } from './earnings-resume';
-import { earnings, ApiError } from '@/lib/api';
+import { earnings, ApiError, isEarningsStaleContentError } from '@/lib/api';
 import { startedRun } from '@/lib/run-handle';
 import { Spinner } from '@/components/shared/Spinner';
 import type { EarningsFigureSection, EarningsSourceLine, EarningsProducedSection } from '@/types/earnings';
@@ -97,6 +97,15 @@ export default function EarningsFiguresPage() {
   const [produced, setProduced] = useState<EarningsProducedSection[]>([]);
   const [running, setRunning] = useState<string | null>(null);
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
+
+  // Which section's Finalise-and-build is in flight. Single-slot -- one
+  // section's per-section produce runs at a time, matching how `running`
+  // tracks narrative runs. Drives the button's "Building…" label.
+  const [finalising, setFinalising] = useState<string | null>(null);
+  // Set when Finalise wrote the flag + expectations but the chained produce
+  // failed or came back empty. Surfaces a Retry next to Change so the user
+  // does not have to un-finalise just to try building again.
+  const [buildFailed, setBuildFailed] = useState<Record<string, boolean>>({});
 
   const [produceRun, setProduceRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [continueError, setContinueError] = useState<string | null>(null);
@@ -229,12 +238,56 @@ export default function EarningsFiguresPage() {
       );
     apply(finalised);
     setSectionError((p) => ({ ...p, [code]: '' }));
+    setBuildFailed((p) => ({ ...p, [code]: false }));
+    if (finalised) setFinalising(code);
     try {
-      await earnings.finaliseEarningsSectionFigures(
+      const res = await earnings.finaliseEarningsSectionFigures(
         reportId, code, finalised,
         pending && Object.keys(pending).length ? pending : undefined,
       );
       if (pending) setUnsaved((p) => ({ ...p, [code]: {} }));
+
+      // The backend chains a per-section produce when finalising true. Merge
+      // its patch into `produced` so isStalled flips, the yellow banner
+      // disappears, and Analyse reads real content -- without the user
+      // pressing Continue and being taken to the Report screen.
+      const produce = res.produce;
+      if (produce && 'section_code' in produce) {
+        const patch = produce;
+        const title =
+          (sections ?? []).find((x) => x.section_code === code)?.title ?? code;
+        setProduced((prev) =>
+          prev.some((p) => p.section_code === code)
+            ? prev.map((p) => (p.section_code === code ? { ...p, ...patch } : p))
+            : [
+                ...prev,
+                {
+                  section_code: code,
+                  title,
+                  status: patch.status,
+                  content: patch.content,
+                } as EarningsProducedSection,
+              ],
+        );
+        // Built, but with nothing usable in it. Name it rather than let the
+        // Analyse click 409 or run against empty content.
+        if (!(patch.content || '').trim()) {
+          setBuildFailed((p) => ({ ...p, [code]: true }));
+          setSectionError((p) => ({
+            ...p,
+            [code]:
+              patch.error ||
+              "The section built but came back empty. Add more figures, or retry the build.",
+          }));
+        }
+      } else if (produce && 'error' in produce) {
+        setBuildFailed((p) => ({ ...p, [code]: true }));
+        setSectionError((p) => ({
+          ...p,
+          [code]:
+            `Your figures were saved, but building the section failed — ${produce.error}. Retry below.`,
+        }));
+      }
     } catch (e) {
       apply(!finalised);
       setSectionError((p) => ({
@@ -243,6 +296,8 @@ export default function EarningsFiguresPage() {
           ? `That didn't save — ${e.message}. Your figures are still here; try again.`
           : "That didn't save. Check your connection and try again — your figures are still here.",
       }));
+    } finally {
+      setFinalising((cur) => (cur === code ? null : cur));
     }
   };
 
@@ -889,7 +944,13 @@ export default function EarningsFiguresPage() {
                       <>
                         {/* Where a line of green text saying "finalised" used to
                             sit. Once the figures are settled the useful next thing
-                            is the commentary that goes under them. */}
+                            is the commentary that goes under them. Hidden when
+                            buildFailed[code] is set (produce raised, produce
+                            returned an error, or content came back empty) — the
+                            retry-build button below is what belongs there
+                            instead. Analysing stale content would be a
+                            confidently-wrong bullet list. */}
+                        {!buildFailed[s.section_code] && (
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <SectionAnalysis
                             // Remounts on every rail switch, deliberately: it is
@@ -901,7 +962,28 @@ export default function EarningsFiguresPage() {
                             section={analysisSection(s)}
                             analyse={(code, opts) =>
                               earnings.analyseEarningsSection(
-                                reportId ?? '', code, opts) as Promise<never>
+                                reportId ?? '', code, opts,
+                              ).catch((err: unknown) => {
+                                // Backend refused because figures moved since
+                                // produce last ran (Add-figures without a
+                                // re-Finalise, or produce failed silently).
+                                // Surface it as a retry-build state instead of
+                                // letting SectionAnalysis show a generic error
+                                // -- the user needs to Re-finalise, not
+                                // "Try again". The Re-finalise button appears
+                                // in the same place the Analyse control sat,
+                                // because !buildFailed gates SectionAnalysis.
+                                const stale = isEarningsStaleContentError(err);
+                                if (stale) {
+                                  setBuildFailed((p) => ({ ...p, [code]: true }));
+                                  setSectionError((p) => ({
+                                    ...p,
+                                    [code]:
+                                      `${stale.message} Click Retry build to refresh.`,
+                                  }));
+                                }
+                                throw err;
+                              }) as Promise<never>
                             }
                             saveAnalysis={(code, text) =>
                               earnings.saveEarningsSectionAnalysis(
@@ -939,11 +1021,26 @@ export default function EarningsFiguresPage() {
                             }
                           />
                         </div>
+                        )}
+                        {/* Finalise + build failed, or built empty. Retry hits the
+                            same endpoint -- the flag write is a no-op and only the
+                            produce actually re-runs. */}
+                        {buildFailed[s.section_code] && (
+                          <button
+                            type="button"
+                            className="btn bs bsm"
+                            disabled={finalising === s.section_code}
+                            onClick={() => void setFinalised(s.section_code, true)}
+                          >
+                            {finalising === s.section_code ? 'Building…' : 'Retry build'}
+                          </button>
+                        )}
                         {/* A one-way door with no lock behind it would only be a
                             nuisance the first time somebody spots a mistake. */}
                         <button
                           type="button"
                           className="btn bs bsm"
+                          disabled={finalising === s.section_code}
                           onClick={() => void setFinalised(s.section_code, false)}
                         >
                           Change
@@ -970,9 +1067,10 @@ export default function EarningsFiguresPage() {
                         <button
                           type="button"
                           className="btn bp bsm"
+                          disabled={finalising === s.section_code}
                           onClick={() => void setFinalised(s.section_code, true)}
                         >
-                          Finalise figures
+                          {finalising === s.section_code ? 'Building…' : 'Finalise figures'}
                         </button>
                       </>
                     )}
@@ -1007,7 +1105,14 @@ export default function EarningsFiguresPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {(sections ?? []).length > 0 && (
             <span style={{ fontSize: 12, color: MUTED }}>
-              {(sections ?? []).filter((x) => x.finalised).length} of{' '}
+              {
+                // Count only sections whose chained produce actually landed.
+                // A section that finalised but whose build failed shouldn't
+                // add to the "done" number -- the user still owes it a retry.
+                (sections ?? []).filter(
+                  (x) => x.finalised && !buildFailed[x.section_code],
+                ).length
+              } of{' '}
               {(sections ?? []).length} sections finalised
             </span>
           )}

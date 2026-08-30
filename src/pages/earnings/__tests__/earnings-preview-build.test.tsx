@@ -491,7 +491,12 @@ describe('EarningsPreviewPage', () => {
     // A bookmark, not a lock. A one-way door with nothing behind it would only be
     // a nuisance the first time somebody spots a mistake.
     h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
-    h.finaliseEarningsSectionFigures.mockResolvedValue({});
+    h.finaliseEarningsSectionFigures.mockResolvedValue({
+      report_id: 'rep-1', section_code: 's04_financial_highlights',
+      figures_finalised: true, expectations_saved: 0,
+      produce: { section_code: 's04_financial_highlights', status: 'produced',
+                 content: '<p>ok</p>', error: null, grounding_violations: [] },
+    });
     renderPage();
     await screen.findByRole('heading', { name: 'Financial Highlights' });
 
@@ -506,6 +511,87 @@ describe('EarningsPreviewPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Change' }));
     expect(await screen.findByRole('button', { name: 'Add figures' })).toBeInTheDocument();
+  });
+
+  it('finalising builds the section in place -- no Continue, no navigation', async () => {
+    // The bug this closes: user adds figures, clicks Finalise, clicks Analyse,
+    // gets 409 "Produce this section before analysing it". The section had a
+    // bookmark but no content, and only Continue built it -- which then took
+    // the user away from Preview entirely. Now the produce is chained into the
+    // same request, so isStalled flips here and Analyse reads real content.
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    h.finaliseEarningsSectionFigures.mockResolvedValue({
+      report_id: 'rep-1', section_code: 's04_financial_highlights',
+      figures_finalised: true, expectations_saved: 0,
+      produce: { section_code: 's04_financial_highlights', status: 'produced',
+                 content: '{"tables":[]}', error: null, grounding_violations: [] },
+    });
+    h.analyseEarningsSection.mockResolvedValue({
+      text: '- Revenue leads the section.', fingerprint: 'FP',
+      warnings: [], edited: false,
+    });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    // "These figures have not been built into the report yet" -- present until
+    // the section has content. Preview.tsx line ~807.
+    expect(screen.getByText(/have not been built into the report yet/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
+    // The banner clears once the produce patch merged content into `produced`
+    // and isStalled recomputed.
+    await waitFor(() =>
+      expect(screen.queryByText(/have not been built into the report yet/)).toBeNull());
+
+    // Analyse now works against real content and no navigation was fired.
+    fireEvent.click(screen.getByRole('button', { name: /Analyse/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Analyse' }));
+    expect(await screen.findByText(/Revenue leads the section/)).toBeInTheDocument();
+    expect(h.navigateMock).not.toHaveBeenCalled();
+    expect(h.produceEarningsReport).not.toHaveBeenCalled();
+  });
+
+  it('if the build failed, figures stay saved and a Retry appears', async () => {
+    // Backend precedent: the finalise write is the user's; a downstream LLM
+    // misfire must not take their expectations back off the DB. The error is
+    // reported under `produce.error` and Retry re-runs just the produce.
+    h.getEarningsFigureSections.mockResolvedValue(FILLED_ONE);
+    h.finaliseEarningsSectionFigures
+      .mockResolvedValueOnce({
+        report_id: 'rep-1', section_code: 's04_financial_highlights',
+        figures_finalised: true, expectations_saved: 0,
+        produce: { error: 'the model went sideways' },
+      })
+      .mockResolvedValueOnce({
+        report_id: 'rep-1', section_code: 's04_financial_highlights',
+        figures_finalised: true, expectations_saved: 0,
+        produce: { section_code: 's04_financial_highlights', status: 'produced',
+                   content: '<p>ok</p>', error: null, grounding_violations: [] },
+      });
+    renderPage();
+    await screen.findByRole('heading', { name: 'Financial Highlights' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finalise figures' }));
+
+    // Analyse is HIDDEN while the build is broken -- the retry-build affordance
+    // replaces it (see !buildFailed gate around <SectionAnalysis>). Showing
+    // Analyse over stale content is exactly the class of bug this closes:
+    // even with the backend's staleness precondition, keeping the button
+    // visible tempts a click that would only surface "Re-finalise" anyway.
+    expect(await screen.findByRole('alert')).toHaveTextContent(/model went sideways/);
+    expect(screen.queryByRole('button', { name: /Analyse/ })).toBeNull();
+    const retry = await screen.findByRole('button', { name: 'Retry build' });
+
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(h.finaliseEarningsSectionFigures).toHaveBeenCalledTimes(2));
+    // Second attempt succeeded -- the Retry button is gone and Analyse comes
+    // back (the flag never flipped away; only the gate re-opened).
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry build' })).toBeNull());
+    expect(screen.getByRole('button', { name: /Analyse/ })).toBeInTheDocument();
   });
 
   it('a failed finalise puts the button back rather than lying', async () => {
