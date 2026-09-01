@@ -58,6 +58,38 @@ export function computeProgress(
   return Math.min(99, Math.round(((completed + running * 0.3) / expected) * 100));
 }
 
+// Progress for a batch section-produce run, read off the heartbeat the backend
+// already writes: agent_runs.output_summary is rewritten after EVERY section as
+// {results: [...], total: N}, and the poll endpoint returns it verbatim.
+//
+// The UI used to throw that away and ask GET /agent_runs/{id}/nodes instead, which
+// 404s for every run whose agent_name isn't 'pipeline_run' — so computeProgress
+// above saw a permanently empty node list and returned its 6% floor for the whole
+// multi-minute run, once every three seconds, for nothing.
+//
+// Takes `unknown` on purpose. agent_runs.output_summary genuinely holds three
+// different shapes (pipeline results, period_not_found, and this), and widening the
+// AgentRun union to say so breaks consumers typed against the other two. `total` is
+// the discriminator: the pipeline summary has total_uploaded, period_not_found has
+// neither.
+//
+// null means "nothing measured yet" — before the first section lands, or while the
+// outline is still being saved. The caller renders that as an indeterminate bar,
+// because a percentage nobody measured is a lie the user can see through on a long
+// wait.
+export function computeProduceProgress(
+  summary: unknown,
+): { done: number; total: number; percent: number } | null {
+  if (!summary || typeof summary !== 'object') return null;
+  const s = summary as { results?: unknown; total?: unknown };
+  if (typeof s.total !== 'number' || s.total <= 0) return null;
+  if (!Array.isArray(s.results)) return null;
+  const done = Math.min(s.results.length, s.total);
+  // Capped at 99 while running so the bar never overshoots to 100 and back down;
+  // the caller passes 100 itself once the run envelope says completed.
+  return { done, total: s.total, percent: Math.min(99, Math.round((done / s.total) * 100)) };
+}
+
 export function QuarterlyGeneratingScreen({
   phase,
   errorMessage,
