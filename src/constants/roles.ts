@@ -2,7 +2,17 @@
 // Admin Console (and anywhere else that shows a role). Never hardcode display
 // names inline — import from here.
 
-export type BackendRole = "admin" | "project_manager" | "hod" | "department_user" | "ir";
+// `spark_admin` is the platform owner (Spark), not a tenant role: it sits
+// outside every company and is the only role allowed on /spark. It is
+// deliberately absent from ROLE_ORDER and ASSIGNABLE_ROLES below — it never
+// appears on a company's Users & Roles screen and can never be granted there.
+export type BackendRole =
+  | "admin"
+  | "project_manager"
+  | "hod"
+  | "department_user"
+  | "ir"
+  | "spark_admin";
 
 export interface RoleMeta {
   label: string; // Display name shown to users
@@ -44,6 +54,12 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     description: "Read-only access to published reports",
     badgeClass: "b-gy",
     dot: "#9BA3C4",
+  },
+  spark_admin: {
+    label: "Spark",
+    description: "Platform owner — read-only across every company",
+    badgeClass: "b-dk",
+    dot: "#1A1D2E",
   },
 };
 

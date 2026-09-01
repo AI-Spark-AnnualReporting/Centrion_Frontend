@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { communications, ApiError, type ThreadSummary } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
@@ -100,13 +101,21 @@ const REFRESH_MS = 45000;
 
 export function NotificationBell() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // Threads live inside a company, so a user without one (the platform-owner
+  // `spark_admin`) has no notifications to poll for — the request 400s every
+  // 45 seconds. Same guard ComplianceRunsContext already applies to its own
+  // company-scoped sweep.
+  const enabled = !!user?.company_id;
+
   const unreadCount = items.filter((n) => n.unread).length;
 
   const load = useCallback(async () => {
+    if (!enabled) return;
     try {
       const res = await communications.listThreads();
       setItems(buildThreadNotifications(res.threads));
@@ -115,14 +124,15 @@ export function NotificationBell() {
       // failure just leaves the bell empty rather than surfacing an error.
       if (e instanceof ApiError && e.status === 401) return;
     }
-  }, []);
+  }, [enabled]);
 
   // Poll in the background so the badge stays roughly live.
   useEffect(() => {
+    if (!enabled) return;
     void load();
     const id = window.setInterval(() => void load(), REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, enabled]);
 
   // Refresh on open so the panel reflects the latest read state.
   useEffect(() => {
@@ -166,6 +176,10 @@ export function NotificationBell() {
       }
     });
   };
+
+  // After the hooks, so the bell simply isn't there for a company-less user
+  // rather than sitting in the topbar permanently empty.
+  if (!enabled) return null;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
