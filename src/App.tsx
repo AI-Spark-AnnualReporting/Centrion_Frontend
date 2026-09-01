@@ -62,6 +62,7 @@ const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage
 const BoardSetupPage = lazy(() => import("./pages/annual-report/BoardSetupPage"));
 const BoardSourcesPage = lazy(() => import("./pages/annual-report/BoardSourcesPage"));
 const BoardSectionsPage = lazy(() => import("./pages/annual-report/BoardSectionsPage"));
+const BoardOutlinePage = lazy(() => import("./pages/annual-report/BoardOutlinePage"));
 const BoardPreviewPage = lazy(() => import("./pages/annual-report/BoardPreviewPage"));
 const BoardReportPage = lazy(() => import("./pages/annual-report/BoardReportPage"));
 
@@ -299,6 +300,16 @@ const App = () => (
               element={
                 <PerReport>
                   <BoardSectionsPage />
+                </PerReport>
+              }
+            />
+            {/* How each section will be structured — the subheadings proposed
+                from the user's own documents, and where Generate now lives. */}
+            <Route
+              path="/board-report/:reportId/outline"
+              element={
+                <PerReport>
+                  <BoardOutlinePage />
                 </PerReport>
               }
             />

@@ -328,7 +328,7 @@ export default function BoardPreviewPage() {
 
   return (
     <BoardStepShell
-      step={3}
+      step={4}
       reportId={reportId}
       locked={locked}
       period={period}
@@ -450,8 +450,8 @@ export default function BoardPreviewPage() {
         }}
       >
         <StepActions
-          back={() => navigate(`/board-report/${reportId}/sections`)}
-          backLabel="Sections"
+          back={() => navigate(`/board-report/${reportId}/outline`)}
+          backLabel="Outline"
           hint={
             unfilled.length > 0 ? (
               // Naming the first one beats a bare count — it's the click you want.
@@ -965,6 +965,29 @@ function SectionPanel({
               {busy === 'confirm' ? 'Confirming…' : 'Confirm'}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Subheadings the reviewer approved on the Outline step that found no
+          matching text. They chose them, so they are told nothing was found
+          rather than watching a heading disappear from the report unexplained. */}
+      {(feeder?.unfilled_headings?.length ?? 0) > 0 && (
+        <div
+          style={{
+            margin: '0 0 12px',
+            padding: '10px 12px',
+            borderRadius: 8,
+            background: 'rgba(180,115,11,.07)',
+            border: '1px solid rgba(180,115,11,.25)',
+            fontSize: 11.5,
+            color: AMBER,
+            lineHeight: 1.55,
+          }}
+        >
+          <b>Nothing was found for:</b> {feeder?.unfilled_headings?.join(' · ')}
+          <div style={{ color: MUTED, marginTop: 2 }}>
+            These subheadings had no matching text in your documents, so they were left out.
+          </div>
         </div>
       )}
 

@@ -111,6 +111,8 @@ import type {
   BoardSection,
   BoardSectionsResponse,
   BoardSourcesResponse,
+  BoardSubheadingsResponse,
+  BoardSubheadingsSavePayload,
   CreateBoardReportPayload,
 } from "@/types/board";
 import type {
@@ -3394,6 +3396,30 @@ export const boardReports = {
   // silently; including a dropped/na section is a 422 and nothing is saved.
   saveOutline: (reportId: string, body: BoardOutlineSavePayload) =>
     request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { method: "PUT", body }),
+
+  // All 46 sections with their eligibility, plus the subheadings the prose ones
+  // will be broken into.
+  //
+  // THE FIRST CALL IS SLOW — 15-30s. It runs the paragraph→section routing that
+  // produce would otherwise run (cached, so the wait moves earlier rather than
+  // happening twice) plus one proposal call. Later calls are a plain read, so
+  // the loader belongs on the first fetch only.
+  //
+  // There is no `regenerate` parameter, by design: the server proposes once per
+  // report and the reviewer shapes what it proposed.
+  getSubheadings: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSubheadingsResponse>(boardPath(reportId, "/subheadings"), { signal }),
+
+  // Rename, delete, reorder — array order IS the new order, and omitting a saved
+  // id deletes that heading. Send back the `id` you were given: a heading whose
+  // id the server did not propose is a 422 ("subheadings cannot be added"), which
+  // is what a dropped id turns every rename into. 409 once the report is
+  // approved, or if nothing has been proposed yet.
+  saveSubheadings: (reportId: string, body: BoardSubheadingsSavePayload) =>
+    request<BoardSubheadingsResponse>(boardPath(reportId, "/subheadings"), {
+      method: "PUT",
+      body,
+    }),
 
   // Synchronous, and cached — `cached: true` means nothing it depends on changed
   // and no LLM call was made. 422 when the section has no producer yet.

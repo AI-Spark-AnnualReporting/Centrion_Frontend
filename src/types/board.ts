@@ -166,6 +166,67 @@ export interface BoardOutlineSavePayload {
   sections: { section_code: string; included: boolean }[];
 }
 
+// ─── subheadings ──────────────────────────────────────────────────────────────
+// The structure step. The server reads the paragraphs matched to each prose
+// section and proposes the subheadings it will be broken into; the reviewer
+// renames, deletes and reorders them, and what they approve is what prints.
+//
+// Three rules are enforced server-side and shape the whole screen: headings
+// cannot be ADDED (a heading with an unrecognised id is a 422), the proposal is
+// made ONCE per report (there is no regenerate), and approval freezes the lot
+// (every PUT is then a 409).
+
+/** Why a section takes no subheadings. Null on an editable row. */
+export type BoardSubheadingReason =
+  | "not_applicable"
+  | "excluded"
+  | "generated"
+  | "no_producer"
+  | "statement_table"
+  | "governance_table"
+  | "metric_table";
+
+export interface BoardSubheading {
+  /**
+   * Server-assigned, and the only thing that distinguishes a rename from an
+   * addition — text alone cannot. Send it back on save; drop it and every
+   * rename comes back 422 "subheadings cannot be added".
+   */
+  id: number;
+  heading: string;
+}
+
+export interface BoardSubheadingSection {
+  section_code: string;
+  title: string;
+  category: string;
+  display_order: number;
+  /** Only the narrative sections take subheadings. */
+  editable: boolean;
+  reason_code: BoardSubheadingReason | null;
+  /** Written for display — print as-is. Null when `editable`. */
+  reason: string | null;
+  subheadings: BoardSubheading[];
+  /** 0 on an editable row means nothing has been matched to it yet. */
+  source_paragraph_count: number;
+}
+
+export interface BoardSubheadingsResponse {
+  report_id: string;
+  period: string;
+  /** False once the report is approved — the whole screen goes read-only. */
+  editable: boolean;
+  /** Documents changed since the proposal. Informational: there is no re-propose. */
+  stale: boolean;
+  counts: { editable: number; read_only: number };
+  sections: BoardSubheadingSection[];
+}
+
+/** Only the sections that changed — the endpoint replaces just those. */
+export interface BoardSubheadingsSavePayload {
+  sections: { section_code: string; subheadings: BoardSubheading[] }[];
+}
+
 // ─── produced sections ────────────────────────────────────────────────────────
 
 /** Which document a section's content was read from. */
@@ -201,6 +262,12 @@ export interface BoardSectionFeeder {
   edited?: boolean;
   /** A reviewer had the model rewrite it. */
   refined?: boolean;
+  /**
+   * Approved subheadings the section's own text did not cover. The reviewer
+   * chose them, so they are told nothing was found rather than having the
+   * heading vanish from the report unexplained.
+   */
+  unfilled_headings?: string[] | null;
 }
 
 export interface BoardSection {

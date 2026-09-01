@@ -247,7 +247,7 @@ export default function BoardReportPage() {
 
   return (
     <BoardStepShell
-      step={4}
+      step={5}
       reportId={reportId}
       locked={isLocked}
       period={period}

@@ -220,9 +220,11 @@ export default function BoardSourcesPage() {
     (s) => s.required && s.status !== 'received' && !s.documents.length && !staged[s.slot]?.length,
   );
   const readOnly = locked || generated;
-  // Nothing moves — not processing, not continuing — while a required document
-  // is outstanding. Processing a partial set is what produced half-written
-  // sections that then had to be regenerated.
+  // Gates PROCESSING only. Producing from a partial set is what made half-written
+  // sections that then had to be regenerated — but the section list is resolved
+  // from the issuer profile, not from documents, so it is readable from the
+  // start and blocking the way to it only hid the outline behind an upload. The
+  // same gate is re-stated on the Sections step, where Generate actually runs.
   const blocked = missingRequired.length > 0;
 
   return (
@@ -311,19 +313,24 @@ export default function BoardSourcesPage() {
             hint={
               <span style={{ fontSize: 11.5, color: blocked ? AMBER : FAINT }}>
                 {blocked
-                  ? `${missingRequired.length} required document${missingRequired.length === 1 ? '' : 's'} still needed`
+                  ? `${missingRequired.length} required document${missingRequired.length === 1 ? '' : 's'} still needed — you can review the sections meanwhile`
                   : stagedCount > 0
                     ? `${stagedCount} attached, not yet processed`
                     : 'All required documents are in.'}
               </span>
             }
           >
+            {/* Two different actions on one button: with files staged it processes
+                them (gated), with none it just walks to the next step (never
+                gated — reading the resolved sections needs no document). */}
             <button
               className="btn bp"
               onClick={stagedCount > 0 ? process : () => navigate(`/board-report/${reportId}/sections`)}
-              disabled={blocked}
+              disabled={stagedCount > 0 && blocked}
               title={
-                blocked ? `Still needed: ${missingRequired.map((s) => s.slot).join(', ')}` : undefined
+                stagedCount > 0 && blocked
+                  ? `Still needed: ${missingRequired.map((s) => s.slot).join(', ')}`
+                  : undefined
               }
               style={{ padding: '11px 24px', fontSize: 13, fontWeight: 700 }}
             >

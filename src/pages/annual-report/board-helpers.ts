@@ -23,6 +23,9 @@ import type {
   BoardRequirement,
   BoardSection,
   BoardSourcesResponse,
+  BoardSubheadingReason,
+  BoardSubheadingSection,
+  BoardSubheadingsSavePayload,
 } from '@/types/board';
 import type { ProducedSection } from '@/types/quarterly';
 
@@ -82,25 +85,6 @@ export function profileFromCompany(
   };
 }
 
-// ─── where to drop the operator on open ───────────────────────────────────────
-
-/**
- * Which step a report should open on. Reopening a half-built report must not
- * dump the operator back on Profile — pick the furthest step its server state
- * justifies.
- */
-export function initialStep(
-  report: Pick<BoardReportSummary, 'status'> | null,
-  sources: Pick<BoardSourcesResponse, 'slots'> | null,
-  outline: Pick<BoardOutlineSection, 'status'>[] | null,
-): number {
-  if (report && report.status !== 'draft') return 4;
-  if (outline?.some((s) => s.status === 'produced' || s.status === 'locked')) return 4;
-  const required = sources?.slots.filter((s) => s.required) ?? [];
-  if (required.length > 0 && required.every((s) => s.status === 'received')) return 3;
-  return 1;
-}
-
 export const isBoardLocked = (status: string | null | undefined): boolean =>
   !!status && status !== 'draft';
 
@@ -119,6 +103,80 @@ export function outlinePayload(sections: BoardOutlineSection[]): BoardOutlineSav
 
 export const isBoardExcluded = (s: Pick<BoardOutlineSection, 'resolution'>): boolean =>
   s.resolution === 'dropped' || s.resolution === 'na';
+
+// ─── subheadings ──────────────────────────────────────────────────────────────
+
+/**
+ * The subheadings as `PUT /subheadings` wants them. Array order IS the new
+ * order, and an id omitted here is deleted server-side.
+ *
+ * Only the sections named in `changed` are sent — the endpoint replaces just
+ * those, so a one-section edit leaves the other 45 untouched.
+ *
+ * The `id` is carried through deliberately: it is the only thing that tells the
+ * server a rename from an addition, and additions are rejected outright.
+ */
+export function subheadingsPayload(
+  sections: BoardSubheadingSection[],
+  changed: Iterable<string>,
+): BoardSubheadingsSavePayload {
+  const only = new Set(changed);
+  return {
+    sections: sections
+      .filter((s) => only.has(s.section_code))
+      .map((s) => ({
+        section_code: s.section_code,
+        subheadings: s.subheadings.map(({ id, heading }) => ({ id, heading })),
+      })),
+  };
+}
+
+/**
+ * Move one heading within its own section. A cross-section move is refused
+ * rather than fudged: the API has no way to express it, so a heading dragged
+ * into another section would be silently dropped from both.
+ */
+export function reorderSubheadings(
+  sections: BoardSubheadingSection[],
+  from: { sectionCode: string; index: number },
+  to: { sectionCode: string; index: number },
+): BoardSubheadingSection[] {
+  if (from.sectionCode !== to.sectionCode) return sections;
+  return sections.map((s) => {
+    if (s.section_code !== from.sectionCode) return s;
+    const n = s.subheadings.length;
+    if (from.index === to.index || from.index < 0 || to.index < 0 || from.index >= n || to.index >= n) {
+      return s;
+    }
+    const next = s.subheadings.slice();
+    const [moved] = next.splice(from.index, 1);
+    next.splice(to.index, 0, moved);
+    return { ...s, subheadings: next };
+  });
+}
+
+/** Rows this issuer cannot have are hidden, matching the Sections screen. */
+export const isSubheadingSectionHidden = (s: Pick<BoardSubheadingSection, 'reason_code'>): boolean =>
+  s.reason_code === 'not_applicable';
+
+/** The small uppercase chip on a read-only row. Null when there is nothing to say. */
+export function subheadingReasonBadge(code: BoardSubheadingReason | null): string | null {
+  switch (code) {
+    case 'governance_table':
+    case 'statement_table':
+    case 'metric_table':
+      return 'TABLE';
+    case 'generated':
+      return 'TEMPLATE';
+    case 'no_producer':
+      return 'NOT AUTOMATED';
+    case 'excluded':
+      return 'EXCLUDED';
+    default:
+      // not_applicable rows are hidden, and an editable row has no reason.
+      return null;
+  }
+}
 
 // ─── rendering ────────────────────────────────────────────────────────────────
 

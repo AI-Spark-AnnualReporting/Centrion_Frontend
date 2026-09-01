@@ -12,7 +12,6 @@ import {
   boardCitations,
   boardContentMode,
   canRefineSection,
-  initialStep,
   isBoardCoverSection,
   numberBoardHeadings,
   outlinePayload,
@@ -105,31 +104,6 @@ describe('profileFromCompany', () => {
       sharia_compliant: false,
       has_capital_instruments: false,
     });
-  });
-});
-
-describe('initialStep', () => {
-  it('opens an approved report on the report step', () => {
-    expect(initialStep({ status: 'approved' }, null, null)).toBe(4);
-    expect(initialStep({ status: 'locked' }, null, null)).toBe(4);
-  });
-
-  it('opens on the report step once anything has been produced', () => {
-    expect(initialStep({ status: 'draft' }, null, [outlineSection({ status: 'produced' })])).toBe(4);
-    expect(initialStep({ status: 'draft' }, null, [outlineSection({ status: 'locked' })])).toBe(4);
-  });
-
-  it('opens on sections once every required slot is in', () => {
-    const all = sources([slot({ status: 'received' }), slot({ slot: 'Risk report', required: false })]);
-    expect(initialStep({ status: 'draft' }, all, [outlineSection({})])).toBe(3);
-  });
-
-  it('opens on profile when required slots are still outstanding', () => {
-    const some = sources([slot({ status: 'received' }), slot({ slot: 'Risk report' })]);
-    expect(initialStep({ status: 'draft' }, some, [outlineSection({})])).toBe(1);
-    expect(initialStep({ status: 'draft' }, null, null)).toBe(1);
-    // No required slots at all is not "all required slots received".
-    expect(initialStep({ status: 'draft' }, sources([]), null)).toBe(1);
   });
 });
 

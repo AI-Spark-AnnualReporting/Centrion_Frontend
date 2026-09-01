@@ -8,21 +8,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { boardReports } from '@/lib/api';
-import { startedRun } from '@/lib/run-handle';
-import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
-import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
-import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import type { BoardCounts, BoardOutlineSection } from '@/types/board';
-import {
-  boardProduceSummary,
-  boardSheetWarning,
-  errorMessage,
-  isBoardExcluded,
-  outlinePayload,
-  readExistingRunId,
-  REQ_TEXT,
-} from './board-helpers';
+import { errorMessage, isBoardExcluded, outlinePayload, REQ_TEXT } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
 import { useFitFrame } from './useFitFrame';
@@ -37,19 +25,6 @@ import {
   Notice,
   SetupCard,
 } from './board-ui';
-
-const PRODUCE_MILESTONES = [
-  'Reading your source documents',
-  'Drafting the narrative sections',
-  'Building the financial statements',
-  'Assembling governance tables',
-  'Finishing the report',
-];
-const BOARD_TIPS = [
-  'Sections that do not apply to your issuer stay listed and greyed, so you can see what was left out and why.',
-  'Anything carried forward from last year is flagged until you confirm it is still accurate.',
-  'You can edit any section by hand afterwards — your edit wins over anything regenerated later.',
-];
 
 // Six-dot drag handle, same as the quarterly section list's grip icon.
 const GRIP = (
@@ -73,9 +48,7 @@ export default function BoardSectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [run, setRun] = useState<{ run_id: string; poll_url: string } | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const { frameRef, tailRef, height: frameHeight } = useFitFrame([
     loading,
     outline.length,
@@ -175,81 +148,6 @@ export default function BoardSectionsPage() {
     },
     [scheduleSave],
   );
-
-  const startProduce = useCallback(async () => {
-    setError(null);
-    try {
-      const handle = await boardReports.produceAll(reportId);
-      // A handle with nothing to poll would put this page's full-screen loader
-      // over a job that does not exist. No board endpoint returns one today; the
-      // shape allows it, and the earnings flow has already proved what that costs.
-      const started = startedRun(handle);
-      if (!started) {
-        await refetch();
-        return;
-      }
-      setRun(started);
-    } catch (err: unknown) {
-      const existing = readExistingRunId(err);
-      if (existing) {
-        setRun({ run_id: existing, poll_url: `/api/v1/agent_runs/${existing}` });
-        return;
-      }
-      setError(errorMessage(err, 'Could not start generating the report.'));
-    }
-  }, [reportId]);
-
-  // Confirm before a full regenerate — it is minutes of work, not because it
-  // is destructive: the server preserves edited and refined sections itself.
-  const generate = useCallback(() => setConfirmRegenerate(true), []);
-
-  // Progress here comes from the run's own `output_summary`, not from node rows.
-  // Cadence stays at the default — a produce-all runs for minutes, so a shorter
-  // one would only add requests.
-  const poll = usePipelinePoll(run?.run_id ?? null, run?.poll_url ?? null, { nodes: false });
-  useEffect(() => {
-    if (!run) return;
-    // Per-section status moves live as the run works through them.
-    void refetch().catch(() => {});
-    if (poll.state.phase === 'running' || poll.state.phase === 'idle') return;
-    setRun(null);
-    setError(
-      poll.state.phase === 'completed'
-        ? null
-        : poll.state.phase === 'timeout'
-          ? 'Still generating — refresh in a moment to see the result.'
-          : (poll.state.run?.error_message ?? 'Generation failed. Try again.'),
-    );
-    if (poll.state.phase === 'completed') {
-      // The run's warning has to travel with the navigation — this screen is
-      // gone the moment it lands, and the warning belongs where the sections
-      // are read anyway.
-      navigate(`/board-report/${reportId}/preview`, {
-        state: { sheetWarning: boardSheetWarning(poll.state.run) },
-      });
-    }
-  }, [poll.state.phase, poll.state.elapsedMs, poll.state.run, run, refetch, navigate, reportId]);
-
-  if (run) {
-    const s = boardProduceSummary(poll.state.run);
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 1400, overflowY: 'auto' }}>
-        <AiLoadingScreen
-          title="Writing your board report"
-          subtitle="Each section is drafted from the documents you provided."
-          milestones={PRODUCE_MILESTONES}
-          tips={BOARD_TIPS}
-          indeterminate={!s}
-          controlledProgress={s && s.total > 0 ? Math.round((s.produced / s.total) * 100) : undefined}
-          progressCaption={
-            s
-              ? `${s.produced} of ${s.total} sections${s.skipped ? ` · ${s.skipped} skipped (no producer yet)` : ''}${s.failed ? ` · ${s.failed} failed` : ''}`
-              : 'Starting…'
-          }
-        />
-      </div>
-    );
-  }
 
   const anyProduced = outline.some((s) => s.status === 'produced' || s.status === 'locked');
   const readOnly = locked || anyProduced;
@@ -402,6 +300,13 @@ export default function BoardSectionsPage() {
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {/* Where this section's content comes from — the reviewer's
+                        first question when a section reads wrong. */}
+                    {s.data_source && (
+                      <span className="badge b-gy" style={{ color: FAINT }}>
+                        {s.data_source.replace(/_/g, ' ')}
+                      </span>
+                    )}
                     {s.provenance === 'carried_forward' && <span className="badge b-am">Carried forward</span>}
                     {s.status === 'needs_input' && <span className="badge b-rd">Needs input</span>}
                     <span className="badge b-gy" style={{ textTransform: 'uppercase', letterSpacing: '.4px' }}>
@@ -420,16 +325,6 @@ export default function BoardSectionsPage() {
           </div>
         )}
 
-        {confirmRegenerate && (
-          <RegenerateDialog
-            onCancel={() => setConfirmRegenerate(false)}
-            onConfirm={() => {
-              setConfirmRegenerate(false);
-              void startProduce();
-            }}
-          />
-        )}
-
         <div ref={tailRef}>
           <StepActions
             back={() => navigate(`/board-report/${reportId}/sources`)}
@@ -442,59 +337,19 @@ export default function BoardSectionsPage() {
               )
             }
           >
-            {/* Once generated, Continue means "go read it" — regenerating is a
-                separate, explicit choice, not what stepping back and forward does. */}
-            {anyProduced && !locked && (
-              <button
-                className="btn bs"
-                onClick={generate}
-                title="Re-run every section from your source documents"
-                style={{ padding: '10px 18px', fontSize: 13 }}
-              >
-                Regenerate all
-              </button>
-            )}
+            {/* Generating moved to the Outline step — the subheadings are decided
+                there, and the report has to be written from them. Both labels go
+                to the same place; only the wording changes with what exists. */}
             <button
               className="btn bp"
-              onClick={anyProduced ? () => navigate(`/board-report/${reportId}/preview`) : generate}
-              disabled={locked && !anyProduced}
+              onClick={() => navigate(`/board-report/${reportId}/outline`)}
               style={{ padding: '11px 24px', fontSize: 13, fontWeight: 700 }}
             >
-              {anyProduced ? 'Review sections →' : 'Generate report'}
+              {anyProduced ? 'Review sections →' : 'Continue to outline →'}
             </button>
           </StepActions>
         </div>
       </SetupCard>
     </BoardStepShell>
-  );
-}
-
-// A regenerate rewrites every included section and takes minutes, so it asks
-// first — but it is not destructive: the server skips anything a reviewer
-// edited or refined, and returns those codes as `skipped_edited`.
-function RegenerateDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <ApproveConfirmDialog
-      title="Regenerate every section?"
-      confirmLabel="Regenerate"
-      onConfirm={onConfirm}
-      onClose={onCancel}
-    >
-      <div
-        style={{
-          marginTop: 14,
-          padding: '12px 14px',
-          borderRadius: 10,
-          background: 'rgba(34,197,94,.08)',
-          border: '1px solid rgba(34,197,94,.25)',
-          fontSize: 11.5,
-          color: MUTED,
-          lineHeight: 1.6,
-        }}
-      >
-        <b style={{ color: '#16803C' }}>Your own work is kept.</b> Sections you edited by hand or
-        refined with AI are left exactly as they are — only the rest are rewritten.
-      </div>
-    </ApproveConfirmDialog>
   );
 }
