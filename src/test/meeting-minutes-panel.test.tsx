@@ -117,42 +117,6 @@ describe('MeetingMinutesPanel', () => {
     expect(screen.getByText('2 of 2 attended', { exact: false })).toBeTruthy();
   });
 
-  // `attachment_text` is the file's text, kept apart from `notes` so that what
-  // the user typed is never overwritten by an upload.
-  it('shows the text read out of an attachment without touching the notes', async () => {
-    getMinutes.mockResolvedValue({
-      minutes: {
-        meeting_id: 'm1', notes: 'What I typed.', decision_taken: '', decision_under_review: '',
-        decision_abandoned: '', attendance: {},
-        attachment_name: 'minutes.pdf', attachment_url: 'https://x/f?token=1',
-        attachment_text: 'Read out of the PDF.',
-      },
-    });
-
-    render(<MeetingMinutesPanel meeting={meeting} canEdit onClose={vi.fn()} />);
-
-    await waitFor(() => expect(screen.getByText(/text read from minutes\.pdf/i)).toBeTruthy());
-    expect(screen.getByText('Read out of the PDF.')).toBeTruthy();
-    // The notes box still holds only what the user wrote.
-    expect(screen.getByDisplayValue('What I typed.')).toBeTruthy();
-  });
-
-  it('says so when the attached file has no readable text', async () => {
-    // A scanned PDF: uploaded fine, but there's no text layer to extract.
-    getMinutes.mockResolvedValue({
-      minutes: {
-        meeting_id: 'm1', notes: '', decision_taken: '', decision_under_review: '',
-        decision_abandoned: '', attendance: {},
-        attachment_name: 'scanned-minutes.pdf', attachment_url: 'https://x/f?token=1',
-        attachment_text: '',
-      },
-    });
-
-    render(<MeetingMinutesPanel meeting={meeting} canEdit onClose={vi.fn()} />);
-
-    await waitFor(() => expect(screen.getByText(/no readable text in scanned-minutes\.pdf/i)).toBeTruthy());
-  });
-
   it('leaves the notes the user typed alone when saving with a file', async () => {
     getMinutes.mockResolvedValue({ minutes: null });
     saveMinutes.mockResolvedValue({

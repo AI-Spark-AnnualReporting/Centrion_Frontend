@@ -576,16 +576,18 @@ function MeetingDetailModal({
                   ? <span style={{ color: '#9BA3C4' }}>None</span>
                   : `${current.participants.length} · ${current.participants.join(', ')}`}
               </DetailRow>
-              <DetailRow
-                icon={ICON_DOC}
-                label={current.platform === 'in_person' ? 'Location' : 'Meeting URL'}
-              >
-                {current.link_or_location
-                  ? current.platform === 'in_person'
-                    ? <span style={{ wordBreak: 'break-word' }}>{current.link_or_location}</span>
-                    : <a href={current.link_or_location} target="_blank" rel="noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>{current.link_or_location}</a>
-                  : <span style={{ color: '#9BA3C4' }}>None</span>}
-              </DetailRow>
+              {!hasHappened && (
+                <DetailRow
+                  icon={ICON_DOC}
+                  label={current.platform === 'in_person' ? 'Location' : 'Meeting URL'}
+                >
+                  {current.link_or_location
+                    ? current.platform === 'in_person'
+                      ? <span style={{ wordBreak: 'break-word' }}>{current.link_or_location}</span>
+                      : <a href={current.link_or_location} target="_blank" rel="noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>{current.link_or_location}</a>
+                    : <span style={{ color: '#9BA3C4' }}>None</span>}
+                </DetailRow>
+              )}
               <DetailRow icon={ICON_DOC} label="Agenda">
                 {current.agenda
                   ? <div style={{ whiteSpace: 'pre-wrap' }}>{current.agenda}</div>
@@ -623,7 +625,9 @@ function MeetingDetailModal({
               <span />
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Close</button>
-                <button className="btn bs" onClick={() => setEditing(true)} style={{ padding: '9px 18px' }}>Edit</button>
+                {!hasHappened && (
+                  <button className="btn bs" onClick={() => setEditing(true)} style={{ padding: '9px 18px' }}>Edit</button>
+                )}
               </div>
             </>
           )}

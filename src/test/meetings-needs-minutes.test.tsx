@@ -125,6 +125,37 @@ describe('Board & Meetings — Needs Minutes rail', () => {
     expect(screen.queryByText('Needs minutes')).toBeNull();
   });
 
+  // Nothing left to join, travel to, or reschedule once a meeting has happened.
+  it('hides the meeting URL and Edit on a meeting that already happened', async () => {
+    render(<MemoryRouter><MeetingsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('button', { name: /needs minutes/i })).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText('Previous month'));
+    clickDay(12);
+    fireEvent.click(screen.getByText('Unwritten Board Meeting'));
+    await waitFor(() => expect(screen.getByText('Details')).toBeTruthy());
+    fireEvent.click(screen.getByText('Details'));
+
+    expect(screen.getByText('Platform')).toBeTruthy();
+    expect(screen.queryByText('Meeting URL')).toBeNull();
+    expect(screen.queryByText('Edit')).toBeNull();
+  });
+
+  it('keeps the meeting URL and Edit on one that has not', async () => {
+    render(<MemoryRouter><MeetingsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('button', { name: /needs minutes/i })).toBeTruthy());
+
+    clickDay(12);
+    // It's upcoming, so it appears in the rail too — take the day panel's copy,
+    // which the calendar card puts first in the DOM.
+    fireEvent.click(screen.getAllByText('Future Investor Call')[0]);
+
+    await waitFor(() => expect(screen.getByText('Meeting URL')).toBeTruthy());
+    expect(screen.getByText('Edit')).toBeTruthy();
+    // A future meeting has no minutes to write, so no second tab either.
+    expect(screen.queryByText('Minutes')).toBeNull();
+  });
+
   it('drops the tab count to zero once everything is written up', async () => {
     listMeetings.mockResolvedValue({
       meetings: [meeting({ id: 'm2', title: 'Already Written Up', has_minutes: true })],

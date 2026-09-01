@@ -294,31 +294,6 @@ export default function MeetingMinutesPanel({
             )}
           </div>
 
-          {/* What the backend read out of the file. Folded away by default —
-              it can run long, and it's a reference, not something to edit.
-              Native <details>, so it costs nothing to open. */}
-          {!pendingFile && storedAttachment && storedAttachment.attachment_text != null && (
-            storedAttachment.attachment_text.trim() ? (
-              <details style={{ marginTop: 9 }}>
-                <summary style={{ fontSize: 11, fontWeight: 600, color: '#4040C8', cursor: 'pointer' }}>
-                  Text read from {storedAttachment.attachment_name || 'the attachment'}
-                </summary>
-                <div style={{
-                  marginTop: 7, fontSize: 11.5, color: '#5A6080', lineHeight: 1.6, whiteSpace: 'pre-wrap',
-                  background: '#F2F3FA', border: '1px solid #ECEEF8', borderRadius: 8,
-                  padding: '10px 12px', maxHeight: 200, overflowY: 'auto',
-                }}>
-                  {storedAttachment.attachment_text}
-                </div>
-              </details>
-            ) : (
-              // A spreadsheet or a scanned PDF. It uploaded fine — say so, or
-              // the missing text reads as a failed save.
-              <div style={{ marginTop: 9, fontSize: 11, color: '#B45309' }}>
-                No readable text in {storedAttachment.attachment_name || 'this file'} — it&apos;s attached for download only.
-              </div>
-            )
-          )}
         </div>
 
         {SECTIONS.map((s) => (
