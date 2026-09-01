@@ -10,11 +10,13 @@
 import type {
   AuthUser,
   DepartmentOption,
+  JwtPermissionClaims,
   LoginResponse,
   OnboardingPayload,
   OnboardingResponse,
 } from "@/types/auth";
 import type { DetectedBrandColors } from "@/types/brand";
+import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
   Company,
@@ -46,6 +48,7 @@ import type {
   OutlineLockResponse,
   ProducedSection,
   ProducedSectionResponse,
+  SectionAnalysis,
   ProduceAllHandle,
   CompanyType,
   Voice,
@@ -77,9 +80,13 @@ import type {
   EditEarningsFigurePayload,
   EarningsOutlineSection,
   EarningsOutlineResponse,
+  EarningsSourceLinesResponse,
+  EarningsFigureSectionsResponse,
+  EarningsSectionFiguresResponse,
   EarningsSectionFeeder,
   SaveEarningsOutlinePayload,
   EarningsProducedSection,
+  EarningsSectionPatch,
   EarningsSectionsResponse,
   EarningsSectionStatus,
   EarningsProduceHandle,
@@ -88,6 +95,24 @@ import type {
   EarningsReportSummary,
   EarningsReportsListResponse,
 } from "@/types/earnings";
+import type {
+  BoardAssembleResponse,
+  BoardCompletion,
+  BoardExportFormat,
+  BoardIssuerProfile,
+  BoardOutlineResponse,
+  BoardOutlineSavePayload,
+  BoardProduceSectionResponse,
+  BoardProfileResponse,
+  BoardReportDetail,
+  BoardReportListResponse,
+  BoardReportSummary,
+  BoardRunHandle,
+  BoardSection,
+  BoardSectionsResponse,
+  BoardSourcesResponse,
+  CreateBoardReportPayload,
+} from "@/types/board";
 import type {
   CreateMeetingBody,
   MeetingListResponse,
@@ -106,6 +131,7 @@ import type {
   RegenerateTempPasswordResponse,
   SavePermissionsPayload,
   TempPasswordResponse,
+  UserPermissionsResponse,
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
@@ -237,6 +263,15 @@ function detailOf(body: unknown): string | null {
   return null;
 }
 
+// 429/5xx responses come from infra or an upstream provider (rate limits,
+// exhausted API credits, crashes) rather than deliberate FastAPI
+// HTTPExceptions, so `detail` there is often a raw exception string never
+// meant for an end user — e.g. a leaked
+// `RateLimitError: ... insufficient_quota ...` blob. Those always get this
+// generic line instead, regardless of what's in `detail`.
+const SERVICE_UNAVAILABLE_MESSAGE =
+  "The system is temporarily unavailable. Please try again in a few minutes.";
+
 export class ApiError<TBody = unknown> extends Error {
   constructor(
     public status: number,
@@ -244,13 +279,79 @@ export class ApiError<TBody = unknown> extends Error {
     public body: TBody,
     public url: string,
   ) {
-    // Prefer the backend's own words. Callers all over the app surface
-    // `err.message` straight into the UI, and "API 409 Conflict — http://…"
-    // tells the user nothing while "Email already registered" tells them
-    // exactly what to fix. Status and url stay on the instance for debugging.
-    super(detailOf(body) ?? `API ${status} ${statusText} — ${url}`);
+    // Prefer the backend's own words for deliberate business-logic rejections
+    // (403/404/409/422 etc. — "Email already registered" tells the user
+    // exactly what to fix). Callers all over the app surface `err.message`
+    // straight into the UI, and "API 409 Conflict — http://…" tells the user
+    // nothing while "Email already registered" tells them exactly what to
+    // fix. Status and url stay on the instance for debugging either way.
+    const isInfraFailure = status === 429 || status >= 500;
+    super(
+      isInfraFailure
+        ? SERVICE_UNAVAILABLE_MESSAGE
+        : (detailOf(body) ?? `API ${status} ${statusText} — ${url}`),
+    );
     this.name = "ApiError";
   }
+}
+
+// A handful of endpoints (register, resend-verification) use 429 deliberately
+// — a per-email cooldown, not infra rate limiting — and carry a structured
+// `detail: {message, retry_after_seconds}` instead of the plain-string shape
+// `detailOf()` expects. ApiError's own `.message` collapses every 429 into
+// the generic SERVICE_UNAVAILABLE_MESSAGE above (right call for genuine infra
+// limits), so callers that need the real reason and countdown read it here
+// off `.body` instead.
+export interface RateLimitDetail {
+  message: string;
+  retryAfterSeconds: number;
+}
+
+export function rateLimitDetailOf(err: unknown): RateLimitDetail | null {
+  if (!(err instanceof ApiError) || err.status !== 429) return null;
+  const body = err.body as { detail?: unknown } | null;
+  const detail =
+    body && typeof body === "object" ? (body as { detail?: unknown }).detail : null;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    typeof (detail as { retry_after_seconds?: unknown }).retry_after_seconds === "number"
+  ) {
+    const d = detail as { message?: unknown; retry_after_seconds: number };
+    return {
+      message: typeof d.message === "string" ? d.message : "Please wait before trying again.",
+      retryAfterSeconds: d.retry_after_seconds,
+    };
+  }
+  return null;
+}
+
+// Earnings Analyse returns HTTP 409 with `detail: {code: "STALE_CONTENT",
+// message}` when the section's figures have changed since produce last ran --
+// e.g. the user added a figure without a re-Finalise, or the chained produce
+// silently failed. Callers check with this helper and steer the user to
+// re-finalise instead of showing an analysis of stale content.
+export function isEarningsStaleContentError(
+  err: unknown,
+): { message: string } | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body as { detail?: unknown } | null;
+  const detail =
+    body && typeof body === "object" ? (body as { detail?: unknown }).detail : null;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    (detail as { code?: unknown }).code === "STALE_CONTENT"
+  ) {
+    const d = detail as { message?: unknown };
+    return {
+      message:
+        typeof d.message === "string" && d.message
+          ? d.message
+          : "Figures have changed since this section was last built. Finalise the section again to refresh, then analyse.",
+    };
+  }
+  return null;
 }
 
 type QueryParams = object;
@@ -446,7 +547,7 @@ export interface GenerateQuarterlyBody {
   financial_scale?: string;    // actual | thousands | millions | billions
   // system = map the sheet to our standard metrics + template (default).
   // custom = extract the sheet's lines as-is, section-assigned (no metric mapping).
-  metrics_mode?: "system" | "custom";
+  metrics_mode?: MetricsMode;
 }
 
 // Whether the company has extracted figures for the period(s) a report would
@@ -456,7 +557,7 @@ export interface ComparisonAvailability {
   comparison: Comparison;
   // The mode the answer was computed for — read this rather than the live radio,
   // which may have moved on since the request went out.
-  metrics_mode?: 'system' | 'custom';
+  metrics_mode?: MetricsMode;
   target_period: string; // e.g. "Q3-2025"
   specs: {
     key: string;
@@ -544,7 +645,7 @@ export interface RegisterParams {
   email: string;
   password: string;
   full_name: string;
-  role?: string; // default "department_user"
+  company_id?: string | null;
 }
 
 export interface LoginParams {
@@ -561,17 +662,43 @@ export interface ChangePasswordResponse {
 }
 
 export const auth = {
+  // JSON body, not query params — registration no longer logs the user in;
+  // it only creates the (unverified) account and queues a verification email.
   register: <T = unknown>(params: RegisterParams) =>
     request<T>("/api/v1/auth/register", {
       method: "POST",
-      query: params,
+      body: params,
       auth: false,
     }),
 
+  // JSON body, same as register — the request moved off query params, but
+  // the response shape (access_token, user, ...) is unchanged.
   login: <T = unknown>(params: LoginParams) =>
     request<T>("/api/v1/auth/login", {
       method: "POST",
-      query: params,
+      body: params,
+      auth: false,
+    }),
+
+  // Body carries `code` as a string on purpose — it may have leading zeros,
+  // which a number would silently drop.
+  verifyEmail: (email: string, code: string) =>
+    request<{ verified: boolean }>("/api/v1/auth/verify-email", {
+      method: "POST",
+      body: { email, code },
+      auth: false,
+    }),
+
+  // Unknown / already-verified email always resolves { sent: true } with no
+  // message — same anti-enumeration shape as forgotPassword, deliberately
+  // indistinguishable from a real send. A known, unverified email outside the
+  // cooldown attempts a real send and returns its actual outcome (sent may be
+  // false — a created-but-undelivered case, not a client error). Within the
+  // cooldown this throws ApiError(429) instead — read it with rateLimitDetailOf().
+  resendVerification: (email: string) =>
+    request<{ sent: boolean; message?: string }>("/api/v1/auth/resend-verification", {
+      method: "POST",
+      body: { email },
       auth: false,
     }),
 
@@ -1475,6 +1602,24 @@ export const reports = {
     return postForm("/api/v1/reports/quarterly/check-language", fd);
   },
 
+  // Can we read any figures out of this financial upload? Called the moment a file
+  // is picked. A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+  // file to us — has_tables=false, and `message` is the sentence to show.
+  checkTables: (
+    file: File,
+  ): Promise<{
+    success: boolean;
+    has_tables: boolean;
+    table_count: number;
+    table_names: string[];
+    reason: "no_tables" | "no_figures" | null;
+    message: string | null;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return postForm("/api/v1/reports/quarterly/check-tables", fd);
+  },
+
   getCoverage: <T = unknown>(
     companyId: string,
     reportId: string,
@@ -1555,6 +1700,23 @@ export const quarterlyReports = {
       { method: "POST" },
     ),
 
+  // Rename one section for this report — the name then appears everywhere,
+  // including the exported PDF's heading and table of contents. An empty title
+  // clears the rename and puts the blueprint name back. Works after the outline is
+  // locked (a rename can't regenerate anything), and returns the rebuilt outline
+  // like saveOutline does.
+  renameSection: (
+    companyId: string,
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ) =>
+    request<OutlineResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
+    ),
+
   // ── Produced sections (step 7 — Part 5 Preview) ──
   // The section-by-section producer. getSection reads one section's status +
   // content; produceSection composes it (optionally with supplied user_input for
@@ -1593,6 +1755,32 @@ export const quarterlyReports = {
       { method: "POST", body: { instruction } },
     ).then(unwrapProducedSection),
 
+  // Read this section's figures and write a short analysis. Never touches the
+  // section's content — the result is shown on screen only. `signal` matters:
+  // request() has no timeout of its own and this is a live LLM call.
+  analyseSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
+
+  // Replace the analysis prose by hand. An empty string removes it from the report.
+  saveSectionAnalysis: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    text: string,
+  ): Promise<SectionAnalysis> =>
+    request<SectionAnalysis>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
   // Async batch produce. Returns a 202 { run_id, poll_url }; request<T> returns
   // the parsed 202 body (202 is ok), so no FormData/postPipeline needed. Drive
   // the returned handle with usePipelinePoll and refresh getSection per tick.
@@ -1617,7 +1805,7 @@ export const quarterlyReports = {
   // "no data" dialog when a required period is missing.
   checkComparisonAvailability: (
     companyId: string,
-    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: 'system' | 'custom' },
+    params: { year: number; quarter: string; comparison: Comparison; metrics_mode?: MetricsMode },
   ) =>
     request<ComparisonAvailability>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/comparison-availability` +
@@ -1658,6 +1846,11 @@ export const quarterlyReports = {
   getColorPalettesGlobal: () =>
     request<ColorPalettesResponse>("/api/v1/reports/quarterly/color-palettes"),
 
+  // The designs, company-unscoped. The URL says quarterly, but this is the
+  // shared catalogue — earnings and board reports pick from it too.
+  getCoverTemplatesGlobal: (signal?: AbortSignal) =>
+    request<CoverTemplatesResponse>("/api/v1/reports/quarterly/cover-templates", { signal }),
+
   // Persist the chosen cover design + brand colors; re-renders the cover +
   // report accents. Colors apply to accents/headings only (body stays dark).
   selectCoverTemplate: (
@@ -1694,6 +1887,169 @@ export const quarterlyReports = {
       { query, signal },
     );
   },
+
+  // ── Extraction review (step 2) ──
+  // The figures the mapper matched exactly (already stored) plus the ones it
+  // wasn't confident enough about, which the user confirms one by one. Nothing in
+  // `pending` is in the report yet.
+  getExtractionReview: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { signal },
+    ),
+
+  // Apply the yes/no answers. Anything not accepted — rejected OR left unanswered
+  // — is dropped, so a figure only ever lands in the report with a human's yes.
+  submitExtractionReview: (
+    companyId: string,
+    reportId: string,
+    decisions: import("@/types/quarterly").ExtractionReviewDecision[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/extraction-review`,
+      { method: "POST", body: { decisions } },
+    ),
+
+  // Company-scoped, not report-scoped: an exclusion applies to every future
+  // upload, so it has to be findable from whichever report the user is on.
+  listExclusions: (
+    companyId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").ExclusionsResponse> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      signal,
+    }),
+
+  undoExclusions: (
+    companyId: string,
+    labels: string[],
+  ): Promise<{ company_id: string; restored: number }> =>
+    request(`/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/exclusions`, {
+      method: "DELETE",
+      body: { labels },
+    }),
+
+  // Custom mode only: rename or delete lines read from the per-section uploads.
+  // There is no yes/no here — the section was settled at upload time, so what's
+  // left is tidying a databook's spacer rows and awkward labels.
+  editCustomFigures: (
+    companyId: string,
+    reportId: string,
+    edits: import("@/types/quarterly").CustomFigureEdit[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/custom-figures`,
+      { method: "POST", body: { edits } },
+    ),
+
+  // ── Financial Data (Custom mode, the step before Extraction) ──
+  // One statement per section, so nothing has to guess where a figure belongs.
+  getFinancials: (
+    companyId: string,
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials`,
+      { signal },
+    ),
+
+  // Report-wide currency + scale. Every figure is printed in this scale.
+  saveFinancialsSettings: (
+    companyId: string,
+    reportId: string,
+    body: { currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/settings`,
+      { method: "PATCH", body },
+    ),
+
+  // Read one statement into one section. Re-uploading replaces it. currency/scale
+  // are the user correcting our reading for THIS section — omit them and the
+  // file's own units decide.
+  //
+  // Two possible responses: the screen payload (stored), or a confirmation request
+  // (nothing stored) when it isn't obvious which table/columns to read. Send the
+  // SAME file back with `structure` filled in to commit the user's answer — the
+  // file is re-posted rather than parked server-side, so there is no temp copy to
+  // expire, clean up, or get out of step with what they're looking at.
+  uploadFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    file: File,
+    units?: { currency?: string; scale?: string },
+    structure?: import("@/types/quarterly").SheetStructureChoice,
+  ): Promise<
+    | import("@/types/quarterly").FinancialsResponse
+    | import("@/types/quarterly").FinancialsConfirmation
+  > => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (units?.currency) fd.append("currency", units.currency);
+    if (units?.scale) fd.append("scale", units.scale);
+    if (structure) {
+      fd.append("table_key", structure.table_key);
+      fd.append("header_row", String(structure.header_row));
+      fd.append("label_col", String(structure.label_col));
+      fd.append("value_col", String(structure.value_col));
+    }
+    return request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    );
+  },
+
+  deleteFinancialsSectionUpload: (
+    companyId: string,
+    reportId: string,
+    code: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}/upload`,
+      { method: "DELETE" },
+    ),
+
+  // Include/exclude a section, or correct the units we read for it. A units change
+  // reinterprets the stored numbers — it never re-reads the file.
+  patchFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    code: string,
+    body: { included?: boolean; currency?: string; scale?: string },
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections/${encodeURIComponent(code)}`,
+      { method: "PATCH", body },
+    ),
+
+  // A section of the company's own — saved against the COMPANY, so it comes back
+  // next quarter and prior-period comparison lines up against it.
+  addFinancialsSection: (
+    companyId: string,
+    reportId: string,
+    title: string,
+  ): Promise<import("@/types/quarterly").FinancialsResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/sections`,
+      { method: "POST", body: { title } },
+    ),
+
+  // 422 with the section titles still missing a file — the gate that stops an
+  // empty table reaching the report.
+  completeFinancials: (
+    companyId: string,
+    reportId: string,
+  ): Promise<import("@/types/quarterly").FinancialsCompleteResult> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financials/complete`,
+      { method: "POST" },
+    ),
 
   addDriver: (
     companyId: string,
@@ -1767,6 +2123,18 @@ export const quarterlyReports = {
     fd.append("file", file);
     return request<ProducedSectionResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/upload`,
+      { method: "POST", form: fd },
+    ).then(unwrapProducedSection);
+  },
+
+  // attach-mode sections (e.g. auditor_report): the file is embedded verbatim
+  // as-is, never turned into editable text — one-step save like upload above,
+  // no preview-then-commit. PDF only; the backend 422s on anything else.
+  attachSectionDocument: (companyId: string, reportId: string, code: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<ProducedSectionResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(code)}/attach`,
       { method: "POST", form: fd },
     ).then(unwrapProducedSection);
   },
@@ -2162,6 +2530,10 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
   return {
     section_code: code,
     title: earnStr(o.title) ?? earnStr(o.label) ?? earnStr(o.name) ?? code,
+    // The catalogue's own name for it, so the panel can offer Reset and say what
+    // it would go back to. Null on a payload that predates renaming.
+    title_original: earnStr(o.title_original),
+    prompt: earnStr(o.prompt),
     description: earnStr(o.description) ?? earnStr(o.summary) ?? earnStr(o.subtitle),
     section_number: earnNum(o.section_number) ?? earnNum(o.number),
     display_order: displayOrder,
@@ -2175,6 +2547,9 @@ function normalizeEarningsOutlineSection(raw: unknown): EarningsOutlineSection |
     mode: earnStr(o.mode) ?? earnStr(o.generation_mode),
     page_hint: earnStr(o.page_hint) ?? earnStr(o.pages) ?? earnStr(o.length_hint),
     status: earnStr(o.status) as EarningsSectionStatus | null,
+    // How many of the user's own lines are filed under this section. On the
+    // outline response so the badge is right on first paint.
+    figure_count: earnNum(o.figure_count) ?? null,
     feeder: normalizeEarningsSectionFeeder(o.feeder),
   };
 }
@@ -2230,12 +2605,82 @@ function normalizeEarningsSection(raw: unknown): EarningsProducedSection | null 
     source_ref: earnStr(o.source_ref) ?? earnStr(feeder.ref) ?? earnStr(feeder.page),
     confidence: earnNum(o.confidence),
     flag: earnStr(o.flag) ?? earnStr(o.grounding_status),
-    grounding_flag: earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message),
-    grounding_acknowledged: earnBool(o.grounding_acknowledged) || earnBool(o.acknowledged),
+    // One readable line, whatever shape it arrived in. Several ungrounded
+    // numbers in one section is the normal case, and naming all of them is the
+    // difference between a targeted edit and guesswork.
+    grounding_flag: readGroundingViolations(o).join(", ") || null,
+    // edit_acknowledged is the field the backend actually stores (inside
+    // feeder); the two client-side spellings are kept as fallbacks.
+    grounding_acknowledged:
+      earnBool(earnRecord(o.feeder).edit_acknowledged) ||
+      earnBool(o.grounding_acknowledged) ||
+      earnBool(o.acknowledged),
     edited: earnBool(o.edited) || earnBool(o.is_edited),
+    // Built field-by-field, so anything not listed here is silently dropped --
+    // which is exactly what happened to the analysis. GET /sections has always
+    // sent it, the exporters have always rendered it, and this mapper threw it
+    // away, so the Report screen showed none and Preview lost it on reload.
+    // Quarterly hit the identical bug in AssembledReportPage.
+    analysis: (o.analysis && typeof o.analysis === "object" && !Array.isArray(o.analysis)
+      ? (o.analysis as EarningsProducedSection["analysis"])
+      : null),
   };
 }
-function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
+// The produce response is a PATCH, not a section. It carries status/content/error
+// for one section and nothing else, so it is read as exactly that — running it
+// through normalizeEarningsSection built a whole section around those four
+// fields, defaulting the title to the section code, display_order to 0 and mode
+// to 'generate'. Spread over the real section by the caller, those defaults won.
+// Every shape the backend expresses "these numbers are not in the figures" in.
+// GET /sections nests it as feeder.grounding_violations; the PATCH and refine
+// responses put grounding_violations at the top level. Both are LISTS, and the
+// mapper below used to read three singular STRING keys the backend has never
+// sent — so section.grounding_flag was always null, the amber banner never
+// rendered, and the only thing the user ever saw was the 409 on approve.
+function readGroundingViolations(o: Record<string, unknown>): string[] {
+  const feeder = earnRecord(o.feeder);
+  for (const v of [o.grounding_violations, feeder.grounding_violations]) {
+    if (Array.isArray(v)) {
+      // Numbers are accepted as well as strings: the backend sends regex matches
+      // (strings today), but a token is a token, and silently dropping a numeric
+      // one would under-report which figures are at fault.
+      const items = v
+        .map((x) => (typeof x === "number" && Number.isFinite(x) ? String(x) : earnStr(x)))
+        .filter((x): x is string => !!x);
+      if (items.length) return items;
+    }
+  }
+  // The singular string keys are kept as a fallback: nothing observed sends
+  // them, but reading them costs nothing and removing them could only break
+  // something unseen.
+  const single =
+    earnStr(o.grounding_flag) ?? earnStr(o.grounding_violation) ?? earnStr(o.grounding_message);
+  return single ? [single] : [];
+}
+
+function readEarningsSectionPatch(raw: unknown): EarningsSectionPatch | null {
+  const o = earnRecord(raw);
+  const code = earnStr(o.section_code) ?? earnStr(o.code) ?? earnStr(o.id);
+  if (!code) return null;
+  const rawContent = o.content ?? o.body ?? o.text;
+  return {
+    section_code: code,
+    status: (earnStr(o.status) ?? "pending") as EarningsSectionPatch["status"],
+    content:
+      rawContent == null
+        ? null
+        : typeof rawContent === "string"
+          ? rawContent
+          : JSON.stringify(rawContent),
+    error: earnStr(o.error),
+    grounding_violations: readGroundingViolations(o),
+  };
+}
+
+// Exported for the same reason normalizeEarningsSources is: this mapper is where
+// the wire shape becomes the screen's shape, and the page tests all mock above it
+// — which is exactly how a grounding flag that never rendered shipped green.
+export function normalizeEarningsSections(raw: unknown): EarningsSectionsResponse {
   const rec = earnRecord(raw);
   const arr: unknown[] = Array.isArray(raw)
     ? raw
@@ -2259,6 +2704,12 @@ function readEarningsProduceHandle(raw: unknown): EarningsProduceHandle {
   const o = earnRecord(raw);
   const runId = earnStr(o.run_id) ?? earnStr(o.runId) ?? earnStr(o.id);
   const pollUrl = earnStr(o.poll_url) ?? earnStr(o.pollUrl) ?? earnStr(o.url);
+  // Nothing to do: the report is already built and unchanged, so no run was
+  // started. A handle with nothing to poll is the honest answer here, not a
+  // failure — the caller navigates straight on and never raises a loader.
+  if (earnStr(o.status) === "completed" && !runId) {
+    return { run_id: null, poll_url: null };
+  }
   if (!runId || !pollUrl) {
     throw new Error("Produce earnings report: response did not include run_id/poll_url.");
   }
@@ -2460,6 +2911,78 @@ export const earnings = {
       { method: "PUT", body: payload },
     ).then(normalizeEarningsOutline),
 
+  // Rename one FINANCIAL section for this report — the name then appears on the
+  // Outline, on Figures, and as the heading and table-of-contents entry in the
+  // exported PDF. An empty title clears the rename and puts the catalogue name
+  // back. It cannot change which figures the section gets: the picker is prompted
+  // with the catalogue name, never this one. Returns the rebuilt outline.
+  renameEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    title: string,
+  ): Promise<EarningsOutlineResponse> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/outline/sections/${encodeURIComponent(sectionCode)}/title`,
+      { method: "PATCH", body: { title } },
+    ).then(normalizeEarningsOutline),
+
+  // ── Figures (user-metrics lane) ──
+  // A user-metrics quarterly report is built from the company's own workbook, so
+  // its lines carry the workbook's labels and nothing canonical. Figures get into
+  // an earnings report one way: the user asks for them, per section, in their own
+  // words. Nothing is picked on their behalf.
+
+  // The Figures screen: every table section with its prompt and its figures.
+  getEarningsFigureSections: (
+    reportId: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsFigureSectionsResponse> =>
+    request<EarningsFigureSectionsResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/sections`,
+      { signal },
+    ),
+
+  // Runs the model for ONE section with the user's prompt in the call. Results are
+  // added to what the section already has, so searching again broadens it.
+  searchSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    prompt: string,
+  ): Promise<EarningsSectionFiguresResponse> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/search-figures`,
+      { method: "POST", body: { prompt } },
+    ),
+
+  // Sets exactly which lines a section carries — what the Add-figure picker saves,
+  // and how one figure is removed. Scoped to the section.
+  setSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    lineIds: string[],
+  ): Promise<EarningsSectionFiguresResponse> =>
+    request(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/` +
+        `${encodeURIComponent(sectionCode)}/figures`,
+      { method: "PUT", body: { line_ids: lineIds } },
+    ),
+
+  // Every line in the source report, for the Add-figure picker. A plain read —
+  // sectionCode ticks what that section already holds.
+  getEarningsSourceLines: (
+    reportId: string,
+    sectionCode?: string,
+    signal?: AbortSignal,
+  ): Promise<EarningsSourceLinesResponse> => {
+    const qs = sectionCode ? `?section_code=${encodeURIComponent(sectionCode)}` : "";
+    return request<EarningsSourceLinesResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/figures/source-lines${qs}`,
+      { signal },
+    );
+  },
+
   // ── Cover template + brand colors ──
   // Same contract style as the quarterly picker, but earnings splits the current
   // selection into its own report-scoped GET (quarterly folds it into
@@ -2515,6 +3038,133 @@ export const earnings = {
       { method: "POST", body: {} },
     ).then(readEarningsProduceHandle),
 
+  // Build the whole report: search every financial section with the brief typed
+  // on the Outline, then produce every section. One job, one poll, one loader --
+  // this is what the Outline's Continue fires, and Preview opens finished.
+  buildEarningsReport: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { search_figures: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Write the short commentary under one section's figures, or re-write it.
+  // Cached server-side on a fingerprint of the table, model, prompt, tone and
+  // language, so re-opening a section costs nothing; force is "write it again".
+  //
+  // Backend gates on a staleness precondition and returns HTTP 409 with
+  // `detail.code === "STALE_CONTENT"` when the section's figures have moved
+  // since produce last ran (Add-figures without a re-Finalise, or a chained
+  // produce that failed and never refreshed `content`). Callers detect this
+  // via `isEarningsStaleContentError` and prompt the user to re-finalise
+  // rather than serve a confidently-wrong analysis.
+  analyseEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    opts: { force?: boolean; signal?: AbortSignal } = {},
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analyse`,
+      { method: "POST", body: { force: !!opts.force }, signal: opts.signal },
+    ),
+
+  // Save an edited analysis, or clear it with an empty string. Marks it edited,
+  // which stops the cache serving our words over the user's.
+  saveEarningsSectionAnalysis: (
+    reportId: string,
+    sectionCode: string,
+    text: string,
+  ): Promise<unknown> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/analysis`,
+      { method: "PATCH", body: { text } },
+    ),
+
+  // Mark a section's figures as done with, or undo it — and store the
+  // expectations typed against them, all in this one request.
+  //
+  // The expectations ride along here rather than having an endpoint of their
+  // own. Preview holds them locally while the user types, because a consensus
+  // table gets a dozen numbers entered and half of them changed, and none of it
+  // is meant until the user says the section is done. One write at that moment.
+  //
+  // `expectations` maps a figure id to its expected value, or to null to clear
+  // one. Omit it entirely when only the bookmark is moving.
+  finaliseEarningsSectionFigures: (
+    reportId: string,
+    sectionCode: string,
+    finalised: boolean,
+    expectations?: Record<string, number | null>,
+  ): Promise<{
+    report_id: string;
+    section_code: string;
+    figures_finalised: boolean;
+    expectations_saved: number;
+    // The backend chains a per-section produce when finalising true so the
+    // section's content is written in the same round-trip -- otherwise the
+    // Analyse control renders (the button is inside the finalised block) but
+    // has no built content to read against. Three shapes:
+    //   * a section patch  -> merge into `produced` state, Analyse works
+    //   * { error: string } -> figures + expectations were saved but the build
+    //                          failed; the section stays finalised and the UI
+    //                          offers a Retry via runEarningsSection
+    //   * null              -> undo path (finalised=false), nothing built
+    produce: EarningsSectionPatch | { error: string } | null;
+  }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}` +
+        `/sections/${encodeURIComponent(sectionCode)}/finalise-figures`,
+      { method: "PATCH", body: { finalised, ...(expectations ? { expectations } : {}) } },
+    ).then((raw) => {
+      const o = earnRecord(raw);
+      const rawProduce = o.produce;
+      let produce: EarningsSectionPatch | { error: string } | null = null;
+      if (rawProduce != null) {
+        const patch = readEarningsSectionPatch(rawProduce);
+        if (patch) {
+          produce = patch;
+        } else {
+          const err = earnStr(earnRecord(rawProduce).error);
+          if (err) produce = { error: err };
+        }
+      }
+      return {
+        report_id: earnStr(o.report_id) ?? reportId,
+        section_code: earnStr(o.section_code) ?? sectionCode,
+        figures_finalised: o.figures_finalised === true,
+        expectations_saved: typeof o.expectations_saved === "number" ? o.expectations_saved : 0,
+        produce,
+      };
+    }),
+
+  // Produce ONLY the sections that can be built before a figure exists — the
+  // CEO quote, guidance, the disclaimer, the IR calendar. This is what the
+  // Outline's Continue fires, so the wait before Preview buys the user readable
+  // narrative instead of buying nothing. Same 202 + poll shape as produce-all.
+  produceEarningsFigureFreeSections: (reportId: string): Promise<EarningsProduceHandle> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/produce`,
+      { method: "POST", body: { figure_free_only: true } },
+    ).then(readEarningsProduceHandle),
+
+  // Run (or re-run) one section, synchronously. Backs both the Run button on a
+  // section that has never been produced and Regenerate on one that has;
+  // `regenerate` bypasses the produce cache so a re-run is a real re-run.
+  runEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    regenerate = false,
+  ): Promise<EarningsSectionPatch> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/produce`,
+      { method: "POST", body: { regenerate } },
+    ).then((raw) => {
+      const patch = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
+      if (!patch) throw new Error("Run earnings section: response was not a section.");
+      return patch;
+    }),
+
   // Save a user's manual input for a needs_input section (typed directly, or
   // edited after extractSectionInput prefilled it from an uploaded file).
   // Reuses the section-produce route — the backend turns the raw text into
@@ -2563,14 +3213,57 @@ export const earnings = {
     reportId: string,
     sectionCode: string,
     body: SaveEarningsSectionContentPayload,
-  ): Promise<EarningsProducedSection> =>
+    // A PATCH answers for the fields it owns — content, status, violations. Read
+    // as a whole section it invented a title (falling back to the section CODE),
+    // display_order 0 and mode 'generate' for everything absent, and the caller
+    // spread those over the real section. Same defect the run endpoint had.
+  ): Promise<EarningsSectionPatch> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/content`,
       { method: "PATCH", body },
     ).then((raw) => {
-      const sec = normalizeEarningsSection(earnRecord(raw).section ?? raw);
+      const sec = readEarningsSectionPatch(earnRecord(raw).section ?? raw);
       if (!sec) throw new Error("Edit earnings section: response was not a section.");
       return sec;
+    }),
+
+  // Have the model rewrite one narrative section from a free-text instruction.
+  // One LLM call server-side, and it only re-words the prose already stored --
+  // producing the section again is what Regenerate is for. 422 the section is a
+  // table (nothing to rewrite) or the instruction is missing/too long · 409 the
+  // section is empty, or the report is locked · 502 the model returned nothing,
+  // in which case the stored text is untouched and a retry is safe.
+  //
+  // Deliberately NOT run through normalizeEarningsSection: the response carries
+  // only what changed, and the normaliser would default mode/source_type/title
+  // back over the real ones (the trap EarningsReportPage.tsx documents). The
+  // caller merges these three fields and nothing else.
+  refineEarningsSection: (
+    reportId: string,
+    sectionCode: string,
+    instruction: string,
+  ): Promise<{
+    section_code: string;
+    content: string | null;
+    status: string;
+    grounding_violations: string[];
+  }> =>
+    request<unknown>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionCode)}/refine`,
+      { method: "POST", body: { instruction } },
+    ).then((raw) => {
+      const o = earnRecord(raw).section ? earnRecord(earnRecord(raw).section) : earnRecord(raw);
+      const code = earnStr(o.section_code) ?? sectionCode;
+      const content = typeof o.content === "string" ? o.content : null;
+      if (content == null) throw new Error("Refine: the server returned no text.");
+      return {
+        section_code: code,
+        content,
+        status: earnStr(o.status) ?? "produced",
+        grounding_violations: Array.isArray(o.grounding_violations)
+          ? o.grounding_violations.filter((v): v is string => typeof v === "string")
+          : [],
+      };
     }),
 
   // Approve & lock. On a gate failure the backend throws a 409 whose ApiError.body
@@ -2614,6 +3307,207 @@ export const earnings = {
     const a = document.createElement("a");
     a.href = url;
     a.download = serverName || `${(filename || "earnings-report").replace(/[^\w.-]+/g, "_")}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Board of Directors' Report — /api/v1/board.
+//
+// Unlike quarterly/earnings, the 46-section registry and the profile→section
+// resolution live server-side: the client PATCHes a profile and renders whatever
+// outline comes back. Two endpoints are async (202 + poll_url): document upload
+// and batch produce. Everything is company-scoped — another company's report is
+// a 404, never a 403.
+// ---------------------------------------------------------------------------
+
+const BOARD_BASE = "/api/v1/board/reports";
+const boardPath = (reportId: string, suffix = "") =>
+  `${BOARD_BASE}/${encodeURIComponent(reportId)}${suffix}`;
+
+export const boardReports = {
+  // 409 when an unfinished report already exists for that company + year; the
+  // body carries `existing_report_id` so the caller can offer "continue".
+  createReport: (body: CreateBoardReportPayload) =>
+    request<BoardReportSummary>(BOARD_BASE, { method: "POST", body }),
+
+  listReports: (companyId: string) =>
+    request<BoardReportListResponse>(BOARD_BASE, { query: { company_id: companyId } }),
+
+  // One report by id. `locked` comes precomputed — don't re-derive it from status.
+  getReport: (reportId: string, signal?: AbortSignal) =>
+    request<BoardReportDetail>(boardPath(reportId), { signal }),
+
+  getProfile: (reportId: string, signal?: AbortSignal) =>
+    request<BoardProfileResponse>(boardPath(reportId, "/profile"), { signal }),
+
+  // Re-resolves and re-saves the WHOLE outline server-side — refetch the outline
+  // (and the sources, whose slots derive from issuer_type) after every call.
+  patchProfile: (reportId: string, body: BoardIssuerProfile) =>
+    request<BoardProfileResponse>(boardPath(reportId, "/profile"), { method: "PATCH", body }),
+
+  getSources: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSourcesResponse>(boardPath(reportId, "/sources"), { signal }),
+
+  // One call, one run, every staged file extracted concurrently. `files` and
+  // `slots` are repeated fields matched BY POSITION — the nth file is filed
+  // under the nth slot, so they must be appended in lockstep.
+  //
+  // Only one job may run per report, so uploading slot-by-slot would 409 on the
+  // second call. The UI stages the picks and submits them together.
+  //
+  // 202 → poll the returned poll_url. Deliberately NOT routed through
+  // postPipeline(): that normalises a 409 into a handle, which would hide the
+  // `existing_run_id` the caller wants to surface.
+  //
+  // `sectionCode` is set only by the per-section upload on the Review step,
+  // where one document is supplied for one named section. The Sources screen
+  // uploads across many slots at once and sends none.
+  uploadSources: (
+    reportId: string,
+    staged: { slot: string; file: File }[],
+    sectionCode?: string,
+  ) => {
+    const fd = new FormData();
+    staged.forEach(({ slot, file }) => {
+      fd.append("files", file);
+      fd.append("slots", slot);
+    });
+    if (sectionCode) fd.append("section_code", sectionCode);
+    return request<BoardRunHandle>(boardPath(reportId, "/sources/upload"), {
+      method: "POST",
+      form: fd,
+    });
+  },
+
+  // Clears the slot tag only — the document stays in the company's document
+  // bank, so "replace" is delete-then-upload and nothing is destroyed.
+  deleteSourceDocument: (reportId: string, documentId: string) =>
+    request<unknown>(
+      boardPath(reportId, `/sources/${encodeURIComponent(documentId)}`),
+      { method: "DELETE" },
+    ),
+
+  // Returns all 46 sections including the non-applicable ones, so the UI can
+  // grey them rather than have them vanish. Built and saved lazily on first call.
+  getOutline: (reportId: string, signal?: AbortSignal) =>
+    request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { signal }),
+
+  // Array order IS display order. Mandatory sections are force-included
+  // silently; including a dropped/na section is a 422 and nothing is saved.
+  saveOutline: (reportId: string, body: BoardOutlineSavePayload) =>
+    request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { method: "PUT", body }),
+
+  // Synchronous, and cached — `cached: true` means nothing it depends on changed
+  // and no LLM call was made. 422 when the section has no producer yet.
+  produceSection: (reportId: string, sectionCode: string, regenerate = false) =>
+    request<BoardProduceSectionResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/produce`),
+      { method: "POST", query: { regenerate } },
+    ),
+
+  // 202 → poll; `output_summary` carries {produced, skipped, failed, total}.
+  produceAll: (reportId: string) =>
+    request<BoardRunHandle>(boardPath(reportId, "/produce"), { method: "POST" }),
+
+  getSections: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSectionsResponse>(boardPath(reportId, "/sections"), { signal }),
+
+  // A human edit is authoritative: the section becomes produced/updated and the
+  // cache key is cleared, so the next produce sees changed input rather than
+  // serving the cache over the edit.
+  patchSectionContent: (reportId: string, sectionCode: string, content: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/content`),
+      { method: "PATCH", body: { content } },
+    ),
+
+  // Have the model rewrite a narrative section to a free-text instruction.
+  // Narrative content is now lifted verbatim from the source document, so this
+  // is how a reviewer turns extracted text into prose. Returns the rewritten
+  // section. 422 not refinable · 409 no content yet · 502 the model returned
+  // nothing (keep the existing text and offer a retry).
+  refineSection: (reportId: string, sectionCode: string, instruction: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/refine`),
+      { method: "POST", body: { instruction } },
+    ),
+
+  getCompletion: (reportId: string, signal?: AbortSignal) =>
+    request<BoardCompletion>(boardPath(reportId, "/completion"), { signal }),
+
+  // Confirms a carried-forward section is still accurate — the check that stops
+  // last year's board list going out as this year's. 409 if it wasn't carried
+  // forward, i.e. there was nothing to confirm.
+  confirmSection: (reportId: string, sectionCode: string) =>
+    request<BoardSection>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/confirm`),
+      { method: "POST" },
+    ),
+
+  // 409 while completion.can_approve is false — and the error body IS the
+  // completion payload, so the caller can list exactly what is missing.
+  approve: (reportId: string) =>
+    request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
+
+  // The cover design + colours already saved on this report, so the picker
+  // opens on the current choice rather than blank.
+  // `cover_template_key` is null until the user picks one; `brand` always comes
+  // back with real hex. Safe to call on an approved report.
+  getCoverTemplate: (reportId: string, signal?: AbortSignal) =>
+    request<Partial<CoverSelectionResponse>>(boardPath(reportId, "/cover-template"), { signal }),
+
+  // Cover design + brand colours, same payload shape as the quarterly picker
+  // (`PATCH .../cover-template`). The catalogue and palettes themselves are
+  // company-scoped, so the board step reuses quarterlyReports.getCoverTemplates.
+  // Answers {report_id, generation_config} — not the selection — so the caller
+  // keeps what the user picked rather than reading it back. 409 once the report
+  // is approved; 422 on an unknown template key or a bad colour.
+  selectCoverTemplate: (reportId: string, body: CoverSelectionPayload) =>
+    request<Partial<CoverSelectionResponse>>(boardPath(reportId, "/cover-template"), {
+      method: "PATCH",
+      body,
+    }),
+
+  // The same dict the exporter renders, so the preview and the PDF can't drift.
+  getAssemble: (reportId: string, signal?: AbortSignal) =>
+    request<BoardAssembleResponse>(boardPath(reportId, "/assemble"), { signal }),
+
+  // Binary response → bypass request<T>() (which parses JSON) and use
+  // fetchWithAuth + blob, mirroring earnings.downloadEarningsExport. Unlike
+  // earnings, `format` is a query param rather than a JSON body.
+  downloadExport: async (
+    reportId: string,
+    format: BoardExportFormat,
+    filename?: string,
+  ): Promise<void> => {
+    const res = await fetchWithAuth(
+      `${boardPath(reportId, "/export")}?format=${encodeURIComponent(format)}`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      let msg = `Export failed (${res.status})`;
+      try {
+        const j = await res.json();
+        const d = j?.detail;
+        if (typeof d === "string") msg = d;
+        else if (d?.error) msg = d.error;
+      } catch {
+        /* non-JSON error body — keep the status message */
+      }
+      throw new Error(msg);
+    }
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    const serverName = match ? decodeURIComponent(match[1].trim()) : null;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = serverName || `${(filename || "board-report").replace(/[^\w.-]+/g, "_")}.${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2825,6 +3719,14 @@ export interface ThreadlessReport {
   period: string;
   status: string;
   created_at: string;
+  // One general thread and one private thread per person, per report.
+  // Which flag disables the row depends on the Private tickbox.
+  has_general_thread: boolean;
+  has_my_private_thread: boolean;
+  // "cycle" → this row is a reporting cycle with no annual report behind it
+  // yet, and `id` is the cycle's. Starting a thread on it creates that report
+  // server-side; nothing else here needs to know. Absent on real reports.
+  source?: 'cycle';
 }
 
 export interface ThreadlessReportsResponse {
@@ -2849,17 +3751,25 @@ export interface CommunicationMembersResponse {
   members: CommunicationMember[];
 }
 
+// A thread is either on a report (report_id set) or ad-hoc (subject set
+// instead) — 422 if neither is given. Omit report_id entirely for an ad-hoc
+// thread rather than sending null.
 export interface StartThreadBody {
-  report_id: string;
+  report_id?: string;
+  subject?: string;
   message: string;
   // Members' `id` UUIDs (NOT their usr_ `user_id`). Empty array if none.
+  // On a private thread these people ARE the members — 422 if empty.
   mentioned_user_ids: string[];
+  // Only the mentioned people can see the thread. Omit for a normal thread.
+  is_private?: boolean;
 }
 
 export interface CommunicationThread {
   id: string;
   company_id: string;
-  report_id: string;
+  report_id: string | null;
+  subject: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -2876,10 +3786,55 @@ export interface CommunicationMessage {
 
 export interface StartThreadResponse {
   thread: CommunicationThread;
-  message: CommunicationMessage;
+  // null when the thread was started with no first message — the thread exists,
+  // it just has nothing in it yet.
+  message: CommunicationMessage | null;
+}
+
+// POST /ad-hoc/draft — stateless; nothing is saved. Call again to regenerate
+// before the user commits. The resulting text becomes StartThreadBody.message
+// verbatim (edited or not) when the user posts the ad-hoc thread.
+export interface GenerateAdHocDraftResponse {
+  draft: string;
 }
 
 // ── Communication Hub list (Communication tab) ────────────────────────────
+
+// Where a report's CONTENT stands, which `status` does not answer: status is
+// the review workflow (who shared it, who signed it off), so a Draft report and
+// an In review one both land on an empty page when nothing was ever written.
+//
+// `ready` means APPROVED, not written — board and quarterly approve enforce no
+// completeness check. Don't label it "complete" in the UI.
+//
+// An unrecognised future `state` should be treated as not_applicable rather
+// than crashing the card.
+export interface ReportGeneration {
+  state: 'ready' | 'not_ready' | 'in_progress' | 'not_applicable';
+  // Annual only — its sections live in the reporting-cycles system, which
+  // counts them. null for every other type, so never render a bar off these
+  // without checking. `percent` is a whole number.
+  done: number | null;
+  total: number | null;
+  percent: number | null;
+  // Ids and a kind, never a URL — the backend has no view of our routes.
+  // See generationHref() in @/lib/reportRoutes.
+  target: {
+    kind:
+      | 'quarterly_report'
+      | 'board_report'
+      | 'earnings_report'
+      | 'annual_cycle'
+      | 'esg_page'
+      | null;
+    company_id: string;
+    // Module lanes only.
+    report_id?: string;
+    // Annual only, and NOT the report id — an annual `reports` row is a shell
+    // pointing at a cycle; navigating to the report id lands on an empty page.
+    cycle_id?: string;
+  };
+}
 
 export interface ThreadReport {
   id: string;
@@ -2890,8 +3845,14 @@ export interface ThreadReport {
   title: string;
   status: string;
   status_label: string;
+  // Always present when `report` itself is non-null (it is null on an ad-hoc
+  // thread) — every report type resolves to one of the four states.
+  generation: ReportGeneration;
 }
 
+// The person who STARTED the thread (confirmed with the backend) — not the
+// report's owner, even on a report thread. `can_add_members` is true only for
+// them on a private thread.
 export interface ThreadOwner {
   user_id: string;
   full_name: string;
@@ -2906,12 +3867,21 @@ export interface ThreadLastMessage {
 }
 
 // One row in the Communication tab. Rows arrive pre-sorted (updated_at desc) —
-// don't re-sort. `owner` and `last_message` can both be null.
+// don't re-sort. `owner` and `last_message` can both be null. Exactly one of
+// `report` / `subject` is set — null report + non-null subject means an
+// ad-hoc thread; render `subject` as the title and skip report-only UI
+// (status pill, review actions) in that case.
 export interface ThreadSummary {
   thread_id: string;
-  report: ThreadReport;
+  report: ThreadReport | null;
+  subject: string | null;
+  // Private threads you're not a member of never appear in the list at all.
+  is_private: boolean;
+  // Non-null once you've been removed — the row stays, read-only.
+  removed_at: string | null;
   owner: ThreadOwner | null;
-  // Added alongside the review flow; null when the report isn't out for review.
+  // Added alongside the review flow; null when the report isn't out for review
+  // (always null for ad-hoc threads — review doesn't apply to them).
   assignment: ReviewAssignment | null;
   updated_at: string;
   last_message: ThreadLastMessage | null;
@@ -2937,9 +3907,21 @@ export interface MessageSender {
   is_you: boolean;
 }
 
-// `kind` drives the bubble: "system" renders with the Communication Hub avatar
-// and label (ignore `sender` for the display name); "user" renders as a person.
-export type ThreadMessageKind = 'system' | 'user';
+// `kind` drives the bubble: "system" lines are rendered with a muted avatar and
+// name the actor (`sender`) — who added or removed someone; "user" renders as a
+// person;
+// "attachment" also renders as a person (the uploader) but with `attachment`
+// rendered as a file chip instead of `body` as plain text.
+export type ThreadMessageKind = 'system' | 'user' | 'attachment';
+
+// download_url is short-lived/signed, same convention as documents.list etc.
+export interface ThreadAttachment {
+  id: string;
+  filename: string;
+  file_size_bytes: number;
+  content_type?: string | null;
+  download_url: string;
+}
 
 export interface ThreadMessage {
   id: string;
@@ -2948,6 +3930,8 @@ export interface ThreadMessage {
   body: string;
   mentioned_user_ids: string[];
   created_at: string;
+  // Only present on kind === "attachment" messages.
+  attachment?: ThreadAttachment | null;
 }
 
 // Who the report is currently out for review with. `label` is the snapshotted
@@ -2961,12 +3945,45 @@ export interface ReviewAssignment {
   assigned_at: string;
 }
 
+// A member of a private thread. `id` is the users.id UUID the member endpoints
+// take; `user_id` is the usr_… string (matches MessageSender.user_id) and is
+// what membership comparisons against the mention picker go through.
+export interface ThreadMemberSummary {
+  // The users.id UUID — what BOTH member endpoints take. Not `user_id`: the
+  // usr_… string won't resolve and comes back 403.
+  id: string;
+  user_id: string;
+  full_name: string;
+  role: string;
+  is_you: boolean;
+}
+
+// Both member calls return this — drop it straight into the strip.
+export interface ThreadMembersResponse {
+  members: ThreadMemberSummary[];
+  can_add_members: boolean;
+}
+
 export interface ThreadDetail {
   thread_id: string;
-  report: ThreadReport;
+  report: ThreadReport | null;
+  subject: string | null;
+  is_private: boolean;
+  // When you were removed from this thread. null = current member. Non-null
+  // means read-only: the backend still serves the thread, cut off at that
+  // moment, and 403s every write.
+  removed_at: string | null;
+  // [] on a public thread — render the members strip off this alone, no need
+  // to check is_private first.
+  members: ThreadMemberSummary[];
+  // True only for the creator of a private thread; false for its other members
+  // and on every public thread. Gates who may pull a non-member in.
+  can_add_members: boolean;
   owner: ThreadOwner | null;
   assignment: ReviewAssignment | null;
-  // True only for the assigned reviewer — gates "Open as reviewer".
+  // True only for the assigned reviewer — gates "Open as reviewer". Always
+  // false for ad-hoc threads (report === null) — the review endpoints
+  // themselves 422 on those, so don't surface any review UI when report is null.
   can_review: boolean;
   created_at: string;
   updated_at: string;
@@ -2986,6 +4003,25 @@ export interface SendMessageBody {
 
 export interface SendMessageResponse {
   message: ThreadMessage;
+}
+
+export interface UploadAttachmentResponse {
+  message: ThreadMessage;
+}
+
+// POST .../send-external — works on any thread (ad-hoc or report-based).
+// `body` omitted defaults server-side to the thread's latest message.
+export interface SendExternalBody {
+  subject: string;
+  recipients: ComposeRecipient[];
+  audience_label?: string;
+  body?: string | null;
+}
+
+export interface SendExternalResponse {
+  send: EmailSend;
+  recipient_count: number;
+  delivery_status: 'sent' | 'failed' | 'skipped' | null;
 }
 
 // ── History tab: email sends + publications ────────────────────────────────
@@ -3208,6 +4244,10 @@ export interface ReviewViewResponse {
   // can_act && !can_approve.
   can_act: boolean;
   can_approve: boolean;
+  // Same flag the thread payload carries: non-null → you were removed, so the
+  // screen is read-only. `can_comment` is the derived form — use that.
+  removed_at: string | null;
+  can_comment: boolean;
   // Empty when the narrative hasn't been generated — hide the per-section rail.
   sections: ReviewSection[];
   comments: ReviewComment[];
@@ -3261,6 +4301,24 @@ export const communications = {
 
   // Move the caller's read watermark to now for this thread → clears "N new".
   // Fire when the user opens a thread. 404 → thread gone / not in company.
+  // Add people to a private thread. Creator only (403 otherwise); idempotent —
+  // re-adding an existing member is a 200 that changes nothing. The
+  // "X added Y" system line lands on the next message fetch, not in here.
+  addThreadMembers: (threadId: string, userIds: string[]) =>
+    request<ThreadMembersResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/members`,
+      { method: "POST", body: { user_ids: userIds } },
+    ),
+
+  // Remove one person. `userId` is the users.id UUID, NOT the usr_ `user_id`
+  // on ThreadMemberSummary. Creator only · 422 removing yourself, or the last
+  // other person, or on a public thread · 404 if you're not in the thread.
+  removeThreadMember: (threadId: string, userId: string) =>
+    request<ThreadMembersResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    ),
+
   markThreadRead: (threadId: string) =>
     request<MarkThreadReadResponse>(
       `/api/v1/communications/threads/${encodeURIComponent(threadId)}/read`,
@@ -3280,6 +4338,32 @@ export const communications = {
       { method: "POST", body },
     ),
 
+  // Attach a document to a thread. Returns the kind:"attachment" message the
+  // backend created for it — append it to the message list the same way as
+  // sendMessage's response, no refetch needed. 422 → bad file type / empty /
+  // too large. 404 → thread gone / not accessible.
+  uploadAttachment: (threadId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<UploadAttachmentResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/attachments`,
+      form,
+    );
+  },
+
+  // Stateless draft generation for the "Draft with AI" ad-hoc flow — nothing
+  // is saved server-side, so call again to regenerate. document, if given,
+  // must be PDF/DOCX (other types 422 here but can still be attached to the
+  // thread afterwards via uploadAttachment). 422 → blank instructions,
+  // unsupported/empty file, or a document the AI couldn't extract text from.
+  generateAdHocDraft: (params: { instructions: string; sourceText?: string; document?: File }) => {
+    const form = new FormData();
+    form.append("instructions", params.instructions);
+    if (params.sourceText) form.append("source_text", params.sourceText);
+    if (params.document) form.append("document", params.document);
+    return postForm<GenerateAdHocDraftResponse>("/api/v1/communications/ad-hoc/draft", form);
+  },
+
   // All threadless reports + the type pills. `type` narrows only the reports
   // list; the pills always reflect the full unfiltered set.
   threadlessReports: (type?: string) =>
@@ -3288,9 +4372,13 @@ export const communications = {
       { query: type ? { type } : undefined },
     ),
 
-  // Members eligible for the @mention picker. Loaded once and filtered client-side.
-  members: () =>
-    request<CommunicationMembersResponse>("/api/v1/communications/members"),
+  // Company members. With `reportId` the list narrows to people who can open
+  // that report (404 if it isn't in your company) — that's the assign/reassign
+  // picker. The @mention picker passes nothing and gets every active member.
+  members: (reportId?: string) =>
+    request<CommunicationMembersResponse>("/api/v1/communications/members", {
+      query: reportId ? { report_id: reportId } : undefined,
+    }),
 
   // Start a thread on a report with a first message + optional mentions.
   startThread: (body: StartThreadBody) =>
@@ -3298,6 +4386,15 @@ export const communications = {
       method: "POST",
       body,
     }),
+
+  // Works on any thread (ad-hoc or report-based). 422 → blank subject or no
+  // recipients. 404 → thread gone / not in your company. Logs a system
+  // message onto the thread — refetch getThread() to show it.
+  sendExternal: (threadId: string, body: SendExternalBody) =>
+    request<SendExternalResponse>(
+      `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-external`,
+      { method: "POST", body },
+    ),
 
   // ── History tab ──────────────────────────────────────────────────────────
   // Email sends + header stats. `audience` filters the list only; stats always
@@ -3381,6 +4478,16 @@ export const communications = {
       { method: "POST", body },
     ),
 
+  // An annual report's written body for the reviewer screen. Annual reports are
+  // written in the reporting-cycles system, so this reads cycle_report_sections
+  // rather than a per-report table — same envelope as the earnings sections
+  // endpoint, keyed on the section_code the review payload emits as each
+  // section's `id`. 422 for any other report type.
+  reviewAnnualSections: (reportId: string) =>
+    request<EarningsSectionsResponse>(
+      `/api/v1/communications/reports/${encodeURIComponent(reportId)}/annual-sections`,
+    ),
+
   // Reviewer screen: sections, comments, and the action gates. Any company
   // member may read this — only the write calls below are restricted.
   reviewView: (threadId: string) =>
@@ -3412,8 +4519,10 @@ export const communications = {
       { method: "POST", body: note ? { note } : {} },
     ),
 
-  // Note is REQUIRED (422 if blank). Returns the report to draft and clears the
-  // assignment. 403 → not the reviewer · 409 → report locked/published.
+  // Note is REQUIRED (422 if blank). Returns the report to draft and hands the
+  // review back to the report's owner — the person who shared it — so it is a
+  // reassignment, not an unassignment. 403 → not the reviewer · 409 → report
+  // locked/published.
   sendBackReview: (threadId: string, note: string) =>
     request<SendBackReviewResponse>(
       `/api/v1/communications/threads/${encodeURIComponent(threadId)}/send-back`,
@@ -3518,6 +4627,29 @@ export const adminConsole = {
     request<unknown>(`/api/v1/admin/departments/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+};
+
+// Per-user feature-permission grants — additive-only on top of a user's role
+// defaults, distinct from the role-keyed matrix above (getPermissions/
+// savePermissions, which is a separate, older system: manage_users_roles etc).
+// A grant/revoke here only takes effect on the target user's NEXT login.
+export const adminUserPermissions = {
+  get: (userId: string) =>
+    request<UserPermissionsResponse>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions`,
+    ),
+
+  grant: (userId: string, featureKey: string, action: string) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions`,
+      { method: "POST", body: { feature_key: featureKey, action } },
+    ),
+
+  revoke: (userId: string, featureKey: string, action: string) =>
+    request<unknown>(
+      `/api/v1/admin/users/${encodeURIComponent(userId)}/permissions/${encodeURIComponent(featureKey)}/${encodeURIComponent(action)}`,
+      { method: "DELETE" },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -3924,15 +5056,25 @@ export async function login(
   // onboarding flag, which we mirror onto the user (preferring the explicit
   // top-level field) so ProtectedRoute can gate on it.
   const user: AuthUser = { ...res.user };
-  const claims = parseJwtPayload<{
-    company_id?: string | null;
-    onboarding_completed?: boolean | null;
-  }>(res.access_token);
+  const claims = parseJwtPayload<
+    {
+      company_id?: string | null;
+      onboarding_completed?: boolean | null;
+    } & JwtPermissionClaims
+  >(res.access_token);
   if (user.company_id == null && claims && "company_id" in claims) {
     user.company_id = claims.company_id;
   }
   user.onboarding_completed =
     res.onboarding_completed ?? claims?.onboarding_completed ?? null;
+
+  // Feature/app permission system — computed once at login, baked into both
+  // the response and the JWT. Prefer the response field, fall back to the
+  // claim, same pattern as company_id above.
+  user.permissions = res.permissions ?? claims?.permissions ?? null;
+  user.visible_features = res.visible_features ?? claims?.visible_features ?? null;
+  user.apps = res.apps ?? claims?.apps ?? null;
+  user.default_app = res.default_app ?? claims?.default_app ?? null;
 
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -3963,19 +5105,29 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
   try {
     const user = JSON.parse(raw) as AuthUser;
-    // Nothing to backfill if both already present.
-    if (user.company_id != null && user.onboarding_completed != null) {
+    // Nothing to backfill if every field a prior session might be missing is
+    // already present. `visible_features` is checked by key presence, not
+    // nullish, since a legitimate empty array (a fully-locked-out user) must
+    // not be mistaken for "needs backfill".
+    if (
+      user.company_id != null &&
+      user.onboarding_completed != null &&
+      "visible_features" in user
+    ) {
       return user;
     }
 
     // Backfill from the JWT for sessions saved before these fields were
-    // captured, so the onboarding gate still resolves on a page reload.
+    // captured, so the onboarding gate + permission gates still resolve on a
+    // page reload.
     const token = getAuthToken();
     if (!token) return user;
-    const claims = parseJwtPayload<{
-      company_id?: string | null;
-      onboarding_completed?: boolean | null;
-    }>(token);
+    const claims = parseJwtPayload<
+      {
+        company_id?: string | null;
+        onboarding_completed?: boolean | null;
+      } & JwtPermissionClaims
+    >(token);
     if (!claims) return user;
     const merged: AuthUser = { ...user };
     if (merged.company_id == null && "company_id" in claims) {
@@ -3983,6 +5135,18 @@ export function getStoredUser(): AuthUser | null {
     }
     if (merged.onboarding_completed == null && "onboarding_completed" in claims) {
       merged.onboarding_completed = claims.onboarding_completed;
+    }
+    if (!("visible_features" in merged) && "visible_features" in claims) {
+      merged.visible_features = claims.visible_features;
+    }
+    if (!("permissions" in merged) && "permissions" in claims) {
+      merged.permissions = claims.permissions;
+    }
+    if (!("apps" in merged) && "apps" in claims) {
+      merged.apps = claims.apps;
+    }
+    if (!("default_app" in merged) && "default_app" in claims) {
+      merged.default_app = claims.default_app;
     }
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(merged));
     return merged;
@@ -4010,52 +5174,25 @@ export async function fetchWithAuth(
   return res;
 }
 
-// Spec-named register() — raw fetch with res.text() + JSON.parse fallback per
-// .claude/specs/2step_register.md. Role is always "admin"; callers cannot override.
-// Typed auth.register() namespace remains for other future callers.
+// Spec-named register() — consumed by SignupPage. JSON body only; the backend
+// no longer logs the caller in here, it only creates the unverified account
+// and queues a verification email (see VerifyEmailPage). Throws ApiError, so
+// callers can branch on .status: 409 "Email already registered", 403 "This
+// company already has members" (only reachable if a non-fresh company_id is
+// ever passed in), 422 validation.
 export async function register(
   params: RegisterRequest,
 ): Promise<RegisterResponse> {
-  const query = new URLSearchParams({
-    email: params.email,
-    password: params.password,
-    full_name: params.full_name,
-    role: "admin",
+  return request<RegisterResponse>("/api/v1/auth/register", {
+    method: "POST",
+    body: {
+      email: params.email,
+      password: params.password,
+      full_name: params.full_name,
+      company_id: params.company_id ?? null,
+    },
+    auth: false,
   });
-  if (params.company_id) query.append("company_id", params.company_id);
-
-  let res: Response;
-  try {
-    res = await fetch(
-      `${API_BASE_URL}/api/v1/auth/register?${query.toString()}`,
-      {
-        method: "POST",
-        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
-      },
-    );
-  } catch {
-    throw new Error("Unable to connect. Check your connection.");
-  }
-
-  if (res.ok) {
-    const text = await res.text();
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (parsed && typeof parsed === "object") return parsed as RegisterResponse;
-      return { message: String(parsed) };
-    } catch {
-      return { message: text };
-    }
-  }
-
-  if (res.status === 422) {
-    const err = (await res.json().catch(() => null)) as
-      | { detail?: Array<{ msg?: string }> }
-      | null;
-    throw new Error(err?.detail?.[0]?.msg ?? "Validation error");
-  }
-
-  throw new Error("Registration failed. Please try again.");
 }
 
 // Spec-named getSectors() — raw fetch per .claude/specs/2step_register.md.

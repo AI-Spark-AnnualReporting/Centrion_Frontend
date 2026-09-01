@@ -22,6 +22,14 @@ const extractBrandLanguage = vi.fn();
 const detectLogoColors = vi.fn();
 const getColorPalettesGlobal = vi.fn();
 
+// The page now disables every field for non-admins (it's reachable by anyone
+// with profile access, not just admins, since it's folded into Company
+// Profile) — mock an admin so this file's existing save-payload assertions
+// keep exercising the editable path.
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: { role: "admin" } }),
+}));
+
 // Mock the real export names — see onboarding-brand-step.test.tsx for why that
 // matters. brand-identity-api-contract.test.tsx is the backstop.
 vi.mock("@/lib/api", () => ({
@@ -35,6 +43,19 @@ vi.mock("@/lib/api", () => ({
     detectLogoColors: (uri: string) => detectLogoColors(uri),
   },
   quarterlyReports: { getColorPalettesGlobal: () => getColorPalettesGlobal() },
+  ApiError: class ApiError extends Error {
+    status: number;
+    body: unknown;
+    url: string;
+    constructor(status: number, statusText: string, body: unknown, url: string) {
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      super(typeof detail === "string" && detail ? detail : `API ${status} ${statusText} — ${url}`);
+      this.status = status;
+      this.body = body;
+      this.url = url;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 const { default: BrandIdentityPage } = await import("@/pages/BrandIdentityPage");

@@ -1,6 +1,27 @@
 import type { BrandColors } from "@/types/brand";
 import type { CompanyRecord } from "@/types/company";
 
+// Per-user feature-permission system. Computed once at login (role defaults +
+// any admin-granted extras) and baked into both the login response and the JWT
+// — there is no live refresh, so these only change on the user's next login.
+export type FeatureAction = "read" | "create" | "access";
+export type FeaturePermissions = Partial<Record<FeatureAction, boolean>>;
+export type PermissionsMap = Record<string, FeaturePermissions>;
+
+// Which app(s) a user can land in: this app ("Centriton"/"Centriyon") vs. the
+// separate external workspace app (backend calls it "spark_studio").
+export type AppKey = "centriton_dashboard" | "spark_studio";
+
+// Claims the backend embeds in the JWT payload, mirroring the login response's
+// permission fields — read via parseJwtPayload() when the response itself
+// omits them (same pattern already used for company_id/onboarding_completed).
+export interface JwtPermissionClaims {
+  permissions?: PermissionsMap | null;
+  visible_features?: string[] | null;
+  apps?: AppKey[] | null;
+  default_app?: AppKey | null;
+}
+
 export interface AuthUser {
   user_id: string;
   email: string;
@@ -29,6 +50,11 @@ export interface AuthUser {
   // FALSE for a freshly-registered admin until they finish /auth/onboarding.
   // Invited users (project_manager / department_user) are never gated on this.
   onboarding_completed?: boolean | null;
+  // Feature/app permission system — see JwtPermissionClaims above.
+  permissions?: PermissionsMap | null;
+  visible_features?: string[] | null;
+  apps?: AppKey[] | null;
+  default_app?: AppKey | null;
 }
 
 export interface LoginResponse {
@@ -37,6 +63,12 @@ export interface LoginResponse {
   user: AuthUser;
   // Explicit top-level mirror of the user's onboarding state.
   onboarding_completed: boolean;
+  // Explicit top-level mirrors of the permission system — same fields also
+  // land on `user` via login()'s enrichment step (src/lib/api.ts).
+  permissions?: PermissionsMap | null;
+  visible_features?: string[] | null;
+  apps?: AppKey[] | null;
+  default_app?: AppKey | null;
 }
 
 export interface AuthState {

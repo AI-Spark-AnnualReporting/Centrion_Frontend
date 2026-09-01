@@ -14,6 +14,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { auth, companies, quarterlyReports } from "@/lib/api";
 import BrandIdentityPage from "@/pages/BrandIdentityPage";
 
+// Unrelated to the real-api-module contract this file checks — the page now
+// also reads useAuth() to decide editability, so it needs a provider (or a
+// mock) to mount at all.
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: { role: "admin" } }),
+}));
+
 describe("Brand Identity page against the real api module", () => {
   it("exposes every endpoint the page calls", () => {
     expect(typeof companies.getMyCompany).toBe("function");

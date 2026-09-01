@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { createCompany, extractProfileAtSignup, register } from '@/lib/api';
-import { isSarRole, redirectToSar } from '@/lib/sar';
+import { auth, createCompany, extractProfileAtSignup, register, ApiError, rateLimitDetailOf } from '@/lib/api';
+import { redirectToApp, shouldStayInCentriton } from '@/lib/appRouting';
 import type { StepOneState, StepTwoState } from '@/types/register';
 import { StepIndicator } from '@/components/registration/StepIndicator';
 import { StepOneForm } from '@/components/registration/StepOneForm';
@@ -30,29 +30,38 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  // Same green banner serves several arrivals: straight from signup pending
+  // verification, back from a completed verification, and back from a
+  // completed password reset (which ends with "now sign in").
+  const arrivedFrom = location.state as {
+    registered?: boolean;
+    verified?: boolean;
+    passwordReset?: boolean;
+    email?: string;
+  } | null;
+  const [email, setEmail] = useState(arrivedFrom?.email ?? '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Same green banner serves both arrivals: straight from signup, and back
-  // from a completed password reset (which ends with "now sign in").
-  const arrivedFrom = location.state as {
-    registered?: boolean;
-    passwordReset?: boolean;
-  } | null;
+  // Set only when login fails because the email isn't verified yet — offers
+  // a way back to the code screen instead of a dead-end error.
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(
-    arrivedFrom?.registered
-      ? 'Account created successfully. Please sign in.'
-      : arrivedFrom?.passwordReset
-        ? 'Password updated. Please sign in with your new password.'
-        : null,
+    arrivedFrom?.verified
+      ? 'Email verified. Please sign in.'
+      : arrivedFrom?.registered
+        ? 'Account created successfully. Please sign in.'
+        : arrivedFrom?.passwordReset
+          ? 'Password updated. Please sign in with your new password.'
+          : null,
   );
 
   const handleLogin = async () => {
     if (submitting) return;
     setError(null);
+    setUnverifiedEmail(null);
     setSubmitting(true);
     try {
       const loggedIn = await login(email, password);
@@ -62,18 +71,38 @@ export function LoginPage() {
       // own, but explicit navigation avoids the visible bounce.
       if (loggedIn.must_change_password) {
         navigate('/change-password', { replace: true });
-      } else if (isSarRole(loggedIn.role) && redirectToSar()) {
-        // PM / department_user belong in the SAR workspace app, not Centriyon.
-        // redirectToSar() navigates away; stop here.
+      } else if (
+        !shouldStayInCentriton(loggedIn) &&
+        redirectToApp(loggedIn.default_app!)
+      ) {
+        // This user's default app is the other workspace (spark_studio), not
+        // Centriyon. redirectToApp() navigates away; stop here.
         return;
       } else {
         navigate('/');
       }
-    } catch {
-      setError('Invalid email or password');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        // Backend's message already explains this is an unverified email.
+        setError(err.message || 'Please verify your email before logging in.');
+        setUnverifiedEmail(email.trim());
+      } else {
+        setError('Invalid email or password');
+      }
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Original code may well have expired by the time someone hits this —
+  // fire a resend on the way to the code screen so there's always a fresh
+  // one waiting, rather than making them ask for it themselves.
+  const goVerifyEmail = () => {
+    const target = unverifiedEmail;
+    if (!target) return;
+    setUnverifiedEmail(null);
+    navigate('/verify-email', { state: { email: target } });
+    void auth.resendVerification(target).catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -189,6 +218,14 @@ export function LoginPage() {
           {error && (
             <div style={{ fontSize: '11px', color: '#E5484D', marginTop: '8px' }} role="alert">
               {error}
+              {unverifiedEmail && (
+                <>
+                  {' '}
+                  <a className="text-[#4040C8] cursor-pointer" onClick={goVerifyEmail}>
+                    Verify your email
+                  </a>
+                </>
+              )}
             </div>
           )}
           {/* <div className="auth-div">or</div>
@@ -216,7 +253,6 @@ export function SignupPage() {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   const handleStepOneSubmit = (data: StepOneState) => {
     setError('');
@@ -248,7 +284,7 @@ export function SignupPage() {
   };
 
   const handleStepTwoSubmit = async (data: StepTwoState) => {
-    if (loading || success) return;
+    if (loading) return;
     setError('');
 
     if (!data.companyName.trim()) {
@@ -273,19 +309,41 @@ export function SignupPage() {
         /* extraction is best-effort; onboarding falls back to manual */
       }
 
-      await register({
+      const res = await register({
         email: stepOne.email,
         password: stepOne.password,
         full_name: stepOne.full_name,
         company_id: companyId,
       });
 
-      setSuccess(true);
-      setTimeout(() => {
-        navigate('/login', { state: { registered: true } });
-      }, 2000);
+      navigate('/verify-email', {
+        state: { email: stepOne.email, emailSent: res.email_sent, emailMessage: res.email_message },
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      if (err instanceof ApiError && err.status === 409) {
+        // Email already registered — resubmitting the same unverified email
+        // is fine (backend silently reissues the code), so send them to the
+        // code screen instead of a dead-end error.
+        navigate('/verify-email', { state: { email: stepOne.email } });
+        return;
+      }
+      const rateLimit = rateLimitDetailOf(err);
+      if (rateLimit) {
+        // A code was already sent moments ago (e.g. a double-submit) — the
+        // account exists either way, so this isn't a failure, just a reason
+        // to go straight to the code screen instead of asking again.
+        navigate('/verify-email', {
+          state: { email: stepOne.email, notice: rateLimit.message, retryAfterSeconds: rateLimit.retryAfterSeconds },
+        });
+        return;
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        // Defensive only — unreachable via this flow since companyId always
+        // comes from a company we just created, so it never has members yet.
+        setError(err.message || 'This company already has members. Ask an admin for an invite.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -325,12 +383,6 @@ export function SignupPage() {
               ? 'Step 1 of 2 — Personal information'
               : 'Step 2 of 2 — Your organisation'}
           </p>
-
-          {success && (
-            <div style={{ fontSize: '11px', color: '#30A46C', marginBottom: '8px' }} role="status">
-              Account created! Setting up your workspace…
-            </div>
-          )}
 
           {step === 1 ? (
             <StepOneForm

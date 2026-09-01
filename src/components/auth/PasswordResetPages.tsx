@@ -14,8 +14,9 @@ const LogoMark = () => (
 
 // The dark left panel every auth screen shares. Same markup as LoginPage /
 // ChangePasswordPage, just parameterised — these two screens are the third and
-// fourth to need it, so it stops being copy-paste here.
-function AuthAside({ blurb, stats }: { blurb: string; stats: [string, string][] }) {
+// fourth to need it, so it stops being copy-paste here. Exported so later
+// single-purpose auth screens (e.g. VerifyEmailPage) can reuse it too.
+export function AuthAside({ blurb, stats }: { blurb: string; stats: [string, string][] }) {
   return (
     <div className="auth-l">
       <div>

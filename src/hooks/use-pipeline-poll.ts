@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { agentRuns } from "@/lib/api";
+import { agentRuns, ApiError } from "@/lib/api";
 import type { AgentNode, AgentRun } from "@/types/report";
 
 const POLL_INTERVAL_MS = 3000;
@@ -19,9 +19,21 @@ export interface UsePipelinePollResult {
   restart: () => void;
 }
 
+export interface UsePipelinePollOptions {
+  /**
+   * Fetch the per-agent node rows alongside the run. Only pages that draw a
+   * timeline need them — everyone else is paying for a second request every
+   * tick and throwing the answer away.
+   */
+  nodes?: boolean;
+  /** Poll cadence. Shorter suits short runs, where the tail wait is the cost. */
+  intervalMs?: number;
+}
+
 export function usePipelinePoll(
   runId: string | null,
   pollUrl: string | null,
+  { nodes = true, intervalMs = POLL_INTERVAL_MS }: UsePipelinePollOptions = {},
 ): UsePipelinePollResult {
   const [state, setState] = useState<PipelinePollState>({
     phase: pollUrl ? "running" : "idle",
@@ -34,6 +46,17 @@ export function usePipelinePoll(
 
   useEffect(() => {
     if (!pollUrl) {
+      // A run id with nothing to poll it at is a contradiction, and the only
+      // version of "watching nothing" this hook can recognise as wrong. Every
+      // valve below lives inside tick(), which never runs without a url, so
+      // left as plain `idle` this is an absorbing state with no clock: the
+      // caller sits on a loading screen that nothing can ever end. Say timeout
+      // instead -- a phase every screen already handles, with Retry and Keep
+      // waiting on it.
+      if (runId) {
+        setState({ phase: "timeout", run: null, nodes: [], elapsedMs: 0 });
+        return;
+      }
       setState({ phase: "idle", run: null, nodes: [], elapsedMs: 0 });
       return;
     }
@@ -67,7 +90,7 @@ export function usePipelinePoll(
         // for phase transitions, the timeline can stay stale for one tick.
         const [run, nodesResult] = await Promise.all([
           agentRuns.getByPollUrl(pollUrl, controller.signal),
-          runId
+          nodes && runId
             ? agentRuns.getNodes(runId, controller.signal).catch(() => null)
             : Promise.resolve(null),
         ]);
@@ -88,13 +111,28 @@ export function usePipelinePoll(
           return { phase: "running", run, nodes: nextNodes, elapsedMs };
         });
       } catch (err) {
-        // Transient network error on the run endpoint — swallow and try again
-        // on the next tick. Nodes failures are handled above and never land here.
         if ((err as Error)?.name === "AbortError") return;
+        // A run that isn't there any more is never coming back — the server
+        // sweeps unfinished runs on restart. Retrying it for the full 30
+        // minutes leaves a loading screen up over nothing. The grace window is
+        // for the race right after a 202, where the row may not be readable yet.
+        if (err instanceof ApiError && err.status === 404 && elapsedMs > 10_000) {
+          stopped = true;
+          window.clearInterval(intervalId);
+          setState((prev) => ({
+            phase: "timeout",
+            run: prev.run as AgentRun | null,
+            nodes: prev.nodes,
+            elapsedMs,
+          }));
+          return;
+        }
+        // Anything else is transient — try again on the next tick. Nodes
+        // failures are handled above and never land here.
       }
     };
 
-    const intervalId = window.setInterval(tick, POLL_INTERVAL_MS);
+    const intervalId = window.setInterval(tick, intervalMs);
     tick();
 
     return () => {
@@ -102,11 +140,25 @@ export function usePipelinePoll(
       controller.abort();
       window.clearInterval(intervalId);
     };
-  }, [runId, pollUrl, restartCount]);
+  }, [runId, pollUrl, restartCount, nodes, intervalMs]);
 
   const restart = useCallback(() => {
     setRestartCount((c) => c + 1);
   }, []);
 
-  return { state, restart };
+  // A url to watch means we ARE watching, from the very first render. The effect
+  // that flips the state runs a tick later, and callers papered over that one
+  // frame by rendering `idle` as `running` -- which is how a screen with nothing
+  // behind it showed a spinner that no timer could ever end, because the timers
+  // only exist while polling.
+  //
+  // Derived here so `idle` means exactly one thing everywhere, in every consumer:
+  // nothing is being watched. Nobody has to reinterpret it, and nobody can
+  // reinterpret it wrongly.
+  const effective: PipelinePollState =
+    pollUrl && state.phase === "idle"
+      ? { phase: "running", run: null, nodes: [], elapsedMs: 0 }
+      : state;
+
+  return { state: effective, restart };
 }

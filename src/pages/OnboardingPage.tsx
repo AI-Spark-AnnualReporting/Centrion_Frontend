@@ -10,7 +10,7 @@ import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
-import { companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
+import { ApiError, companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 
 const LogoMark = () => (
@@ -26,6 +26,9 @@ const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+// TODO: fold into REPORTING_CURRENCIES (@/constants/currency) once the backend
+// widens OnboardingPayload['reporting_currency'] — that union is missing EUR/GBP,
+// so importing the shared 9-item list here is a type error today.
 const CURRENCIES: OnboardingPayload['reporting_currency'][] = [
   'SAR', 'AED', 'BHD', 'KWD', 'OMR', 'QAR', 'USD',
 ];
@@ -230,6 +233,12 @@ export default function OnboardingPage() {
   }, []);
 
   // Apply LLM-extracted fields onto the Review form (onboarding doc-upload path).
+  //
+  // The backend now saves these and returns the MERGED result, so this is applying
+  // what the company row actually holds: a re-upload from step 1 overwrites what the
+  // new document answers and leaves the rest alone. Setting only truthy values is
+  // the same rule on the form side — a field the document is silent about keeps
+  // whatever is already in the box.
   const applyExtracted = (d: ExtractedCompanyProfile) => {
     if (d.description) setDescription(d.description);
     if (d.sector_id) setSectorId(d.sector_id);
@@ -240,6 +249,11 @@ export default function OnboardingPage() {
     if (d.reporting_currency) setReportingCurrency(d.reporting_currency as OnboardingPayload['reporting_currency']);
     if (d.primary_language) setPrimaryLanguage(d.primary_language as OnboardingPayload['primary_language']);
     if (d.listed_exchange) setListedExchange(d.listed_exchange);
+    // website_url is deliberately NOT applied, and sector_name has no field. The
+    // Review step has no website input, so taking the document's URL would silently
+    // replace the one the user gave at signup — in a value they can neither see nor
+    // correct before it is submitted. Same rule the backend follows by leaving
+    // website_url out of PERSISTED_PROFILE_FIELDS.
   };
 
   // "Analyse" on step 1 — upload a document and extract from it (single LLM call).
@@ -252,10 +266,13 @@ export default function OnboardingPage() {
         setStep('review');
       })
       .catch((err) => {
-        const detail = (err as { body?: { detail?: unknown } })?.body?.detail;
+        // ApiError.message already carries the backend's `detail` (or a
+        // generic message for 429/5xx infra failures) — read it rather than
+        // re-parsing `err.body.detail` directly, which would bypass that
+        // sanitization.
         setAnalyseError(
-          typeof detail === 'string'
-            ? detail
+          err instanceof ApiError && err.message
+            ? err.message
             : "We couldn't read that document. Try another, or fill the details in manually.",
         );
         setStep('intel');
@@ -455,7 +472,7 @@ export default function OnboardingPage() {
                   <input className="inp" placeholder="e.g. Riyadh" value={headquarterCity} onChange={(e) => setHeadquarterCity(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai>Fiscal year</FieldLabel>
+                  <FieldLabel required>Fiscal year</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.fiscalYearEndMonth ? ' inp-error' : ''}`}
                     value={fiscalYearEndMonth}

@@ -16,7 +16,12 @@ import QuarterlyReportForm from "@/components/reports/QuarterlyReportForm";
 import ReportsPage from "@/pages/ReportsPage";
 
 vi.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ user: { company_id: "company-1" } }),
+  useAuth: () => ({
+    user: {
+      company_id: "company-1",
+      permissions: { quarterly_report: { read: true, create: true } },
+    },
+  }),
 }));
 
 const realFetch = global.fetch;

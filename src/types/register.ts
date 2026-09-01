@@ -17,15 +17,17 @@ export interface RegisterRequest {
   email: string;
   password: string;
   full_name: string;
-  role?: string;
-  company_id?: string;
+  company_id?: string | null;
 }
 
+// Registration no longer logs the user in — it only queues a verification
+// email. `user_id` is the account created in an unverified state. The account
+// is created either way, even when `email_sent` is false — that only means
+// the delivery attempt itself failed, not that signup failed.
 export interface RegisterResponse {
   message: string;
-  user_id?: string;
-  email?: string;
-  full_name?: string;
-  role?: string;
-  company_id?: string | null;
+  email: string;
+  user_id: string;
+  email_sent: boolean;
+  email_message: string;
 }

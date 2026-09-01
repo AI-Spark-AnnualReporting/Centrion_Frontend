@@ -1,44 +1,27 @@
 import type { EarningsProducedSection } from '@/types/earnings';
+import { canonicalMoneyInText } from '@/components/quarterly/figureUnits';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import {
   isCoverMode,
   isTableMode,
   isQuoteMode,
   isReconciliationMode,
-  isSourcesMode,
   readCoverValues,
+  readNarrativeEnvelope,
   tryParseJson,
   isRecord,
 } from '@/pages/earnings/preview-helpers';
 import { SectionTable } from './SectionTable';
 import { ReconciliationTable } from './ReconciliationTable';
 import { QuoteBlock } from './QuoteBlock';
-import { SourcesList } from './SourcesList';
-import { MUTED } from './tokens';
+import { INK, MUTED } from './tokens';
+import { AnalysisText, MarkdownProse } from '@/components/quarterly/SectionContent';
 
-// Prose block — split on blank lines into justified paragraphs, never a JSON blob.
+// Prose block — Markdown-rendered (headings, bullets, GFM tables), with raw
+// storage-token money references ("248,891 SAR_million") rewritten to their
+// canonical display form first, so the screen reads like the file.
 function Prose({ text }: { text: string }) {
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  const blocks = paragraphs.length ? paragraphs : [text];
-  return (
-    <>
-      {blocks.map((p, i) => (
-        <p
-          key={i}
-          style={{
-            margin: i === 0 ? 0 : '14px 0 0',
-            fontSize: 14,
-            lineHeight: 1.75,
-            color: '#2A2E47',
-            whiteSpace: 'pre-wrap',
-            textAlign: 'justify',
-          }}
-        >
-          {p}
-        </p>
-      ))}
-    </>
-  );
+  return <MarkdownProse text={canonicalMoneyInText(text)} />;
 }
 
 // Dispatch a produced section by content shape: cover → CoverRenderer (reused from
@@ -46,11 +29,36 @@ function Prose({ text }: { text: string }) {
 export function SectionRenderer({
   section,
   coverTemplateKey,
+  deliverable = false,
+  showAnalysis = false,
 }: {
   section: EarningsProducedSection;
   coverTemplateKey?: string | null;
+  /** Forwarded to SectionTable — the finished report drops rows that can never
+   *  carry a figure, the workbench keeps them. */
+  deliverable?: boolean;
+  /** Print the section's stored analysis under its body. Off by default: Preview
+   *  owns the interactive Analyse control, and only the Report screen prints the
+   *  finished result — the same split quarterly draws between Preview and the
+   *  assembled report. */
+  showAnalysis?: boolean;
 }) {
   const content = section.content;
+
+  // Wraps whatever the dispatch below returns, so the analysis prints under every
+  // shape — table, reconciliation, narrative envelope, prose. report_export does
+  // the same thing for the same reason: the analysis belongs to the section, not
+  // to one particular content shape, so it is appended outside the mode branches.
+  const withAnalysis = (body: React.ReactNode) => {
+    const text = showAnalysis ? (section.analysis?.text ?? '').trim() : '';
+    if (!text) return body;
+    return (
+      <>
+        {body}
+        <AnalysisText text={text} />
+      </>
+    );
+  };
 
   if (isCoverMode(section)) {
     const cv = readCoverValues(content, coverTemplateKey ?? null);
@@ -69,7 +77,7 @@ export function SectionRenderer({
   // Management commentary (S05) — QuoteBlock itself returns null when the
   // backend omitted it (no placeholder, ever), so no empty-content branch here.
   if (isQuoteMode(section)) {
-    return <QuoteBlock content={content} />;
+    return withAnalysis(<QuoteBlock content={content} />);
   }
 
   if (isReconciliationMode(section)) {
@@ -81,19 +89,7 @@ export function SectionRenderer({
         </p>
       );
     }
-    return <ReconciliationTable content={content} />;
-  }
-
-  if (isSourcesMode(section)) {
-    if (content == null || content.trim() === '') {
-      const pending = section.status === 'pending';
-      return (
-        <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: pending ? 'italic' : 'normal' }}>
-          {pending ? 'This section is awaiting generation.' : 'No data available for this section.'}
-        </p>
-      );
-    }
-    return <SourcesList content={content} />;
+    return withAnalysis(<ReconciliationTable content={content} />);
   }
 
   if (content == null || content.trim() === '') {
@@ -108,8 +104,27 @@ export function SectionRenderer({
   if (isTableMode(section)) {
     // Table mode but non-JSON content → treat the string as prose; otherwise render
     // the metric/value table.
-    if (tryParseJson(content) === undefined) return <Prose text={content} />;
-    return <SectionTable content={content} />;
+    if (tryParseJson(content) === undefined) return withAnalysis(<Prose text={content} />);
+    return withAnalysis(<SectionTable content={content} deliverable={deliverable} />);
+  }
+
+  // A `{heading, content}` narrative envelope (Financial Review/MD&A, Executive
+  // Summary, Capital Allocation — written from the report's own figures) reads
+  // as a heading line + real prose, not a label/value dump of its two keys.
+  // Checked before the generic table fallback below, which would otherwise
+  // print "heading" / "content" as table rows.
+  const narrative = readNarrativeEnvelope(content);
+  if (narrative) {
+    return withAnalysis(
+      <>
+        {narrative.heading && (
+          <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 800, color: INK }}>
+            {narrative.heading}
+          </h3>
+        )}
+        <Prose text={narrative.body} />
+      </>,
+    );
   }
 
   // Fallback: some sections (e.g. Reporting Calendar / IR Contact) carry a
@@ -119,8 +134,8 @@ export function SectionRenderer({
   // to an object/array, so it still falls through to <Prose>.
   const parsed = tryParseJson(content);
   if (parsed !== undefined && (Array.isArray(parsed) || isRecord(parsed))) {
-    return <SectionTable content={content} />;
+    return withAnalysis(<SectionTable content={content} deliverable={deliverable} />);
   }
 
-  return <Prose text={content} />;
+  return withAnalysis(<Prose text={content} />);
 }

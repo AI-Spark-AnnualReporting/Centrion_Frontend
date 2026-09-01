@@ -8,7 +8,7 @@ const PRIMARY = '#4040C8';
 const WORKFLOW_STEPS = [
   'Admin creates the cycle — sets the name, fiscal year, dates, and assigns a Project Manager',
   'PM configures the cycle — writes the kickoff brief, adds department timelines, activates it',
-  'HR Lead curates & reviews — refines the AI-generated questions for their department and reviews each answer',
+  'Department lead curates & reviews — refines the AI-generated questions for their department and reviews each answer',
   'Departments answer AI-generated questions — each department submits their narrative',
   'PM reviews & generates the final report',
 ];
@@ -38,7 +38,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
 
   const [name, setName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
-  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('en');
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('english');
   const [projectManagerId, setProjectManagerId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -85,7 +85,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const reset = () => {
     setName('');
     setFiscalYear('');
-    setContentLanguage('en');
+    setContentLanguage('english');
     setProjectManagerId('');
     setStartDate('');
     setEndDate('');
@@ -113,6 +113,7 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
         start_date: startDate,
         end_date: endDate,
         submission_deadline: submissionDeadline,
+        content_language: contentLanguage,
       };
       const cycle = await sarCycles.create(payload);
       reset();
@@ -189,8 +190,8 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             <div className="fl" style={{ marginBottom: 0 }}>
               <label className="fl-label">Content Language *</label>
               <div className="tabs" style={{ marginBottom: 0 }}>
-                <button type="button" className={`tab ${contentLanguage === 'en' ? 'act' : ''}`} onClick={() => setContentLanguage('en')}>English</button>
-                <button type="button" className={`tab ${contentLanguage === 'ar' ? 'act' : ''}`} onClick={() => setContentLanguage('ar')}>العربية</button>
+                <button type="button" className={`tab ${contentLanguage === 'english' ? 'act' : ''}`} onClick={() => setContentLanguage('english')}>English</button>
+                <button type="button" className={`tab ${contentLanguage === 'arabic' ? 'act' : ''}`} onClick={() => setContentLanguage('arabic')}>العربية</button>
               </div>
             </div>
           </div>
@@ -221,11 +222,19 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={startDate}
                 onChange={(e) => {
                   const v = e.target.value;
+                  // Native date inputs fire onChange with an empty string on every
+                  // keystroke while a segment (day/month/year) is still incomplete —
+                  // committing that would reset the whole field mid-type. Only commit
+                  // once the date is fully valid; a real clear is caught on blur.
+                  if (!v) return;
                   setStartDate(v);
                   // Downstream dates can't precede the new start — clear them
                   // instead of leaving a now-invalid value in place.
                   if (endDate && endDate < v) setEndDate('');
                   if (submissionDeadline && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setStartDate('');
                 }}
               />
             </div>
@@ -238,9 +247,13 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={endDate}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v && startDate && v < startDate) return;
+                  if (!v) return;
+                  if (startDate && v < startDate) return;
                   setEndDate(v);
-                  if (submissionDeadline && v && submissionDeadline < v) setSubmissionDeadline('');
+                  if (submissionDeadline && submissionDeadline < v) setSubmissionDeadline('');
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setEndDate('');
                 }}
               />
             </div>
@@ -253,8 +266,13 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
                 value={submissionDeadline}
                 onChange={(e) => {
                   const v = e.target.value;
+                  if (!v) return;
                   const floor = endDate && endDate > today ? endDate : today;
-                  setSubmissionDeadline(v && v < floor ? '' : v);
+                  if (v < floor) return;
+                  setSubmissionDeadline(v);
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) setSubmissionDeadline('');
                 }}
               />
             </div>

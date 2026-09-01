@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
+import UploadedReportsList from '@/components/reports/UploadedReportsList';
 
 // The onboarding upload step, reachable from inside the app.
 //
@@ -38,7 +39,11 @@ export default function UploadReportsPage() {
 
       <div className="card" style={{ padding: '22px 24px' }}>
         <UploadReportsStep
-          submitLabel="Process Reports & Rebuild Dashboard →"
+          submitLabel="Process Reports & Update Dashboard →"
+          // Only the annual/ESG slots here: the ingest reads nothing else, so offering
+          // the financial/other slots would promise processing that never happens.
+          // Onboarding passes no docTypes and keeps all four.
+          docTypes={['annual', 'esg']}
           onProcess={(files) => {
             // Same flag onboarding sets, so the dashboard shows the workspace view
             // immediately instead of racing the documents query behind hasDocs.
@@ -47,6 +52,8 @@ export default function UploadReportsPage() {
           }}
         />
       </div>
+
+      <UploadedReportsList />
     </div>
   );
 }

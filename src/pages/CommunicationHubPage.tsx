@@ -26,8 +26,20 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
+import { statusPill, isInReview } from '@/components/dashboard/report-status';
+import { canOpenReport, hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
-import { abbreviateName, initials, relativeTime } from '@/components/communications/helpers';
+import { RecipientChip } from '@/components/communications/RecipientChip';
+import { SendExternalModal } from '@/components/communications/SendExternalModal';
+import { RichTextEditor, openAnchorFromEvent } from '@/components/communications/RichTextEditor';
+import {
+  abbreviateName,
+  ATTACHMENT_ACCEPT,
+  companyDomain,
+  initials,
+  relativeTime,
+  validateAttachmentFile,
+} from '@/components/communications/helpers';
 
 /* ══════════════════════════════════════════════════════════════════════
    Communication Hub
@@ -38,7 +50,7 @@ import { abbreviateName, initials, relativeTime } from '@/components/communicati
    and Publish are static placeholders on this page — later parts.
 ═══════════════════════════════════════════════════════════════════════ */
 
-type ReportKind = 'report' | 'board' | 'esg';
+type ReportKind = 'report' | 'board' | 'esg' | 'discussion';
 
 // Backend sends report_type only (no icon). Map: ESG → green leaf, board →
 // purple board, all financial types (quarterly/annual/agm/dividend/press) →
@@ -67,6 +79,16 @@ const ICON_LEAF = (
     <path d="M5 16c2.5-4 5-6 8.5-8" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 );
+const ICON_DISCUSSION = (
+  <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
+    <path
+      d="M3 5.8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6.4a2 2 0 0 1-2 2H8.4L5 17.2v-3H5a2 2 0 0 1-2-2V5.8z"
+      stroke="#fff"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 function FileTile({ kind }: { kind: ReportKind }) {
   const cfg =
@@ -74,7 +96,9 @@ function FileTile({ kind }: { kind: ReportKind }) {
       ? { bg: 'linear-gradient(150deg,#22C55E,#16A34A)', icon: ICON_LEAF }
       : kind === 'board'
         ? { bg: 'linear-gradient(150deg,#7C5CFF,#5B34D6)', icon: ICON_BOARD }
-        : { bg: 'linear-gradient(150deg,#5B5BF0,#4040C8)', icon: ICON_CHART };
+        : kind === 'discussion'
+          ? { bg: 'linear-gradient(150deg,#94A3B8,#64748B)', icon: ICON_DISCUSSION }
+          : { bg: 'linear-gradient(150deg,#5B5BF0,#4040C8)', icon: ICON_CHART };
   return (
     <div style={{ flexShrink: 0, textAlign: 'center' }}>
       <div
@@ -113,6 +137,24 @@ const ICON_PUBLISH = (
   <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
     <path d="M7 9.5V2.5M4.3 5.2L7 2.4l2.7 2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M2.5 9.5v1.4a.9.9 0 0 0 .9.9h7.2a.9.9 0 0 0 .9-.9V9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+const ICON_OPEN_REVIEW = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M5.6 2.6H2.9a.9.9 0 0 0-.9.9v7.6a.9.9 0 0 0 .9.9h7.6a.9.9 0 0 0 .9-.9V8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M8.2 2.3h3.5v3.5M11.4 2.6L6.6 7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ICON_PAPERCLIP = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M21.44 11.05l-9.19 9.19a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.48"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
 
@@ -182,18 +224,61 @@ function ThreadRow({
   onOpen,
   onExternal,
   onPublish,
+  onReview,
+  onAttached,
 }: {
   thread: ThreadSummary;
   last: boolean;
   onOpen: (thread: ThreadSummary) => void;
   onExternal: (thread: ThreadSummary) => void;
   onPublish: () => void;
+  // Opens the reviewer view straight from the row — same action the thread
+  // modal's footer button fires. Only rendered while the report is actually
+  // out for review; the view itself self-gates approve/reassign on can_act.
+  onReview: (thread: ThreadSummary) => void;
+  // Fired after a successful quick-attach so the parent can refresh the row's
+  // internal_count / last_message / updated_at without a full page reload.
+  onAttached: () => void;
 }) {
-  const { report, owner, last_message, updated_at, unread_count, internal_count } = thread;
+  const { report, subject, owner, last_message, updated_at, unread_count, internal_count, is_private, removed_at, assignment } = thread;
+  const { toast } = useToast();
+  // Reviewing means reading the report — only for someone with its module.
+  const { user } = useAuth();
+  const title = report ? report.title : (subject?.trim() || 'Discussion');
+
+  // Review is only live while the report is out for review — once it's
+  // approved (or locked/published) there's nothing left to review.
+  // The report's status, shown only on the thread that IS the review — a
+  // general thread about the same report is not under review itself.
+  const inReview = isInReview(report?.status) && !!assignment;
 
   const ownerLabel = owner
     ? `${abbreviateName(owner.full_name)}${owner.is_you ? ' (you)' : ''}`
     : '—';
+
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+
+  const attachFile = async (file: File) => {
+    const err = validateAttachmentFile(file);
+    if (err) {
+      toast({ title: err, variant: 'destructive' });
+      return;
+    }
+    setAttaching(true);
+    try {
+      await communications.uploadAttachment(thread.thread_id, file);
+      onAttached();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return;
+      toast({
+        title: e instanceof ApiError ? e.message : 'Could not attach that file. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   return (
     <div
@@ -205,29 +290,76 @@ function ThreadRow({
         borderBottom: last ? 'none' : '1px solid #F0F1F8',
       }}
     >
-      <FileTile kind={reportKind(report.report_type)} />
+      <FileTile kind={report ? reportKind(report.report_type) : 'discussion'} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: '#1A1D2E', letterSpacing: '-.1px' }}>
-            {report.title}
+            {title}
           </span>
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '2px 9px',
-              borderRadius: 20,
-              background: 'rgba(245,158,11,.12)',
-              color: '#B45309',
-              fontSize: 11,
-              fontWeight: 700,
-            }}
-          >
-            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F59E0B' }} />
-            {report.status_label}
-          </span>
+          {/* Only "In review" earns a pill in the list — every other status is
+              noise next to the thread's own activity line. */}
+          {inReview && (() => {
+            const pill = statusPill(report.status, report.status_label);
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '2px 9px',
+                  borderRadius: 20,
+                  background: pill.bg,
+                  color: pill.color,
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: pill.color }} />
+                {pill.text}
+              </span>
+            );
+          })()}
+          {/* A review thread is private too, so "Private" alone left it looking
+              like a second private discussion on the same report — and it does
+              sit beside one, since a review does not eat the owner's own slot.
+              The assignment is what makes it a review, whatever the report's
+              status happens to be now; "In review" above only speaks while the
+              report is still out for review. */}
+          {is_private && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: assignment ? '#EDEAFB' : '#EFF0F7',
+                color: assignment ? '#5B34D6' : '#5A6080',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {ICON_LOCK}
+              {assignment ? 'Review' : 'Private'}
+            </span>
+          )}
+          {removed_at && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 9px',
+                borderRadius: 20,
+                background: '#FDF2F2',
+                color: '#B4232A',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              Removed
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12, color: '#8890AE', marginTop: 3 }}>
           Owner: {ownerLabel} · {relativeTime(updated_at)}
@@ -266,9 +398,57 @@ function ThreadRow({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <input
+          ref={attachInputRef}
+          type="file"
+          accept={ATTACHMENT_ACCEPT.join(',')}
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void attachFile(f);
+            e.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          className="ch-btn"
+          onClick={() => attachInputRef.current?.click()}
+          disabled={attaching}
+          title="Attach a document to this thread"
+          aria-label="Attach a document to this thread"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            borderRadius: 9,
+            border: '1.5px solid #E5E7EF',
+            background: '#fff',
+            color: '#5A6080',
+            cursor: attaching ? 'not-allowed' : 'pointer',
+            opacity: attaching ? 0.55 : 1,
+            transition: '.15s',
+          }}
+        >
+          {ICON_PAPERCLIP}
+        </button>
         <ChannelBtn icon={ICON_LOCK} label="Internal" count={internal_count} tone="internal" onClick={() => onOpen(thread)} />
-        <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        {!removed_at && (
+          <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
+        )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
+        {inReview && assignment && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
+          <button
+            type="button"
+            className="btn bp"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', fontSize: 12 }}
+            onClick={() => onReview(thread)}
+          >
+            Open review
+            {ICON_OPEN_REVIEW}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -542,166 +722,12 @@ function Toggle({ on, onChange, color = '#6D45F5' }: { on: boolean; onChange: (n
 
 // A green recipient chip: "Institutional investors  340  ×". `count` is
 // optional (typed email addresses have none); the × removes the chip.
-function RecipientChip({ label, count, onRemove }: { label: string; count?: number; onRemove?: () => void }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 9px 6px 12px',
-        borderRadius: 20,
-        background: '#E7F7EE',
-        color: '#15803D',
-        fontSize: 12.5,
-        fontWeight: 600,
-      }}
-    >
-      {label}
-      {count != null && <span style={{ fontSize: 11.5, fontWeight: 800, color: '#16A34A', opacity: 0.85 }}>{count}</span>}
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${label}`}
-        style={{ display: 'inline-flex', border: 'none', background: 'transparent', color: '#4BAF79', cursor: 'pointer', padding: 0 }}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      </button>
-    </span>
-  );
-}
-
-/* ── Investor-email helpers (shared by the External modal) ──────────────────
-   The company name/city/currency come from the live company profile; the
-   sender address is derived from the company's website host (fallback: a slug
-   of the name). All best-effort — the modal still works if the fetch fails. */
-function companyDomain(company: Company | null, fallbackName: string): string {
-  const raw = company?.website_url?.trim();
-  if (raw) {
-    try {
-      const host = new URL(raw.startsWith('http') ? raw : `https://${raw}`).hostname.replace(/^www\./, '');
-      if (host) return host;
-    } catch {
-      /* fall through to the slug */
-    }
-  }
-  const slug = fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return `${slug || 'company'}.com`;
-}
-
 // ISO → "YYYY-MM-DDTHH:mm" for a datetime-local input (local time).
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// contentEditable and the preview swallow anchor navigation, so intercept a
-// click on a link and open it in a new tab. Used by both the editor + preview.
-function openAnchorFromEvent(e: React.MouseEvent) {
-  const anchor = (e.target as HTMLElement).closest('a');
-  const href = anchor?.getAttribute('href');
-  if (href) {
-    e.preventDefault();
-    window.open(href, '_blank', 'noopener,noreferrer');
-  }
-}
-
-// A tiny WYSIWYG editor: toolbar (B/I/U/link/list) + a contentEditable box.
-// Seeds its HTML once from `initialHtml` (uncontrolled inner HTML so the caret
-// never jumps), and reports every edit via onChange so the preview stays live.
-function RichTextEditor({ initialHtml, onChange }: { initialHtml: string; onChange: (html: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (ref.current) ref.current.innerHTML = initialHtml;
-    // Seed once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const emit = () => onChange(ref.current?.innerHTML ?? '');
-  const exec = (command: string, value?: string) => {
-    ref.current?.focus();
-    document.execCommand(command, false, value);
-    emit();
-  };
-
-  const TB_BTN: React.CSSProperties = {
-    width: 26,
-    height: 26,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    color: '#5A6080',
-    cursor: 'pointer',
-    border: 'none',
-    background: 'transparent',
-    fontFamily: 'inherit',
-  };
-  // Keep the selection when a toolbar button is pressed.
-  const hold = (e: React.MouseEvent) => e.preventDefault();
-
-  return (
-    <>
-      {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '10px 0', borderTop: '1px solid #F0F1F8', borderBottom: '1px solid #F0F1F8' }}>
-        <button type="button" onMouseDown={hold} onClick={() => exec('bold')} style={{ ...TB_BTN, fontWeight: 800, fontSize: 14 }}>B</button>
-        <button type="button" onMouseDown={hold} onClick={() => exec('italic')} style={{ ...TB_BTN, fontStyle: 'italic', fontSize: 14, fontFamily: 'Georgia, serif' }}>I</button>
-        <button type="button" onMouseDown={hold} onClick={() => exec('underline')} style={{ ...TB_BTN, textDecoration: 'underline', fontSize: 14 }}>U</button>
-        <button
-          type="button"
-          onMouseDown={hold}
-          onClick={() => {
-            const url = window.prompt('Link URL');
-            if (url) {
-              const trimmed = url.trim();
-              // Bare hosts ("example.com") need a scheme or the browser treats
-              // them as relative and the link won't open.
-              const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-              exec('createLink', href);
-            }
-          }}
-          style={TB_BTN}
-          aria-label="Insert link"
-        >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <path d="M6.5 9.5a2.5 2.5 0 0 0 3.5 0l2-2a2.5 2.5 0 0 0-3.5-3.5l-1 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            <path d="M9.5 6.5a2.5 2.5 0 0 0-3.5 0l-2 2a2.5 2.5 0 0 0 3.5 3.5l1-1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-        </button>
-        <button type="button" onMouseDown={hold} onClick={() => exec('insertUnorderedList')} style={TB_BTN} aria-label="Bulleted list">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <path d="M6 4.5h7M6 8h7M6 11.5h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            <circle cx="3" cy="4.5" r="1" fill="currentColor" />
-            <circle cx="3" cy="8" r="1" fill="currentColor" />
-            <circle cx="3" cy="11.5" r="1" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Editable body */}
-      <div
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={emit}
-        onClick={openAnchorFromEvent}
-        className="ext-body"
-        style={{
-          fontSize: 13.5,
-          color: '#3A4066',
-          lineHeight: 1.7,
-          padding: '16px 2px 4px',
-          minHeight: 120,
-          outline: 'none',
-        }}
-      />
-    </>
-  );
 }
 
 // A delivery-option row: icon · title/subtitle · toggle.
@@ -2468,6 +2494,10 @@ export default function CommunicationHubPage() {
   const [tab, setTab] = useState<'communication' | 'history'>('communication');
   const [showNew, setShowNew] = useState(false);
   const [externalThread, setExternalThread] = useState<ThreadSummary | null>(null);
+  // Ad-hoc threads have no report for ExternalEmailModal's report-centric compose
+  // flow to prefill from ("No report attached" / blank subject) — route those
+  // through the simpler per-thread send-external action instead.
+  const [sendExternalTarget, setSendExternalTarget] = useState<ThreadSummary | null>(null);
   const [reopenDraftId, setReopenDraftId] = useState<string | null>(null);
   const [draftsRefresh, setDraftsRefresh] = useState(0);
   const [showPublish, setShowPublish] = useState(false);
@@ -2565,6 +2595,14 @@ export default function CommunicationHubPage() {
           }}
         />
       )}
+      {sendExternalTarget && (
+        <SendExternalModal
+          threadId={sendExternalTarget.thread_id}
+          defaultSubject={sendExternalTarget.subject?.trim() || 'Discussion'}
+          onClose={() => setSendExternalTarget(null)}
+          onSent={() => void fetchThreads()}
+        />
+      )}
       {showPublish && <PublishModal onClose={() => setShowPublish(false)} />}
       {showNew && (
         <NewThreadModal
@@ -2645,8 +2683,10 @@ export default function CommunicationHubPage() {
                   thread={t}
                   last={i === threads.length - 1}
                   onOpen={openThread}
-                  onExternal={(t) => setExternalThread(t)}
+                  onExternal={(t) => (t.report ? setExternalThread(t) : setSendExternalTarget(t))}
                   onPublish={() => setShowPublish(true)}
+                  onReview={(t) => setReviewThreadId(t.thread_id)}
+                  onAttached={() => void fetchThreads()}
                 />
               ))}
             </div>

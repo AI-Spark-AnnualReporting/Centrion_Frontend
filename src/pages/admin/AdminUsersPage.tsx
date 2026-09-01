@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
-import { admin, adminConsole } from '@/lib/api';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { admin, adminConsole, adminUserPermissions } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER } from './admin-flags';
+import { SHOW_CHANGE_ROLE, SHOW_SUSPEND_USER, SHOW_CHANGE_DEPARTMENT } from './admin-flags';
 import {
   ASSIGNABLE_ROLES,
-  CAPABILITY_GROUPS,
   ROLE_DISPLAY,
   ROLE_ORDER,
+  roleLabel,
   type BackendRole,
 } from '@/constants/roles';
+import { GRANTABLE_FEATURES, ROLE_FEATURE_DEFAULTS } from '@/constants/features';
 import type {
   AdminUserRow,
   Department,
   InviteUserPayload,
   InviteUserResponse,
-  PermissionMatrix,
+  UserPermissionsResponse,
   UserStatus,
 } from '@/types/admin';
+import type { FeatureAction, FeaturePermissions } from '@/types/auth';
 import { relativeTime } from '@/lib/time';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import { downloadText } from '@/lib/utils';
@@ -56,18 +59,70 @@ function normalizeUser(raw: any): AdminUserRow {
   };
 }
 
+// Modules the "filter by module access" control can check — the two `app:*`
+// keys are a different concept (which dashboard app a user lands in), not a
+// report module, so they're left out here.
+const MODULE_FILTER_FEATURES = GRANTABLE_FEATURES.filter((f) => !f.key.startsWith('app:'));
+
+// A user has a feature+action once their per-user permissions are known
+// (role default OR an additive extra grant — grants only ever add on top of
+// the role default, never remove it). Until that fetch resolves, fall back to
+// the role default alone: it undercounts a user with an extra grant beyond
+// their role, but never overcounts, so a still-loading count only ever climbs
+// as real data comes in — it doesn't have to flicker down again.
+function hasFeatureAccess(
+  user: AdminUserRow,
+  perm: UserPermissionsResponse | undefined,
+  featureKey: string,
+  action: FeatureAction,
+): boolean {
+  if (perm) {
+    const locked = Boolean(perm.role_defaults?.[featureKey]?.[action]);
+    const granted = perm.extra_grants.some((g) => g.feature_key === featureKey && g.action === action);
+    return locked || granted;
+  }
+  return Boolean(ROLE_FEATURE_DEFAULTS[user.role]?.[featureKey]?.[action as keyof FeaturePermissions]);
+}
+
 // ── Role summary cards ─────────────────────────────────────────────────────
 function RoleCards({
   counts,
+  total,
   active,
   onPick,
+  onClear,
 }: {
   counts: Record<string, number>;
+  total: number;
   active: BackendRole | null;
   onPick: (role: BackendRole) => void;
+  onClear: () => void;
 }) {
   return (
     <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+      <button
+        type="button"
+        onClick={onClear}
+        className="card"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          padding: 14,
+          textAlign: 'left',
+          cursor: 'pointer',
+          border: active === null ? `1.5px solid ${PRIMARY}` : undefined,
+          boxShadow: active === null ? '0 4px 16px rgba(64,64,200,.16)' : undefined,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#9BA3C4' }} />
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>All</span>
+          </div>
+          <span style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>{total}</span>
+        </div>
+        <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 6 }}>Every role, no filter</div>
+      </button>
       {ROLE_ORDER.map((role) => {
         const meta = ROLE_DISPLAY[role];
         const isActive = active === role;
@@ -150,9 +205,9 @@ function InviteModal({
       const dept = departments.find((d) => d.id === departmentId);
       if (dept?.has_hod) {
         const ok = window.confirm(
-          `${dept.department_name} already has an HR Lead` +
+          `${dept.department_name} already has a ${dept.department_code} Lead` +
             (dept.hod_name ? ` (${dept.hod_name})` : '') +
-            `. Creating this user will replace them as the HR Lead. Continue?`,
+            `. Creating this user will replace them as the ${dept.department_code} Lead. Continue?`,
         );
         if (!ok) return;
       }
@@ -224,17 +279,22 @@ function InviteModal({
           </div>
           <div className="fl">
             <label className="fl-label">Role</label>
-            <select
-              className="inp sel"
-              value={role}
-              onChange={(e) => setRole(e.target.value as BackendRole)}
-            >
-              {ASSIGNABLE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
-                </option>
-              ))}
-            </select>
+            {/* A native <select>'s open list is an OS-level popup that ignores
+                the modal's bounds entirely — it visibly spilled out past the
+                card. Radix's Select renders its own positioned, scrollable
+                popover instead, so it stays inside the viewport. */}
+            <Select value={role} onValueChange={(v) => setRole(v as BackendRole)}>
+              <SelectTrigger className="inp" style={{ height: 40 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {ROLE_DISPLAY[r].label} — {ROLE_DISPLAY[r].description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Department — required for department_user and hod. */}
@@ -255,24 +315,27 @@ function InviteModal({
                   No departments available. Create a department first.
                 </div>
               ) : (
-                <select
-                  className="inp sel"
-                  value={departmentId ?? ''}
-                  onChange={(e) => setDepartmentId(e.target.value || null)}
+                <Select
+                  value={departmentId ?? undefined}
+                  onValueChange={(v) => setDepartmentId(v)}
                 >
-                  <option value="">Select a department</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.department_name} ({d.department_code})
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="inp" style={{ height: 40 }}>
+                    <SelectValue placeholder="Select a department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.department_name} ({d.department_code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               {role === 'hod' &&
                 departmentId &&
                 departments.find((d) => d.id === departmentId)?.has_hod && (
                   <div style={{ marginTop: 6, fontSize: 10.5, color: '#B45309', fontWeight: 600 }}>
-                    ⚠ This department already has an HR Lead
+                    ⚠ This department already has a {departments.find((d) => d.id === departmentId)?.department_code} Lead
                     {departments.find((d) => d.id === departmentId)?.hod_name
                       ? ` (${departments.find((d) => d.id === departmentId)?.hod_name})`
                       : ''}
@@ -601,6 +664,18 @@ export default function AdminUsersPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
 
+  // Module-access filter — "how many users have <module> <action> access".
+  // Per-user permissions aren't in the users list, so once a module is picked
+  // we fetch each user's permissions and cache them here (shared with the
+  // expanded-row panel would be nicer, but that panel already fetches on its
+  // own open; this cache just avoids re-fetching a user twice for the filter).
+  const [moduleFilter, setModuleFilter] = useState<string | null>(null);
+  const [moduleAction, setModuleAction] = useState<FeatureAction>('read');
+  const [permsCache, setPermsCache] = useState<Record<string, UserPermissionsResponse>>({});
+  const [loadingModuleAccess, setLoadingModuleAccess] = useState(false);
+  const permsCacheRef = useRef(permsCache);
+  permsCacheRef.current = permsCache;
+
   const { toast } = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
   // Only set when the invite email failed and the temp password needs handing
@@ -646,6 +721,49 @@ export default function AdminUsersPage() {
       .catch(() => setDepartments([]));
   }, []);
 
+  // Reset to an action the picked module actually supports (e.g. switching
+  // from Board Report — read/create — to Command Center, which is read-only).
+  useEffect(() => {
+    const feature = MODULE_FILTER_FEATURES.find((f) => f.key === moduleFilter);
+    if (feature && !feature.actions.includes(moduleAction)) {
+      setModuleAction(feature.actions[0]);
+    }
+  }, [moduleFilter, moduleAction]);
+
+  // Fetch permissions for whichever users aren't cached yet once a module
+  // filter is active. Runs again only when `users` changes (a refetch) or a
+  // new module is picked — not on every cache update, so it settles instead
+  // of looping.
+  useEffect(() => {
+    if (!moduleFilter) return;
+    const missing = users.filter((u) => !permsCacheRef.current[u.user_id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    setLoadingModuleAccess(true);
+    Promise.all(
+      missing.map((u) =>
+        adminUserPermissions
+          .get(u.user_id)
+          .then((res) => [u.user_id, res] as const)
+          .catch(() => null),
+      ),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setPermsCache((prev) => {
+          const next = { ...prev };
+          for (const r of results) if (r) next[r[0]] = r[1];
+          return next;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingModuleAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleFilter, users]);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const u of users) c[u.role] = (c[u.role] ?? 0) + 1;
@@ -664,9 +782,10 @@ export default function AdminUsersPage() {
       if (statusFilter !== 'all' && u.status !== statusFilter) return false;
       if (roleFilter && u.role !== roleFilter) return false;
       if (q && !`${u.full_name} ${u.email}`.toLowerCase().includes(q)) return false;
+      if (moduleFilter && !hasFeatureAccess(u, permsCache[u.user_id], moduleFilter, moduleAction)) return false;
       return true;
     });
-  }, [users, statusFilter, roleFilter, search]);
+  }, [users, statusFilter, roleFilter, search, moduleFilter, moduleAction, permsCache]);
 
   const changeRole = async (u: AdminUserRow, role: BackendRole) => {
     setRowBusy(u.user_id);
@@ -736,8 +855,10 @@ export default function AdminUsersPage() {
 
       <RoleCards
         counts={counts}
+        total={users.length}
         active={roleFilter}
         onPick={(r) => setRoleFilter((prev) => (prev === r ? null : r))}
+        onClear={() => setRoleFilter(null)}
       />
 
       {view === 'users' ? (
@@ -758,9 +879,19 @@ export default function AdminUsersPage() {
           onChangeRole={changeRole}
           onChangeStatus={changeStatus}
           onChangeDepartment={changeDepartment}
+          users={users}
+          permsCache={permsCache}
+          loadingModuleAccess={loadingModuleAccess}
+          moduleFilter={moduleFilter}
+          moduleAction={moduleAction}
+          onModuleChange={setModuleFilter}
+          onActionChange={setModuleAction}
         />
       ) : (
-        <PermissionMatrixView highlight={roleFilter} />
+        <>
+          <PermissionMatrixView highlight={roleFilter} />
+          <AnnualReportCapabilities highlight={roleFilter} />
+        </>
       )}
 
       {inviteOpen && (
@@ -810,6 +941,13 @@ function UsersView(props: {
   onChangeRole: (u: AdminUserRow, role: BackendRole) => void;
   onChangeStatus: (u: AdminUserRow, status: UserStatus) => void;
   onChangeDepartment: (u: AdminUserRow, departmentId: string) => void;
+  users: AdminUserRow[];
+  permsCache: Record<string, UserPermissionsResponse>;
+  loadingModuleAccess: boolean;
+  moduleFilter: string | null;
+  moduleAction: FeatureAction;
+  onModuleChange: (key: string | null) => void;
+  onActionChange: (action: FeatureAction) => void;
 }) {
   const {
     loading,
@@ -828,7 +966,19 @@ function UsersView(props: {
     onChangeRole,
     onChangeStatus,
     onChangeDepartment,
+    users,
+    permsCache,
+    loadingModuleAccess,
+    moduleFilter,
+    moduleAction,
+    onModuleChange,
+    onActionChange,
   } = props;
+
+  const moduleFeature = MODULE_FILTER_FEATURES.find((f) => f.key === moduleFilter);
+  const moduleMatchCount = moduleFilter
+    ? users.filter((u) => hasFeatureAccess(u, permsCache[u.user_id], moduleFilter, moduleAction)).length
+    : null;
 
   return (
     <>
@@ -852,24 +1002,71 @@ function UsersView(props: {
             </button>
           ))}
         </div>
-        <div style={{ position: 'relative', width: 240 }}>
-          <input
-            className="inp"
-            placeholder="Search name or email"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: 30 }}
-          />
-          <svg
-            viewBox="0 0 13 13"
-            width="13"
-            height="13"
-            fill="none"
-            style={{ position: 'absolute', left: 11, top: 11, color: '#9BA3C4' }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Select
+            value={moduleFilter ?? '__none'}
+            onValueChange={(v) => onModuleChange(v === '__none' ? null : v)}
           >
-            <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M8.5 8.5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
+            <SelectTrigger className="inp" style={{ width: 190, height: 37 }}>
+              <SelectValue placeholder="All modules" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">All modules</SelectItem>
+              {MODULE_FILTER_FEATURES.map((f) => (
+                <SelectItem key={f.key} value={f.key}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {moduleFeature && moduleFeature.actions.length > 1 && (
+            <Select value={moduleAction} onValueChange={(v) => onActionChange(v as FeatureAction)}>
+              <SelectTrigger className="inp" style={{ width: 90, height: 37 }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {moduleFeature.actions.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {ACTION_LABEL[a]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {moduleFeature && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: loadingModuleAccess ? '#9BA3C4' : PRIMARY,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {loadingModuleAccess ? 'Checking…' : `${moduleMatchCount} of ${users.length}`}
+            </span>
+          )}
+
+          <div style={{ position: 'relative', width: 240 }}>
+            <input
+              className="inp"
+              placeholder="Search name or email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 30 }}
+            />
+            <svg
+              viewBox="0 0 13 13"
+              width="13"
+              height="13"
+              fill="none"
+              style={{ position: 'absolute', left: 11, top: 11, color: '#9BA3C4' }}
+            >
+              <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8.5 8.5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </div>
         </div>
       </div>
 
@@ -905,7 +1102,6 @@ function UsersView(props: {
                 <th>Status</th>
                 <th>Onboarding</th>
                 <th>Last active</th>
-                <th style={{ textAlign: 'right' }}>Reports</th>
                 <th style={{ width: 44 }} />
               </tr>
             </thead>
@@ -941,7 +1137,7 @@ function UsersView(props: {
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${meta.badgeClass}`}>● {meta.label}</span>
+                        <span className={`badge ${meta.badgeClass}`}>● {roleLabel(u.role, u.department_code)}</span>
                       </td>
                       <td>
                         {u.department_name ? (
@@ -982,9 +1178,6 @@ function UsersView(props: {
                           <span style={{ color: '#C4C9DD' }}>Never</span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: "'DM Mono', monospace", fontWeight: 700, color: u.reports_count ? '#1A1D2E' : '#C4C9DD' }}>
-                        {u.reports_count ?? 0}
-                      </td>
                       <td style={{ textAlign: 'right' }}>
                         <span className={`uchev ${isOpen ? 'open' : ''}`}>
                           <svg
@@ -1001,7 +1194,7 @@ function UsersView(props: {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
+                        <td colSpan={7} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                             {SHOW_CHANGE_ROLE && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1034,7 +1227,7 @@ function UsersView(props: {
                             {/* Change department — for department_user and hod. They
                                 must always belong to a department, so there's no
                                 "none" option. */}
-                            {(u.role === 'department_user' || u.role === 'hod') && (
+                            {SHOW_CHANGE_DEPARTMENT && (u.role === 'department_user' || u.role === 'hod') && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
                                   Change department
@@ -1129,6 +1322,7 @@ function UsersView(props: {
                                 </span>
                               )}
                           </div>
+                          <UserPermissionsPanel user={u} />
                         </td>
                       </tr>
                     )}
@@ -1148,71 +1342,224 @@ function RowGroup({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ── Permission matrix ──────────────────────────────────────────────────────
-function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) {
-  const [matrix, setMatrix] = useState<PermissionMatrix>({});
+// ── Per-user permissions (expanded row) ─────────────────────────────────────
+// Additive-only grants on top of this user's role defaults — a DIFFERENT
+// system from PermissionMatrixView below (that one is role-keyed and covers
+// admin-ops capabilities like manage_users_roles; this one is per-user and
+// covers the 16-key feature catalogue). Fetched fresh every time the row
+// opens rather than cached, since another admin could have changed it.
+function UserPermissionsPanel({ user }: { user: AdminUserRow }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<UserPermissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [busyCell, setBusyCell] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
+    let cancelled = false;
     setLoading(true);
-    adminConsole
-      .getPermissions()
+    setError('');
+    adminUserPermissions
+      .get(user.user_id)
       .then((res) => {
-        if (alive) setMatrix(res ?? {});
+        if (!cancelled) setData(res);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : 'Failed to load permissions.');
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Could not load permissions.');
+        }
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (!cancelled) setLoading(false);
       });
     return () => {
-      alive = false;
+      cancelled = true;
     };
-  }, []);
+  }, [user.user_id]);
 
-  const isChecked = (role: BackendRole, cap: string) =>
-    role === 'admin' ? true : !!matrix[role]?.[cap];
+  const isDefault = (featureKey: string, action: string) =>
+    Boolean(data?.role_defaults?.[featureKey]?.[action as keyof FeaturePermissions]);
 
-  const toggle = (role: BackendRole, cap: string) => {
-    if (role === 'admin') return; // locked
-    const next = !isChecked(role, cap);
-    setMatrix((prev) => ({
-      ...prev,
-      [role]: { ...(prev[role] ?? {}), [cap]: next },
-    }));
-    const k = `${role}:${cap}`;
-    clearTimeout(timers.current[k]);
-    timers.current[k] = setTimeout(() => {
-      adminConsole
-        .savePermissions({ role, capability: cap, enabled: next })
-        .catch(() => {
-          /* keep optimistic state; backend remains source of truth on reload */
+  const extraGrant = (featureKey: string, action: string) =>
+    data?.extra_grants.find((g) => g.feature_key === featureKey && g.action === action);
+
+  const toggle = async (featureKey: string, action: string, nextChecked: boolean) => {
+    const cellKey = `${featureKey}:${action}`;
+    setBusyCell(cellKey);
+    try {
+      if (nextChecked) {
+        await adminUserPermissions.grant(user.user_id, featureKey, action);
+        setData((prev) => {
+          if (!prev) return prev;
+          const additions = [{ feature_key: featureKey, action }];
+          // The backend implies "read" whenever "create" is granted, but
+          // only reflects that in its own response on the next fetch —
+          // mirror it here so the read tick appears immediately instead of
+          // waiting for a reload.
+          if (
+            action === 'create' &&
+            !prev.role_defaults?.[featureKey]?.read &&
+            !prev.extra_grants.some((g) => g.feature_key === featureKey && g.action === 'read')
+          ) {
+            additions.push({ feature_key: featureKey, action: 'read' });
+          }
+          return { ...prev, extra_grants: [...prev.extra_grants, ...additions] };
         });
-    }, 500);
+      } else {
+        await adminUserPermissions.revoke(user.user_id, featureKey, action);
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                extra_grants: prev.extra_grants.filter(
+                  (g) => !(g.feature_key === featureKey && g.action === action),
+                ),
+              }
+            : prev,
+        );
+      }
+      toast({
+        title: 'Permission updated',
+        description: "This change takes effect the next time the user logs in.",
+        variant: 'success',
+      });
+    } catch (e) {
+      toast({
+        title: 'Could not update permission',
+        description: e instanceof Error ? e.message : 'Something went wrong.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyCell(null);
+    }
   };
 
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        paddingTop: 14,
+        borderTop: '1px solid #E5E7EF',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#5A6080', marginBottom: 8 }}>
+        Additional permissions
+      </div>
+      {loading ? (
+        <Spinner />
+      ) : error ? (
+        <div style={{ fontSize: 12, color: '#DC2626' }}>{error}</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ECEEF8' }}>
+                <th
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#9BA3C4',
+                    textTransform: 'uppercase',
+                    letterSpacing: '.5px',
+                  }}
+                >
+                  Feature
+                </th>
+                {(['read', 'create', 'access'] as const).map((action) => (
+                  <th
+                    key={action}
+                    style={{
+                      textAlign: 'center',
+                      padding: '8px 10px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#9BA3C4',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.5px',
+                    }}
+                  >
+                    {action}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {GRANTABLE_FEATURES.map((feature) => (
+                <tr key={feature.key} style={{ borderBottom: '1px solid #F4F5FB' }}>
+                  <td style={{ padding: '8px 10px', fontSize: 12, color: '#1A1D2E' }}>{feature.label}</td>
+                  {(['read', 'create', 'access'] as const).map((action) => {
+                    if (!feature.actions.includes(action)) {
+                      return <td key={action} style={{ padding: '8px 10px' }} />;
+                    }
+                    const locked = isDefault(feature.key, action);
+                    const granted = Boolean(extraGrant(feature.key, action));
+                    const checked = locked || granted;
+                    const cellKey = `${feature.key}:${action}`;
+                    const disabled = locked || feature.alwaysDisabled || busyCell === cellKey;
+                    return (
+                      <td key={action} style={{ padding: '8px 10px', textAlign: 'center' }}>
+                        <span
+                          role="checkbox"
+                          aria-checked={checked}
+                          aria-disabled={disabled}
+                          title={
+                            feature.alwaysDisabled
+                              ? 'Not available to grant'
+                              : locked
+                                ? 'Included in this role by default'
+                                : undefined
+                          }
+                          onClick={() => !disabled && toggle(feature.key, action, !checked)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 22,
+                            height: 22,
+                            borderRadius: 6,
+                            background: checked ? (locked ? '#E8EAF5' : '#4040C8') : '#fff',
+                            border: checked ? 'none' : '1.5px solid #E2E4F0',
+                            color: checked ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
+                            fontSize: 12,
+                            cursor: disabled ? 'default' : 'pointer',
+                            opacity: busyCell === cellKey ? 0.5 : 1,
+                          }}
+                        >
+                          {checked ? '✓' : '✕'}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ACTION_LABEL: Record<FeatureAction, string> = {
+  read: 'Read',
+  create: 'Create',
+  access: 'Access',
+};
+
+// ── Permission matrix ──────────────────────────────────────────────────────
+// A read-only, hardcoded picture of what each role can do by default —
+// sourced from the ROLE_FEATURE_DEFAULTS constant rather than fetched, so
+// every role always shows a real answer, including one with zero current
+// members. There is nothing to edit here: a role's defaults change by editing
+// that constant, and one person's access beyond their role is granted from
+// their own row in Team members, not from this page.
+function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) {
   const cols = ROLE_ORDER;
 
-  if (loading) {
-    return (
-      <div className="card">
-        <Spinner />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="card" style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>
-        {error}
-      </div>
-    );
-  }
-
-  const cellBox = (checked: boolean, locked: boolean, accent: string) => (
+  const cellBox = (value: boolean, locked: boolean) => (
     <span
       style={{
         display: 'inline-flex',
@@ -1221,19 +1568,25 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
         width: 22,
         height: 22,
         borderRadius: 6,
-        background: checked ? (locked ? '#E8EAF5' : accent) : '#fff',
-        border: checked ? 'none' : '1.5px solid #E2E4F0',
-        color: checked ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
+        background: value ? (locked ? '#E8EAF5' : PRIMARY) : '#fff',
+        border: value ? 'none' : '1.5px solid #E2E4F0',
+        color: value ? (locked ? '#5A6080' : '#fff') : '#C4C9DD',
         fontSize: 12,
-        cursor: locked ? 'default' : 'pointer',
       }}
     >
-      {checked ? '✓' : '✕'}
+      {value ? '✓' : '✕'}
     </span>
   );
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>Feature access</div>
+        <div style={{ fontSize: 11.5, color: '#5A6080', marginTop: 4, lineHeight: 1.6 }}>
+          What each role can do by default, read-only. To give one specific person more than their
+          role gets, open their row in Team members instead.
+        </div>
+      </div>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #ECEEF8' }}>
@@ -1248,7 +1601,7 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                 letterSpacing: '.5px',
               }}
             >
-              Capability
+              Feature
             </th>
             {cols.map((role) => (
               <th
@@ -1267,8 +1620,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
           </tr>
         </thead>
         <tbody>
-          {CAPABILITY_GROUPS.map((group) => (
-            <RowGroup key={group.section}>
+          {GRANTABLE_FEATURES.map((feature) => (
+            <RowGroup key={feature.key}>
               <tr>
                 <td
                   colSpan={1 + cols.length}
@@ -1282,15 +1635,17 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                     background: '#FAFBFE',
                   }}
                 >
-                  {group.section}
+                  {feature.label}
                 </td>
               </tr>
-              {group.caps.map((cap) => (
-                <tr key={cap.key} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#1A1D2E' }}>{cap.label}</td>
+              {feature.actions.map((action) => (
+                <tr key={`${feature.key}:${action}`} style={{ borderTop: '1px solid #F4F5FB' }}>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#1A1D2E' }}>
+                    {ACTION_LABEL[action]}
+                  </td>
                   {cols.map((role) => {
                     const locked = role === 'admin';
-                    const checked = isChecked(role, cap.key);
+                    const value = Boolean(ROLE_FEATURE_DEFAULTS[role]?.[feature.key]?.[action]);
                     return (
                       <td
                         key={role}
@@ -1299,9 +1654,8 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
                           padding: '8px',
                           background: highlight === role ? 'rgba(64,64,200,.04)' : undefined,
                         }}
-                        onClick={() => !locked && toggle(role, cap.key)}
                       >
-                        {cellBox(checked, locked, ROLE_DISPLAY[role].dot === '#0D9488' ? '#0D9488' : PRIMARY)}
+                        {cellBox(value, locked)}
                       </td>
                     );
                   })}
@@ -1320,8 +1674,204 @@ function PermissionMatrixView({ highlight }: { highlight: BackendRole | null }) 
           background: '#FAFBFE',
         }}
       >
-        🔒 Admin retains all capabilities and can’t be restricted. Changes apply to every user with
-        that role.
+        🔒 Admin always has full access. These are platform defaults, not per-company settings — a
+        role's access changes by updating them in code, never from this screen.
+      </div>
+    </div>
+  );
+}
+
+// ── Annual Report Dashboard internal capabilities ───────────────────────────
+// The Feature Access table above only says whether a role gets into the Annual
+// Report Dashboard at all — `app:spark_studio`, a single yes/no. It can't say
+// what a role does once inside, because the Annual Report Dashboard is a
+// separate backend with its own fixed role guards, not something this app's
+// permission system exposes. So this is hardcoded reference content, not
+// fetched from anywhere — the same shape of fact as "what does this button do",
+// just documented instead of queried. Update it by hand if the Annual Report
+// Dashboard's own role guards change.
+interface AnnualReportCapabilityGroup {
+  section: string;
+  items: string[];
+}
+
+const ANNUAL_REPORT_ROLE_ORDER: BackendRole[] = ['project_manager', 'hod', 'department_user'];
+
+const ANNUAL_REPORT_CAPABILITIES: Partial<Record<BackendRole, AnnualReportCapabilityGroup[]>> = {
+  project_manager: [
+    {
+      section: 'Kickoff flow',
+      items: [
+        'Set the brief, themes and suggested themes',
+        'Save the brief + themes',
+        'Set the questions deadline',
+        'View a previous brief',
+      ],
+    },
+    {
+      section: 'Cycle dashboard',
+      items: ['View dashboard & build-readiness', "List a cycle's sessions", 'View resolved sections'],
+    },
+    {
+      section: 'Session review',
+      items: ["Approve, reject or reopen a department's submission"],
+    },
+    {
+      section: 'Report section content',
+      items: ['Draft and edit management'],
+    },
+    {
+      section: 'Final report',
+      items: ['Generate, list, get, download and render'],
+    },
+  ],
+  hod: [
+    {
+      section: 'Session visibility',
+      items: ['View sessions assigned to their department'],
+    },
+    {
+      section: 'Question curation',
+      items: ['Edit, add or delete a question', 'Approve the full question set at once'],
+    },
+    {
+      section: 'Assignment',
+      items: ['Assign the approved question set to a department user, including themselves'],
+    },
+    {
+      section: 'Session review',
+      items: ['Review a submitted session'],
+    },
+    {
+      section: 'Also reaches',
+      items: [
+        "Department User's own routes, by self-assigning then answering directly. A session's " +
+          'visibility still stays scoped to its department, not to the role alone.',
+      ],
+    },
+  ],
+  department_user: [
+    {
+      section: 'Dashboard',
+      items: ['View their assigned session dashboard'],
+    },
+    {
+      section: 'Session & questions',
+      items: ['View assigned questions'],
+    },
+    {
+      section: 'Answers',
+      items: [
+        'Submit an answer',
+        'Generate one from an uploaded document',
+        'Get AI-assist suggestions',
+        'Adjust tone',
+      ],
+    },
+    {
+      section: 'Outline & draft',
+      items: ['Generate and save a draft', 'Finalize the session'],
+    },
+    {
+      section: 'Documents',
+      items: ['Upload supporting documents'],
+    },
+  ],
+};
+
+function AnnualReportCapabilities({ highlight }: { highlight: BackendRole | null }) {
+  return (
+    <div className="card" style={{ marginTop: 14, padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
+          Annual Report Dashboard — internal capabilities
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${ANNUAL_REPORT_ROLE_ORDER.length}, 1fr)`,
+          gap: 0,
+        }}
+      >
+        {ANNUAL_REPORT_ROLE_ORDER.map((role, i) => {
+          const groups = ANNUAL_REPORT_CAPABILITIES[role] ?? [];
+          return (
+            <div
+              key={role}
+              style={{
+                borderLeft: i > 0 ? '1px solid #ECEEF8' : undefined,
+                background: highlight === role ? 'rgba(64,64,200,.04)' : undefined,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  padding: '14px 16px',
+                  borderBottom: '1px solid #ECEEF8',
+                }}
+              >
+                <span className={`badge ${ROLE_DISPLAY[role].badgeClass}`}>
+                  ● {ROLE_DISPLAY[role].label}
+                </span>
+                <span style={{ fontSize: 10, color: '#9BA3C4', fontWeight: 600 }}>
+                  {groups.length} {groups.length === 1 ? 'area' : 'areas'}
+                </span>
+              </div>
+              {groups.map((group, gi) => (
+                <div key={group.section}>
+                  <div
+                    style={{
+                      padding: '12px 16px 6px',
+                      borderTop: gi === 0 ? undefined : '1px solid #F4F5FB',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      color: '#9BA3C4',
+                      textTransform: 'uppercase',
+                      letterSpacing: '.6px',
+                      background: '#FAFBFE',
+                    }}
+                  >
+                    {group.section}
+                  </div>
+                  <div style={{ padding: '6px 16px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {group.items.map((item, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: 7, alignItems: 'flex-start' }}>
+                        <span
+                          style={{
+                            width: 4,
+                            height: 4,
+                            borderRadius: '50%',
+                            background: PRIMARY,
+                            marginTop: 6,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: '#1A1D2E', lineHeight: 1.5 }}>{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          padding: '12px 16px',
+          borderTop: '1px solid #ECEEF8',
+          fontSize: 11,
+          color: '#9BA3C4',
+          background: '#FAFBFE',
+          lineHeight: 1.6,
+        }}
+      >
+        Once inside the Annual Report Dashboard, every authenticated user can also manage their own
+        documents, chat conversations, AI agents, and notifications — only deleting a Knowledge Base
+        document requires admin.
       </div>
     </div>
   );

@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { reports as reportsApi, quarterlyReports as quarterlyReportsApi, ApiError } from '@/lib/api';
+import {
+  reports as reportsApi,
+  quarterlyReports as quarterlyReportsApi,
+  companies as companiesApi,
+  ApiError,
+} from '@/lib/api';
 import type {
   QuarterlyReportArea,
   ComparisonAvailability,
   QuarterlySystemMetricsResponse,
 } from '@/lib/api';
-import type { CompanyType, Voice, ReportTone, Comparison } from '@/types/quarterly';
+import type { CompanyType, Voice, ReportTone, Comparison, MetricsMode } from '@/types/quarterly';
 import type { ProcessingPageState } from '@/pages/ProcessingPage';
+import {
+  REPORTING_CURRENCIES,
+  FINANCIAL_SCALES,
+  DEFAULT_CURRENCY,
+  isKnownCurrency,
+  normaliseCurrencyCode,
+  type FinancialScale,
+} from '@/constants/currency';
 
 // Quarter options for the reporting-period selector.
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
@@ -51,6 +64,16 @@ interface FileLangInfo {
   detected?: string;
 }
 
+// Same idea for the financial lane, where the question is "can we read any figures
+// out of this". A .docx is read as TABLES ONLY, so a Word file of prose is an empty
+// file to us and the report would come out with every number blank.
+type FinTableStatus = 'checking' | 'ok' | 'none';
+interface FinTableInfo {
+  status: FinTableStatus;
+  tableCount?: number;
+  message?: string;
+}
+
 const fileKey = (f: File) => `${f.name}:${f.size}`;
 const langName = (l: string) => (l === 'arabic' ? 'Arabic' : 'English');
 
@@ -75,13 +98,14 @@ function humaniseMetric(slug: string): string {
     .join(' ');
 }
 
-// Two upload lanes: narrative documents (PDF/DOCX → vision + chunks) and the
-// dedicated financial-data lane (Excel/CSV → lean, exact figure extraction).
+// Two upload lanes with no overlap: narrative documents (PDF/DOCX) supply the
+// prose and NO figures, and the financial-data lane (Excel/CSV/Word) supplies
+// every number, read as exact cells with no OCR in the path.
 const ACCEPTED_UPLOAD_EXT = ['.pdf', '.docx'] as const;
 const ACCEPTED_UPLOAD_ATTR = ACCEPTED_UPLOAD_EXT.join(',');
-const ACCEPTED_FIN_EXT = ['.xlsx', '.csv'] as const;
+const ACCEPTED_FIN_EXT = ['.xlsx', '.csv', '.docx'] as const;
 const ACCEPTED_FIN_ATTR = ACCEPTED_FIN_EXT.join(',');
-const MAX_DOCUMENTS = 5;   // combined cap across both lanes
+const MAX_DOCUMENTS = 10;  // combined cap across both lanes (backend: MAX_QUARTERLY_DOCUMENTS)
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
@@ -299,6 +323,186 @@ function CtxCard({
   );
 }
 
+// The "?" affordance that sits inside a `.fl-label` and explains what the field
+// wants. Opens on hover and pins on click, so pointer and keyboard users get the
+// same panel. The parent owns `openId` rather than each instance owning a boolean
+// — that is what keeps two panels from being open at once.
+function LabelHelp({
+  id,
+  openId,
+  onOpenChange,
+  ariaLabel,
+  panelLabel,
+  heading,
+  children,
+  width = 290,
+}: {
+  id: string;
+  openId: string | null;
+  onOpenChange: (next: string | null) => void;
+  ariaLabel: string;
+  panelLabel: string;
+  heading?: string;
+  children: React.ReactNode;
+  width?: number;
+}) {
+  const open = openId === id;
+  const pinnedRef = useRef(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  };
+
+  // Same 120/180ms pacing as the metrics catalogue: the open delay stops a flash
+  // when the pointer merely crosses the label, the close delay lets it travel
+  // into the panel.
+  const handleEnter = () => {
+    clearTimers();
+    openTimer.current = setTimeout(() => onOpenChange(id), 120);
+  };
+
+  const handleLeave = () => {
+    clearTimers();
+    if (pinnedRef.current) return;
+    closeTimer.current = setTimeout(() => onOpenChange(null), 180);
+  };
+
+  const togglePin = () => {
+    clearTimers();
+    const next = !(pinnedRef.current && open);
+    pinnedRef.current = next;
+    onOpenChange(next ? id : null);
+  };
+
+  useEffect(() => () => clearTimers(), []);
+
+  // A panel closed by the parent (Escape, or another "?" opening) must drop its
+  // pin too, or the next hover-out would refuse to close it.
+  useEffect(() => {
+    if (!open) pinnedRef.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(null);
+    };
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      onOpenChange(null);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onDown);
+    };
+  }, [open, onOpenChange]);
+
+  return (
+    <span
+      ref={wrapRef}
+      style={{ position: 'relative', display: 'inline-flex' }}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        onFocus={handleEnter}
+        onClick={togglePin}
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          border: '1px solid #9BA3C4',
+          background: open ? '#4040C8' : 'transparent',
+          color: open ? '#fff' : '#9BA3C4',
+          fontSize: 10,
+          fontWeight: 800,
+          lineHeight: 1,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 0,
+          flexShrink: 0,
+        }}
+      >
+        ?
+      </button>
+
+      {open && (
+        <div
+          role="note"
+          aria-label={panelLabel}
+          onMouseEnter={handleEnter}
+          onMouseLeave={handleLeave}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 9px)',
+            left: -10,
+            zIndex: 40,
+            width,
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: '1px solid #ECEEF8',
+            background: '#fff',
+            boxShadow: '0 12px 32px rgba(20,22,40,.16)',
+            // The parent .fl-label is uppercase + letter-spaced; reset so the
+            // help copy reads as normal prose.
+            textTransform: 'none',
+            letterSpacing: 'normal',
+            fontSize: 11.5,
+            fontWeight: 400,
+            color: '#5A6080',
+            lineHeight: 1.55,
+            cursor: 'default',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: -5,
+              left: 14,
+              width: 9,
+              height: 9,
+              background: '#fff',
+              borderLeft: '1px solid #ECEEF8',
+              borderTop: '1px solid #ECEEF8',
+              transform: 'rotate(45deg)',
+            }}
+          />
+          {heading && (
+            <div style={{ color: '#1A1D2E', fontWeight: 700, marginBottom: 6 }}>{heading}</div>
+          )}
+          {children}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// Bulleted list inside a LabelHelp panel. A real <ul> so screen readers announce
+// the item count instead of reading a run-on sentence.
+function HelpList({ items }: { items: string[] }) {
+  return (
+    <ul style={{ margin: 0, paddingLeft: 16 }}>
+      {items.map((it) => (
+        <li key={it} style={{ marginBottom: 2 }}>
+          {it}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // Minimal shape of an existing quarterly report needed by the year dropdown.
 interface QuarterlyReportOption {
   id: string;
@@ -403,7 +607,7 @@ export default function QuarterlyReportForm({
   // data at all" from "prior data exists but in the other metrics lane", plus
   // the mode the backend actually answered for (the radio may have moved since).
   const [compSpecs, setCompSpecs] = useState<ComparisonAvailability['specs'] | null>(null);
-  const [compCheckedMode, setCompCheckedMode] = useState<'system' | 'custom' | null>(null);
+  const [compCheckedMode, setCompCheckedMode] = useState<MetricsMode | null>(null);
 
   const toggleVoice = (v: Voice) => {
     if (v === 'ceo') return; // always on, locked
@@ -438,18 +642,30 @@ export default function QuarterlyReportForm({
   const [showFileCapWarning, setShowFileCapWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Dedicated Excel/CSV lane — exact figures via the lean spreadsheet flow. No
-  // language check (numbers, not prose). Currency + scale are auto-detected server
-  // side (sheet units → prior-period magnitude cross-check → LLM), so no inputs.
+  // Dedicated financial-data lane (Excel/CSV/Word) — exact figures via the lean
+  // spreadsheet flow. No language check (numbers, not prose). Currency and scale
+  // are declared here rather than auto-detected: detection resolves a single
+  // sheet-wide value, so a sheet carrying both SAR and USD columns produced every
+  // metric twice in the report.
   const [financialFiles, setFinancialFiles] = useState<File[]>([]);
   const [isDraggingFin, setIsDraggingFin] = useState(false);
   const financialInputRef = useRef<HTMLInputElement>(null);
+  // null = the user hasn't touched it, so the company default still applies.
+  // Storing the choice separately (rather than seeding state from the fetch) is
+  // what stops a late /companies/me resolve from clobbering a picked currency.
+  const [financialCurrency, setFinancialCurrency] = useState<string | null>(null);
+  const [companyCurrency, setCompanyCurrency] = useState<string | null>(null);
+  // Deliberately no default: a pre-selected scale is a guess, and a silently
+  // mis-scaled report is exactly what this field exists to prevent.
+  const [financialScale, setFinancialScale] = useState<FinancialScale | ''>('');
+  const currencyValue = financialCurrency ?? companyCurrency ?? DEFAULT_CURRENCY;
 
   // System vs Custom metrics. system (default) = map the sheet to our standard
   // metrics + template. custom = extract the sheet's lines as-is, section-assigned.
-  // The Financial Data (Excel/CSV) field only shows in custom mode.
-  const [metricsMode, setMetricsMode] = useState<'system' | 'custom'>('system');
-  const [metricsHelpOpen, setMetricsHelpOpen] = useState(false);
+  // Both modes take their figures from the Financial Data field.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode>('user');
+  // Which "?" panel is open, by id — one slot, so opening one closes the others.
+  const [helpOpen, setHelpOpen] = useState<string | null>(null);
   // The standard metric catalogue behind the "System metrics" hover list. null
   // until the mount fetch lands (or if it fails) — the hover affordance is
   // hidden in that case rather than opening an empty panel.
@@ -494,6 +710,25 @@ export default function QuarterlyReportForm({
   const [fileLang, setFileLang] = useState<Record<string, FileLangInfo>>({});
   const languageRef = useRef(language);
   const filesRef = useRef(files);
+
+  // The financial lane's equivalent, keyed the same way. Unlike the language check
+  // this doesn't depend on any other form choice, so a file is checked once when it
+  // is added and never re-checked.
+  const [finTables, setFinTables] = useState<Record<string, FinTableInfo>>({});
+  // Mirrored in a ref because an in-flight check has to know, the moment its answer
+  // lands, whether the file is still attached — and state read from a closure is
+  // whatever it was when the check started. A key is present here from the instant
+  // the file is added until the instant it is removed, so `id in ref` IS the
+  // question "is this file still on the form".
+  const finTablesRef = useRef<Record<string, FinTableInfo>>({});
+  const writeFinTables = (next: Record<string, FinTableInfo>) => {
+    finTablesRef.current = next;
+    setFinTables(next);
+  };
+  // The popup itself — set when a check comes back with nothing readable in the file.
+  const [noTablesPopup, setNoTablesPopup] = useState<
+    { key: string; name: string; message: string } | null
+  >(null);
 
   const [genError, setGenError] = useState<string | null>(null);
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
@@ -589,6 +824,17 @@ export default function QuarterlyReportForm({
       .catch(() => {
         // Catalogue unavailable — the hover affordance stays hidden.
       });
+
+    // Pre-select the Currency field from the company's own reporting currency.
+    // Resolves from the JWT rather than `companyId`, so this belongs on mount.
+    companiesApi
+      .getMyCompany()
+      .then((c) => {
+        if (!cancelled) setCompanyCurrency(normaliseCurrencyCode(c.reporting_currency));
+      })
+      .catch(() => {
+        // No company currency — the field falls back to the default.
+      });
     return () => {
       cancelled = true;
     };
@@ -644,33 +890,30 @@ export default function QuarterlyReportForm({
     return () => window.removeEventListener('keydown', onKey);
   }, [metricsModal]);
 
-  // Escape closes the System-metrics hover list and the "?" help card, and drops
-  // the pin so a later hover behaves normally.
+  // Escape closes the System-metrics hover list and drops the pin so a later
+  // hover behaves normally. The "?" panels handle their own Escape.
   useEffect(() => {
-    if (!metricsListOpen && !metricsHelpOpen) return;
+    if (!metricsListOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setMetricsListOpen(false);
       setMetricsListPinned(false);
-      setMetricsHelpOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [metricsListOpen, metricsHelpOpen]);
+  }, [metricsListOpen]);
 
-  // Clicking outside the Metrics block dismisses the "?" help card and any
-  // pinned metric list.
+  // Clicking outside the Metrics block dismisses a pinned metric list.
   useEffect(() => {
-    if (!metricsHelpOpen && !metricsListPinned) return;
+    if (!metricsListPinned) return;
     const onDown = (e: MouseEvent) => {
       if (metricsBlockRef.current?.contains(e.target as Node)) return;
-      setMetricsHelpOpen(false);
       setMetricsListPinned(false);
       setMetricsListOpen(false);
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
-  }, [metricsHelpOpen, metricsListPinned]);
+  }, [metricsListPinned]);
 
   // Drop any in-flight hover timers if the form unmounts mid-hover.
   useEffect(
@@ -750,6 +993,42 @@ export default function QuarterlyReportForm({
     });
   };
 
+  // Ask the backend whether each financial file holds anything we can read figures
+  // from, and pop the answer when it doesn't. Fail-open on a network error, same as
+  // the language check — the submit-time gate is the real backstop.
+  const runTablesCheck = (list: File[]) => {
+    list.forEach((file) => {
+      const id = fileKey(file);
+      writeFinTables({ ...finTablesRef.current, [id]: { status: 'checking' } });
+      reportsApi
+        .checkTables(file)
+        .then((res) => {
+          // Removed while the check was in flight — the file is gone, so its answer
+          // is too.
+          if (!(id in finTablesRef.current)) return;
+          writeFinTables({
+            ...finTablesRef.current,
+            [id]: res.has_tables
+              ? { status: 'ok', tableCount: res.table_count }
+              : { status: 'none', message: res.message ?? undefined },
+          });
+          if (!res.has_tables) {
+            setNoTablesPopup({
+              key: id,
+              name: file.name,
+              message:
+                res.message ??
+                `We couldn't find anything to read in "${file.name}".`,
+            });
+          }
+        })
+        .catch(() => {
+          if (!(id in finTablesRef.current)) return;
+          writeFinTables({ ...finTablesRef.current, [id]: { status: 'ok' } });
+        });
+    });
+  };
+
   // Re-check every selected file whenever the report language toggles, since a
   // file's correctness depends on the chosen language.
   useEffect(() => {
@@ -800,7 +1079,14 @@ export default function QuarterlyReportForm({
   const openFilePicker = () => fileInputRef.current?.click();
 
   const acceptFiles = (incoming: FileList | File[]) => {
-    const capLimit = MAX_DOCUMENTS;
+    // On a NEW report, hold back a slot for the financial-data lane: filling the
+    // cap with narrative documents would otherwise leave the required financials
+    // field unfillable and Generate permanently disabled. The reservation is
+    // bidirectional — see acceptFinancialFiles. Upload-to-existing sends only this
+    // lane, so it keeps the whole cap.
+    const capLimit = isUploadMode
+      ? MAX_DOCUMENTS
+      : MAX_DOCUMENTS - Math.max(financialFiles.length, 1);
     const accepted: File[] = [];
     let rejected = false;
     Array.from(incoming).forEach((f) => {
@@ -862,11 +1148,14 @@ export default function QuarterlyReportForm({
       else rejected = true;
     });
     if (rejected) {
-      setGenError(`Financial data must be a spreadsheet (${ACCEPTED_FIN_EXT.join(', ')}).`);
+      setGenError(`Financial data must be a CSV, Excel or Word file (${ACCEPTED_FIN_EXT.join(', ')}).`);
     } else {
       setGenError(null);
     }
     if (accepted.length === 0) return;
+    // Genuinely-new files (not already in the list) get the tables check.
+    const existing = new Set(financialFiles.map(fileKey));
+    const fresh = accepted.filter((f) => !existing.has(fileKey(f)));
     setFinancialFiles((prev) => {
       const seen = new Set(prev.map(fileKey));
       const merged = [...prev];
@@ -874,13 +1163,19 @@ export default function QuarterlyReportForm({
         const id = fileKey(f);
         if (!seen.has(id)) { seen.add(id); merged.push(f); }
       });
-      const capRemaining = Math.max(0, MAX_DOCUMENTS - files.length);
+      // Mirror of the narrative lane's reservation: both lanes are required on a
+      // new report, so neither may consume the cap so completely that the other
+      // can't be filled at all.
+      const capRemaining = isUploadMode
+        ? Math.max(0, MAX_DOCUMENTS - files.length)
+        : Math.max(0, MAX_DOCUMENTS - Math.max(files.length, 1));
       if (merged.length > capRemaining) {
         setShowFileCapWarning(true);
         return merged.slice(0, capRemaining);
       }
       return merged;
     });
+    if (fresh.length > 0) runTablesCheck(fresh);
   };
 
   const handleFinInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -896,8 +1191,18 @@ export default function QuarterlyReportForm({
     }
   };
 
+  const forgetFinancialFile = (key: string) => {
+    setFinancialFiles((prev) => prev.filter((f) => fileKey(f) !== key));
+    const next = { ...finTablesRef.current };
+    delete next[key];
+    writeFinTables(next);
+    // Dropping the offending file is the fix, so the popup about it goes with it.
+    setNoTablesPopup((prev) => (prev?.key === key ? null : prev));
+  };
+
   const removeFinancialFile = (index: number) => {
-    setFinancialFiles((prev) => prev.filter((_, i) => i !== index));
+    const removed = financialFiles[index];
+    if (removed) forgetFinancialFile(fileKey(removed));
   };
 
   const openFinPicker = () => financialInputRef.current?.click();
@@ -925,9 +1230,20 @@ export default function QuarterlyReportForm({
 
   // --- Submit --------------------------------------------------------------
   const hasFiles = files.length > 0;
-  // A new report is satisfied by EITHER lane — a narrative document or a
-  // financial spreadsheet (or both).
-  const hasAnyUpload = files.length > 0 || financialFiles.length > 0;
+  // System mode needs both lanes on a new report: the financial lane is its only
+  // figure source, the narrative lane its only prose source. Custom mode takes its
+  // figures one statement at a time on the Financial Data screen that follows, so
+  // here it asks for narrative documents and nothing else.
+  const hasFinancialFiles = financialFiles.length > 0;
+  // A financial file with nothing readable in it blocks Generate for the same reason
+  // a wrong-language narrative does: this field is the report's only figure source,
+  // so letting it through produces a report with every number blank.
+  const finChecking = financialFiles.some((f) => finTables[fileKey(f)]?.status === 'checking');
+  const finBadFiles = financialFiles.filter((f) => finTables[fileKey(f)]?.status === 'none');
+  const tablesBlocked = finChecking || finBadFiles.length > 0;
+  // Both System and User take every figure from this field, so both require it.
+  // Custom takes its figures per section on the next screen instead.
+  const needsFinancialUpload = !isUploadMode && metricsMode !== 'custom';
 
   // New-report submit requires a company type (pre-selected from detection, but
   // must be set). Report tone is default-selected and voices always has CEO, so
@@ -947,11 +1263,14 @@ export default function QuarterlyReportForm({
       (!selectedReportId &&
         customYear != null &&
         quarter != null &&
-        hasAnyUpload &&
+        hasFiles &&
+        (!needsFinancialUpload || (hasFinancialFiles && !!financialScale && !tablesBlocked)) &&
         !langBlocked &&
         !comparisonBlocked &&
         contextComplete));
 
+  // Ordered to follow the form top to bottom, so the reason points at the next
+  // thing the user will actually reach.
   const disabledReason = isOpenMode
     ? undefined
     : isUploadMode
@@ -962,20 +1281,32 @@ export default function QuarterlyReportForm({
         ? 'Select a reporting year to continue'
         : quarter == null
           ? 'Select a reporting quarter to continue'
-          : !hasAnyUpload
-            ? 'Upload a document or a financial spreadsheet to continue'
+          : !hasFiles
+            ? 'Upload at least one source document (MD&A, prior-year report or management notes) to continue'
             : anyChecking
               ? 'Checking document language…'
               : badFiles.length > 0
                 ? 'Remove the wrong-language document to continue'
-                : companyType == null
-                  ? 'Select the company type to continue'
-                  : comparisonCheck === 'checking'
-                    ? 'Checking comparison data…'
-                    : undefined;
+                : needsFinancialUpload && !hasFinancialFiles
+                  ? 'Upload the financial statements (Excel, CSV or Word) to continue'
+                  : needsFinancialUpload && finChecking
+                    ? 'Checking the financial file…'
+                    : needsFinancialUpload && finBadFiles.length > 0
+                      ? 'Remove the financial file with no tables in it to continue'
+                      : needsFinancialUpload && !financialScale
+                        ? 'Tell us what scale the financial figures are in to continue'
+                        : companyType == null
+                          ? 'Select the company type to continue'
+                          : comparisonCheck === 'checking'
+                            ? 'Checking comparison data…'
+                            : undefined;
 
   const extractApiError = (err: unknown): string => {
     if (err instanceof ApiError) {
+      // 429/5xx come from infra/upstream provider failures, not deliberate
+      // FastAPI responses — ApiError.message is already the sanitized
+      // generic string there, so skip re-parsing the raw body.
+      if (err.status === 429 || err.status >= 500) return err.message;
       const body = err.body as
         | { detail?: string | { error?: string } | Array<{ msg?: string }> }
         | null;
@@ -985,6 +1316,7 @@ export default function QuarterlyReportForm({
       if (detail && typeof detail === 'object' && 'error' in detail && detail.error) {
         return detail.error;
       }
+      return err.message;
     }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
@@ -993,9 +1325,12 @@ export default function QuarterlyReportForm({
   const triggerGenerate = () => {
     if (!canGenerate || !companyId) return;
 
-    // Branch A — open existing report: navigate straight to the outline.
+    // Branch A — open existing report. Goes to the extraction review, not straight
+    // to the outline, so there is ONE way into the flow: if figures are still
+    // awaiting confirmation the user sees them, and if not the screen is a
+    // read-only record of what was extracted and they continue on.
     if (isOpenMode && selectedReportId) {
-      navigate(`/quarterly-report/${selectedReportId}/outline`);
+      navigate(`/quarterly-report/${selectedReportId}/extraction`);
       return;
     }
 
@@ -1005,6 +1340,10 @@ export default function QuarterlyReportForm({
       setGenError(null);
       setIsSubmittingGenerate(true);
       const targetReportId = selectedReportId;
+      // TODO: financialFiles staged in upload-to-existing mode are dropped here —
+      // AddReportDocumentsBody has no financial lane and the backend endpoint takes
+      // no financial params, so the field is live but its files go nowhere. Needs a
+      // backend change; don't "fix" it by hiding the field.
       reportsApi
         .addDocuments(companyId, targetReportId, { files })
         .then((handle) => {
@@ -1054,9 +1393,17 @@ export default function QuarterlyReportForm({
         // Only send a basis we actually have prior data for; otherwise omit it so
         // the report is generated current-period-only (no empty comparison column).
         comparison: compAvail && compAvail[comparison] ? comparison : undefined,
-        // Dedicated Excel/CSV lane → lean extraction; currency/scale auto-detected.
-        financial_files: financialFiles.length > 0 ? financialFiles : undefined,
-        // custom = extract the sheet's lines as-is, section-assigned (no metric map).
+        // Dedicated Excel/CSV lane → lean extraction. Currency and scale are
+        // user-declared: currency picks the column when a sheet carries more than
+        // one, scale is both the fallback for unlabelled rows and the scale every
+        // figure is reported in. System mode only — the backend rejects a sheet
+        // sent in Custom mode, which takes its figures per section on the next
+        // screen (and asks for currency/scale there).
+        financial_files: needsFinancialUpload && hasFinancialFiles ? financialFiles : undefined,
+        financial_currency: needsFinancialUpload && hasFinancialFiles ? currencyValue : undefined,
+        financial_scale:
+          needsFinancialUpload && hasFinancialFiles ? financialScale || undefined : undefined,
+        // custom = the user's own lines, one uploaded statement per section.
         metrics_mode: metricsMode,
       })
       .then((handle) => {
@@ -1072,6 +1419,12 @@ export default function QuarterlyReportForm({
           conflictMessage: handle.message,
           reportType: 'quarterly',
           period: `${quarter} ${customYear}`,
+          // Custom mode has no figures yet — this run only read the narrative
+          // documents. Land on the Financial Data screen, which is where its
+          // numbers come from.
+          // User mode confirms nothing, but it still stops at Extraction — that is
+          // where it shows which tables became sections and which produced nothing.
+          quarterlyNext: metricsMode === 'custom' ? 'financials' : 'extraction',
         };
         navigate('/reports/processing', { state: processingState });
       })
@@ -1373,67 +1726,12 @@ export default function QuarterlyReportForm({
             Financial Data (Excel/CSV) field is shown. */}
         {!isOpenMode && !isUploadMode && (
           <div ref={metricsBlockRef} style={{ marginBottom: 18, position: 'relative' }}>
-            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              Metrics
-              {/* Anchor for the help card so it tracks the "?" rather than a
-                  guessed offset from the label's left edge. */}
-              <span style={{ position: 'relative', display: 'inline-flex' }}>
-                <button
-                  type="button"
-                  aria-label="What are System and Custom metrics?"
-                  aria-expanded={metricsHelpOpen}
-                  onClick={() => setMetricsHelpOpen((v) => !v)}
-                  style={{
-                    width: 16, height: 16, borderRadius: '50%', border: '1px solid #9BA3C4',
-                    background: metricsHelpOpen ? '#4040C8' : 'transparent',
-                    color: metricsHelpOpen ? '#fff' : '#9BA3C4',
-                    fontSize: 10, fontWeight: 800, lineHeight: 1, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
-                  }}
-                >
-                  ?
-                </button>
-
-                {metricsHelpOpen && (
-                  <div
-                    role="note"
-                    style={{
-                      position: 'absolute', top: 'calc(100% + 9px)', left: -10, zIndex: 40,
-                      width: 290, padding: '12px 14px', borderRadius: 12,
-                      border: '1px solid #ECEEF8', background: '#fff',
-                      boxShadow: '0 12px 32px rgba(20,22,40,.16)',
-                      // The parent .fl-label is uppercase + letter-spaced; reset
-                      // so the help copy reads as normal prose.
-                      textTransform: 'none', letterSpacing: 'normal',
-                      fontSize: 11.5, fontWeight: 400, color: '#5A6080', lineHeight: 1.55,
-                      cursor: 'default',
-                    }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        position: 'absolute', top: -5, left: 14, width: 9, height: 9,
-                        background: '#fff', borderLeft: '1px solid #ECEEF8',
-                        borderTop: '1px solid #ECEEF8', transform: 'rotate(45deg)',
-                      }}
-                    />
-                    <div style={{ marginBottom: 8 }}>
-                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>System metrics</strong>
-                      {' — we map your data to our standard set of metrics and lay it out in the '}
-                      standard report template.
-                    </div>
-                    <div>
-                      <strong style={{ color: '#1A1D2E', fontWeight: 700 }}>Custom metrics</strong>
-                      {' — we take the figures from your Excel/CSV exactly as they are, place each '}
-                      line in the right section, and print them as-is.
-                    </div>
-                  </div>
-                )}
-              </span>
-            </label>
+            <label className="fl-label">Metrics</label>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center' }}>
-              {(['system', 'custom'] as const).map((m) => {
+              {/* Only 'Sections from my files' is offered. The other two modes still
+                  work end to end -- put them back in this list to re-enable them. */}
+              {(['user'] as MetricsMode[]).map((m) => {
                 const radio = (
                   <label
                     style={{
@@ -1449,17 +1747,27 @@ export default function QuarterlyReportForm({
                       checked={metricsMode === m}
                       onChange={() => {
                         setMetricsMode(m);
-                        // Leaving custom → the sheet field hides; drop any staged sheets
-                        // so a hidden field can't submit files the user can't see.
-                        if (m === 'system') setFinancialFiles([]);
-                        // The catalogue pill unmounts in custom mode — reset it so a
-                        // hover in flight (or a pinned panel) can't spring back open
-                        // on the way back to system.
-                        else resetMetricsList();
+                        if (m === 'custom') {
+                          // The Financial Data field unmounts in custom mode, and the
+                          // backend rejects a sheet sent with it — so a staged file
+                          // would be invisible AND fatal. Drop it here, while the user
+                          // is looking at the control that caused it.
+                          // NOT done for 'user': that mode keeps the field and needs
+                          // the file, so clearing it would silently undo their upload.
+                          setFinancialFiles([]);
+                        }
+                        if (m !== 'system') {
+                          // The catalogue pill unmounts outside system mode — reset it
+                          // so a hover in flight (or a pinned panel) can't spring back
+                          // open on the way back to system.
+                          resetMetricsList();
+                        }
                       }}
                       style={{ accentColor: '#4040C8', width: 14, height: 14 }}
                     />
-                    {m === 'system' ? 'System metrics' : 'Custom metrics'}
+                    {m === 'system' ? 'System metrics'
+                      : m === 'custom' ? 'Custom metrics'
+                      : 'Sections from my files'}
                   </label>
                 );
 
@@ -1581,30 +1889,51 @@ export default function QuarterlyReportForm({
             </div>
 
             <div style={{ marginTop: 7, fontSize: 11, color: '#9BA3C4', lineHeight: 1.5 }}>
+              {/* "our standard N" stopped being true once the total included the
+                  company's own additions — those are theirs, not ours. */}
               {metricsMode === 'system'
-                ? `We map your data to our standard${systemMetrics ? ` ${systemMetrics.total}` : ''} metrics and lay it out in the standard report template.`
-                : 'We take the figures from your Excel/CSV exactly as they are, place each line in the right section, and print them as-is.'}
+                ? `We map your data to${systemMetrics ? ` these ${systemMetrics.total}` : ' our standard'} metrics and lay it out in the standard report template.`
+                : metricsMode === 'custom'
+                ? 'We print your figures exactly as they are. You upload one statement per section on the next screen, so nothing has to guess where a line belongs.'
+                : 'We print your figures exactly as they are, and build the report around the tables in your files — each one becomes a section named after it, with related tables printed together.'}
             </div>
           </div>
         )}
 
         {/* Upload — shown for new reports and upload-to-existing mode */}
         {!isOpenMode && (
-          <div style={{ marginBottom: 18 }}>
-            <label className="fl-label">
-              Source Documents{' '}
-              <span
-                style={{
-                  fontWeight: 400,
-                  textTransform: 'none',
-                  color: '#9BA3C4',
-                }}
-              >
-                {isUploadMode && existingCoverageLoading
-                  ? '(loading…)'
-                  : `(PDF, DOCX — narrative & prose)`}
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Source Documents
+              <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
+                — required
               </span>
+              <LabelHelp
+                id="source"
+                openId={helpOpen}
+                onOpenChange={setHelpOpen}
+                ariaLabel="What to upload as source documents"
+                panelLabel="What to upload as source documents"
+                heading="Upload any of these"
+              >
+                <HelpList
+                  items={[
+                    'MD&A (management discussion & analysis)',
+                    'Prior-year annual report',
+                    'Management notes',
+                    'Board or chairman commentary',
+                  ]}
+                />
+                <div style={{ marginTop: 8, color: '#9BA3C4' }}>
+                  Prose only — we do not read any figures from these.
+                </div>
+              </LabelHelp>
             </label>
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
+              {isUploadMode && existingCoverageLoading
+                ? '(loading…)'
+                : 'PDF, DOCX — narrative & prose only, no figures read from here. The report’s narrative sections are written from these.'}
+            </div>
 
             <input
               ref={fileInputRef}
@@ -1658,8 +1987,8 @@ export default function QuarterlyReportForm({
                 />
               </svg>
               <span style={{ fontSize: 12, color: '#5A6080' }}>
-                Click to upload or drag &amp; drop financial statements, prior-year
-                report, management notes
+                Click to upload or drag &amp; drop the MD&amp;A, prior-year report,
+                management notes
               </span>
             </div>
 
@@ -1793,20 +2122,85 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Financial Data — dedicated Excel/CSV lane (lean, exact figures).
-            New reports: shown only in Custom-metrics mode (System hides it, per the
-            boss). Upload-to-existing keeps showing it (unchanged behaviour). */}
-        {!isOpenMode && (isUploadMode || metricsMode === 'custom') && (
-          <div style={{ marginBottom: 18 }}>
-            <label className="fl-label">
-              Financial Data (Excel / CSV){' '}
+        {/* Financial Data — System mode's ONLY source of figures. Nothing is read
+            out of the narrative documents above. Hidden in Custom mode, which takes
+            one statement per section on the next screen instead: there the section
+            is chosen by the user rather than guessed from the label. */}
+        {!isOpenMode && (isUploadMode || metricsMode !== 'custom') && (
+          <div style={{ marginBottom: 18, position: 'relative' }}>
+            <label className="fl-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Financial Data (Excel / CSV / Word)
               <span style={{ fontWeight: 400, textTransform: 'none', color: '#2E9B57' }}>
-                — recommended for accuracy
+                — required
               </span>
+              <LabelHelp
+                id="financial"
+                openId={helpOpen}
+                onOpenChange={setHelpOpen}
+                ariaLabel="What financial documents to upload"
+                panelLabel="What to upload as financial data"
+                heading="Upload the statements"
+              >
+                <HelpList
+                  items={[
+                    'Balance sheet',
+                    'Statement of income (P&L)',
+                    'Cash flow statement',
+                  ]}
+                />
+                <div style={{ marginTop: 8, color: '#9BA3C4' }}>
+                  One figure column per period, in a single currency. If your sheet has two
+                  currency columns, upload only the one you want reported.
+                </div>
+              </LabelHelp>
             </label>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>
-              Upload the statements as a spreadsheet for exact figures (no OCR). Currency and
-              scale are detected automatically.
+              Every figure in the report comes from here, read as exact cells with no OCR.
+              Tell us the currency and scale so we read the right column and nothing is
+              mis-scaled.
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }} htmlFor="fin-currency">
+                  Currency
+                </label>
+                <select
+                  id="fin-currency"
+                  className="inp sel"
+                  value={currencyValue}
+                  onChange={(e) => setFinancialCurrency(e.target.value)}
+                >
+                  {/* A company reporting in something off our list still gets to see
+                      its own currency rather than a silent fallback. */}
+                  {!isKnownCurrency(currencyValue) && (
+                    <option value={currencyValue}>{currencyValue}</option>
+                  )}
+                  {REPORTING_CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="fl-label" style={{ fontSize: 10 }} htmlFor="fin-scale">
+                  Numbers are in
+                </label>
+                <select
+                  id="fin-scale"
+                  className="inp sel"
+                  value={financialScale}
+                  onChange={(e) => setFinancialScale(e.target.value as FinancialScale | '')}
+                >
+                  <option value="">Select…</option>
+                  {FINANCIAL_SCALES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <input
@@ -1841,27 +2235,71 @@ export default function QuarterlyReportForm({
                 <path d="M3 14v2a2 2 0 002 2h10a2 2 0 002-2v-2" stroke="#2E9B57" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
               <span style={{ fontSize: 12, color: '#5A6080' }}>
-                Click to upload or drag &amp; drop an Excel or CSV of the financial statements
+                Click to upload or drag &amp; drop the financial statements as Excel, CSV or Word
               </span>
             </div>
 
             {financialFiles.length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
-                {financialFiles.map((file, index) => (
+                {financialFiles.map((file, index) => {
+                  const info = finTables[fileKey(file)];
+                  const isChecking = info?.status === 'checking';
+                  const isBad = info?.status === 'none';
+                  const found = info?.tableCount ?? 0;
+                  return (
                   <div
                     key={`${file.name}:${file.size}:${index}`}
                     style={{
                       position: 'relative', display: 'flex', flexDirection: 'column', gap: 6,
                       padding: '10px 10px 8px', borderRadius: 8,
-                      border: '1px solid #2E9B57', background: 'rgba(46,155,87,.05)',
+                      border: `1px solid ${isBad ? 'rgba(229,72,77,.45)' : '#2E9B57'}`,
+                      background: isBad ? 'rgba(229,72,77,.06)' : 'rgba(46,155,87,.05)',
                     }}
                   >
                     <div style={{ minWidth: 0, paddingRight: 16 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {file.name}
                       </div>
-                      <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>{formatBytes(file.size)}</div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: isBad ? '#B33A3E' : '#9BA3C4',
+                          fontWeight: isBad ? 700 : 400,
+                          marginTop: 2,
+                        }}
+                      >
+                        {isChecking
+                          ? 'Checking for tables…'
+                          : isBad
+                            ? 'No tables found'
+                            : info?.status === 'ok' && found > 0
+                              ? `${found} table${found === 1 ? '' : 's'} found`
+                              : formatBytes(file.size)}
+                      </div>
                     </div>
+                    {info && (
+                      <span
+                        aria-hidden
+                        title={
+                          isChecking
+                            ? 'Checking for tables'
+                            : isBad
+                              ? 'No tables found'
+                              : 'Tables found'
+                        }
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 22,
+                          fontSize: 11,
+                          fontWeight: 800,
+                          lineHeight: 1,
+                          color: isChecking ? '#9BA3C4' : isBad ? '#E5484D' : '#2E9B57',
+                        }}
+                      >
+                        {isChecking ? '⋯' : isBad ? '⚠' : '✓'}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeFinancialFile(index)}
@@ -1878,7 +2316,8 @@ export default function QuarterlyReportForm({
                       </svg>
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2098,8 +2537,16 @@ export default function QuarterlyReportForm({
           </div>
         )}
 
-        {/* Submit */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Submit. The reason is rendered, not just a title — browsers suppress
+            pointer events on a disabled button, so the tooltip never appears and
+            the user is left staring at a dead button. */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span
+            aria-live="polite"
+            style={{ fontSize: 11.5, color: '#9BA3C4', lineHeight: 1.45 }}
+          >
+            {!canGenerate ? disabledReason ?? '' : ''}
+          </span>
           <button
             type="button"
             disabled={!canGenerate}
@@ -2331,6 +2778,115 @@ export default function QuarterlyReportForm({
                   </>
                 )}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* "No tables in this file" — the financial upload is the report's only figure
+          source, and a .docx is read as TABLES ONLY. A user testing the app blind
+          dropped a plain Word document here expecting the narrative to be read out of
+          it, and the report generated with every figure blank and no explanation.
+          Generate stays disabled while the file is attached. */}
+      {noTablesPopup && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="No tables found in the financial file"
+          onClick={() => setNoTablesPopup(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            background: 'rgba(20,22,40,.45)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            animation: 'fade-in .25s ease-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(460px, 100%)',
+              background: '#fff',
+              borderRadius: 16,
+              boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '18px 22px',
+                borderBottom: '1px solid #ECEEF8',
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'rgba(245,158,11,.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 6v5M10 14h.01" stroke="#D97706" strokeWidth="2" strokeLinecap="round" />
+                  <circle cx="10" cy="10" r="8.5" stroke="#D97706" strokeWidth="1.5" />
+                </svg>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
+                No tables found
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 22px 20px' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#3A3F5C', lineHeight: 1.6 }}>
+                {noTablesPopup.message}
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 22 }}>
+                <button
+                  type="button"
+                  onClick={() => setNoTablesPopup(null)}
+                  style={{
+                    padding: '10px 18px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#3A3F5C',
+                    background: '#fff',
+                    border: '1px solid #DDE0F2',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Got it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => forgetFinancialFile(noTablesPopup.key)}
+                  style={{
+                    padding: '10px 22px',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#4040C8',
+                    border: 'none',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Remove file
+                </button>
+              </div>
             </div>
           </div>
         </div>

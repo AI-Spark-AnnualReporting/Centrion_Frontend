@@ -4,6 +4,7 @@ import { companies, getSectors } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { Company, CompanyEditableFields, Sector } from '@/types/company';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import { REPORTING_CURRENCIES } from '@/constants/currency';
 
 // Fields an admin may PATCH. Save diffs these against the loaded company so we
 // only send what actually changed.
@@ -24,18 +25,6 @@ const EDITABLE_FIELDS: (keyof CompanyEditableFields)[] = [
   'has_subsidiaries',
   'has_sukuk',
   'reporting_sector',
-];
-
-const CURRENCIES: { code: string; label: string }[] = [
-  { code: 'SAR', label: 'SAR — Saudi Riyal' },
-  { code: 'USD', label: 'USD — US Dollar' },
-  { code: 'EUR', label: 'EUR — Euro' },
-  { code: 'GBP', label: 'GBP — British Pound' },
-  { code: 'AED', label: 'AED — UAE Dirham' },
-  { code: 'QAR', label: 'QAR — Qatari Riyal' },
-  { code: 'KWD', label: 'KWD — Kuwaiti Dinar' },
-  { code: 'BHD', label: 'BHD — Bahraini Dinar' },
-  { code: 'OMR', label: 'OMR — Omani Rial' },
 ];
 
 const MONTHS = [
@@ -303,7 +292,7 @@ export function CompanyDetailsCard() {
                   disabled={!canEdit}
                 >
                   <option value="">Select currency</option>
-                  {CURRENCIES.map((c) => (
+                  {REPORTING_CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>{c.label}</option>
                   ))}
                 </select>

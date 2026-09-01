@@ -7,6 +7,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { ApiError, companies, complianceValidation } from '@/lib/api';
 import { rememberScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import { useComplianceRuns } from '@/context/ComplianceRunsContext';
 import type {
   Candidate,
@@ -18,7 +19,6 @@ import type {
   RunRejectedBody,
 } from '@/types/compliance';
 import { UPLOAD_EXTENSIONS, UPLOAD_MAX_BYTES } from '@/types/compliance';
-import { ComplianceStepper } from './ComplianceStepper';
 import { CertifiedGallery } from './CertifiedGallery';
 import type { ComplianceRunningState } from './ComplianceRunningPage';
 import {
@@ -65,9 +65,9 @@ const ENTITY_BY_SECTOR: Record<string, EntityType> = {
 };
 
 // Nearly every rule carries effective_from = 2024-01-01, so a report whose
-// period ended before that matches zero rules and POST /runs rejects it. Grey
-// those out up front rather than letting the user find out after clicking
-// Validate. Bump this if the backend's earliest effective_from moves.
+// period ended before that matches zero rules and POST /runs rejects it. Such a
+// report can still be picked here — it just gets an acknowledgement instead of a
+// run. Bump this if the backend's earliest effective_from moves.
 const FIRST_RULED_YEAR = 2024;
 
 // Two ways to name the thing being validated: pick one we generated and the
@@ -88,13 +88,10 @@ const QUARTERS: { key: Quarter; label: string }[] = (['Q1', 'Q2', 'Q3', 'Q4'] as
 
 const CURRENT_YEAR = new Date().getFullYear();
 
-// Newest first, stopping at the first year any rule was in force. Offering 2023
-// would just be offering a guaranteed rejection — the same reason the picker
-// greys out subjects that predate the rules.
-const YEAR_OPTIONS = Array.from(
-  { length: Math.max(1, CURRENT_YEAR - FIRST_RULED_YEAR + 1) },
-  (_, i) => CURRENT_YEAR - i,
-);
+// Newest first, ten years back. Pre-2024 years are offered because an older
+// report is a legitimate thing to bring us — it just can't be validated, so
+// choosing one lands on the acknowledgement in Card 3 instead of a run.
+const YEAR_OPTIONS = Array.from({ length: 10 }, (_, i) => CURRENT_YEAR - i);
 
 // The backend takes the period as an exact string. Compose it in one place so
 // no screen can invent "2025-Q3" or send a bare year.
@@ -131,6 +128,12 @@ function periodYear(period: string | undefined): number | null {
   return m ? Number(m[1]) : null;
 }
 
+// Companion to periodYear for the other half of "Q1-2026".
+function periodQuarter(period: string | undefined): Quarter | null {
+  const m = /Q[1-4]/.exec(period ?? '');
+  return m ? (m[0] as Quarter) : null;
+}
+
 function isPreRules(c: Candidate): boolean {
   const y = periodYear(c.period);
   return y != null && y < FIRST_RULED_YEAR;
@@ -146,6 +149,11 @@ function isPreRules(c: Candidate): boolean {
 //                                   the console, `msg` is for the banner.
 function readComplianceDetail(err: unknown): string | null {
   if (!(err instanceof ApiError)) return null;
+  // 429/5xx come from infra/upstream provider failures, not deliberate
+  // FastAPI responses — never trust raw `detail` there, it can be a leaked
+  // exception string (e.g. an OpenAI RateLimitError). readRunError's own
+  // status-based fallback handles these instead.
+  if (err.status === 429 || err.status >= 500) return null;
   const detail = (err.body as { detail?: unknown } | undefined)?.detail;
   if (!detail) return null;
   if (typeof detail === 'string') return detail.trim() || null;
@@ -167,7 +175,9 @@ function readRunError(err: unknown): string {
   if (detail) return detail;
   if (err instanceof ApiError) {
     if (err.status === 403) return 'That report doesn’t belong to your company.';
-    if (err.status >= 500) return 'The compliance service couldn’t start the run. Please try again.';
+    if (err.status === 429 || err.status >= 500) {
+      return 'The compliance service couldn’t start the run. Please try again.';
+    }
     return 'Validation failed. Please try again.';
   }
   return err instanceof Error ? err.message : 'Validation failed. Please try again.';
@@ -175,31 +185,134 @@ function readRunError(err: unknown): string {
 
 // ── shared bits ──────────────────────────────────────────────────────────────
 
-function Card({
+// The whole wizard lives in one card — Source, Regulators and Validate are
+// sections inside it, not separate cards — with a single header up top that
+// can collapse the entire form away once it's been set up once.
+function SetupCard({
+  expanded,
+  onToggleExpanded,
+  caption,
+  children,
+}: {
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  caption: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="card" style={{ marginBottom: 14, overflow: 'hidden' }}>
+      <button
+        type="button"
+        onClick={onToggleExpanded}
+        aria-expanded={expanded}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '14px 18px',
+          background: 'transparent',
+          border: 'none',
+          borderBottom: expanded ? '1px solid #ECEEF8' : 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: 'inherit',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg,#4040C8,#7C3AED)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 1.5l5.5 2v4c0 4-2.4 6.6-5.5 7.7C4.9 14.1 2.5 11.5 2.5 7.5v-4l5.5-2z"
+                stroke="white"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M5.8 8l1.7 1.7L10.3 6.3"
+                stroke="white"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div className="ct">Set up validation</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: MUTED,
+                marginTop: 2,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {caption}
+            </div>
+          </div>
+        </div>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          style={{
+            flexShrink: 0,
+            transform: expanded ? 'rotate(0deg)' : 'rotate(180deg)',
+            transition: 'transform .15s',
+          }}
+        >
+          <path
+            d="M2.5 7L6 3.5 9.5 7"
+            stroke={MUTED}
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {expanded && children}
+    </div>
+  );
+}
+
+function Section({
   step,
   title,
   caption,
+  last,
   children,
 }: {
   step: number;
   title: string;
   caption?: string;
+  last?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="card" style={{ marginBottom: 14 }}>
-      <div className="ch">
-        <div>
-          <div className="ct">
-            <span style={{ color: MUTED, fontFamily: MONO, marginRight: 6 }}>{step}</span>
-            {title}
-          </div>
-          {caption && (
-            <div style={{ fontSize: 11, color: MUTED, marginTop: 3, maxWidth: 620 }}>{caption}</div>
-          )}
-        </div>
+    <div style={{ padding: '16px 18px', borderBottom: last ? 'none' : '1px solid #ECEEF8' }}>
+      <div className="ct">
+        <span style={{ color: MUTED, fontFamily: MONO, marginRight: 6 }}>{step}</span>
+        {title}
       </div>
-      <div className="cb">{children}</div>
+      {caption && (
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 3, marginBottom: 14, maxWidth: 620 }}>{caption}</div>
+      )}
+      {children}
     </div>
   );
 }
@@ -489,22 +602,25 @@ function UploadPanel({
   );
 }
 
+// `preRules` doesn't disable the row — an older report is still selectable, it
+// just gets acknowledged rather than validated. The amber caption is the only
+// warning it needs; Card 3 does the explaining.
 function SubjectRow({
   subject,
   selected,
-  disabled,
+  preRules,
   onSelect,
 }: {
   subject: Candidate;
   selected: boolean;
-  disabled: boolean;
+  preRules: boolean;
   onSelect: () => void;
 }) {
   return (
     <label
       title={
-        disabled
-          ? `No compliance rules were in force in ${periodYear(subject.period)} — rules start from ${FIRST_RULED_YEAR}.`
+        preRules
+          ? `No compliance rules were in force in ${periodYear(subject.period)} — rules start from ${FIRST_RULED_YEAR}. This report can be acknowledged, not validated.`
           : undefined
       }
       style={{
@@ -513,10 +629,9 @@ function SubjectRow({
         gap: 12,
         padding: '11px 13px',
         borderRadius: 10,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        cursor: 'pointer',
         border: `1.5px solid ${selected ? PRIMARY : '#ECEEF8'}`,
-        background: disabled ? '#FAFBFE' : selected ? '#FAFAFF' : '#fff',
-        opacity: disabled ? 0.55 : 1,
+        background: selected ? '#FAFAFF' : '#fff',
         transition: '.12s',
       }}
     >
@@ -524,7 +639,6 @@ function SubjectRow({
         type="radio"
         name="compliance-subject"
         checked={selected}
-        disabled={disabled}
         onChange={onSelect}
         style={{ accentColor: PRIMARY, width: 14, height: 14, flexShrink: 0 }}
       />
@@ -545,12 +659,105 @@ function SubjectRow({
           {/* No "uploaded" badge: uploaded subjects only ever render under the
               upload tab's own heading, which already says it. */}
           {[subject.period, subject.status].filter(Boolean).join(' · ')}
-          {disabled && (
+          {preRules && (
             <span style={{ color: '#B45309' }}> · predates all compliance rules</span>
           )}
         </div>
       </div>
     </label>
+  );
+}
+
+// The whole answer for a pre-2024 report: there is nothing to validate it
+// against, so say so and get out of the way. No reason field, no confirm/cancel
+// pair — nothing is being decided, only acknowledged. Every way out (button,
+// backdrop, Escape) runs the same `onClose`, which clears the selection, so the
+// dialog can be driven straight off `preRulesSelected` with no state of its own.
+// Modal shell mirrors ResolveGapDialog.
+function PreRulesDialog({ period, onClose }: { period: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="No compliance rules were in force for this period"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1400,
+        background: 'rgba(20,22,40,.45)',
+        backdropFilter: 'blur(2px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+        animation: 'fade-in .2s ease-out',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(480px, 100%)',
+          background: '#fff',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '20px 22px 4px' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: DARK }}>
+            No compliance rules were in force for this period
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              padding: '11px 13px',
+              borderRadius: 10,
+              background: 'rgba(245,158,11,.08)',
+              border: '1px solid rgba(245,158,11,.3)',
+              fontSize: 11.5,
+              fontFamily: MONO,
+              color: '#8A5A0B',
+            }}
+          >
+            {period} · predates all compliance rules
+          </div>
+
+          <p style={{ margin: '12px 0 0', fontSize: 12, color: MUTED, lineHeight: 1.7 }}>
+            Every rule in the catalogue takes effect from 1 January {FIRST_RULED_YEAR}, so a
+            report covering an earlier period can’t be validated and no certificate can be
+            issued for it. Nothing has been sent. Pick a {FIRST_RULED_YEAR}-or-later report to
+            run a validation.
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            padding: '18px 22px',
+          }}
+        >
+          <button
+            type="button"
+            className="btn bp"
+            onClick={onClose}
+            style={{ fontSize: 13, padding: '10px 22px' }}
+          >
+            I understand
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -560,6 +767,7 @@ export default function ComplianceSetupPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? '';
+  const { canCreate, canRead } = useFeaturePermissions('compliance_validation');
   // So a new run is in the dock the moment it is accepted, rather than whenever
   // the next discovery sweep happens to come round.
   const { report: reportRun } = useComplianceRuns();
@@ -630,6 +838,10 @@ export default function ComplianceSetupPage() {
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState('');
 
+  // The whole setup form collapses behind one header once it's been filled in
+  // — expanded by default, since there's nothing to hide on first arrival.
+  const [setupExpanded, setSetupExpanded] = useState(true);
+
   // One endpoint returns both, but they belong to different tabs: reports we
   // generated and the company approved, and files the user brought us. Keeping
   // an uploaded file in the approved list would misdescribe it — nobody
@@ -652,12 +864,28 @@ export default function ComplianceSetupPage() {
     setRunError('');
   };
 
+  // The period picker lives under "or upload a new one", so touching it means
+  // "I'm describing a new file" — same as dropping one in. An already-uploaded
+  // report carries its own period and ignores this, so leaving it selected
+  // would silently discard whatever the user just typed.
+  const pickPeriod = (apply: () => void) => {
+    apply();
+    setSelected(null);
+    setRunError('');
+  };
+
   const pickSubject = (subject: Candidate) => {
     setSelected(subject);
     if (subject.source === 'upload') {
       setFile(null);
       setFileProblem('');
     }
+    // The subject already knows its period, so mirror it into the pickers
+    // rather than leaving them on a default that contradicts the row above.
+    // Still editable — this is a starting point, not a lock.
+    const y = periodYear(subject.period);
+    if (y != null) setYear(y);
+    setQuarter(periodQuarter(subject.period));
     setRunError('');
   };
 
@@ -741,7 +969,7 @@ export default function ComplianceSetupPage() {
         if (wanted) {
           preselectId.current = null;
           const match = list.find((c) => c.subject_id === wanted);
-          if (match && !isPreRules(match)) {
+          if (match) {
             setSelected(match);
             // An uploaded subject lives on the upload tab, so open the tab that
             // can actually show what we just selected.
@@ -847,9 +1075,31 @@ export default function ComplianceSetupPage() {
   const newFileReady = file != null && !fileProblem && period !== '';
   const sourceReady = sourceMode === 'upload' ? selected != null || newFileReady : selected != null;
 
+  // A pre-2024 subject is selectable but not validatable — no rule was in force,
+  // so there is nothing to check it against. Card 3 shows the acknowledgement
+  // instead of the run button, and this keeps `runValidation` from firing even
+  // if something else ever calls it.
+  // Not gated on the file: the period is what decides which rules were in
+  // force, so the answer is known the moment it's picked. Making the user
+  // choose a file first would be asking for an upload we already know we can't
+  // validate.
+  const preRulesSelected = selected
+    ? isPreRules(selected)
+    : sourceMode === 'upload' && period !== '' && effectiveYear < FIRST_RULED_YEAR;
+
   // An empty `enabled_frameworks` means "no filter" to the API — every rule
   // runs, the opposite of switching them all off. So block the submit instead.
-  const canRun = sourceReady && enabled.length > 0 && !starting;
+  const canRun = sourceReady && enabled.length > 0 && !starting && !preRulesSelected;
+
+  // The acknowledgement is the end of the road — /compliance is this page, so
+  // there is nowhere to send the user except back to picking something newer.
+  const dismissPreRules = () => {
+    setSelected(null);
+    setFile(null);
+    setFileProblem('');
+    setYear(null);
+    setRunError('');
+  };
 
   // POST /runs is 202: it comes back before a single check has been made, with
   // no scores in the body. All we get is the run id, so the only thing to do
@@ -982,10 +1232,19 @@ export default function ComplianceSetupPage() {
   return (
     <div>
       <ComplianceHeader />
-      <ComplianceStepper activeStep={1} />
 
-      {/* ── Card 1 · Source ─────────────────────────────────────────────── */}
-      <Card
+      {canCreate && (
+      <>
+      {/* No stepper here — this is the entry screen, not a step inside a report
+          already underway. It shows up once there's an actual run to walk
+          through: Review (step 2) and Gate (step 3). */}
+      <SetupCard
+        expanded={setupExpanded}
+        onToggleExpanded={() => setSetupExpanded((e) => !e)}
+        caption="Source, regulators, and the run itself — all in one place."
+      >
+      {/* ── Section 1 · Source ───────────────────────────────────────────── */}
+      <Section
         step={1}
         title="Source"
         caption={
@@ -1034,7 +1293,7 @@ export default function ComplianceSetupPage() {
                         key={s.subject_id}
                         subject={s}
                         selected={s.subject_id === selected?.subject_id}
-                        disabled={isPreRules(s)}
+                        preRules={isPreRules(s)}
                         onSelect={() => pickSubject(s)}
                       />
                     ))}
@@ -1062,9 +1321,9 @@ export default function ComplianceSetupPage() {
                 fileProblem={fileProblem}
                 onPickFile={pickFile}
                 year={effectiveYear}
-                onPickYear={setYear}
+                onPickYear={(y) => pickPeriod(() => setYear(y))}
                 quarter={quarter}
-                onPickQuarter={setQuarter}
+                onPickQuarter={(q) => pickPeriod(() => setQuarter(q))}
                 period={period}
               />
             </div>
@@ -1096,17 +1355,17 @@ export default function ComplianceSetupPage() {
                   key={s.subject_id}
                   subject={s}
                   selected={s.subject_id === selected?.subject_id}
-                  disabled={isPreRules(s)}
+                  preRules={isPreRules(s)}
                   onSelect={() => pickSubject(s)}
                 />
               ))}
             </div>
           )}
         </div>
-      </Card>
+      </Section>
 
-      {/* ── Card 2 · Regulators ─────────────────────────────────────────── */}
-      <Card
+      {/* ── Section 2 · Regulators ───────────────────────────────────────── */}
+      <Section
         step={2}
         title="Regulators"
         caption={
@@ -1183,12 +1442,13 @@ export default function ComplianceSetupPage() {
             </>
           )}
         </div>
-      </Card>
+      </Section>
 
-      {/* ── Card 3 · Validate ───────────────────────────────────────────── */}
-      <Card
+      {/* ── Section 3 · Validate ─────────────────────────────────────────── */}
+      <Section
         step={3}
         title="Validate"
+        last
         caption={
           // Only a brand-new file pays the reading cost. Re-running something
           // already uploaded is an ordinary run — its text is already extracted.
@@ -1248,14 +1508,27 @@ export default function ComplianceSetupPage() {
             {runError}
           </div>
         )}
-      </Card>
+      </Section>
+      </SetupCard>
+      </>
+      )}
 
       {/* Unfinished business, then past sign-offs — both for whichever report
           type is selected above, and both render nothing when empty. They sit
           below Validate because they're where you go back to, not part of
           setting a new run up. */}
+      {canRead && (
+      <>
       <ResumeGallery companyId={companyId} reportType={reportType} />
       <CertifiedGallery companyId={companyId} reportType={reportType} />
+      </>
+      )}
+
+      {/* Driven straight off the derived flag: dismissing clears the selection,
+          which is what closes it. */}
+      {preRulesSelected && (
+        <PreRulesDialog period={selected?.period || period} onClose={dismissPreRules} />
+      )}
     </div>
   );
 }

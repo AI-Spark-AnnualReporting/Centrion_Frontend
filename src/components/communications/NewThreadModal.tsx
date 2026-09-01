@@ -1,23 +1,102 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
   communications,
   ApiError,
   type CommunicationMember,
+  type ComposeRecipient,
   type ThreadlessReport,
   type ThreadlessReportType,
 } from '@/lib/api';
-import { MentionComposer } from './MentionComposer';
+import { MentionComposer, MentionChips, MemberPicker } from './MentionComposer';
+import { RecipientChip } from './RecipientChip';
 import { ALL_FILTER, SECTION_LABEL } from './helpers';
 
-/* "Start a communication" modal — pick a report type, choose a report that
-   doesn't have a thread yet, brief the team, and @mention members. Wired to
-   the live backend: GET threadless-reports + members on open, POST threads on
-   submit. company_id is never sent — the backend derives it from the JWT.
+/* "Start a communication" modal — three ways in:
+     - "Start on a report": pick a report type, choose a report that doesn't
+       have a thread yet, brief the team. (Original flow, unchanged.)
+     - "New discussion": a plain ad-hoc thread — subject + message, no report.
+     - "Draft with AI": upload a document (PDF/DOCX only — that's all the AI
+       can read) and/or paste source text, describe what you want, get a
+       draft back, edit it, then post it exactly like a hand-typed ad-hoc
+       thread. The draft call is stateless — nothing is saved until "Start
+       thread" — so Regenerate just re-calls it with the same or adjusted
+       inputs.
 
-   This is the older start-a-communication flow and is unchanged by the review
-   work; sharing a report for review goes through ShareReportModal instead. */
+   `message` + `mentions` are shared across all three modes — they're always
+   "the first message" the thread starts with, however it got typed. `subject`
+   only applies to the two ad-hoc modes. Wired to the live backend:
+   GET threadless-reports + members on open, POST ad-hoc/draft to draft,
+   POST threads to submit either shape. company_id is never sent — the
+   backend derives it from the JWT. */
+
+type Mode = 'report' | 'adhoc' | 'ai';
+
+const AI_DOCUMENT_ACCEPT = ['.pdf', '.docx'] as const;
+
+function validateAiDocument(file: File): string | null {
+  const lower = file.name.toLowerCase();
+  if (!AI_DOCUMENT_ACCEPT.some((ext) => lower.endsWith(ext))) {
+    return `AI can only read PDF and Word documents. Allowed: ${AI_DOCUMENT_ACCEPT.join(', ')}.`;
+  }
+  return null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const ICON_REPORT = (
+  <svg width="15" height="15" viewBox="0 0 14 14" fill="none">
+    <path d="M4 1.5h4.5L11 4v8a.5.5 0 0 1-.5.5h-6A.5.5 0 0 1 4 12V1.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    <path d="M8.5 1.5V4H11" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+  </svg>
+);
+const ICON_DISCUSSION = (
+  <svg width="15" height="15" viewBox="0 0 14 14" fill="none">
+    <path
+      d="M2 4.2a1.4 1.4 0 0 1 1.4-1.4h7.2a1.4 1.4 0 0 1 1.4 1.4v4.5a1.4 1.4 0 0 1-1.4 1.4H5.9L3.4 12v-1.9h-0a1.4 1.4 0 0 1-1.4-1.4V4.2z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+const ICON_SPARKLE = (
+  <svg width="15" height="15" viewBox="0 0 14 14" fill="none">
+    <path
+      d="M7 1.5l1.1 3.4L11.5 6l-3.4 1.1L7 10.5l-1.1-3.4L2.5 6l3.4-1.1L7 1.5z"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+// "adhoc" (plain "New discussion", no AI) is hidden from the picker per
+// request — its mode/state/handlers are left in place, just unreachable from
+// the UI, in case it comes back.
+const MODES: { key: Mode; label: string; icon: React.ReactNode }[] = [
+  { key: 'report', label: 'Start on a report', icon: ICON_REPORT },
+  { key: 'ai', label: 'Announcement', icon: ICON_SPARKLE },
+];
+
+// "Only you and Noura Al Fahad will see this" — the reader must know who can
+// see a private thread before sending, not after.
+function privateRoster(names: string[]): string {
+  const who =
+    names.length === 0
+      ? 'you'
+      : names.length === 1
+        ? `you and ${names[0]}`
+        : names.length === 2
+          ? `you, ${names[0]} and ${names[1]}`
+          : `you, ${names[0]}, ${names[1]} and ${names.length - 2} others`;
+  return `Only ${who} will see this`;
+}
 
 export function NewThreadModal({
   onClose,
@@ -29,6 +108,8 @@ export function NewThreadModal({
   const { user } = useAuth();
   const { toast } = useToast();
 
+  const [mode, setMode] = useState<Mode>('report');
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Pills — always the full unfiltered set; never derived from `reports`.
@@ -39,23 +120,47 @@ export function NewThreadModal({
   const [typeFilter, setTypeFilter] = useState<string>(ALL_FILTER);
   const [reportId, setReportId] = useState<string | null>(null);
 
+  // Ad-hoc-only.
+  const [subject, setSubject] = useState('');
+
+  // Report mode only — the thread is visible to the mentioned people alone.
+  const [isPrivate, setIsPrivate] = useState(false);
+
+  // Shared "first message" across all three modes.
   const [message, setMessage] = useState('');
   const [mentions, setMentions] = useState<CommunicationMember[]>([]);
+
+  // AI-draft-only.
+  const [instructions, setInstructions] = useState('');
+  const [sourceText, setSourceText] = useState('');
+  const [aiDocument, setAiDocument] = useState<File | null>(null);
+  const aiFileInputRef = useRef<HTMLInputElement>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [aiDraftGenerated, setAiDraftGenerated] = useState(false);
+
+  // Announcement-only: who this goes to. "Both" also sends a tracked external
+  // email in the same submit — no separate trip to "Send externally" after.
+  const [shareExternally, setShareExternally] = useState(false);
+  const [externalRecipients, setExternalRecipients] = useState<{ id: string; name: string; email: string | null }[]>([]);
+  const [externalDraft, setExternalDraft] = useState('');
+  const [externalAdding, setExternalAdding] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // On open → load reports + members in parallel.
+  // On open → load the reports to choose from. Members come from the effect
+  // below, which re-runs as the chosen report changes.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([communications.threadlessReports(), communications.members()])
-      .then(([reportsRes, membersRes]) => {
+    communications
+      .threadlessReports()
+      .then((reportsRes) => {
         if (cancelled) return;
         setTypes(reportsRes.types);
         setReports(reportsRes.reports);
-        setMembers(membersRes.members);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -66,6 +171,23 @@ export function NewThreadModal({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Everyone active in the company, whatever the chosen report is: a private
+  // conversation can include anyone, and whether they can open the report is
+  // answered at the report itself (see canOpenReport) — not by leaving them
+  // out of the picker.
+  useEffect(() => {
+    let cancelled = false;
+    communications
+      .members()
+      .then((res) => {
+        if (!cancelled) setMembers(res.members);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -91,30 +213,87 @@ export function NewThreadModal({
       .catch(() => {});
   };
 
-  // Pills stay constant across filters (from `types`); only the list narrows.
+  // Which flag rules a report out on THIS tab. Taken rows are still listed —
+  // greyed, with the reason — because dropping them made a report you had just
+  // started a conversation on look like it had fallen out of the list.
+  const isTaken = (r: ThreadlessReport) =>
+    isPrivate ? r.has_my_private_thread : r.has_general_thread;
+
   const visibleReports = useMemo(
-    () =>
-      typeFilter === ALL_FILTER
-        ? reports
-        : reports.filter((r) => r.report_type === typeFilter),
+    () => reports.filter((r) => typeFilter === ALL_FILTER || r.report_type === typeFilter),
     [reports, typeFilter],
   );
+
+  // What you can actually start on — the pill counts, not the list.
+  const startableReports = useMemo(
+    () => reports.filter((r) => !isTaken(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reports, isPrivate],
+  );
+
+  // Counted here rather than taken from the API's `types`: the backend counts a
+  // report that can still take EITHER kind of thread, so a report that already
+  // has a general one was still adding to its pill on the General tab — a "· 1"
+  // over an empty list. A type with nothing left to start on drops out.
+  const typePills = useMemo(() => {
+    const startable = new Map<string, number>();
+    for (const r of startableReports) startable.set(r.report_type, (startable.get(r.report_type) ?? 0) + 1);
+    // Every type with rows keeps its pill, or the filter could not reach the
+    // greyed ones; the count is what you can still start on, so it reads as an
+    // invitation rather than a total.
+    const present = new Set(reports.map((r) => r.report_type));
+    return types
+      .filter((t) => present.has(t.code))
+      .map((t) => ({ ...t, count: startable.get(t.code) ?? 0 }));
+  }, [types, reports, startableReports]);
+
+  // Switching tabs can empty the type you had picked — fall back to All rather
+  // than leaving a filter selected that rules everything out.
+  useEffect(() => {
+    if (typeFilter !== ALL_FILTER && !typePills.some((t) => t.code === typeFilter)) {
+      setTypeFilter(ALL_FILTER);
+    }
+  }, [typePills, typeFilter]);
 
   // report_type code → human label for the "ESG · FY-2023" row text.
   const labelForCode = (code: string) =>
     types.find((t) => t.code === code)?.label ?? code;
 
+  // People not already added — the picker's options. Self is excluded: the
+  // backend drops a self-mention anyway.
+  const addableMembers = members.filter(
+    (m) => m.user_id !== user?.user_id && !mentions.some((x) => x.id === m.id),
+  );
+
   const messageEmpty = message.trim().length === 0;
-  // A thread must be addressed to at least one participant.
-  const needsRecipient = !messageEmpty && mentions.length === 0;
-  const canSubmit = !!reportId && !messageEmpty && mentions.length > 0 && !submitting;
+  const subjectEmpty = subject.trim().length === 0;
+  // At least one of pasted text / an attached document is required to draft
+  // from — "optional" invited a blank draft attempt with nothing to work off.
+  const hasSource = sourceText.trim().length > 0 || !!aiDocument;
+  const needsExternalRecipient =
+    mode === 'ai' && shareExternally && externalRecipients.length === 0 && !externalDraft.trim();
+  // @mention is an optional notify, not a requirement to start a thread —
+  // except on a private thread, where the mentions ARE the member list.
+  const privateNeedsMentions = isPrivate && mentions.length === 0;
+  // A report thread can start with no message, WhatsApp-style — the report,
+  // and on a private one its people, are what it actually needs. An
+  // announcement still needs a message: that mode can fire a tracked external
+  // email off it.
+  const canSubmit =
+    mode === 'report'
+      ? !!reportId && !submitting && !privateNeedsMentions
+      : !subjectEmpty && !messageEmpty && !submitting && !needsExternalRecipient;
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setFormError(null);
+    // Private is report-only — an announcement can also fire a tracked external
+    // email, which a private thread must never do.
+    if (next !== 'report') setIsPrivate(false);
+  };
 
   const submit = async () => {
-    if (!reportId || messageEmpty) return;
-    if (mentions.length === 0) {
-      setFormError('Add at least one participant with @ before starting.');
-      return;
-    }
+    if (!reportId) return;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -124,8 +303,18 @@ export function NewThreadModal({
         // Members' UUID `id`s — NOT their usr_ `user_id`. Backend dedupes +
         // drops any self-mention, so no client-side cleanup needed.
         mentioned_user_ids: mentions.map((m) => m.id),
+        ...(isPrivate ? { is_private: true } : {}),
       });
-      toast({ title: 'Thread started', description: 'Your team has been briefed.' });
+      // Say what actually happened: a thread can now start with nothing said,
+      // and claiming a briefing that never went out is worse than saying less.
+      toast({
+        title: isPrivate ? 'Private thread started' : 'Thread started',
+        description: isPrivate
+          ? 'Only the people you added can see it.'
+          : messageEmpty
+            ? 'Your team can see it and reply.'
+            : 'Your team has been briefed.',
+      });
       onCreated?.(res.thread.id);
       onClose();
     } catch (e) {
@@ -136,16 +325,26 @@ export function NewThreadModal({
       }
       switch (e.status) {
         case 422:
-          setFormError("Message can't be empty");
+          // Covers both "message empty" and the private-thread "needs at least
+          // one person" detail, which is written to be shown as-is.
+          setFormError(e.message || "Message can't be empty");
           break;
         case 404:
           toast({ title: 'That report is no longer available', variant: 'destructive' });
           refreshReports();
           break;
         case 409:
-          toast({ title: 'A conversation already exists for this report', variant: 'destructive' });
-          setReports((prev) => prev.filter((r) => r.id !== reportId));
-          setReportId(null);
+          // The slot filled up (or the flags were stale). Recoverable: refetch so
+          // the row greys out, and leave the form and the typed message alone.
+          toast({
+            title:
+              e.message ||
+              (isPrivate
+                ? 'You already have a private conversation on this report'
+                : 'This report already has a conversation'),
+            variant: 'destructive',
+          });
+          refreshReports();
           break;
         case 403:
           toast({ title: 'One of the mentioned people is no longer available', variant: 'destructive' });
@@ -161,9 +360,137 @@ export function NewThreadModal({
     }
   };
 
+  const makeExternalRecipient = (value: string) => ({
+    id: `r-${externalRecipients.length}-${value}`,
+    name: value,
+    email: value.includes('@') ? value : null,
+  });
+  const addExternalRecipient = () => {
+    const value = externalDraft.trim();
+    if (!value) {
+      setExternalAdding(false);
+      return;
+    }
+    setExternalRecipients((prev) => [...prev, makeExternalRecipient(value)]);
+    setExternalDraft('');
+  };
+  // Flushes a typed-but-uncommitted address so it isn't silently dropped when
+  // the user goes straight for "Start thread" instead of pressing Enter.
+  const commitPendingExternalRecipient = () => {
+    const value = externalDraft.trim();
+    if (!value) return externalRecipients;
+    const next = [...externalRecipients, makeExternalRecipient(value)];
+    setExternalRecipients(next);
+    setExternalDraft('');
+    setExternalAdding(false);
+    return next;
+  };
+  const removeExternalRecipient = (id: string) =>
+    setExternalRecipients((prev) => prev.filter((r) => r.id !== id));
+
+  const submitAdHoc = async () => {
+    if (subjectEmpty || messageEmpty) return;
+    if (needsExternalRecipient) {
+      setFormError('Add at least one external recipient, or switch to Internally only.');
+      return;
+    }
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const res = await communications.startThread({
+        subject: subject.trim(),
+        message: message.trim(),
+        mentioned_user_ids: mentions.map((m) => m.id),
+      });
+
+      let description = 'Your team has been briefed.';
+      if (mode === 'ai' && shareExternally) {
+        const finalRecipients = commitPendingExternalRecipient();
+        if (finalRecipients.length > 0) {
+          try {
+            const sendRes = await communications.sendExternal(res.thread.id, {
+              subject: subject.trim(),
+              recipients: finalRecipients.map(
+                (r): ComposeRecipient => ({ name: r.name, org: null, contact: null, email: r.email }),
+              ),
+              audience_label: 'Investors',
+            });
+            description =
+              sendRes.delivery_status === 'failed'
+                ? 'Your team has been briefed, but the external email could not be delivered.'
+                : `Your team has been briefed and ${finalRecipients.length} external recipient${finalRecipients.length === 1 ? '' : 's'} emailed.`;
+          } catch {
+            description = 'Your team has been briefed, but the external email failed to send.';
+          }
+        }
+      }
+
+      toast({ title: 'Thread started', description });
+      onCreated?.(res.thread.id);
+      onClose();
+    } catch (e) {
+      if (!(e instanceof ApiError)) {
+        setFormError('Something went wrong. Please try again.');
+        setSubmitting(false);
+        return;
+      }
+      switch (e.status) {
+        case 422:
+          setFormError(e.message);
+          break;
+        case 403:
+          toast({ title: 'One of the mentioned people is no longer available', variant: 'destructive' });
+          refreshMembers();
+          break;
+        case 401:
+          // Session-expired flow already handled by the request layer.
+          break;
+        default:
+          setFormError('Something went wrong. Please try again.');
+      }
+      setSubmitting(false);
+    }
+  };
+
+  const generateDraft = async () => {
+    const trimmed = instructions.trim();
+    if (!trimmed || !hasSource || draftLoading) return;
+    setDraftLoading(true);
+    setDraftError(null);
+    try {
+      const res = await communications.generateAdHocDraft({
+        instructions: trimmed,
+        sourceText: sourceText.trim() || undefined,
+        document: aiDocument ?? undefined,
+      });
+      setMessage(res.draft);
+      setAiDraftGenerated(true);
+    } catch (e) {
+      if (!(e instanceof ApiError)) {
+        setDraftError('Something went wrong. Please try again.');
+        return;
+      }
+      if (e.status === 401) return; // session-expired flow already handled by the request layer
+      // 422 → blank instructions, unsupported/empty file, or no extractable text.
+      setDraftError(e.message);
+    } finally {
+      setDraftLoading(false);
+    }
+  };
+
+  const pickAiDocument = (file: File) => {
+    const err = validateAiDocument(file);
+    if (err) {
+      setDraftError(err);
+      return;
+    }
+    setDraftError(null);
+    setAiDocument(file);
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content" style={{ width: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '20px 22px 16px' }}>
           <div
@@ -191,7 +518,11 @@ export function NewThreadModal({
               Start a communication
             </div>
             <div style={{ fontSize: 12.5, color: '#8890AE', marginTop: 3 }}>
-              Pick a report type, choose a report, and brief the team
+              {mode === 'report'
+                ? 'Pick a report type, choose a report, and brief the team'
+                : mode === 'adhoc'
+                  ? 'Start a plain discussion — no report needed'
+                  : 'Draft an urgent announcement to send to everyone — upload or paste source material and describe what you want'}
             </div>
           </div>
           <button
@@ -218,11 +549,44 @@ export function NewThreadModal({
           </button>
         </div>
 
-        <div style={{ padding: '0 22px 4px' }}>
+        <div style={{ padding: '0 22px 4px', overflowY: 'auto' }}>
+          {/* Mode picker */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginBottom: 20 }}>
+            {MODES.map((m) => {
+              const active = m.key === mode;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => switchMode(m.key)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    padding: '8px 15px',
+                    borderRadius: 20,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    transition: '.15s',
+                    border: active ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
+                    background: active ? '#4040C8' : '#fff',
+                    color: active ? '#fff' : '#5A6080',
+                    boxShadow: active ? '0 4px 12px rgba(64,64,200,.25)' : 'none',
+                  }}
+                >
+                  {m.icon}
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+
           {loading ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '48px 0' }}>
               <div className="proc-ring" style={{ width: 34, height: 34, borderWidth: 3 }} />
-              <div style={{ fontSize: 12, color: '#9BA3C4', fontWeight: 600 }}>Loading reports…</div>
+              <div style={{ fontSize: 12, color: '#9BA3C4', fontWeight: 600 }}>Loading…</div>
             </div>
           ) : loadError ? (
             <div style={{ padding: '40px 0', textAlign: 'center' }}>
@@ -231,12 +595,65 @@ export function NewThreadModal({
                 Retry
               </button>
             </div>
-          ) : (
+          ) : mode === 'report' ? (
             <>
-              {/* Report type pills — always from `types`; "All" clears the filter. */}
+              {/* General vs private is the first choice — it changes which reports
+                  you can even start on, so the list below follows it. */}
+              <div style={SECTION_LABEL}>CONVERSATION</div>
+              <div style={{ display: 'flex', gap: 9, marginBottom: 20 }}>
+                {[
+                  { priv: false, label: 'General', hint: 'everyone in the company' },
+                  { priv: true, label: 'Private', hint: 'only the people you add' },
+                ].map((tab) => {
+                  const active = tab.priv === isPrivate;
+                  return (
+                    <button
+                      key={tab.label}
+                      type="button"
+                      onClick={() => {
+                        setIsPrivate(tab.priv);
+                        setFormError(null);
+                        // The list is about to change under it.
+                        setReportId(null);
+                        // A general thread carries no guest list — don't send
+                        // one picked while the Private tab was open.
+                        if (!tab.priv) setMentions([]);
+                      }}
+                      style={{
+                        flex: 1,
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        borderRadius: 12,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        transition: '.15s',
+                        border: active ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
+                        background: active ? '#F5F4FF' : '#fff',
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: active ? '#4040C8' : '#1A1D2E',
+                        }}
+                      >
+                        {tab.label}
+                      </span>
+                      <span style={{ display: 'block', fontSize: 11.5, color: '#8890AE', marginTop: 1 }}>
+                        {tab.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Report type pills — counted over what this tab can start on;
+                  "All" clears the filter. */}
               <div style={SECTION_LABEL}>REPORT TYPE</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginBottom: 20 }}>
-                {[{ code: ALL_FILTER, label: 'All', count: null as number | null }, ...types].map((t) => {
+                {[{ code: ALL_FILTER, label: 'All', count: null as number | null }, ...typePills].map((t) => {
                   const active = t.code === typeFilter;
                   return (
                     <button
@@ -261,15 +678,36 @@ export function NewThreadModal({
                       }}
                     >
                       {t.label}
-                      {t.count != null && ` · ${t.count}`}
+                      {/* 0 startable is not worth printing — the rows below are
+                          all greyed and say so themselves. */}
+                      {t.count != null && t.count > 0 && ` · ${t.count}`}
                     </button>
                   );
                 })}
               </div>
 
               {/* Reports without a thread yet */}
-              <div style={SECTION_LABEL}>REPORTS WITHOUT A THREAD YET</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              <div style={SECTION_LABEL}>
+                {isPrivate
+                  ? 'REPORTS YOU CAN START A PRIVATE CONVERSATION ON'
+                  : 'REPORTS YOU CAN START A GENERAL CONVERSATION ON'}
+              </div>
+              {/* Scrolls on its own past ~4 rows: a company with a dozen
+                  threadless reports was pushing MESSAGE and Start thread below
+                  the fold. The 2px of padding keeps the selected row's ring
+                  from being clipped by the overflow. */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  marginBottom: 20,
+                  maxHeight: 268,
+                  overflowY: 'auto',
+                  padding: 2,
+                  margin: '-2px -2px 18px',
+                }}
+              >
                 {visibleReports.length === 0 ? (
                   <div
                     style={{
@@ -281,16 +719,31 @@ export function NewThreadModal({
                       color: '#9BA3C4',
                     }}
                   >
-                    No reports without a thread yet.
+                    No reports here yet.
                   </div>
                 ) : (
                   visibleReports.map((r) => {
-                    const selected = r.id === reportId;
+                    const taken = isTaken(r);
+                    const selected = !taken && r.id === reportId;
+                    // The tab's own slot is why a row is dead; the other slot is
+                    // just context. Both are worth saying — the two are
+                    // independent, and silence is what made this confusing.
+                    const note = taken
+                      ? isPrivate
+                        ? 'You already have a private conversation on this report'
+                        : 'This report already has a general conversation'
+                      : (isPrivate ? r.has_general_thread : r.has_my_private_thread)
+                        ? isPrivate
+                          ? 'Has a general conversation'
+                          : 'You have a private conversation on this'
+                        : null;
                     return (
                       <button
                         key={r.id}
                         type="button"
+                        disabled={taken}
                         onClick={() => setReportId(r.id)}
+                        title={taken ? note ?? undefined : undefined}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -298,11 +751,11 @@ export function NewThreadModal({
                           textAlign: 'left',
                           padding: '14px 16px',
                           borderRadius: 12,
-                          cursor: 'pointer',
+                          cursor: taken ? 'not-allowed' : 'pointer',
                           fontFamily: 'inherit',
                           transition: '.15s',
                           border: selected ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
-                          background: selected ? '#F5F4FF' : '#fff',
+                          background: taken ? '#F7F8FC' : selected ? '#F5F4FF' : '#fff',
                         }}
                       >
                         <span
@@ -312,11 +765,19 @@ export function NewThreadModal({
                             borderRadius: '50%',
                             flexShrink: 0,
                             border: selected ? '5px solid #4040C8' : '1.6px solid #CBD0E4',
+                            opacity: taken ? 0.5 : 1,
                             transition: '.15s',
                           }}
                         />
-                        <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 700, color: '#1A1D2E' }}>
-                          {labelForCode(r.report_type)} · {r.period}
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: taken ? '#9BA3C4' : '#1A1D2E' }}>
+                            {labelForCode(r.report_type)} · {r.period}
+                          </span>
+                          {note && (
+                            <span style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: taken ? '#A9B0C8' : '#8890AE', marginTop: 2 }}>
+                              {note}
+                            </span>
+                          )}
                         </span>
                       </button>
                     );
@@ -324,9 +785,73 @@ export function NewThreadModal({
                 )}
               </div>
 
-              {/* First message + @mention picker */}
-              <div style={SECTION_LABEL}>START THE THREAD WITH A MESSAGE</div>
+              {/* Participants are a PRIVATE thread's guest list — on a general
+                  thread there is nobody to pick: everyone in the company is in
+                  it already. Its own field with its own picker; the message box
+                  is plain text, nobody is added by typing. */}
+              {isPrivate && (
+                <>
+                  <div style={SECTION_LABEL}>PARTICIPANTS</div>
 
+                  <MentionChips mentions={mentions} onMentionsChange={setMentions} />
+
+                  <MemberPicker
+                    options={addableMembers}
+                    onPick={(m) => {
+                      setMentions([...mentions, m]);
+                      if (formError) setFormError(null);
+                    }}
+                    label={
+                      addableMembers.length === 0
+                        ? mentions.length === 0
+                          ? 'No one else in your company yet'
+                          : 'Everyone is already added'
+                        : 'Add someone…'
+                    }
+                  />
+
+                  <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: privateNeedsMentions ? '#B45309' : '#5A6080' }}>
+                    {privateNeedsMentions
+                      ? 'Add at least one participant — a private conversation needs someone in it.'
+                      : privateRoster(mentions.map((m) => m.full_name))}
+                  </div>
+                </>
+              )}
+
+              <div style={{ ...SECTION_LABEL, marginTop: 20 }}>MESSAGE</div>
+
+              {/* Plain textarea — participants are picked in their own field above,
+                  so there's no "@" picker to run here. */}
+              <textarea
+                className="inp"
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                  if (formError) setFormError(null);
+                }}
+                placeholder="Write the first message to the team…"
+                style={{ minHeight: 92, resize: 'vertical', lineHeight: 1.5 }}
+              />
+
+              {formError && (
+                <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#DC2626' }}>{formError}</div>
+              )}
+            </>
+          ) : mode === 'adhoc' ? (
+            <>
+              <div style={SECTION_LABEL}>SUBJECT</div>
+              <input
+                className="inp"
+                value={subject}
+                onChange={(e) => {
+                  setSubject(e.target.value);
+                  if (formError) setFormError(null);
+                }}
+                placeholder="What's this about?"
+                style={{ marginBottom: 20 }}
+              />
+
+              <div style={SECTION_LABEL}>START THE THREAD WITH A MESSAGE</div>
               <MentionComposer
                 members={members}
                 currentUserId={user?.user_id}
@@ -337,20 +862,239 @@ export function NewThreadModal({
                 }}
                 mentions={mentions}
                 onMentionsChange={setMentions}
-                placeholder="Write the first message to the team...  (type @ to mention)"
+                placeholder="Write the first message...  (type @ to mention)"
               />
 
-              {(formError || needsRecipient) && (
+              {formError && (
+                <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#DC2626' }}>{formError}</div>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={SECTION_LABEL}>SUBJECT</div>
+              <input
+                className="inp"
+                value={subject}
+                onChange={(e) => {
+                  setSubject(e.target.value);
+                  if (formError) setFormError(null);
+                }}
+                placeholder="What's this about?"
+                style={{ marginBottom: 20 }}
+              />
+
+              <div style={SECTION_LABEL}>WHAT DO YOU WANT DRAFTED?</div>
+              <textarea
+                className="inp"
+                value={instructions}
+                onChange={(e) => {
+                  setInstructions(e.target.value);
+                  if (draftError) setDraftError(null);
+                }}
+                placeholder="e.g. Summarize the attached board pack into a 3-paragraph update for the exec team"
+                style={{ minHeight: 64, resize: 'vertical', lineHeight: 1.5, marginBottom: 14 }}
+              />
+
+              <div style={SECTION_LABEL}>SOURCE MATERIAL</div>
+              <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: -6, marginBottom: 8 }}>
+                Paste text or attach a document — at least one is required to draft from.
+              </div>
+              <textarea
+                className="inp"
+                value={sourceText}
+                onChange={(e) => setSourceText(e.target.value)}
+                placeholder="Paste source text here…"
+                style={{ minHeight: 56, resize: 'vertical', lineHeight: 1.5, marginBottom: 10 }}
+              />
+
+              <input
+                ref={aiFileInputRef}
+                type="file"
+                accept={AI_DOCUMENT_ACCEPT.join(',')}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) pickAiDocument(f);
+                  e.target.value = '';
+                }}
+              />
+              {aiDocument ? (
                 <div
                   style={{
-                    fontSize: 11.5,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 8px 6px 12px',
+                    borderRadius: 20,
+                    background: '#F1ECFF',
+                    color: '#5B34D6',
+                    fontSize: 12.5,
                     fontWeight: 600,
-                    marginTop: 7,
-                    color: formError ? '#DC2626' : '#9BA3C4',
+                    marginBottom: 6,
                   }}
                 >
-                  {formError ?? 'Add at least one participant with @ to start.'}
+                  {aiDocument.name}
+                  <span style={{ opacity: 0.7 }}>{formatFileSize(aiDocument.size)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAiDocument(null)}
+                    aria-label={`Remove ${aiDocument.name}`}
+                    style={{ display: 'inline-flex', border: 'none', background: 'transparent', color: '#8B5CF6', cursor: 'pointer', padding: 0 }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                    </svg>
+                  </button>
                 </div>
+              ) : (
+                <div style={{ marginBottom: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => aiFileInputRef.current?.click()}
+                    className="btn bs"
+                    style={{ fontSize: 12, padding: '7px 13px' }}
+                  >
+                    Attach a document
+                  </button>
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 16 }}>
+                AI can read PDF and Word documents. Other file types can still be attached to the
+                thread after it's created, just not summarized here.
+              </div>
+
+              {draftError && (
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#DC2626', marginBottom: 10 }}>{draftError}</div>
+              )}
+
+              <button
+                type="button"
+                className="btn bs"
+                style={{
+                  gap: 7,
+                  marginBottom: 22,
+                  opacity: instructions.trim() && hasSource && !draftLoading ? 1 : 0.55,
+                  cursor: instructions.trim() && hasSource && !draftLoading ? 'pointer' : 'not-allowed',
+                }}
+                disabled={!instructions.trim() || !hasSource || draftLoading}
+                onClick={generateDraft}
+              >
+                {ICON_SPARKLE}
+                {draftLoading ? 'Drafting…' : aiDraftGenerated ? 'Regenerate draft' : 'Generate draft'}
+              </button>
+
+              {aiDraftGenerated && (
+                <>
+                  <div style={SECTION_LABEL}>DRAFT — EDIT BEFORE POSTING</div>
+                  <MentionComposer
+                    members={members}
+                    currentUserId={user?.user_id}
+                    message={message}
+                    onMessageChange={(v) => {
+                      setMessage(v);
+                      if (formError) setFormError(null);
+                    }}
+                    mentions={mentions}
+                    onMentionsChange={setMentions}
+                    placeholder="Edit the draft…  (type @ to mention)"
+                    minHeight={140}
+                  />
+
+                  <div style={{ ...SECTION_LABEL, marginTop: 20 }}>SHARE THIS ANNOUNCEMENT</div>
+                  <div style={{ display: 'flex', gap: 9, marginBottom: shareExternally ? 12 : 4 }}>
+                    {([
+                      { value: false, label: 'Internally only' },
+                      { value: true, label: 'Internally and externally' },
+                    ] as const).map((opt) => {
+                      const active = shareExternally === opt.value;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          onClick={() => {
+                            setShareExternally(opt.value);
+                            if (formError) setFormError(null);
+                          }}
+                          style={{
+                            padding: '7px 15px',
+                            borderRadius: 20,
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                            transition: '.15s',
+                            border: active ? '1.5px solid #4040C8' : '1.5px solid #E5E7EF',
+                            background: active ? '#4040C8' : '#fff',
+                            color: active ? '#fff' : '#5A6080',
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {shareExternally && (
+                    <>
+                      <div style={{ fontSize: 11, color: '#9BA3C4', marginBottom: 8 }}>
+                        Sent as a tracked email once the thread is created, using this same subject and message.
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                        {externalRecipients.map((r) => (
+                          <RecipientChip
+                            key={r.id}
+                            label={r.email ?? r.name}
+                            onRemove={() => removeExternalRecipient(r.id)}
+                          />
+                        ))}
+                        {externalAdding ? (
+                          <input
+                            className="inp"
+                            autoFocus
+                            value={externalDraft}
+                            onChange={(e) => setExternalDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addExternalRecipient();
+                              } else if (e.key === 'Escape') {
+                                setExternalDraft('');
+                                setExternalAdding(false);
+                              }
+                            }}
+                            onBlur={addExternalRecipient}
+                            placeholder="name@investor.com"
+                            style={{ width: 200, padding: '6px 12px', fontSize: 12.5 }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setExternalAdding(true)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '6px 12px',
+                              borderRadius: 20,
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#16A34A',
+                              fontSize: 12.5,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                          >
+                            + Add recipients
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {formError && (
+                    <div style={{ fontSize: 11.5, fontWeight: 600, marginTop: 7, color: '#DC2626' }}>{formError}</div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -366,7 +1110,7 @@ export function NewThreadModal({
             className="btn bp"
             style={{ gap: 7, opacity: canSubmit ? 1 : 0.55, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
             disabled={!canSubmit}
-            onClick={submit}
+            onClick={mode === 'report' ? submit : submitAdHoc}
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M12.5 1.5L6 8M12.5 1.5L8.3 12.5l-2.3-4.5L1.5 5.7 12.5 1.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />

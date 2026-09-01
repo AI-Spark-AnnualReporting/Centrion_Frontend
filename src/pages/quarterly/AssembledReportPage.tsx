@@ -9,15 +9,10 @@ import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker'
 import { ApproveConfirmDialog } from '@/components/quarterly/ApproveConfirmDialog';
 import { DownloadMenu } from '@/components/quarterly/DownloadMenu';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
+import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
+import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
-import type {
-  ProducedSection,
-  AssembledSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -72,17 +67,11 @@ function readApprovalStatus(res: unknown): { approved: boolean; approvedAt: stri
   return { approved: !!approved, approvedAt };
 }
 
-// "2026-04-26T07:47:38..." → "Apr 26, 2026" for the Approved & Locked badge.
-function formatApprovedDate(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
 // The assemble endpoint returns produced sections only. Map to a ProducedSection
 // shape so the shared renderers/editor work unchanged.
-function toProduced(s: AssembledSection): ProducedSection {
+// Exported for its own test: it builds the object field-by-field, so a field added
+// anywhere upstream is silently dropped here unless someone remembers to list it.
+export function toProduced(s: AssembledSection): ProducedSection {
   // /assemble may return table content as a parsed object; normalise to a string
   // so the renderers/editor (which expect a JSON string or prose) work.
   const raw = s.content as unknown;
@@ -93,9 +82,15 @@ function toProduced(s: AssembledSection): ProducedSection {
     display_order: s.display_order ?? 0,
     source_type: s.source_type ?? '',
     mode: s.mode,
-    status: 'done',
+    // /assemble only ever returns sections that were produced, and this shape is
+    // synthesised rather than read — "done" was a value the backend has never sent.
+    status: 'produced',
     content,
     feeder_status: 'ready',
+    // Built field-by-field, so anything new has to be listed here or it is silently
+    // dropped — which is exactly what happened to the analysis: the backend sent it,
+    // showAnalysis asked for it, and this mapper threw it away.
+    analysis: s.analysis ?? null,
   };
 }
 
@@ -104,6 +99,9 @@ export default function AssembledReportPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  // Approve & Lock is admin-only — a non-admin has nothing to do with the
+  // button, so it isn't there at all rather than sitting greyed out.
+  const isAdmin = user?.role === 'admin';
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,6 +131,8 @@ export default function AssembledReportPage() {
   // approve & lock
   const [approved, setApproved] = useState(false);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -155,6 +155,7 @@ export default function AssembledReportPage() {
           .sort(byDisplayOrder)
           .map(toProduced);
         setSections(list);
+        setMetricsMode(res.metrics_mode ?? null);
         const { key, brand: coverBrand } = readCoverSelection(res);
         if (coverBrand) setBrand(coverBrand);
         if (key) setCoverTemplateKey(key);
@@ -268,8 +269,16 @@ export default function AssembledReportPage() {
   const bodySections = sections.filter((s) => !isCoverSection(s));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100% - 48px)', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-      {reportId && <QuarterlyReportStepper activeStep={5} reportId={reportId} />}
+    // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
+      {reportId && (
+        <QuarterlyReportStepper
+          step="report"
+          reportId={reportId}
+          metricsMode={metricsMode}
+          locked={approved}
+        />
+      )}
 
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '16px 28px 14px', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -286,7 +295,7 @@ export default function AssembledReportPage() {
             <>
               <span className="badge b-gn" style={{ fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Approved &amp; Locked{approvedAt ? ` · ${formatApprovedDate(approvedAt)}` : ''}
+                Approved &amp; Locked{approvedAt ? ` · ${formatApprovedDate(approvedAt) ?? ''}` : ''}
               </span>
               <DownloadMenu companyId={companyId} reportId={reportId ?? null} title={coverMeta.title ?? undefined} label="Export" />
             </>
@@ -299,14 +308,16 @@ export default function AssembledReportPage() {
               >
                 Choose cover design & colors
               </button>
-              <button
-                type="button"
-                className="btn bp"
-                onClick={() => setApproveDialogOpen(true)}
-                style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 18px' }}
-              >
-                Approve & Lock
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn bp"
+                  onClick={() => setApproveDialogOpen(true)}
+                  style={{ fontSize: 12.5, fontWeight: 700, padding: '9px 18px' }}
+                >
+                  Approve & Lock
+                </button>
+              )}
             </>
           )}
         </div>
@@ -332,7 +343,10 @@ export default function AssembledReportPage() {
             <button className="bs" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => setRetryKey((k) => k + 1)}>Retry</button>
           </div>
         ) : (
-          <div style={{ maxWidth: DOC_WIDTH, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          // Document centred, with the Communication Hub rail alongside it — the
+          // same review & approval panel the earnings preview mounts.
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 18 }}>
+            <div style={{ flex: `0 1 ${DOC_WIDTH}px`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Cover — page 1 */}
             <CoverRenderer
               companyName={companyName}
@@ -359,7 +373,7 @@ export default function AssembledReportPage() {
                           Saved
                         </span>
                       )}
-                      {!approved && !isEditing && (
+                      {!approved && !isEditing && s.mode !== 'attach' && (
                         <button
                           type="button"
                           onClick={() => { setEditError(null); setEditingCode(s.section_code); }}
@@ -381,11 +395,24 @@ export default function AssembledReportPage() {
                       error={isEditing ? editError : null}
                       onSave={(content) => handleSave(s.section_code, content)}
                       onCancel={() => { setEditError(null); setEditingCode(null); }}
+                      showAnalysis
+                      companyId={companyId}
                     />
                   </section>
                 );
               })}
             </div>
+          </div>
+
+            {/* Rail — status card then review & approval, the same order and
+                cards the earnings preview stacks. The panel's Draft/In-review
+                radios stay hidden: this status card owns that. */}
+            {reportId && (
+              <div style={{ width: 290, flexShrink: 0, position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <ReportStatusCard approved={approved} approvedAt={approvedAt} />
+                <ReportHubPanel reportId={reportId} showStatus={false} readOnly={approved} />
+              </div>
+            )}
           </div>
         )}
       </div>

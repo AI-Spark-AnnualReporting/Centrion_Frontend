@@ -122,14 +122,18 @@ describe("System metrics hover list", () => {
     renderForm();
     await screen.findByText("5 metrics");
 
+    // Not "our standard 5" — the count now includes a company's own additions,
+    // and those are theirs, not ours.
     expect(
-      screen.getByText(/we map your data to our standard 5 metrics/i),
+      screen.getByText(/we map your data to these 5 metrics/i),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: /custom metrics/i }));
 
+    // Custom no longer promises to work out where a line belongs — the user says
+    // so, by uploading one statement per section on the next screen.
     expect(
-      screen.getByText(/exactly as they are, place each line in the right section/i),
+      screen.getByText(/one statement per section on the next screen/i),
     ).toBeInTheDocument();
   });
 

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiError, getSectors, lookups, reports as reportsApi } from '@/lib/api';
+import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
   loadActivePipeline,
   type ActivePipelineRecord,
 } from '@/lib/active-pipeline';
 import { useAuth } from '@/context/AuthContext';
+import { useFeaturePermissions } from '@/lib/features';
 import type { Sector } from '@/types/company';
 import type {
   CountriesResponse,
@@ -26,8 +27,8 @@ interface ReportGenerationConfig {
   regulator_ids?: string[];
   framework_codes?: string[];
   gri_scope?: 'standard' | 'full' | string | null;
-  // Quarterly only — 'system' | 'custom'. Absent on reports created before the
-  // custom-metrics lane existed.
+  // Quarterly only — 'system' | 'custom' | 'user'. Absent on reports created
+  // before the custom-metrics lane existed.
   metrics_mode?: string;
 }
 
@@ -87,7 +88,10 @@ function formatPeriod(period: string): string {
 // lane existed carry no metrics_mode — those were all system, which is also how
 // the backend reads them (gen_cfg.get("metrics_mode") or "system").
 function metricsModeLabel(r: ReportSummary): string {
-  return r.generation_config?.metrics_mode === 'custom' ? 'Custom metrics' : 'System metrics';
+  const mode = r.generation_config?.metrics_mode;
+  if (mode === 'custom') return 'Custom metrics';
+  if (mode === 'user') return 'Sections from files';
+  return 'System metrics';
 }
 
 // Earnings Reports are a separate feature (its own /earnings/* pages) that
@@ -98,10 +102,45 @@ function isEarningsReport(r: ReportSummary): boolean {
   return /earnings/i.test(r.title ?? '');
 }
 
+// IR Briefing reports (its own /ir-briefing/* feature — see ActiveReportsCard's
+// report_type map) also write into the same reports table and default to a
+// "QN-YYYY"-shaped period, so the period regex below would otherwise pull them
+// into this page's Quarterly gallery too.
+function isIRBriefingReport(r: ReportSummary): boolean {
+  return (r.report_type ?? '').toLowerCase() === 'ir_briefing' || /ir briefing/i.test(r.title ?? '');
+}
+
 function isQuarterlyReport(r: ReportSummary): boolean {
-  if (isEarningsReport(r)) return false;
+  if (isEarningsReport(r) || isIRBriefingReport(r)) return false;
+  if ((r.report_type ?? '').toLowerCase() === 'quarterly') return true;
   if (r.title?.toLowerCase().includes('quarterly')) return true;
   return /^Q[1-4][\s-]/i.test(r.period);
+}
+
+// Annual Report (Spark Studio / SAR — its own dashboard, but a stray
+// questionnaire/kickoff row can still land in this shared reports table) and
+// Board Report (its own /board-report/* feature) both write into the same
+// table this page lists, so they'd otherwise leak into the ESG gallery below
+// alongside real ESG Validator runs.
+function isAnnualReport(r: ReportSummary): boolean {
+  return (r.report_type ?? '').toLowerCase() === 'annual' || /annual report/i.test(r.title ?? '');
+}
+
+function isBoardReport(r: ReportSummary): boolean {
+  const t = (r.report_type ?? '').toLowerCase();
+  return t === 'board_report' || t === 'board_pack' || /board report/i.test(r.title ?? '');
+}
+
+// A report actually belongs in the ESG Validator gallery/year-picker only once
+// every other feature that shares this table has been ruled out.
+function isEsgReport(r: ReportSummary): boolean {
+  return (
+    !isQuarterlyReport(r) &&
+    !isEarningsReport(r) &&
+    !isIRBriefingReport(r) &&
+    !isAnnualReport(r) &&
+    !isBoardReport(r)
+  );
 }
 
 // Approved/locked quarterly reports open straight on the read-only Assembled
@@ -241,6 +280,14 @@ export default function ReportsPage() {
   )
     ? 'quarterly'
     : 'esg';
+  // Per-action gating — a user might see this route (visible_features) but
+  // only have read, not create, or vice versa. create implies read, so the
+  // create form is never shown without also being able to see the read list
+  // it depends on (e.g. ESG's "select an existing report" dropdown).
+  const { canCreate: canCreateQuarterly, canRead: canReadQuarterly } =
+    useFeaturePermissions('quarterly_report');
+  const { canCreate: canCreateEsg, canRead: canReadEsg } =
+    useFeaturePermissions('esg_validator');
 
   // Dashboard "Generate ESG Report" modal hands off a payload here. We show
   // the full-width loading screen and run the same generate → coverage chain
@@ -340,7 +387,7 @@ export default function ReportsPage() {
         setExistingReports(list);
         // If the company has no ESG reports yet, jump straight to the year
         // picker (quarterly reports live in their own tab/dropdown).
-        setIsAddingNewPeriod(!list.some((r) => !isQuarterlyReport(r) && !isEarningsReport(r)));
+        setIsAddingNewPeriod(!list.some(isEsgReport));
       })
       .catch(() => {
         if (!cancelled) {
@@ -416,7 +463,7 @@ export default function ReportsPage() {
 
   // ESG reports only — the ESG year dropdown and gallery must not surface
   // quarterly reports (those have their own tab and dropdown).
-  const esgReports = existingReports.filter((r) => !isQuarterlyReport(r) && !isEarningsReport(r));
+  const esgReports = existingReports.filter(isEsgReport);
 
   // Years already taken by an existing ESG report — blocked in the year picker
   // so one ESG report per year is enforced.
@@ -434,12 +481,10 @@ export default function ReportsPage() {
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
   const genRequestIdRef = useRef(0);
 
+  // ApiError.message already carries the backend's `detail` (or a generic
+  // message for 429/5xx infra failures) — read it rather than re-parsing
+  // `err.body.detail` directly, which would bypass that sanitization.
   const extractApiError = (err: unknown): string => {
-    if (err instanceof ApiError) {
-      const body = err.body as { detail?: string | Array<{ msg?: string }> } | null;
-      if (typeof body?.detail === 'string') return body.detail;
-      if (Array.isArray(body?.detail) && body.detail[0]?.msg) return body.detail[0].msg;
-    }
     if (err instanceof Error) return err.message;
     return 'Something went wrong. Please try again.';
   };
@@ -778,7 +823,9 @@ export default function ReportsPage() {
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
           {activeTab === 'quarterly'
             ? 'Document-first quarterly results — figures, drivers & YoY narrative'
-            : 'Configure parameters & run the ESG & sustainability validator'}
+            : canCreateEsg
+              ? 'Configure parameters & run the ESG & sustainability validator'
+              : 'Review previously generated ESG & sustainability validator reports'}
         </p>
       </div>
 
@@ -843,13 +890,15 @@ export default function ReportsPage() {
         const quarterlyReportsList = existingReports.filter(isQuarterlyReport);
         return (
           <>
-            <QuarterlyReportForm
-              companyId={companyId}
-              existingReports={quarterlyReportsList}
-              periodsLoading={periodsLoading}
-            />
+            {canCreateQuarterly && (
+              <QuarterlyReportForm
+                companyId={companyId}
+                existingReports={quarterlyReportsList}
+                periodsLoading={periodsLoading}
+              />
+            )}
 
-            {quarterlyReportsList.length > 0 && (
+            {canReadQuarterly && quarterlyReportsList.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                   {quarterlyReportsList.map((r, idx) => {
@@ -877,6 +926,23 @@ export default function ReportsPage() {
                         <div style={{ background: gradient, padding: '20px 20px 22px', color: '#fff', position: 'relative', overflow: 'hidden' }}>
                           <div style={{ position: 'absolute', top: -34, right: -34, width: 124, height: 124, borderRadius: '50%', background: 'rgba(255,255,255,.08)' }} />
                           <div style={{ position: 'absolute', bottom: -48, right: 26, width: 84, height: 84, borderRadius: '50%', background: 'rgba(255,255,255,.05)' }} />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 16,
+                              right: 16,
+                              fontSize: 9,
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              letterSpacing: '.5px',
+                              padding: '4px 9px',
+                              borderRadius: 999,
+                              background: isApprovedReport(r) ? '#fff' : 'rgba(255,255,255,.16)',
+                              color: isApprovedReport(r) ? '#059669' : '#fff',
+                            }}
+                          >
+                            {isApprovedReport(r) ? 'Approved' : 'Draft'}
+                          </div>
                           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', opacity: .8, marginBottom: 10, position: 'relative' }}>
                             {r.title || 'Quarterly Report'}
                           </div>
@@ -923,6 +989,7 @@ export default function ReportsPage() {
       {activeTab === 'esg' && (
       <>
       {/* Generate New ESG Report — collapsible */}
+      {canCreateEsg && (
       <div className="card" style={{ marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', cursor: 'pointer', borderBottom: genOpen ? '1px solid #ECEEF8' : 'none' }} onClick={() => setGenOpen(!genOpen)}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1491,12 +1558,13 @@ export default function ReportsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Recent Reports — driven by GET /api/v1/reports/{company_id}.
           While the list is loading we show a centered spinner. */}
-      {periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
+      {canReadEsg && periodsLoading && existingReports.length === 0 && <Spinner pad={60} />}
 
-      {esgReports.length > 0 && (
+      {canReadEsg && esgReports.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}>
           {esgReports.map((r, idx) => {
             const score = Math.round(r.coverage?.percentage ?? 0);

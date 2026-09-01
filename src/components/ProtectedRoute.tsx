@@ -1,7 +1,9 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { isSarRole, redirectToSar } from "@/lib/sar";
+import { redirectToApp, shouldStayInCentriton } from "@/lib/appRouting";
+import { isFeatureVisible } from "@/lib/features";
+import type { FeatureKey } from "@/constants/features";
 import type { AuthUser } from "@/types/auth";
 
 const CHANGE_PASSWORD_PATH = "/change-password";
@@ -10,10 +12,13 @@ const ONBOARDING_PATH = "/onboarding";
 export function ProtectedRoute({
   children,
   requiredRole,
+  requiredFeature,
 }: {
   children?: ReactNode;
   // Single role or a list of roles allowed on the route.
   requiredRole?: AuthUser["role"] | AuthUser["role"][];
+  // Gate on the backend-computed visible_features list instead of/alongside role.
+  requiredFeature?: FeatureKey;
 }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -41,12 +46,13 @@ export function ProtectedRoute({
     return <Navigate to="/dashboard" replace />;
   }
 
-  // PM / department_user belong in the SAR workspace app — never in Centriyon.
-  // Bounce them out regardless of how they got here (login, bookmark, refresh).
-  // Gated on !must_change_password so a freshly-invited user can still complete
-  // the forced rotation above before being handed off to SAR.
-  if (isSarRole(user.role) && !user.must_change_password) {
-    redirectToSar();
+  // Users whose default app is the other workspace (spark_studio) never
+  // belong in Centriyon. Bounce them out regardless of how they got here
+  // (login, bookmark, refresh). Gated on !must_change_password so a
+  // freshly-invited user can still complete the forced rotation above before
+  // being handed off.
+  if (!shouldStayInCentriton(user) && !user.must_change_password) {
+    redirectToApp(user.default_app!);
     return null; // render nothing while the hard redirect happens
   }
 
@@ -86,6 +92,12 @@ export function ProtectedRoute({
     if (!allowed.includes(user.role)) {
       return <Navigate to="/dashboard" replace />;
     }
+  }
+
+  // Feature gate — defense-in-depth against direct URL navigation to a route
+  // whose nav item is already hidden by visible_features.
+  if (requiredFeature && !isFeatureVisible(user, requiredFeature)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children ?? <Outlet />}</>;

@@ -9,6 +9,16 @@ export function isCoverSection(s: Pick<ProducedSection, 'section_code'>): boolea
   return /cover/i.test(s.section_code);
 }
 
+// A non-empty all-string array, or undefined. A table's `columns` — the explicit
+// column list and order sent by sections whose shape varies (governance grids).
+// Shared so SectionContent and EditableSectionContent read it identically and a
+// grid edits in the same layout it renders in.
+export function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string')
+    ? (v as string[])
+    : undefined;
+}
+
 // The Table of Contents is generated from the finished document (source_type
 // "Template", mode "auto"), so it has nothing to show or configure while the report
 // is still being built. Hide it on Outline and Preview; it stays in the outline the
@@ -34,10 +44,19 @@ export function byDisplayOrder(
 // Honest display state — derived from REAL content, never from a blind status
 // flag. 'produced' requires actual content; empty tables / blank strings are NOT
 // produced.
-export type SectionState = 'produced' | 'needs_input' | 'empty';
+//
+// 'pending' is the one that is NOT about content: the section has not been produced
+// yet. It has to be its own state because batch production takes minutes on a large
+// report, and until it was added a section still in the queue fell through to 'empty'
+// and rendered "No data found for this section" — indistinguishable from one that ran
+// and found nothing. On a 49-section report that meant opening Preview a minute in and
+// seeing a wall of failures that were simply not finished.
+export type SectionState = 'produced' | 'needs_input' | 'empty' | 'pending';
 
 // Both 'needs_input' and 'empty' (no-data) sections want the user to supply
-// content — they render the same text + document-upload controls.
+// content — they render the same text + document-upload controls. 'pending' does NOT:
+// asking for input for a section we have not tried to produce yet is what caused the
+// confusion in the first place.
 export const wantsInput = (state: SectionState): boolean =>
   state === 'needs_input' || state === 'empty';
 
@@ -124,7 +143,36 @@ export function neededInput(s: ProducedSection): string {
 export function sectionState(s: ProducedSection): SectionState {
   if (hasRealContent(s)) return 'produced';
   if (needsInputSection(s)) return 'needs_input';
+  // Checked after needs_input so a section the outline already knows is missing its
+  // input still says so — that is accurate and actionable before production runs.
+  // Everything else with no content and a not-yet-run status is simply waiting.
+  if (s.status === 'pending' || s.status === 'drafting') return 'pending';
   return 'empty';
+}
+
+// Is batch production still working through the report?
+export const isProducing = (sections: ProducedSection[]): boolean =>
+  sections.some((s) => sectionState(s) === 'pending');
+
+// Does this section hold a table of figures the user can ask for an analysis of?
+//
+// The array check has to come FIRST. tableRowCount() falls back to counting an
+// object's keys, so {heading, content} — a plain AI-written prose section — reads
+// as two rows and would have got an Analyse button. Same guard, and same reason,
+// as SectionContent's hasTableShape.
+export function isFinancialTable(s: ProducedSection): boolean {
+  if (sectionState(s) !== 'produced') return false;
+  if ((s.section_code || '').toLowerCase() === 'cover') return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(s.content ?? '');
+  } catch {
+    return false; // a table-mode section can hold plain prose the user typed
+  }
+  if (parsed == null || typeof parsed !== 'object') return false;
+  const o = parsed as { rows?: unknown; tables?: unknown };
+  if (!Array.isArray(o.rows) && !Array.isArray(o.tables)) return false;
+  return tableRowCount(parsed) > 0;
 }
 
 // Friendly source-type label (how the section is generated).
@@ -138,6 +186,7 @@ export function sourceTypeLabel(s: ProducedSection): string {
   if (s.mode === 'generate') return 'AI-written';
   if (s.mode === 'table' || s.mode === 'kpi') return 'Extraction';
   if (s.mode === 'template') return 'Template';
+  if (s.mode === 'attach') return 'Attachment';
   return s.source_type || 'Section';
 }
 

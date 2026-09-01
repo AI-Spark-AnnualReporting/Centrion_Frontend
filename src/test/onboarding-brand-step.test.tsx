@@ -27,9 +27,23 @@ vi.mock("@/lib/api", () => ({
     extractBrandLanguage: (f: File) => extractBrandLanguage(f),
     detectLogoColors: (uri: string) => detectLogoColors(uri),
   },
+  ApiError: class ApiError extends Error {
+    status: number;
+    body: unknown;
+    url: string;
+    constructor(status: number, statusText: string, body: unknown, url: string) {
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      super(typeof detail === "string" && detail ? detail : `API ${status} ${statusText} — ${url}`);
+      this.status = status;
+      this.body = body;
+      this.url = url;
+      this.name = "ApiError";
+    }
+  },
 }));
 
 const { default: BrandStep } = await import("@/pages/onboarding/BrandStep");
+const { ApiError } = await import("@/lib/api");
 
 const PALETTES = [
   { key: "violet_cyan", name: "Violet & Cyan", primary: "#3C0866", secondary: "#5BC9E2" },
@@ -148,9 +162,12 @@ describe("brand language guideline", () => {
 
   it("surfaces the backend's message for an unreadable document", async () => {
     // A scanned PDF: the server explains why, and that reason must reach the user.
-    const err = Object.assign(new Error("bad"), {
-      body: { detail: "We couldn't read any text from that document." },
-    });
+    const err = new ApiError(
+      422,
+      "Unprocessable Entity",
+      { detail: "We couldn't read any text from that document." },
+      "/x",
+    );
     extractBrandLanguage.mockRejectedValue(err);
     const props = await setup();
     fireEvent.change(docInput(), { target: { files: [docFile("scan.pdf")] } });

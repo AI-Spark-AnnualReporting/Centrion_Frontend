@@ -1,29 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
-import { SectionContent } from '@/components/quarterly/SectionContent';
+import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
+import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type {
-  ProducedSection,
-  CoverTemplate,
-  ColorPalette,
-  BrandColors,
-  CoverSelectionPayload,
-} from '@/types/quarterly';
+import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
+  isProducing,
   wantsInput,
   neededInput,
   sourceTypeLabel,
   seedFromOutline,
   byDisplayOrder,
   isTableOfContentsSection,
+  isFinancialTable,
 } from '@/components/quarterly/sectionState';
 
 // ─── colours (match Coverage / Gaps / Outline conventions) ────────────────────
@@ -62,19 +59,32 @@ function SourceTypeBadge({ section }: { section: ProducedSection }) {
 }
 
 // ─── page shell ───────────────────────────────────────────────────────────────
-function Shell({ reportId, children }: { reportId?: string; children: React.ReactNode }) {
+function Shell({
+  reportId,
+  metricsMode,
+  children,
+}: {
+  reportId?: string;
+  // Custom reports have an extra Financial Data step in the indicator. Unknown
+  // until the outline loads, which is why it's nullable rather than defaulted.
+  metricsMode?: MetricsMode | null;
+  children: React.ReactNode;
+}) {
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100% - 48px)',
+        // See OutlinePage: the 48px double-counted the stepper rendered inside.
+        height: '100%',
         background: '#fff',
         borderRadius: 12,
         overflow: 'hidden',
       }}
     >
-      {reportId && <QuarterlyReportStepper activeStep={4} reportId={reportId} />}
+      {reportId && (
+        <QuarterlyReportStepper step="preview" reportId={reportId} metricsMode={metricsMode} />
+      )}
       {children}
     </div>
   );
@@ -93,11 +103,13 @@ function RailItem({
   onClick: () => void;
 }) {
   const state = sectionState(section);
-  const drafting = section.status === 'drafting';
+  // A section still in the production queue spins like one being drafted, because
+  // that is what it is — waiting, not missing.
+  const drafting = section.status === 'drafting' || state === 'pending';
   const produced = state === 'produced';
   const needs = wantsInput(state); // needs_input + no-data both want the user's input
 
-  // dot: green produced · amber needs-input · accent(spin) drafting · grey empty
+  // dot: green produced · amber needs-input · accent(spin) waiting/drafting · grey empty
   const dotBg = produced ? GREEN_LIGHT : needs ? AMBER_LIGHT : drafting ? ACCENT : '#F1F2F6';
   const dotColor = produced ? GREEN : needs ? AMBER : drafting ? '#fff' : MUTED;
   const dotBorder = produced ? '#A7F3D0' : needs ? '#FDE68A' : drafting ? ACCENT : '#E5E7EF';
@@ -174,7 +186,9 @@ function RailItem({
 function StatusPill({ section }: { section: ProducedSection }) {
   const state = sectionState(section);
   const drafting = section.status === 'drafting';
-  const cfg = drafting
+  const cfg = state === 'pending'
+    ? { label: 'Waiting…', color: ACCENT, bg: '#EEEEFF', tick: false }
+    : drafting
     ? { label: 'Composing…', color: ACCENT, bg: '#EEEEFF', tick: false }
     : state === 'produced'
       ? { label: 'Produced', color: GREEN, bg: GREEN_LIGHT, tick: true }
@@ -208,6 +222,16 @@ export default function PreviewPage() {
   const companyId = user?.company_id ?? null;
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
+  // Read by the production poll. A ref rather than the state itself so patching one
+  // section does not tear down and restart the interval on every tick.
+  const sectionsRef = useRef<ProducedSection[]>([]);
+  sectionsRef.current = sections;
+  // Batch production runs in the background after the outline is locked and takes
+  // minutes on a large report, so Preview is routinely opened while it is still
+  // working. Declared here because the poll effect below reads it.
+  const producing = isProducing(sections);
+  // Only for the step indicator — Custom reports have an extra Financial Data step.
+  const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -221,6 +245,12 @@ export default function PreviewPage() {
   // Document extraction in flight (per section) — extract-to-field before save.
   const [extracting, setExtracting] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // inline edit (produced sections — figures and prose are both editable)
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [savingCode, setSavingCode] = useState<string | null>(null);
+  const [savedCode, setSavedCode] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // ── Cover design + brand color (Part 6) ──
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
@@ -331,6 +361,7 @@ export default function PreviewPage() {
           .sort(byDisplayOrder)
           .map(seedFromOutline);
         setSections(included);
+        setMetricsMode(res.metrics_mode ?? null);
         setCurrentIndex(0);
         setLoading(false);
 
@@ -354,46 +385,66 @@ export default function PreviewPage() {
     };
   }, [companyId, reportId, retryKey, patchSection]);
 
-  // ── produce a single section (manual). Covers three cases:
-  //   • needs_input / no-data (empty): the user PROVIDES the content as text (a
-  //     document is extracted into the field first, see handleExtract). Saved via
-  //     produce — Template sections keep it verbatim, AI-written use it as a steer.
-  //   • produced: an explicit Regenerate — re-produce with no user_input.
+  // ── while batch production is still running, re-read the sections it hasn't
+  // reached yet. Production is kicked from the Outline and runs in the background;
+  // on a 49-section report it takes minutes, so Preview is routinely opened partway
+  // through. Without this the page shows whatever was true at load and never moves.
+  //
+  // Only the pending ones are re-fetched — a produced section will not change under
+  // us, and re-reading forty of them every few seconds to learn nothing is waste.
+  useEffect(() => {
+    if (!companyId || !reportId || !producing) return;
+    let cancelled = false;
+
+    const id = window.setInterval(async () => {
+      const waiting = sectionsRef.current.filter((s) => sectionState(s) === 'pending');
+      if (!waiting.length) return;
+      const results = await Promise.allSettled(
+        waiting.map((s) => quarterlyReports.getSection(companyId, reportId, s.section_code)),
+      );
+      if (cancelled) return;
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') patchSection(waiting[i].section_code, r.value);
+      });
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [companyId, reportId, producing, patchSection]);
+
+  // ── produce a single section (manual): needs_input / no-data (empty) sections
+  // let the user PROVIDE the content as text (a document is extracted into the
+  // field first, see handleExtract). Saved via produce — Template sections keep
+  // it verbatim, AI-written use it as a steer. Produced sections are edited
+  // in-place instead (see handleSaveContent), not re-produced.
   const handleProduce = useCallback(
     async (section: ProducedSection) => {
       if (!companyId || !reportId) return;
       const code = section.section_code;
       const text = (inputText[code] ?? '').trim();
-      const provideContent = wantsInput(sectionState(section));
-
-      // ── needs_input / empty: save the supplied text as the section content.
-      if (provideContent) {
-        if (!text) return; // uploaded docs are extracted into the field first
-        setBusy((b) => ({ ...b, [code]: true }));
-        setErrors((e) => ({ ...e, [code]: '' }));
-        try {
-          const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
-          patchSection(code, res);
-          setInputText((m) => ({ ...m, [code]: '' }));
-          setSectionFile((m) => ({ ...m, [code]: null }));
-        } catch (err: unknown) {
-          setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not save this section.' }));
-        } finally {
-          setBusy((b) => ({ ...b, [code]: false }));
-        }
-        return;
-      }
-
-      // ── produced → Regenerate: re-produce from the backend (no user_input).
+      if (!text) return; // uploaded docs are extracted into the field first
       setBusy((b) => ({ ...b, [code]: true }));
       setErrors((e) => ({ ...e, [code]: '' }));
-      patchSection(code, { status: 'drafting' });
       try {
-        const res = await quarterlyReports.produceSection(companyId, reportId, code, undefined);
+        const res = await quarterlyReports.produceSection(companyId, reportId, code, { user_input: text });
         patchSection(code, res);
+        // If the produce came back still needing input (RAG found nothing AND the
+        // typed text was too thin to synthesize from), keep the textarea so the
+        // user isn't left staring at a blank field, and surface the producer's
+        // reason so they know why nothing was written.
+        if (res.status === 'needs_input') {
+          setErrors((e) => ({
+            ...e,
+            [code]: res.error || 'This section still needs input — try adding more detail or attaching a source document.',
+          }));
+        } else {
+          setInputText((m) => ({ ...m, [code]: '' }));
+          setSectionFile((m) => ({ ...m, [code]: null }));
+        }
       } catch (err: unknown) {
-        patchSection(code, { status: 'done' });
-        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not regenerate this section.' }));
+        setErrors((e) => ({ ...e, [code]: err instanceof Error ? err.message : 'Could not save this section.' }));
       } finally {
         setBusy((b) => ({ ...b, [code]: false }));
       }
@@ -401,10 +452,42 @@ export default function PreviewPage() {
     [companyId, reportId, inputText, patchSection],
   );
 
+  // "Saved ✓" flash auto-clears.
+  useEffect(() => {
+    if (!savedCode) return;
+    const t = setTimeout(() => setSavedCode(null), 2000);
+    return () => clearTimeout(t);
+  }, [savedCode]);
+
+  // ── inline edit a produced section's content (figures or prose) in place.
+  const handleSaveContent = useCallback(
+    async (code: string, content: string) => {
+      if (!companyId || !reportId) return;
+      const prev = sections.find((s) => s.section_code === code)?.content ?? null;
+      setSavingCode(code);
+      setEditError(null);
+      patchSection(code, { content }); // optimistic
+      try {
+        const res = await quarterlyReports.saveSectionContent(companyId, reportId, code, { content });
+        patchSection(code, { content: res.section?.content ?? content }); // authoritative
+        setEditingCode(null);
+        setSavedCode(code);
+      } catch (err: unknown) {
+        patchSection(code, { content: prev }); // revert
+        setEditError(err instanceof Error ? err.message : 'Could not save. Please try again.');
+      } finally {
+        setSavingCode(null);
+      }
+    },
+    [companyId, reportId, sections, patchSection],
+  );
+
   // ── document upload for a section awaiting input.
   //   • Financial (table/kpi) sections: one-step /upload — the backend structures
   //     the document's tables into the standard section table (no textarea review,
   //     the table IS the content), so it patches straight to the produced section.
+  //   • Attach-mode sections (e.g. auditor_report): one-step /attach — the PDF is
+  //     embedded verbatim, same "patch straight to produced" flow as upload above.
   //   • Other sections: extract-only — pull the document's text into the input
   //     field for the user to review/edit, then Save persists it as content.
   const handleExtract = useCallback(
@@ -418,6 +501,10 @@ export default function PreviewPage() {
       try {
         if (section.mode === 'table' || section.mode === 'kpi') {
           const res = await quarterlyReports.uploadSectionDocument(companyId, reportId, code, file);
+          patchSection(code, res);
+          setInputText((m) => ({ ...m, [code]: '' }));
+        } else if (section.mode === 'attach') {
+          const res = await quarterlyReports.attachSectionDocument(companyId, reportId, code, file);
           patchSection(code, res);
           setInputText((m) => ({ ...m, [code]: '' }));
         } else {
@@ -451,20 +538,21 @@ export default function PreviewPage() {
   // i.e. nothing is still waiting on the user (needs_input, unfilled).
   const allResolved =
     total > 0 &&
+    !producing &&
     sections.every((s) => sectionState(s) !== 'needs_input' || skipped.has(s.section_code));
   const doneCount = sections.filter((s) => sectionState(s) === 'produced').length;
 
   // ── loading / error / empty ──
   if (loading) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <Spinner pad={80} />
       </Shell>
     );
   }
   if (fetchError) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ padding: '24px 28px' }}>
           <div style={{ padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
             <span style={{ fontSize: 13, color: '#DC2626' }}>{fetchError}</span>
@@ -478,7 +566,7 @@ export default function PreviewPage() {
   }
   if (total === 0) {
     return (
-      <Shell reportId={reportId}>
+      <Shell reportId={reportId} metricsMode={metricsMode}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', textAlign: 'center' }}>
           <h2 style={{ fontSize: 17, fontWeight: 800, color: DARK, margin: '0 0 8px' }}>No sections to produce</h2>
           <p style={{ fontSize: 13, color: MUTED, marginBottom: 22 }}>Lock an outline first to generate the report.</p>
@@ -491,7 +579,7 @@ export default function PreviewPage() {
   }
 
   return (
-    <Shell reportId={reportId}>
+    <Shell reportId={reportId} metricsMode={metricsMode}>
       {/* Header */}
       <div style={{ padding: '22px 28px 16px', flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: '0 0 4px', lineHeight: 1.2 }}>Report preview</h1>
@@ -595,6 +683,14 @@ export default function PreviewPage() {
                   companyId={companyId}
                   reportId={reportId ?? null}
                   onRefined={handleRefined}
+                  onAnalysed={(a) => patchSection(section.section_code, { analysis: a })}
+                  editing={editingCode === section.section_code}
+                  saving={savingCode === section.section_code}
+                  saved={savedCode === section.section_code}
+                  editError={editingCode === section.section_code ? editError : null}
+                  onStartEdit={() => { setEditError(null); setEditingCode(section.section_code); }}
+                  onCancelEdit={() => { setEditError(null); setEditingCode(null); }}
+                  onSaveContent={(content) => handleSaveContent(section.section_code, content)}
                 />
               )}
             </div>
@@ -620,8 +716,13 @@ export default function PreviewPage() {
         <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}>
           ← Back
         </button>
-        <span style={{ fontSize: 13, color: allResolved ? GREEN : MUTED, fontWeight: 600 }}>
-          {doneCount} of {total} produced
+        <span
+          style={{ fontSize: 13, color: allResolved ? GREEN : producing ? ACCENT : MUTED, fontWeight: 600 }}
+          aria-live="polite"
+        >
+          {producing
+            ? `Producing sections… ${doneCount} of ${total} done`
+            : `${doneCount} of ${total} produced`}
         </span>
         <button
           className="bp"
@@ -639,7 +740,17 @@ export default function PreviewPage() {
 }
 
 // Per-section supporting-document picker (label-wrapped input; no ref needed).
-function FileField({ file, onFileChange, disabled }: { file: File | null; onFileChange: (f: File | null) => void; disabled?: boolean }) {
+function FileField({
+  file,
+  onFileChange,
+  disabled,
+  accept,
+}: {
+  file: File | null;
+  onFileChange: (f: File | null) => void;
+  disabled?: boolean;
+  accept?: string;
+}) {
   if (file) {
     return (
       <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid #D1D5EF', background: 'rgba(64,64,200,.04)' }}>
@@ -664,6 +775,7 @@ function FileField({ file, onFileChange, disabled }: { file: File | null; onFile
     >
       <input
         type="file"
+        accept={accept}
         style={{ display: 'none' }}
         disabled={disabled}
         onChange={(e) => { onFileChange(e.target.files?.[0] ?? null); e.currentTarget.value = ''; }}
@@ -693,6 +805,14 @@ function SectionPanel({
   companyId,
   reportId,
   onRefined,
+  onAnalysed,
+  editing,
+  saving,
+  saved,
+  editError,
+  onStartEdit,
+  onCancelEdit,
+  onSaveContent,
 }: {
   section: ProducedSection;
   busy: boolean;
@@ -708,12 +828,23 @@ function SectionPanel({
   companyId: string | null;
   reportId: string | null;
   onRefined: (s: ProducedSection) => void;
+  onAnalysed: (a: Analysis | null) => void;
+  editing: boolean;
+  saving: boolean;
+  saved: boolean;
+  editError: string | null;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveContent: (content: string) => void;
 }) {
   const state = sectionState(section);
+  const [analysing, setAnalysing] = useState(false);
   // Input-seeking states (needs_input / empty) stay in their own panel while
   // saving (button shows "Saving…") — only a fresh produce shows the full
   // "Composing…" spinner.
-  const drafting = (section.status === 'drafting' || busy) && state !== 'produced' && !wantsInput(state);
+  const drafting =
+    (section.status === 'drafting' || busy || state === 'pending')
+    && state !== 'produced' && !wantsInput(state);
   const canRefine = state === 'produced' && section.mode === 'generate';
 
   // 1) Composing (produce in-flight)
@@ -724,60 +855,126 @@ function SectionPanel({
           <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
           <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
         </svg>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Composing this section…</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {state === 'pending' && !busy
+            ? 'Waiting to be produced — this section has not been reached yet.'
+            : 'Composing this section…'}
+        </span>
       </div>
     );
   }
 
-  // 2) Produced → real content (+ Regenerate, + refine for AI-written sections).
-  //    Regenerate is the ONLY path that re-hits the producer for a done section;
-  //    revisiting never auto-regenerates.
+  // 2) Produced → real content, editable in place (figures and prose alike).
+  //    No Regenerate — the user edits the produced content directly instead.
   if (state === 'produced') {
     return (
       <>
-        {/* Regenerate only for sections that actually re-generate — hidden for
-            Template/External and user-supplied (typed/uploaded) content. */}
-        {section.regeneratable !== false && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginBottom: 12 }}>
-          {busy && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: ACCENT }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
-                <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
+          {saved && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: GREEN, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 6.2L5 8.7l4.5-5" stroke={GREEN} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Regenerating…
+              Saved
             </span>
           )}
-          <button
-            type="button"
-            className="btn bs"
-            onClick={onProduce}
-            disabled={busy}
-            title="Regenerate this section"
-            style={{ fontSize: 12.5, padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: 7, opacity: busy ? 0.6 : 1 }}
-          >
-            <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
-              <path d="M16 5a7 7 0 1 0 1.5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              <path d="M16 2v3.5h-3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Regenerate
-          </button>
+          {!editing && section.mode !== 'attach' && (
+            <button
+              type="button"
+              onClick={onStartEdit}
+              aria-label={`Edit ${section.title}`}
+              title="Edit section"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 7, border: '1px solid #E4E6F1', background: '#fff', color: MUTED, cursor: 'pointer' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+          {/* Attach-mode has no text to edit in place — replacing the file (via
+              the same one-step /attach flow) is the only way to change it. */}
+          {section.mode === 'attach' && (
+            <label
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px',
+                borderRadius: 7, border: '1px solid #E4E6F1', background: '#fff', color: MUTED,
+                fontSize: 12, fontWeight: 600, cursor: extracting ? 'not-allowed' : 'pointer',
+                opacity: extracting ? 0.6 : 1,
+              }}
+            >
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                style={{ display: 'none' }}
+                disabled={extracting}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.currentTarget.value = '';
+                  if (f) onFileChange(f);
+                }}
+              />
+              {extracting ? 'Replacing…' : 'Replace PDF'}
+            </label>
+          )}
         </div>
+        {/* The reading band travels over the table while the analyser works, so it
+            wraps the content — and sits OUTSIDE the table's own overflow-x
+            scroller, which would otherwise clip a vertically-moving band. */}
+        <div style={{ position: 'relative', overflow: analysing ? 'hidden' : undefined }}>
+          <div className={analysing ? 'analysis-reading' : undefined}>
+            <EditableSectionContent
+              section={section}
+              editing={editing}
+              saving={saving}
+              error={editing ? editError : null}
+              onSave={onSaveContent}
+              onCancel={onCancelEdit}
+              companyId={companyId}
+            />
+          </div>
+          {analysing && <ReadingBand />}
+        </div>
+        {section.mode === 'attach' && error && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#DC2626' }}>{error}</div>
         )}
-        {error && <div style={{ marginBottom: 12, fontSize: 12, color: '#DC2626' }}>{error}</div>}
-        <SectionContent section={section} />
-        {canRefine && companyId && reportId && (
-          <SectionRefineChat companyId={companyId} reportId={reportId} sectionCode={section.section_code} onRefined={onRefined} />
+        {!editing && companyId && reportId && isFinancialTable(section) && (
+          <SectionAnalysis
+            key={section.section_code}
+            companyId={companyId}
+            reportId={reportId}
+            section={section}
+            onBusyChange={setAnalysing}
+            // The key above remounts this on every rail switch (deliberately — it is
+            // what stops one section's in-flight request and open dialog leaking onto
+            // the next), and a remount re-seeds from section.analysis. So a fresh
+            // result has to land HERE or switching away loses it until a reload.
+            onAnalysis={onAnalysed}
+          />
+        )}
+        {canRefine && !editing && companyId && reportId && (
+          // Keyed on the section: without it the instruction typed for one
+          // section is still sitting in the box after switching to the next.
+          <SectionRefineChat
+            key={section.section_code}
+            onSend={async (instruction) => {
+              onRefined(await quarterlyReports.refineSection(
+                companyId, reportId, section.section_code, instruction));
+            }}
+          />
         )}
       </>
     );
   }
 
-  // 3) Needs input OR no-data (empty) → both let the user supply content: a text
-  //    field + a document upload (whose text is extracted into the field). Upload
-  //    → extract → review/edit → Save.
+  // 3) Needs input OR no-data (empty) → both let the user supply content.
+  //    Attach-mode sections (e.g. auditor_report) only take a PDF — it's embedded
+  //    verbatim, with no text steer and no edit-then-commit step, so there's no
+  //    textarea or Save button, just the file picker (handleExtract saves it in
+  //    one step). Everything else: a text field + a document upload (whose text
+  //    is extracted into the field). Upload → extract → review/edit → Save.
   const need = neededInput(section);
   const isEmpty = state === 'empty';
+  const isAttach = section.mode === 'attach';
   const canProduce = !busy && !extracting && !!inputValue.trim();
   return (
     <div>
@@ -786,29 +983,42 @@ function SectionPanel({
           {isEmpty ? 'No data found for this section' : 'This section needs your input'}
         </div>
         <div style={{ fontSize: 13, color: '#92610A' }}>
-          {isEmpty ? 'Add content below — type it in, or upload a document to pull its text.' : `Needs: ${need}`}
+          {isAttach
+            ? 'Attach the PDF for this section — it is embedded as-is, not turned into editable text.'
+            : isEmpty
+              ? 'Add content below — type it in, or upload a document to pull its text.'
+              : `Needs: ${need}`}
         </div>
       </div>
 
-      <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
-        {isEmpty ? 'Section content' : need}
-      </label>
-      <textarea
-        value={inputValue}
-        onChange={(e) => onInputChange(e.target.value)}
-        placeholder={`Type or paste ${isEmpty ? 'the section content' : need.toLowerCase()}…`}
-        rows={5}
-        disabled={extracting}
-        style={{
-          width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
-          fontSize: 13, lineHeight: 1.6, color: DARK, background: extracting ? '#F8F9FC' : '#fff', resize: 'vertical',
-          outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
-        }}
-        onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
-        onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
-      />
+      {!isAttach && (
+        <>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>
+            {isEmpty ? 'Section content' : need}
+          </label>
+          <textarea
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
+            placeholder={`Type or paste ${isEmpty ? 'the section content' : need.toLowerCase()}…`}
+            rows={5}
+            disabled={extracting}
+            style={{
+              width: '100%', padding: '12px 14px', borderRadius: 8, border: `1.5px solid ${error ? '#FECACA' : '#E5E7EF'}`,
+              fontSize: 13, lineHeight: 1.6, color: DARK, background: extracting ? '#F8F9FC' : '#fff', resize: 'vertical',
+              outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color .15s',
+            }}
+            onFocus={(e) => { if (!error) e.currentTarget.style.borderColor = ACCENT; }}
+            onBlur={(e) => { if (!error) e.currentTarget.style.borderColor = '#E5E7EF'; }}
+          />
+        </>
+      )}
 
-      <FileField file={file} onFileChange={onFileChange} disabled={busy || extracting} />
+      <FileField
+        file={file}
+        onFileChange={onFileChange}
+        disabled={busy || extracting}
+        accept={isAttach ? 'application/pdf,.pdf' : undefined}
+      />
 
       {extracting && (
         <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, color: ACCENT }}>
@@ -816,7 +1026,7 @@ function SectionPanel({
             <circle cx="12" cy="12" r="10" stroke={ACCENT} strokeWidth="3" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
           </svg>
-          Extracting text from document…
+          {isAttach ? 'Attaching document…' : 'Extracting text from document…'}
         </div>
       )}
 
@@ -829,14 +1039,16 @@ function SectionPanel({
         >
           {skipped ? 'Skipped — will be flagged' : 'Skip for now'}
         </button>
-        <button
-          className="btn bp"
-          onClick={onProduce}
-          disabled={!canProduce}
-          style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
+        {!isAttach && (
+          <button
+            className="btn bp"
+            onClick={onProduce}
+            disabled={!canProduce}
+            style={{ fontSize: 13, padding: '10px 22px', opacity: canProduce ? 1 : 0.55 }}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import {
   saveActivePipeline,
 } from "@/lib/active-pipeline";
 import { reports as reportsApi, quarterlyReports, ApiError } from "@/lib/api";
-import { GeneratingScreen } from "@/components/reports/GeneratingScreen";
+import { GeneratingScreen, type GeneratingPhase } from "@/components/reports/GeneratingScreen";
 import {
   QuarterlyGeneratingScreen,
   computeProgress,
@@ -125,9 +125,12 @@ export interface ProcessingPageState {
   reportType?: string;
   // Display-only label for the quarterly hero, e.g. "Q1 2025".
   period?: string;
-  // Where a completed quarterly run hands off. Extraction → "outline" (default);
+  // Where a completed quarterly run hands off. Extraction → "extraction" (default),
+  // the review screen where the user confirms which figures are which metric;
   // section-production (produceAll, kicked from the Outline) → "preview".
-  quarterlyNext?: "outline" | "preview";
+  // Custom-metrics reports → "financials": this run only read their narrative
+  // documents, and their figures come from the per-section uploads on that screen.
+  quarterlyNext?: "extraction" | "financials" | "outline" | "preview";
   // Set when the caller navigated BEFORE a run existed, so the user reaches the
   // loader on the click instead of watching a dead button. Locking an outline takes
   // a few seconds and produceAll can only be kicked after it, so the Outline page
@@ -139,6 +142,10 @@ export interface ProcessingPageState {
     outlinePayload: OutlineSavePayload;
   };
 }
+
+// Long enough for a real outline save + lock + produce kick on a slow connection,
+// short enough that nobody sits watching a bar that will never move.
+const BOOTSTRAP_DEADLINE_MS = 45_000;
 
 export default function ProcessingPage() {
   const location = useLocation();
@@ -157,6 +164,23 @@ export default function ProcessingPage() {
   // loader is already on screen, which is the whole point — these calls take several
   // seconds and used to happen while the user stared at a disabled button.
   const bootstrappedRef = useRef(false);
+  // Tells a "already locked" 409 apart from a "your save was rejected" 409.
+  const lockAttempted = useRef(false);
+  const [bootError, setBootError] = useState<string | null>(null);
+
+  // Bootstrap has to actually produce a run to poll. If it never does -- the effect
+  // below returns early on a missing companyId/reportId, and has no other way to
+  // report that -- nothing further happens: no url, so the poll hook never starts,
+  // so none of its timeouts exist, and the loader stays up until the tab is closed.
+  // Give that window an end.
+  useEffect(() => {
+    if (!state?.bootstrap || pollUrl || bootError) return;
+    const id = window.setTimeout(
+      () => setBootError("Generation did not start"),
+      BOOTSTRAP_DEADLINE_MS,
+    );
+    return () => window.clearTimeout(id);
+  }, [state?.bootstrap, pollUrl, bootError]);
   useEffect(() => {
     const boot = state?.bootstrap;
     if (!boot || !state?.companyId || !state?.reportId) return;
@@ -186,6 +210,9 @@ export default function ProcessingPage() {
         }
 
         await quarterlyReports.saveOutline(companyId, reportId, boot.outlinePayload);
+        // Only a 409 from HERE on means "already locked"; a 409 from the save above
+        // means the save was REJECTED, which is a different thing entirely.
+        lockAttempted.current = true;
         await quarterlyReports.lockOutline(companyId, reportId);
         const handle = await quarterlyReports.produceAll(companyId, reportId);
         if (handle?.run_id && handle?.poll_url) {
@@ -196,13 +223,27 @@ export default function ProcessingPage() {
         // each section individually, so hand off there rather than stranding the user.
         navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
       } catch (err: unknown) {
-        // 409 = already locked elsewhere; sections are (being) produced. Don't
-        // re-kick production, just go look at them. Same rule the Outline page used.
-        if (err instanceof ApiError && err.status === 409) {
+        // A 409 from LOCK means the outline is already locked elsewhere and sections
+        // are (being) produced — going to look at them is right.
+        //
+        // Anything else is a refusal, and this used to navigate to Preview for those
+        // too. That is how a backend rejection became a permanent spinner: the save
+        // 409'd, so the outline was never locked and not one section row was ever
+        // created, and Preview — which infers "producing" purely from rows sitting at
+        // pending — showed "0 of 27" forever with nothing running. Half an hour of
+        // waiting for a request that failed in the first second.
+        //
+        // Never swallow it again: a failure that leaves the outline unlocked has to
+        // say so, because Preview cannot tell "not started" from "still going".
+        if (err instanceof ApiError && err.status === 409 && lockAttempted.current) {
           navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
           return;
         }
-        navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+        setBootError(
+          err instanceof Error
+            ? err.message
+            : 'The report outline could not be saved, so production never started.',
+        );
       }
     })();
   }, [state, navigate]);
@@ -219,7 +260,9 @@ export default function ProcessingPage() {
   // tick (its effect depends on onDone identity).
   const handleQuarterlyLoaderDone = useCallback(() => {
     if (readyReportId) {
-      const next = state?.quarterlyNext ?? "outline";
+      // Extraction now lands on the review screen, not the outline: the user has to
+      // confirm the uncertain metric mappings before those figures exist at all.
+      const next = state?.quarterlyNext ?? "extraction";
       navigate(`/quarterly-report/${readyReportId}/${next}`, { replace: true });
     }
   }, [readyReportId, navigate, state?.quarterlyNext]);
@@ -328,6 +371,25 @@ export default function ProcessingPage() {
     );
   }
 
+  // Saving or locking the outline was refused, so production never started. Shown
+  // here rather than handing off to Preview: Preview infers "producing" from rows
+  // still at pending, so with no rows at all it spins forever on a run that does not
+  // exist. Retry re-runs the bootstrap rather than pretending it worked.
+  if (bootError) {
+    return (
+      <GeneratingScreen
+        phase="failed"
+        errorMessage={`${bootError} — nothing is being generated. Go back to the outline and try again.`}
+        onCancel={() => navigate("/reports", { replace: true })}
+        onRetry={() => {
+          setBootError(null);
+          bootstrappedRef.current = false;
+          lockAttempted.current = false;
+        }}
+      />
+    );
+  }
+
   // Coverage fetch failed after polling reported completed — surface as an error.
   if (coverageFetchError) {
     return (
@@ -345,7 +407,14 @@ export default function ProcessingPage() {
     );
   }
 
-  const phase = poll.phase === "idle" ? "running" : poll.phase;
+  // Still "running" while bootstrapping, and only then. A bootstrapping run has no
+  // pollUrl yet by design -- the loader goes up first, on purpose, because locking
+  // the outline takes seconds -- so `idle` here is legitimate. Everywhere else it
+  // means the hook is watching nothing, and painting that as progress is what left
+  // a loading screen up over a job that was never started. The deadline above is
+  // what stops even this window running forever.
+  const phase: GeneratingPhase =
+    poll.phase !== "idle" ? poll.phase : state.bootstrap ? "running" : "failed";
 
   // Quarterly reports. The running/completing state uses the onboarding workspace
   // loader (AiLoadingScreen). Hard failure / timeout keep the detailed
@@ -391,7 +460,7 @@ export default function ProcessingPage() {
       : {
           title: "Processing your report",
           subtitle: "Reading your documents and extracting the figures.",
-          doneSubtitle: "Taking you to the outline…",
+          doneSubtitle: "Taking you to the figures we found…",
           milestones: QUARTERLY_MILESTONES,
           tips: QUARTERLY_TIPS,
         };
