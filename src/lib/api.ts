@@ -116,7 +116,9 @@ import type {
 import type {
   CreateMeetingBody,
   MeetingListResponse,
+  MeetingMinutesResponse,
   MeetingResponse,
+  SaveMeetingMinutesBody,
   UpdateMeetingBody,
 } from "@/types/meeting";
 import type {
@@ -3691,6 +3693,31 @@ export const meetings = {
       `/api/v1/meetings/${encodeURIComponent(meetingId)}`,
       { method: "PATCH", body },
     ),
+
+  // Minutes of meeting. One record per meeting, upserted by PUT. Multipart
+  // rather than JSON because the notes can carry a file attachment, and a
+  // single round-trip keeps the text and the file from drifting apart.
+  minutes: {
+    get: (meetingId: string) =>
+      request<MeetingMinutesResponse>(
+        `/api/v1/meetings/${encodeURIComponent(meetingId)}/minutes`,
+      ),
+
+    save: (meetingId: string, body: SaveMeetingMinutesBody) => {
+      const fd = new FormData();
+      fd.append("notes", body.notes);
+      fd.append("decision_taken", body.decision_taken);
+      fd.append("decision_under_review", body.decision_under_review);
+      fd.append("decision_abandoned", body.decision_abandoned);
+      fd.append("attendance", JSON.stringify(body.attendance));
+      if (body.attachment) fd.append("attachment", body.attachment);
+      if (body.remove_attachment) fd.append("remove_attachment", "true");
+      return request<MeetingMinutesResponse>(
+        `/api/v1/meetings/${encodeURIComponent(meetingId)}/minutes`,
+        { method: "PUT", form: fd },
+      );
+    },
+  },
 };
 
 // ---------------------------------------------------------------------------

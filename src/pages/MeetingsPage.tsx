@@ -20,6 +20,7 @@ import { canCreateFeature } from '@/lib/features';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
+import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 import {
   MONTHS,
@@ -92,6 +93,10 @@ function typeBadgeClass(t: string): string {
     case 'roadshow': return 'b-tl';
     default: return 'b-or';
   }
+}
+
+function needsMinutes(m: Meeting, date: Date, now: Date): boolean {
+  return !m.has_minutes && m.status !== 'cancelled' && (m.status === 'completed' || date < now);
 }
 
 function fullDateTime(d: Date): string {
@@ -207,23 +212,92 @@ function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: st
   );
 }
 
+// One meeting in a rail. The Upcoming timeline and the Needs Minutes list show
+// the identical row and differ only in what sits at its right edge, so the
+// trailing element is the only thing either caller has to supply.
+function MeetingRow({
+  meeting,
+  date,
+  onClick,
+  trailing,
+  last,
+}: {
+  meeting: Meeting;
+  date: Date;
+  onClick: () => void;
+  trailing: React.ReactNode;
+  last: boolean;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', gap: 12, padding: '12px 0', cursor: 'pointer',
+        borderBottom: last ? 'none' : '1px solid #ECEEF8',
+      }}
+    >
+      <div style={{
+        minWidth: 46, height: 46, background: '#EEEEFF',
+        border: '1px solid rgba(64,64,200,.15)', borderRadius: 10,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#4040C8', lineHeight: 1 }}>
+          {date.getDate().toString().padStart(2, '0')}
+        </div>
+        <div style={{ fontSize: 8, fontWeight: 800, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.6px', marginTop: 2 }}>
+          {SHORT_MONTHS[date.getMonth()]}
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{meeting.title}</div>
+          {meeting.status !== 'scheduled' && (
+            <span className={`badge ${statusBadgeClass(meeting.status)}`} style={{ fontSize: 9, padding: '1px 6px' }}>
+              {meeting.status}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 10, color: '#9BA3C4', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {meetingMeta(meeting)}
+        </div>
+        {meeting.participants.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {meeting.participants.slice(0, 3).map((p) => (
+              <span key={p} className="badge b-gy" style={{ fontSize: 9 }}>{p}</span>
+            ))}
+            {meeting.participants.length > 3 && (
+              <span className="badge b-gy" style={{ fontSize: 9 }}>+{meeting.participants.length - 3}</span>
+            )}
+          </div>
+        )}
+      </div>
+      {trailing}
+    </div>
+  );
+}
+
 function MeetingDetailModal({
   meeting,
   onClose,
   onUpdated,
   companyId,
   companyName,
+  canEdit,
+  initialTab = 'details',
 }: {
   meeting: Meeting;
   onClose: () => void;
   onUpdated: (m: Meeting) => void;
   companyId: string | null;
   companyName: string;
+  canEdit: boolean;
+  initialTab?: 'details' | 'minutes';
 }) {
   const { toast } = useToast();
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const [current, setCurrent] = useState<Meeting>(meeting);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<'details' | 'minutes'>(initialTab);
   const [form, setForm] = useState<ModalState>(() => ({
     title: meeting.title,
     date: meeting.meeting_date,
@@ -341,6 +415,12 @@ function MeetingDetailModal({
 
   const date = toLocalDate(current.meeting_date, current.meeting_time);
 
+  // Minutes belong to meetings that have actually taken place. The backend
+  // never flips `status` to 'completed' today, so a past date counts too.
+  const hasHappened =
+    current.status !== 'cancelled' &&
+    (current.status === 'completed' || date < new Date());
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
@@ -381,6 +461,41 @@ function MeetingDetailModal({
           </button>
         </div>
 
+        {hasHappened && (
+          <div style={{ display: 'flex', gap: 18, padding: '0 24px', borderBottom: '1px solid #ECEEF8' }}>
+            {([['details', 'Details'], ['minutes', 'Minutes']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setTab(key);
+                  // Leaving an unsaved edit behind on the Details tab would be
+                  // invisible from Minutes, so drop it on the way out.
+                  if (key === 'minutes') setEditing(false);
+                }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                  padding: '11px 0', fontSize: 12, fontWeight: 700,
+                  color: tab === key ? '#4040C8' : '#9BA3C4',
+                  borderBottom: `2px solid ${tab === key ? '#4040C8' : 'transparent'}`,
+                  marginBottom: -1,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {hasHappened && tab === 'minutes' ? (
+          <MeetingMinutesPanel
+            meeting={current}
+            canEdit={canEdit}
+            onClose={onClose}
+            onSaved={() => onUpdated({ ...current, has_minutes: true })}
+          />
+        ) : (
+        <>
         <div style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {editing ? (
             <>
@@ -513,6 +628,8 @@ function MeetingDetailModal({
             </>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );
@@ -533,6 +650,15 @@ export default function MeetingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeMeeting, setActiveMeeting] = useState<Meeting | null>(null);
+  const [modalTab, setModalTab] = useState<'details' | 'minutes'>('details');
+  const [rail, setRail] = useState<'upcoming' | 'minutes'>('upcoming');
+
+  // Both bits of "which meeting is open" move together, so the modal can never
+  // inherit a tab left over from the previous meeting.
+  const openMeeting = (m: Meeting, tab: 'details' | 'minutes' = 'details') => {
+    setActiveMeeting(m);
+    setModalTab(tab);
+  };
   // null = still loading. The disclosure layer is best-effort: every source is
   // settled independently so one dead endpoint can't take the meetings grid
   // down with it.
@@ -622,6 +748,15 @@ export default function MeetingsPage() {
   const upcoming = useMemo(
     () => items.filter((it) => it.date >= startToday && !(it.kind === 'disclosure' && it.event.kind === 'filed')),
     [items, startToday],
+  );
+
+  // Newest first: the meeting you just held is the one you sit down to write up.
+  const unwritten = useMemo(
+    () =>
+      decorated
+        .filter((m) => needsMinutes(m, m._date, today))
+        .sort((a, b) => b._date.getTime() - a._date.getTime()),
+    [decorated, today],
   );
 
   const monthItems = useMemo(
@@ -771,8 +906,8 @@ export default function MeetingsPage() {
 
             {/* Selected day detail */}
             {selectedDate && (
-              <div style={{ marginTop: 16, padding: 12, background: '#F2F3FA', borderRadius: 10, border: '1px solid #ECEEF8' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: selectedItems.length ? 8 : 0 }}>
+              <div style={{ marginTop: 16, padding: 12, background: '#F2F3FA', borderRadius: 10, border: '1px solid #ECEEF8', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>
                     {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                   </div>
@@ -786,40 +921,56 @@ export default function MeetingsPage() {
                     )}
                   </div>
                 ) : (
-                  selectedItems.map((it) =>
+                  // Scrolls in place, like the rail opposite. A busy day would
+                  // otherwise stretch this card past the one beside it.
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 208, overflowY: 'auto', paddingRight: 2 }}>
+                  {selectedItems.map((it) =>
                     it.kind === 'meeting' ? (
-                      <button
-                        key={it.id}
-                        onClick={() => setActiveMeeting(it.meeting)}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                          padding: '8px 10px', background: '#fff', borderRadius: 8, marginBottom: 6,
-                          fontSize: 11, border: '1px solid transparent', cursor: 'pointer', fontFamily: 'inherit',
-                        }}
-                      >
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ display: 'block', fontWeight: 700, color: '#1A1D2E', marginBottom: 2 }}>{it.meeting.title}</span>
-                          <span style={{ display: 'block', color: '#5A6080', fontSize: 10 }}>{meetingMeta(it.meeting)}</span>
-                        </span>
-                      </button>
+                      (() => {
+                        // Flag it here too — this panel is how a past meeting
+                        // gets found, and the rail only lists them.
+                        const unwrittenHere = needsMinutes(it.meeting, it.date, today);
+                        return (
+                          <button
+                            key={it.id}
+                            onClick={() => openMeeting(it.meeting, unwrittenHere ? 'minutes' : 'details')}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                              padding: '8px 10px', background: '#fff', borderRadius: 8,
+                              fontSize: 11, border: '1px solid transparent', cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                          >
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ display: 'block', fontWeight: 700, color: '#1A1D2E', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.meeting.title}</span>
+                              <span style={{ display: 'block', color: '#5A6080', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meetingMeta(it.meeting)}</span>
+                            </span>
+                            {unwrittenHere && (
+                              <span className="badge b-rd" style={{ flexShrink: 0, fontSize: 9, whiteSpace: 'nowrap' }}>
+                                Needs minutes
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })()
                     ) : (
                       // Derived, not stored — there is nothing to open or edit.
                       <div
                         key={it.id}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 8,
-                          padding: '8px 10px', background: '#fff', borderRadius: 8, marginBottom: 6,
+                          padding: '8px 10px', background: '#fff', borderRadius: 8,
                         }}
                       >
                         <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
-                        <div style={{ minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>{it.event.title}</div>
                           <div style={{ fontSize: 10, color: '#9BA3C4' }}>{it.event.subtitle}</div>
                         </div>
                       </div>
                     ),
-                  )
+                  )}
+                  </div>
                 )}
               </div>
             )}
@@ -849,16 +1000,78 @@ export default function MeetingsPage() {
           </div>
         </div>
 
-        {/* Upcoming — meetings and disclosure deadlines on one timeline */}
+        {/* Two rails on one card: what's coming, and what still needs writing up. */}
         <div className="card">
           <div className="ch">
-            <div className="ct">Upcoming</div>
-            <span className="badge b-or">
-              {loading || disclosure === null ? 'Loading…' : `${upcoming.length} upcoming`}
-            </span>
+            <div className="tabs" style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`tab ${rail === 'upcoming' ? 'act' : ''}`}
+                onClick={() => setRail('upcoming')}
+              >
+                {/* Plain text, not a pill: it inherits the tab's colour and so
+                    stays legible on both the active and inactive fill. */}
+                Upcoming {upcoming.length}
+              </button>
+              <button
+                type="button"
+                className={`tab ${rail === 'minutes' ? 'act' : ''}`}
+                onClick={() => setRail('minutes')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                Needs Minutes
+                {/* The whole point of the tab: the backlog is visible without
+                    opening it. Own colours rather than `badge b-rd`, which
+                    would vanish against the active tab's indigo fill. */}
+                {unwritten.length > 0 && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, lineHeight: 1, color: '#fff',
+                    background: '#E5484D', borderRadius: 999, padding: '3px 6px', minWidth: 15, textAlign: 'center',
+                  }}>
+                    {unwritten.length}
+                  </span>
+                )}
+              </button>
+            </div>
+            {(loading || disclosure === null) && (
+              <span className="badge b-or">Loading…</span>
+            )}
           </div>
-          <div style={{ padding: '6px 18px 14px' }}>
-            {(loading && data.length === 0) || disclosure === null ? (
+          {/* The rail scrolls inside the card rather than stretching it: a long
+              minutes backlog would otherwise drag the whole row past the
+              calendar beside it. */}
+          <div style={{ padding: '6px 18px 14px', maxHeight: 440, overflowY: 'auto' }}>
+            {rail === 'minutes' ? (
+              (loading && data.length === 0) ? (
+                <div style={{ padding: '32px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
+                  <div className="proc-ring" style={{ margin: '0 auto 10px', width: 28, height: 28, borderWidth: 2.5 }} />
+                  Loading meetings…
+                </div>
+              ) : unwritten.length === 0 ? (
+                <div style={{ padding: '28px 4px', textAlign: 'center', color: '#9BA3C4', fontSize: 12, lineHeight: 1.6 }}>
+                  All caught up — every past meeting has its minutes.
+                </div>
+              ) : (
+                unwritten.map((m, i) => (
+                  <MeetingRow
+                    key={m.id}
+                    meeting={m}
+                    date={m._date}
+                    onClick={() => openMeeting(m, 'minutes')}
+                    last={i === unwritten.length - 1}
+                    trailing={
+                      <span style={{
+                        flexShrink: 0, alignSelf: 'flex-start', whiteSpace: 'nowrap',
+                        fontSize: 10.5, fontWeight: 700, color: '#4040C8',
+                        background: '#ECEEFF', borderRadius: 7, padding: '4px 9px',
+                      }}>
+                        Add minutes →
+                      </span>
+                    }
+                  />
+                ))
+              )
+            ) : (loading && data.length === 0) || disclosure === null ? (
               <div style={{ padding: '32px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
                 <div className="proc-ring" style={{ margin: '0 auto 10px', width: 28, height: 28, borderWidth: 2.5 }} />
                 Loading calendar…
@@ -889,42 +1102,15 @@ export default function MeetingsPage() {
                 );
 
                 if (it.kind === 'meeting') {
-                  const m = it.meeting;
                   return (
-                    <div key={it.id} onClick={() => setActiveMeeting(m)} style={{ ...rowStyle, cursor: 'pointer' }}>
-                      <div style={{
-                        minWidth: 46, height: 46, background: '#EEEEFF',
-                        border: '1px solid rgba(64,64,200,.15)', borderRadius: 10,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                      }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: '#4040C8', lineHeight: 1 }}>{day}</div>
-                        <div style={{ fontSize: 8, fontWeight: 800, color: '#4040C8', textTransform: 'uppercase', letterSpacing: '.6px', marginTop: 2 }}>{month}</div>
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E' }}>{m.title}</div>
-                          {m.status !== 'scheduled' && (
-                            <span className={`badge ${statusBadgeClass(m.status)}`} style={{ fontSize: 9, padding: '1px 6px' }}>
-                              {m.status}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 10, color: '#9BA3C4', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {meetingMeta(m)}
-                        </div>
-                        {m.participants.length > 0 && (
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {m.participants.slice(0, 3).map((p) => (
-                              <span key={p} className="badge b-gy" style={{ fontSize: 9 }}>{p}</span>
-                            ))}
-                            {m.participants.length > 3 && (
-                              <span className="badge b-gy" style={{ fontSize: 9 }}>+{m.participants.length - 3}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {countdown}
-                    </div>
+                    <MeetingRow
+                      key={it.id}
+                      meeting={it.meeting}
+                      date={it.date}
+                      onClick={() => openMeeting(it.meeting)}
+                      trailing={countdown}
+                      last={i === upcoming.length - 1}
+                    />
                   );
                 }
 
@@ -981,9 +1167,20 @@ export default function MeetingsPage() {
           meeting={activeMeeting}
           companyId={companyId}
           companyName={companyName}
+          canEdit={canCreateMeeting}
+          initialTab={modalTab}
           onClose={() => setActiveMeeting(null)}
           onUpdated={(updated) => {
-            setData((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+            // PATCH responses don't carry `has_minutes`, so a plain replace
+            // would forget that a meeting was written up and drop it back onto
+            // the Needs Minutes rail. Keep what we already knew.
+            setData((prev) =>
+              prev.map((m) =>
+                m.id === updated.id
+                  ? { ...updated, has_minutes: updated.has_minutes ?? m.has_minutes }
+                  : m,
+              ),
+            );
             setActiveMeeting(updated);
           }}
         />
