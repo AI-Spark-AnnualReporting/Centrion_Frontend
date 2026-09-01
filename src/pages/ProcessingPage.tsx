@@ -10,6 +10,7 @@ import { GeneratingScreen, type GeneratingPhase } from "@/components/reports/Gen
 import {
   QuarterlyGeneratingScreen,
   computeProgress,
+  computeProduceProgress,
 } from "@/components/reports/QuarterlyGeneratingScreen";
 import AiLoadingScreen from "@/pages/onboarding/AiLoadingScreen";
 import { useAuth } from "@/context/AuthContext";
@@ -143,9 +144,29 @@ export interface ProcessingPageState {
   };
 }
 
-// Long enough for a real outline save + lock + produce kick on a slow connection,
-// short enough that nobody sits watching a bar that will never move.
-const BOOTSTRAP_DEADLINE_MS = 45_000;
+// What the bootstrap chain is doing right now. Purely descriptive: it names the
+// call in flight so the loader can say something true while there is no measured
+// progress. Nothing here is a deadline.
+//
+// There deliberately is NO clock on this chain any more. There used to be a flat
+// 45s one, armed once at mount over all four calls, with no liveness input — it
+// could not tell "still working" from "never started", so on a large outline (one
+// Supabase round-trip per section; the lock→produce window alone measures 22-39s
+// on real reports) it fired on perfectly healthy runs and painted "Report
+// generation failed" over them. Its own comment claimed it was there to catch a
+// missing companyId/reportId, but the only caller (OutlinePage's onGenerate)
+// already returns early without those, and that case is knowable in 0ms anyway —
+// see the effect below. It guarded nothing and lied often.
+//
+// A big upload, a long section list or a slow server is a slow report, not a
+// failed one. Only the server saying no is a failure now.
+type BootStep = "probing" | "saving" | "locking" | "producing";
+const BOOT_STEP_LABEL: Record<BootStep, string> = {
+  probing: "Checking your outline…",
+  saving: "Saving your outline…",
+  locking: "Locking the outline…",
+  producing: "Starting section production…",
+};
 
 export default function ProcessingPage() {
   const location = useLocation();
@@ -158,29 +179,35 @@ export default function ProcessingPage() {
   const [bootRun, setBootRun] = useState<{ runId: string; pollUrl: string } | null>(null);
   const pollUrl = state?.pollUrl || bootRun?.pollUrl || null;
   const runId = state?.runId || bootRun?.runId || null;
-  const { state: poll, restart } = usePipelinePoll(runId, pollUrl);
+  // Batch section-production runs have no per-agent node rows: GET /agent_runs/{id}/nodes
+  // 404s for anything whose agent_name isn't 'pipeline_run', and section_producer_batch
+  // writes none. Asking anyway was a guaranteed 404 every three seconds for the whole
+  // multi-minute run — and the empty node list it fell back to is exactly what pinned
+  // computeProgress at its 6% floor, so the bar never moved. Real progress for these runs
+  // comes from the run's own heartbeat instead (see computeProduceProgress below).
+  const isProduce = state?.quarterlyNext === "preview";
+  const { state: poll, restart } = usePipelinePoll(runId, pollUrl, { nodes: !isProduce });
 
   // Bootstrap: save + lock the outline, then kick produceAll. Runs ONCE, after the
   // loader is already on screen, which is the whole point — these calls take several
   // seconds and used to happen while the user stared at a disabled button.
   const bootstrappedRef = useRef(false);
-  // Tells a "already locked" 409 apart from a "your save was rejected" 409.
+  // Cheap short-circuit for the 409 disambiguation in the catch: past this point a
+  // 409 can only mean "already locked".
   const lockAttempted = useRef(false);
   const [bootError, setBootError] = useState<string | null>(null);
+  // Which call is in flight, for the loader caption. Not a deadline — see BootStep.
+  const [bootStep, setBootStep] = useState<BootStep | null>(null);
 
-  // Bootstrap has to actually produce a run to poll. If it never does -- the effect
-  // below returns early on a missing companyId/reportId, and has no other way to
-  // report that -- nothing further happens: no url, so the poll hook never starts,
-  // so none of its timeouts exist, and the loader stays up until the tab is closed.
-  // Give that window an end.
+  // The one genuinely-broken hand-off: bootstrap state with no ids to act on. The
+  // effect below returns early on it and has no other way to report that, which is
+  // the entire job the old 45s timer claimed. It is knowable immediately, so say it
+  // immediately instead of making the user wait to be told.
   useEffect(() => {
-    if (!state?.bootstrap || pollUrl || bootError) return;
-    const id = window.setTimeout(
-      () => setBootError("Generation did not start"),
-      BOOTSTRAP_DEADLINE_MS,
-    );
-    return () => window.clearTimeout(id);
-  }, [state?.bootstrap, pollUrl, bootError]);
+    if (!state?.bootstrap || pollUrl) return;
+    if (state.companyId && state.reportId) return;
+    setBootError("This run is missing its report or company id, so nothing could be started");
+  }, [state, pollUrl]);
   useEffect(() => {
     const boot = state?.bootstrap;
     if (!boot || !state?.companyId || !state?.reportId) return;
@@ -188,6 +215,18 @@ export default function ProcessingPage() {
     bootstrappedRef.current = true;
     const companyId = state.companyId;
     const reportId = state.reportId;
+
+    // Ground truth, asked twice: once up front to skip a revisit, and once from the
+    // catch to disambiguate a 409. `.catch(() => null)` reads as "not locked", which
+    // is precisely why the second call matters — a probe that failed to reach the
+    // server is one of the ways a locked outline reaches the save and 409s there.
+    const isLockedNow = async () => {
+      const o = await quarterlyReports.getOutline(companyId, reportId).catch(() => null);
+      return (
+        o != null &&
+        (o.locked === true || (o.sections.length > 0 && o.sections.every((s) => s.locked)))
+      );
+    };
 
     (async () => {
       try {
@@ -199,23 +238,28 @@ export default function ProcessingPage() {
         // status first: if it's already locked, sections were already
         // produced on an earlier pass, so just go look at them instead of
         // regenerating everything again.
-        const current = await quarterlyReports.getOutline(companyId, reportId).catch(() => null);
-        const alreadyLocked =
-          current != null &&
-          (current.locked === true ||
-            (current.sections.length > 0 && current.sections.every((s) => s.locked)));
-        if (alreadyLocked) {
+        setBootStep("probing");
+        if (await isLockedNow()) {
           navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
           return;
         }
 
+        setBootStep("saving");
         await quarterlyReports.saveOutline(companyId, reportId, boot.outlinePayload);
-        // Only a 409 from HERE on means "already locked"; a 409 from the save above
-        // means the save was REJECTED, which is a different thing entirely.
+        setBootStep("locking");
+        // Past here a 409 can only mean "already locked", so the catch can skip its
+        // re-probe. Before here it is ambiguous — see the catch.
         lockAttempted.current = true;
         await quarterlyReports.lockOutline(companyId, reportId);
+        setBootStep("producing");
         const handle = await quarterlyReports.produceAll(companyId, reportId);
         if (handle?.run_id && handle?.poll_url) {
+          // A live run handle retires every reason to be showing an error. The
+          // failure card used to be sticky AND rendered above the poll, so a chain
+          // that tripped the old timer and then succeeded seconds later left the user
+          // staring at "Report generation failed" over a run that was working fine.
+          setBootError(null);
+          setBootStep(null);
           setBootRun({ runId: handle.run_id, pollUrl: handle.poll_url });
           return;
         }
@@ -223,21 +267,31 @@ export default function ProcessingPage() {
         // each section individually, so hand off there rather than stranding the user.
         navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
       } catch (err: unknown) {
-        // A 409 from LOCK means the outline is already locked elsewhere and sections
-        // are (being) produced — going to look at them is right.
+        // 409 arrives from two places and means two different things.
         //
-        // Anything else is a refusal, and this used to navigate to Preview for those
-        // too. That is how a backend rejection became a permanent spinner: the save
-        // 409'd, so the outline was never locked and not one section row was ever
-        // created, and Preview — which infers "producing" purely from rows sitting at
-        // pending — showed "0 of 27" forever with nothing running. Half an hour of
-        // waiting for a request that failed in the first second.
+        // From lock or produce: the outline is already locked and sections are (being)
+        // produced — going to look at them is right.
         //
-        // Never swallow it again: a failure that leaves the outline unlocked has to
-        // say so, because Preview cannot tell "not started" from "still going".
-        if (err instanceof ApiError && err.status === 409 && lockAttempted.current) {
-          navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
-          return;
+        // From the SAVE, before any lock: usually a real refusal ("that section is
+        // mandatory"), which MUST be surfaced. Swallowing it is how a rejected save
+        // became a permanent spinner — the outline was never locked and not one
+        // section row existed, and Preview infers "producing" purely from rows sitting
+        // at pending, so it showed "0 of 27" forever with nothing running.
+        //
+        // But 409 is ALSO what a locked outline returns for this payload: a saved
+        // outline always carries its unticked rows (they are what preserve an unticked
+        // section's dragged position), and the post-lock reorder path rejects any item
+        // with included:false. That happens whenever the probe above could not read the
+        // outline, or another tab locked it in between.
+        //
+        // The status code cannot tell those apart, so ask the server which one it is
+        // instead of inferring it from which call threw. Guessing in either direction
+        // is a bug we have already shipped once.
+        if (err instanceof ApiError && err.status === 409) {
+          if (lockAttempted.current || (await isLockedNow())) {
+            navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
+            return;
+          }
         }
         setBootError(
           err instanceof Error
@@ -375,17 +429,33 @@ export default function ProcessingPage() {
   // here rather than handing off to Preview: Preview infers "producing" from rows
   // still at pending, so with no rows at all it spins forever on a run that does not
   // exist. Retry re-runs the bootstrap rather than pretending it worked.
-  if (bootError) {
+  //
+  // Gated on `!pollUrl`. This branch sits above every poll-driven render below and
+  // nothing in the app ever cleared bootError, so once a slow-but-healthy chain
+  // tripped the old blind timer the page held a live run handle AND showed a
+  // permanent failure card — right through to the report finishing. A run we are
+  // actually watching outranks any earlier complaint, always.
+  if (bootError && !pollUrl) {
     return (
       <GeneratingScreen
         phase="failed"
         errorMessage={`${bootError} — nothing is being generated. Go back to the outline and try again.`}
         onCancel={() => navigate("/reports", { replace: true })}
-        onRetry={() => {
-          setBootError(null);
-          bootstrappedRef.current = false;
-          lockAttempted.current = false;
-        }}
+        onRetry={() =>
+          // The old handler reset three flags and fired zero requests: the bootstrap
+          // effect's deps are [state, navigate], both referentially stable in
+          // react-router 6.30.1, and there is no StrictMode, so nothing re-ran. The
+          // button did nothing at all.
+          //
+          // Send the user back to the outline rather than replaying the chain here.
+          // Reaching this branch means the server refused, and the refusal is usually
+          // something only the outline can fix (a mandatory section unticked). Its
+          // Continue also already handles the already-locked case by going to Preview.
+          navigate(
+            state.reportId ? `/quarterly-report/${state.reportId}/outline` : "/reports",
+            { replace: true },
+          )
+        }
       />
     );
   }
@@ -445,10 +515,29 @@ export default function ProcessingPage() {
     // The onboarding loader visual, but bound to the REAL pipeline: progress from
     // node states, backend stat tiles, and a "Run in background" button.
     // Full-viewport overlay so it reads full-screen (its own minHeight:100vh).
-    const progress = computeProgress(phase === "completed" ? "completed" : "running", poll.nodes);
     // Two quarterly loaders share this screen: extraction (→ Outline) and
-    // section-production (→ Preview). Copy + milestones differ by target.
-    const isProduce = state.quarterlyNext === "preview";
+    // section-production (→ Preview). Copy, milestones and progress source all
+    // differ by target — `isProduce` is hoisted to the poll call above.
+    //
+    // Produce runs report real progress through the run's own heartbeat. null means
+    // nothing has been measured yet (the outline is still saving, or no section has
+    // finished), and the bar goes indeterminate rather than inventing a number.
+    // computeProgress stays correct for extraction runs, which do write node rows.
+    const batch = isProduce ? computeProduceProgress(summary) : null;
+    const progress = isProduce
+      ? phase === "completed"
+        ? 100
+        : (batch?.percent ?? 0)
+      : computeProgress(phase === "completed" ? "completed" : "running", poll.nodes);
+    // Say something true instead of a percentage nobody measured. Once sections start
+    // landing that IS the number; before then it is the chain step we are actually on.
+    const progressCaption = isProduce
+      ? batch
+        ? `Section ${Math.min(batch.done + 1, batch.total)} of ${batch.total}`
+        : bootStep
+          ? BOOT_STEP_LABEL[bootStep]
+          : "Starting…"
+      : undefined;
     const copy = isProduce
       ? {
           title: "Composing your report",
@@ -474,26 +563,65 @@ export default function ProcessingPage() {
           milestones={copy.milestones}
           tips={copy.tips}
           controlledProgress={progress}
+          indeterminate={isProduce && batch == null}
+          progressCaption={progressCaption}
           done={readyReportId != null}
           onDone={handleQuarterlyLoaderDone}
-          headerExtra={<QuarterlyStatTiles summary={periodError ? null : summary} />}
+          headerExtra={
+            isProduce ? (
+              // Stated up front rather than after some silent delay, so a long wait
+              // never reads as a stall. True by construction: nothing here cancels the
+              // batch, and an unfinished quarterly report's card routes to its Preview,
+              // which fills sections in as they land.
+              <p style={{ margin: "12px 0 0", fontSize: 12, color: "#5A6080", maxWidth: 460 }}>
+                Large documents take longer. You can close this page — the report keeps
+                building, and you'll find it under Reports.
+              </p>
+            ) : (
+              <QuarterlyStatTiles summary={periodError ? null : summary} />
+            )
+          }
           footer={
-            <button
-              type="button"
-              onClick={() => navigate("/reports/quarterly", { replace: true })}
-              style={{
-                padding: "8px 18px",
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#5A6080",
-                background: "transparent",
-                border: "1px solid #E2E4F0",
-                borderRadius: 8,
-                cursor: "pointer",
-              }}
-            >
-              Run in background
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {isProduce && state.reportId && (
+                // Watching sections land beats watching a bar, and Preview refreshes
+                // the ones still pending on its own.
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(`/quarterly-report/${state.reportId}/preview`, { replace: true })
+                  }
+                  style={{
+                    padding: "8px 18px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#5A6080",
+                    background: "transparent",
+                    border: "1px solid #E2E4F0",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  Watch sections being written →
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => navigate("/reports/quarterly", { replace: true })}
+                style={{
+                  padding: "8px 18px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#5A6080",
+                  background: "transparent",
+                  border: "1px solid #E2E4F0",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                Run in background
+              </button>
+            </div>
           }
         />
       </div>
