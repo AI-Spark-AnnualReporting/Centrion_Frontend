@@ -108,6 +108,7 @@ src/
     ├── dashboard/            # DashboardESG, DashboardBoard, DashboardFinancial
     ├── reports/              # GeneratingScreen, QuarterlyGeneratingScreen,
     │                         #   QuarterlyReportForm, AgentTimeline, ReportDetailView
+    ├── spark/                # ReportTrendsCard (platform-owner console)
     ├── shared/               # ESGModal, FloatingChatbot
     ├── ui/                   # shadcn/ui primitives (40+)
     ├── ProtectedRoute.tsx
@@ -487,6 +488,66 @@ password) — that's what gates the reveal control in the UI. The 409s are the
 backstop for a row that went stale between load and click; `ApiError.message`
 is the `detail`, so both are rendered verbatim.
 
+### Spark (platform owner — cross-tenant) — NOT YET IMPLEMENTED SERVER-SIDE
+| Method | Path | Function |
+|--------|------|----------|
+| GET | `/api/v1/spark/overview` | `spark.overview` |
+| GET | `/api/v1/spark/users` | `spark.listUsers` |
+| GET | `/api/v1/spark/reports` | `spark.listReports` |
+| GET | `/api/v1/spark/report-trends` | `spark.reportTrends` (year?, company_id?) |
+
+Full backend spec: **`docs/spark-admin-backend-spec.md`**.
+
+Every other endpoint in this app is scoped to the caller's company by the JWT.
+These three are the **only** ones that cross tenants, and they back the single
+`/spark` page. **The backend must authorise them on the `spark_admin` role
+alone** — a company `admin` hitting them must get a 403. `spark_admin` users
+belong to no company (`company_id` is null on the JWT).
+
+Read-only by design. Anything that changes a tenant goes through that tenant's
+own `/admin` endpoints, so tenancy enforcement stays in one place.
+
+```
+GET /api/v1/spark/overview
+  { "total_companies": 12, "total_reports": 340, "total_users": 87,
+    "companies": [
+      { "id": "cmp_1", "name": "Aramco", "sector_name": "Energy",
+        "jurisdiction": "KSA", "created_at": "2025-01-04T09:00:00Z",
+        "is_active": true, "user_count": 14, "report_count": 62 }
+    ] }
+
+GET /api/v1/spark/users     → [ { user_id, full_name, email, role, status,
+                                  company_id, company_name, last_active } ]
+GET /api/v1/spark/reports   → [ { report_id, title, report_type, status,
+                                  period, created_at, company_id,
+                                  company_name } ]
+```
+
+`company_id` / `company_name` on every row are what make the two lists
+groupable — that is the whole difference between these and `/admin/users`. The
+per-company `user_count` / `report_count` come down with the overview so the
+Companies tab needs no second call.
+
+Both list endpoints also accept a `{ "users": [...] }` / `{ "reports": [...] }`
+envelope — the client unwraps either shape. Neither is paginated yet; see the
+`ponytail:` note in `src/pages/spark/SparkDashboardPage.tsx`.
+
+**`/report-trends`** backs the comparison chart (`ReportTrendsCard`). `?year=`
+gives twelve zero-filled month buckets; omitting it gives one bucket per year
+with data. The client always sends a year — it adopts `available_years[-1]`
+after the first unfiltered call, because a year-bucketed chart of a single year
+is one bar group.
+
+`?month=` exists server-side (and 422s without a year) but **the client never
+sends it**: it collapses the response to one bucket, losing the twelve-month
+shape. The month picker dims the other months client-side instead.
+
+The wire shape is read tolerantly by `normalizeTrends` in `src/types/spark.ts` —
+per-type counts are accepted nested under `counts` *or* spread flat on the
+bucket, `report_types` as strings *or* `{key,label}`, and `totals` bare *or*
+under `by_type`. That was written against the prose contract rather than a live
+sample; once the real shape is confirmed, the unused branch can be deleted.
+
 ### Lookups (no auth required)
 | Method | Path | Function |
 |--------|------|----------|
@@ -526,9 +587,12 @@ is the `detail`, so both are rendered verbatim.
 ### auth.ts
 ```ts
 interface AuthUser { user_id; email; full_name; role:"admin"|"user";
+  display_role?:string|null;
   company_id?:string|null; company_name?:string|null; must_change_password?:boolean|null }
 interface LoginResponse { access_token; token_type:"bearer"; user:AuthUser }
-interface UserProfile { user_id; email; full_name; role; status;
+// display_role is presentation ONLY ("spark_admin" → "Spark Admin"). Every
+// permission check, route gate and role comparison uses the raw `role`.
+interface UserProfile { user_id; email; full_name; role; display_role?:string|null; status;
   company_id:string|null; company_name:string|null; must_change_password?:boolean|null }
 ```
 

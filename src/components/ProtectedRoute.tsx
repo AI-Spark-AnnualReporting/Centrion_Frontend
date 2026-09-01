@@ -56,6 +56,21 @@ export function ProtectedRoute({
     return null; // render nothing while the hard redirect happens
   }
 
+  // Spark belongs to no company, so every other page in the app — all of which
+  // read the caller's company off the JWT — has nothing to show them. Pin them
+  // to /spark here rather than at each entry point, so login, a bookmark and a
+  // refresh all land the same place.
+  // The change-password exemption is load-bearing, not defensive: the rotation
+  // gate above sends them to /change-password, and pinning that back to /spark
+  // would bounce between the two forever with the form never reachable.
+  if (
+    user.role === "spark_admin" &&
+    !onChangePasswordPage &&
+    !location.pathname.startsWith("/spark")
+  ) {
+    return <Navigate to="/spark" replace />;
+  }
+
   // Onboarding gate — only self-registered admins who haven't finished it.
   // Strict === checks so older sessions (field absent/undefined) are never
   // bounced; invited users (project_manager / department_user) skip it.

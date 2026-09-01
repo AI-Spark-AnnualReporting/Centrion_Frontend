@@ -5,6 +5,7 @@ import { Topbar } from './Topbar';
 import { FloatingChatbot } from '../shared/FloatingChatbot';
 import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
 import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
+import { useAuth } from '@/context/AuthContext';
 import { BackToOrigin } from '../shared/BackToOrigin';
 
 const PAGE_NAMES: Record<string, string> = {
@@ -28,6 +29,10 @@ const PAGE_NAMES: Record<string, string> = {
   '/board-report': 'Board Report',
   '/annual-report/cycles/new': 'New Cycle',
   '/earnings/setup': 'Earnings Report',
+  '/spark': 'Spark Admin',
+  '/spark/companies': 'Companies',
+  '/spark/reports': 'Reports',
+  '/spark/users': 'Users',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -95,6 +100,7 @@ function isReportFlowRoute(pathname: string): boolean {
 
 export function AppLayout() {
   const location = useLocation();
+  const { user } = useAuth();
   const pageName =
     PAGE_NAMES[location.pathname] ??
     PAGE_NAME_PREFIXES.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ??
@@ -108,8 +114,11 @@ export function AppLayout() {
   // just relaunch the page you're already on. The page also runs full-height,
   // same as the report flow, so it needs the launcher's clearance freed up too.
   const aiPage = location.pathname === '/ai';
+  // The copilot answers questions about the caller's company, so it has
+  // nothing to work with for a user who has none (`spark_admin`) — same reason
+  // the notification bell hides itself.
   const chatbotShown =
-    location.pathname !== '/dashboard' && !boardBuilder && !reportFlow && !aiPage;
+    location.pathname !== '/dashboard' && !boardBuilder && !reportFlow && !aiPage && !!user?.company_id;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched

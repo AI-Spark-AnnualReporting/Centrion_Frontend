@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
 
@@ -49,6 +50,14 @@ const ADMIN_CHILDREN: { key: string; label: string; path: string; end?: boolean 
   { key: 'users', label: 'Users & Roles', path: '/admin-console/users' },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
 ];
+
+// Spark console sections — the lists at /spark/:section. Labels come from
+// SECTIONS so the sidebar can't disagree with the page it opens.
+const SPARK_CHILDREN = SECTION_KEYS.map((key) => ({
+  key,
+  label: SECTIONS[key].title,
+  path: `/spark/${key}`,
+}));
 
 // Explicitly typed (like REPORT_CHILDREN / ADMIN_CHILDREN above) because only
 // some items carry `adminOnly` — inferred, the array element would be a union
@@ -140,6 +149,11 @@ export function Sidebar() {
   const profileActive = location.pathname.startsWith('/profile');
   const [profileOpen, setProfileOpen] = useState(profileActive);
 
+  // Spark belongs to no company, so every item below reads a company off the
+  // JWT that they don't have — the whole tenant nav is hidden for them and
+  // replaced by the single Spark entry.
+  const isSpark = user?.role === 'spark_admin';
+
   const handleNav = (path: string) => {
     navigate(path);
   };
@@ -159,7 +173,9 @@ export function Sidebar() {
   };
 
   const displayName = user?.full_name ?? 'Ahmad Al-Rashid';
-  const displayRole = user?.role ?? 'ESG Manager';
+  // Backend-resolved label, falling back to the raw role so a session stored
+  // before the backend sent `display_role` still shows something.
+  const displayRole = user?.display_role || user?.role || 'ESG Manager';
   const initials = (user?.full_name ?? 'AR')
     .split(' ')
     .map((p) => p[0])
@@ -186,7 +202,7 @@ export function Sidebar() {
       </div>
       {/* Sidebar search hidden until it's wired up. */}
       <div style={{ height: 10 }} />
-      {NAV_ITEMS.map((section) => (
+      {(isSpark ? [] : NAV_ITEMS).map((section) => (
         <div key={section.section}>
           <div className="sb-sec">{section.section}</div>
           {section.items
@@ -450,6 +466,43 @@ export function Sidebar() {
               })}
             </div>
           )}
+        </div>
+      )}
+      {isSpark && (
+        <div>
+          <div className="sb-sec">Spark</div>
+          {/* Overview first, then one child per list. Always expanded, unlike
+              the Admin Console's collapsible block: this is the whole sidebar
+              for a Spark user, and collapsing it would leave nothing at all. */}
+          <button
+            className={`sb-item ${location.pathname === '/spark' ? 'act' : ''}`}
+            onClick={() => handleNav('/spark')}
+          >
+            {icons['grid']}
+            Overview
+          </button>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {SPARK_CHILDREN.map((child) => (
+              <button
+                key={child.key}
+                className={`sb-item ${location.pathname === child.path ? 'act' : ''}`}
+                style={{ paddingLeft: 34, fontSize: 11 }}
+                onClick={() => handleNav(child.path)}
+              >
+                <span
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: 'currentColor',
+                    opacity: 0.45,
+                    flexShrink: 0,
+                  }}
+                />
+                {child.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <div style={{ flex: 1 }} />
