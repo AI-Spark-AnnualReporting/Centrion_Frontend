@@ -965,6 +965,9 @@ export const documents = {
 
 export interface TeamMember {
   id: string;
+  // The usr_… address. Every /team/{user_id} sub-resource keys off this, NOT
+  // off `id` — they are different values and swapping them 404s.
+  user_id?: string | null;
   email: string;
   full_name: string;
   title?: string | null;
@@ -975,6 +978,8 @@ export interface TeamMember {
   department?: string | null;
   status?: string | null;
   created_at?: string | null;
+  // Only present when the list was asked for ?include=experience.
+  experience?: TeamExperience[] | null;
 }
 
 export interface CreateTeamMemberBody {
@@ -1007,6 +1012,10 @@ export interface ListTeamQuery {
   position_type?: string;
   role?: string;
   include_inactive?: boolean;
+  // "experience" nests each member's history in the same response. Without it
+  // the Leadership page would need one request per card. Photo and CV are
+  // never included either way — they are too big for a list response.
+  include?: "experience";
 }
 
 // POST response. `member` is the long-standing key; the rest arrived with
@@ -1033,6 +1042,68 @@ function unwrapTeamList(raw: unknown): TeamMember[] {
     }
   }
   return [];
+}
+
+export interface TeamExperience {
+  id: string;
+  job_title: string;
+  company: string;
+  /** "YYYY-MM". Not a date: it comes from <input type="month">, and giving it
+   *  a day-of-month is what reintroduces the timezone off-by-one. */
+  from_month: string;
+  /** "YYYY-MM", or null meaning Present. Never "" — the API rejects that. */
+  to_month: string | null;
+  /** Markdown. No length cap server-side. */
+  responsibility: string;
+  sort_order: number;
+}
+
+export interface CreateTeamExperienceBody {
+  job_title: string;
+  company: string;
+  from_month: string;
+  to_month?: string | null;
+  responsibility?: string;
+  sort_order?: number;
+}
+
+/** PATCH is a true partial: an absent key is left alone, an explicit null on
+ *  to_month means Present. Only send keys the user actually changed — unknown
+ *  keys are a 422, so never spread a whole row back in. */
+export type UpdateTeamExperienceBody = Partial<CreateTeamExperienceBody>;
+
+export interface TeamMemberCv {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  uploaded_at: string;
+  /** Signed and short-lived — re-fetch rather than storing or sharing it. */
+  download_url: string;
+  download_expires_at: string;
+}
+
+function teamMemberPath(companyId: string, userId: string): string {
+  return `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`;
+}
+
+// DELETE/PUT here answer 204, and `request` would still try to parse a body.
+// The error path does parse, though: these endpoints reject with a plain
+// {detail: "..."} sentence, and ApiError only lifts it into .message when the
+// body arrives as JSON rather than as raw text.
+async function noContent(path: string, method: "DELETE" | "PUT", body?: unknown) {
+  const res = await fetchWithAuth(path, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
+  if (res.ok) return;
+  const ct = res.headers.get("content-type") ?? "";
+  const parsed: unknown = ct.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => "");
+  throw new ApiError(res.status, res.statusText, parsed, path);
 }
 
 export const team = {
@@ -1075,6 +1146,76 @@ export const team = {
       const text = await res.text().catch(() => "");
       throw new ApiError(res.status, res.statusText, text, path);
     }
+  },
+
+  // ── Experience ───────────────────────────────────────────────────────────
+  // Every write is gated server-side on self OR leadership:create.
+  experience: {
+    list: (companyId: string, userId: string) =>
+      request<TeamExperience[]>(`${teamMemberPath(companyId, userId)}/experience`),
+
+    create: (companyId: string, userId: string, body: CreateTeamExperienceBody) =>
+      request<TeamExperience>(`${teamMemberPath(companyId, userId)}/experience`, {
+        method: "POST",
+        body,
+      }),
+
+    update: (
+      companyId: string,
+      userId: string,
+      experienceId: string,
+      body: UpdateTeamExperienceBody,
+    ) =>
+      request<TeamExperience>(
+        `${teamMemberPath(companyId, userId)}/experience/${encodeURIComponent(experienceId)}`,
+        { method: "PATCH", body },
+      ),
+
+    remove: (companyId: string, userId: string, experienceId: string) =>
+      noContent(
+        `${teamMemberPath(companyId, userId)}/experience/${encodeURIComponent(experienceId)}`,
+        "DELETE",
+      ),
+  },
+
+  // ── Profile photo ────────────────────────────────────────────────────────
+  // Kept off GET /team on purpose: ~400 KB of inline base64 per member would
+  // make the roster response multi-megabyte. Fetch it on the detail view.
+  photo: {
+    get: (companyId: string, userId: string) =>
+      request<{ photo_base64: string | null }>(
+        `${teamMemberPath(companyId, userId)}/photo`,
+      ),
+
+    /** `photoBase64` must be the full data URI, prefix included. */
+    put: (companyId: string, userId: string, photoBase64: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/photo`, "PUT", {
+        photo_base64: photoBase64,
+      }),
+
+    remove: (companyId: string, userId: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/photo`, "DELETE"),
+  },
+
+  // ── CV ───────────────────────────────────────────────────────────────────
+  cv: {
+    /** 404 when none is uploaded — that is the empty state, not a failure. */
+    get: (companyId: string, userId: string) =>
+      request<TeamMemberCv>(`${teamMemberPath(companyId, userId)}/cv`),
+
+    // Re-uploading replaces whatever is there; no DELETE needed first.
+    upload: (companyId: string, userId: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      // No Content-Type header — the browser must set the multipart boundary.
+      return request<TeamMemberCv>(`${teamMemberPath(companyId, userId)}/cv`, {
+        method: "POST",
+        form,
+      });
+    },
+
+    remove: (companyId: string, userId: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/cv`, "DELETE"),
   },
 };
 

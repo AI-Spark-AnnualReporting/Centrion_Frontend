@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
-import { DOC_ACCEPT, dataUriBytes, formatBytes } from '@/types/brand';
+import { DOC_ACCEPT, DOC_EXTS, formatBytes, hasExt } from '@/types/brand';
 import {
   PHOTO_ACCEPT,
   PHOTO_HEIGHT,
@@ -11,32 +11,14 @@ import {
   validatePhotoFile,
 } from '@/lib/image';
 import { gradientFor, initialsOf } from '@/lib/avatar';
-
-// Frontend-only for now: nothing here is posted anywhere. These shapes are what
-// the backend will be modelled on, so keep them flat and serialisable — the
-// photo is a data URI rather than a File so a future PATCH can send it inline
-// the way companies.logo_base64 already does.
-export interface Experience {
-  id: string;
-  jobTitle: string;
-  company: string;
-  from: string; // 'YYYY-MM' straight off <input type="month">
-  to: string; // 'YYYY-MM', or '' meaning Present
-  responsibility: string;
-}
-
-export interface MemberProfile {
-  photoUri?: string;
-  cvName?: string;
-  cvSize?: number;
-  experiences: Experience[];
-}
+import { ApiError, team, type TeamExperience, type TeamMemberCv } from '@/lib/api';
 
 // What the modal needs off a person. Structurally satisfied by the Person view
-// model in StakeholdersPage without importing it — this file stays reusable if
-// the roster ever renders somewhere else.
+// model in StakeholdersPage without importing it.
 interface ProfilePerson {
   id: string;
+  // The usr_… address. Every sub-resource below keys off this, never off `id`.
+  userId: string | null;
   firstName: string;
   lastName: string;
   role: string;
@@ -46,12 +28,19 @@ interface ProfilePerson {
 }
 
 interface MemberProfileModalProps {
+  companyId: string;
   person: ProfilePerson;
   companyName: string;
   positionLabel: string;
   positionBadgeClass: string;
-  profile: MemberProfile;
-  onChange: (next: MemberProfile) => void;
+  /** Self, or leadership:create. False renders the panel read-only. */
+  canEdit: boolean;
+  /** Seeded from GET /team?include=experience so the list needs no extra call. */
+  experiences: TeamExperience[];
+  onExperiencesChange: (next: TeamExperience[]) => void;
+  /** Lifted so the roster card can show the photo without refetching it. */
+  photoUri: string | null;
+  onPhotoChange: (next: string | null) => void;
   onClose: () => void;
 }
 
@@ -61,7 +50,7 @@ const MONTHS = [
 ];
 
 // 'YYYY-MM' → 'Mar 2019'. date-fns would need a Date, and constructing one from
-// a month string reintroduces the timezone-off-by-one this format exists to
+// a month string reintroduces the timezone off-by-one this format exists to
 // avoid — so parse the two numbers directly.
 function formatMonth(value: string): string {
   const [y, m] = value.split('-');
@@ -70,8 +59,18 @@ function formatMonth(value: string): string {
   return `${MONTHS[idx]} ${y}`;
 }
 
-function periodOf(e: Experience): string {
-  return `${formatMonth(e.from)} — ${e.to ? formatMonth(e.to) : 'Present'}`;
+function periodOf(e: TeamExperience): string {
+  return `${formatMonth(e.from_month)} — ${e.to_month ? formatMonth(e.to_month) : 'Present'}`;
+}
+
+// ApiError already lifts the backend's {detail: "..."} into .message for 4xx,
+// and those read as plain sentences — safe to surface as-is.
+function messageOf(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
+}
+
+function isNotFound(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
 }
 
 interface DraftState {
@@ -112,6 +111,13 @@ const badgeStyle = {
   whiteSpace: 'nowrap',
 } as const;
 
+const sectionTitleStyle = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: '#1A1D2E',
+  letterSpacing: '-.1px',
+} as const;
+
 // Markdown mixes paragraph, heading and list line boxes of different heights,
 // so no fixed clamp can reliably land on a line boundary — it will sometimes
 // cut a line through the middle of the glyphs. The fade dissolves whatever the
@@ -136,6 +142,32 @@ const expandedStyle = {
   paddingRight: 8,
 } as const;
 
+const nowrapStyle = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const;
+
+const errorStyle = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#B33A3E',
+  background: 'rgba(229,72,77,.08)',
+  border: '1px solid rgba(229,72,77,.25)',
+  padding: '8px 12px',
+  borderRadius: 8,
+} as const;
+
+const linkButtonStyle = {
+  padding: 0,
+  border: 'none',
+  background: 'none',
+  color: '#4040C8',
+  font: 'inherit',
+  fontWeight: 700,
+  cursor: 'pointer',
+} as const;
+
 // Whether the clamp can actually bite. Measuring the rendered box would be
 // exact but costs a layout pass and a ref per row; at roughly 90 characters a
 // line across the full panel width, anything past three lines' worth - or with
@@ -144,33 +176,36 @@ function isLongProse(text: string): boolean {
   return text.length > 270 || text.includes('\n');
 }
 
-const nowrapStyle = {
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-} as const;
-
-const sectionTitleStyle = {
-  fontSize: 12,
-  fontWeight: 800,
-  color: '#1A1D2E',
-  letterSpacing: '-.1px',
-} as const;
-
 export default function MemberProfileModal({
+  companyId,
   person,
   companyName,
   positionLabel,
   positionBadgeClass,
-  profile,
-  onChange,
+  canEdit,
+  experiences,
+  onExperiencesChange,
+  photoUri,
+  onPhotoChange,
   onClose,
 }: MemberProfileModalProps) {
   const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [cv, setCv] = useState<TeamMemberCv | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
+  const [cvBusy, setCvBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+
+  const userId = person.userId;
+  const fullName = [person.firstName, person.lastName].filter(Boolean).join(' ');
+
+  const toggleRow = (id: string) =>
+    setExpandedRows((r) => ({ ...r, [id]: !r[id] }));
+
   // Escape closes, since the backdrop deliberately does not.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -180,82 +215,186 @@ export default function MemberProfileModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const toggleRow = (id: string) =>
-    setExpandedRows((r) => ({ ...r, [id]: !r[id] }));
-
-  const fullName = [person.firstName, person.lastName].filter(Boolean).join(' ');
-  const experiences = profile.experiences;
+  // Photo and CV are deliberately absent from GET /team — 400 KB of inline
+  // base64 per member would make the roster response multi-megabyte — so they
+  // are fetched here. Experience already arrived with the roster.
+  useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    let live = true;
+    setLoading(true);
+    void (async () => {
+      const [photoRes, cvRes] = await Promise.allSettled([
+        team.photo.get(companyId, userId),
+        team.cv.get(companyId, userId),
+      ]);
+      if (!live) return;
+      if (photoRes.status === 'fulfilled') {
+        onPhotoChange(photoRes.value.photo_base64);
+      } else if (!isNotFound(photoRes.reason)) {
+        setPhotoError(messageOf(photoRes.reason, 'Could not load the photo.'));
+      }
+      // No CV yet answers 404. That is the empty state, not a failure, and
+      // must not paint an error.
+      if (cvRes.status === 'fulfilled') {
+        setCv(cvRes.value);
+      } else if (!isNotFound(cvRes.reason)) {
+        setCvError(messageOf(cvRes.reason, 'Could not load the CV.'));
+      }
+      setLoading(false);
+    })();
+    return () => {
+      live = false;
+    };
+    // onPhotoChange is a fresh closure each render; depending on it would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, userId]);
 
   const setField = <K extends keyof DraftState>(key: K, value: DraftState[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
   const canAdd =
+    !!userId &&
+    !saving &&
     draft.jobTitle.trim().length > 0 &&
     draft.company.trim().length > 0 &&
     draft.from.length > 0;
 
-  const addExperience = () => {
-    if (!canAdd) return;
-    onChange({
-      ...profile,
-      experiences: [
-        ...experiences,
-        {
-          id: crypto.randomUUID(),
-          jobTitle: draft.jobTitle.trim(),
-          company: draft.company.trim(),
-          from: draft.from,
-          to: draft.present ? '' : draft.to,
-          responsibility: draft.responsibility.trim(),
-        },
-      ],
-    });
-    setDraft(EMPTY_DRAFT);
+  const addExperience = async () => {
+    if (!canAdd || !userId) return;
+    setSaving(true);
+    setFormError(null);
+    try {
+      const created = await team.experience.create(companyId, userId, {
+        job_title: draft.jobTitle.trim(),
+        company: draft.company.trim(),
+        from_month: draft.from,
+        // null is Present. Never '' — the API rejects an empty string with a
+        // 422, and an untouched <input type="month"> hands us exactly that.
+        to_month: draft.present ? null : draft.to || null,
+        responsibility: draft.responsibility.trim(),
+        sort_order: experiences.length,
+      });
+      onExperiencesChange([...experiences, created]);
+      setDraft(EMPTY_DRAFT);
+    } catch (e) {
+      setFormError(messageOf(e, 'Could not save that experience.'));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const removeExperience = (id: string) =>
-    onChange({ ...profile, experiences: experiences.filter((e) => e.id !== id) });
+  const removeExperience = async (id: string) => {
+    if (!userId) return;
+    setFormError(null);
+    try {
+      await team.experience.remove(companyId, userId, id);
+      onExperiencesChange(experiences.filter((e) => e.id !== id));
+    } catch (e) {
+      setFormError(messageOf(e, 'Could not remove that experience.'));
+    }
+  };
 
   // The picked file is never kept: readProfilePhoto returns a 4:5, 1000x1250
-  // JPEG data URI, so what lands in state is ~400 KB no matter what came in.
+  // JPEG data URI, so what reaches the API is ~400 KB no matter what came in.
   const pickPhoto = async (f: File | null) => {
-    if (!f) {
-      setPhotoError(null);
-      setPhotoBusy(false);
-      onChange({ ...profile, photoUri: undefined });
-      return;
-    }
-    const invalid = validatePhotoFile(f);
-    if (invalid) {
-      setPhotoError(invalid);
-      return;
-    }
+    if (!userId) return;
     setPhotoError(null);
     setPhotoBusy(true);
     try {
-      onChange({ ...profile, photoUri: await readProfilePhoto(f) });
+      if (!f) {
+        await team.photo.remove(companyId, userId);
+        onPhotoChange(null);
+        return;
+      }
+      const invalid = validatePhotoFile(f);
+      if (invalid) {
+        setPhotoError(invalid);
+        return;
+      }
+      const dataUri = await readProfilePhoto(f);
+      await team.photo.put(companyId, userId, dataUri);
+      onPhotoChange(dataUri);
     } catch (e) {
-      setPhotoError(e instanceof Error ? e.message : 'Could not read that image.');
+      setPhotoError(messageOf(e, 'Could not save that photo.'));
     } finally {
       setPhotoBusy(false);
     }
   };
 
-  // Only the name and size are kept: there is no endpoint to send the bytes to
-  // yet, and holding the File alive buys nothing but memory.
-  const pickCv = (f: File | null) => {
-    if (!f) {
-      setCvError(null);
-      onChange({ ...profile, cvName: undefined, cvSize: undefined });
-      return;
-    }
-    if (!/\.(pdf|docx?)$/i.test(f.name)) {
-      setCvError('That file type isn’t supported. Use a PDF or DOCX.');
-      return;
-    }
+  const pickCv = async (f: File | null) => {
+    if (!userId) return;
     setCvError(null);
-    onChange({ ...profile, cvName: f.name, cvSize: f.size });
+    setCvBusy(true);
+    try {
+      if (!f) {
+        await team.cv.remove(companyId, userId);
+        setCv(null);
+        return;
+      }
+      // The server checks magic bytes, not the extension. This is only so an
+      // obviously wrong pick fails instantly instead of after an upload.
+      if (!hasExt(f.name, DOC_EXTS)) {
+        setCvError('That file type isn’t supported. Use a PDF or DOCX.');
+        return;
+      }
+      // Re-uploading replaces whatever is there; no DELETE needed first.
+      setCv(await team.cv.upload(companyId, userId, f));
+    } catch (e) {
+      setCvError(messageOf(e, 'Could not upload that CV.'));
+    } finally {
+      setCvBusy(false);
+    }
   };
+
+  // download_url is signed and expires in an hour, so it is re-fetched at click
+  // time rather than trusted from whenever the panel happened to open.
+  const downloadCv = async () => {
+    if (!userId) return;
+    setCvError(null);
+    try {
+      const fresh = await team.cv.get(companyId, userId);
+      setCv(fresh);
+      window.open(fresh.download_url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      setCvError(messageOf(e, 'Could not open that CV.'));
+    }
+  };
+
+  const photoFilled = photoUri ? (
+    <>
+      <div className="ob-logo-thumb">
+        <img src={photoUri} alt={`${fullName} preview`} />
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="ob-logo-name">Profile photo</div>
+        <div className="ob-logo-meta" style={nowrapStyle}>
+          {PHOTO_WIDTH}×{PHOTO_HEIGHT}
+        </div>
+      </div>
+    </>
+  ) : null;
+
+  const cvFilled = cv ? (
+    <>
+      <div className="ob-logo-thumb" style={{ fontSize: 22 }} aria-hidden>
+        📄
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="ob-logo-name" title={cv.filename}>
+          {cv.filename}
+        </div>
+        <div className="ob-logo-meta" style={nowrapStyle}>
+          {formatBytes(cv.size_bytes)} ·{' '}
+          <button type="button" onClick={() => void downloadCv()} style={linkButtonStyle}>
+            Download
+          </button>
+        </div>
+      </div>
+    </>
+  ) : null;
 
   const experienceForm = (
     <div
@@ -278,6 +417,7 @@ export default function MemberProfileModal({
             className="inp"
             placeholder="Chief Financial Officer"
             value={draft.jobTitle}
+            disabled={saving}
             onChange={(e) => setField('jobTitle', e.target.value)}
           />
         </div>
@@ -289,6 +429,7 @@ export default function MemberProfileModal({
             className="inp"
             placeholder="Saudi Aramco"
             value={draft.company}
+            disabled={saving}
             onChange={(e) => setField('company', e.target.value)}
           />
         </div>
@@ -304,6 +445,7 @@ export default function MemberProfileModal({
             type="month"
             value={draft.from}
             max={draft.to || undefined}
+            disabled={saving}
             onChange={(e) => setField('from', e.target.value)}
           />
         </div>
@@ -334,6 +476,7 @@ export default function MemberProfileModal({
               <input
                 type="checkbox"
                 checked={draft.present}
+                disabled={saving}
                 onChange={(e) =>
                   setDraft((d) => ({
                     ...d,
@@ -351,7 +494,7 @@ export default function MemberProfileModal({
             type="month"
             value={draft.to}
             min={draft.from || undefined}
-            disabled={draft.present}
+            disabled={draft.present || saving}
             onChange={(e) => setField('to', e.target.value)}
             style={
               draft.present
@@ -369,15 +512,22 @@ export default function MemberProfileModal({
           rows={3}
           placeholder="Led the finance function across 12 markets; owned the annual audit…"
           value={draft.responsibility}
+          disabled={saving}
           onChange={(e) => setField('responsibility', e.target.value)}
           style={{ resize: 'vertical', minHeight: 72, fontFamily: 'inherit' }}
         />
       </div>
 
+      {formError && (
+        <div role="alert" style={errorStyle}>
+          {formError}
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
           type="button"
-          onClick={addExperience}
+          onClick={() => void addExperience()}
           disabled={!canAdd}
           style={{
             padding: '9px 18px',
@@ -392,34 +542,30 @@ export default function MemberProfileModal({
             boxShadow: canAdd ? '0 3px 10px rgba(64,64,200,.25)' : 'none',
           }}
         >
-          + Add Experience
+          {saving ? 'Saving…' : '+ Add Experience'}
         </button>
       </div>
     </div>
   );
 
+  const columnCount = canEdit ? 4 : 3;
+
   const experienceTable = (
-    <div
-      style={{
-        border: '1px solid #E2E4F0',
-        borderRadius: 12,
-        overflow: 'hidden',
-      }}
-    >
+    <div style={{ border: '1px solid #E2E4F0', borderRadius: 12, overflow: 'hidden' }}>
       <table className="utable">
         <thead>
           <tr>
             <th>Job Title</th>
             <th>Company</th>
             <th style={{ width: 170 }}>Period</th>
-            <th style={{ width: 44 }} />
+            {canEdit && <th style={{ width: 44 }} />}
           </tr>
         </thead>
         <tbody>
           {experiences.length === 0 ? (
             <tr>
               <td
-                colSpan={4}
+                colSpan={columnCount}
                 style={{
                   padding: '22px 16px',
                   textAlign: 'center',
@@ -434,50 +580,41 @@ export default function MemberProfileModal({
             experiences.map((e) => {
               const hasProse = e.responsibility.length > 0;
               const open = expandedRows[e.id] ?? false;
-              const noRule = hasProse
-                ? { borderBottom: 'none' as const }
-                : undefined;
+              const noRule = hasProse ? { borderBottom: 'none' as const } : undefined;
               return (
-                // Two <tr> per entry, matching AdminUsersPage's RowGroup
-                // idiom: the facts stay on one scannable line and the
-                // prose gets the full width underneath, so a pasted job
-                // description can no longer stretch the row to 600px.
+                // Two <tr> per entry, matching AdminUsersPage's RowGroup idiom:
+                // the facts stay on one scannable line and the prose gets the
+                // full width underneath, so a pasted job description can no
+                // longer stretch the row to 600px.
                 <Fragment key={e.id}>
                   <tr className="urow">
-                    <td style={{ fontWeight: 700, ...noRule }}>
-                      {e.jobTitle}
-                    </td>
+                    <td style={{ fontWeight: 700, ...noRule }}>{e.job_title}</td>
                     <td style={noRule}>{e.company}</td>
-                    <td
-                      style={{
-                        color: '#5A6080',
-                        whiteSpace: 'nowrap',
-                        ...noRule,
-                      }}
-                    >
+                    <td style={{ color: '#5A6080', whiteSpace: 'nowrap', ...noRule }}>
                       {periodOf(e)}
                     </td>
-                    <td style={noRule}>
-                      <button
-                        type="button"
-                        className="ob-logo-remove"
-                        onClick={() => removeExperience(e.id)}
-                        aria-label={`Remove ${e.jobTitle} at ${e.company}`}
-                        style={{ width: 26, height: 26 }}
-                      >
-                        ✕
-                      </button>
-                    </td>
+                    {canEdit && (
+                      <td style={noRule}>
+                        <button
+                          type="button"
+                          className="ob-logo-remove"
+                          onClick={() => void removeExperience(e.id)}
+                          aria-label={`Remove ${e.job_title} at ${e.company}`}
+                          style={{ width: 26, height: 26 }}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    )}
                   </tr>
                   {hasProse && (
                     <tr className="urow">
-                      <td colSpan={4} style={{ paddingTop: 0 }}>
-                        {/* Markdown, because people paste CV text
-                            straight out of a job description. Raw HTML
-                            in the source is escaped, not rendered:
-                            react-markdown only emits elements it builds
-                            itself unless rehype-raw is added, which it
-                            deliberately is not. */}
+                      <td colSpan={columnCount} style={{ paddingTop: 0 }}>
+                        {/* Markdown, because people paste CV text straight out
+                            of a job description. Raw HTML in the source is
+                            escaped, not rendered: react-markdown only emits
+                            elements it builds itself unless rehype-raw is
+                            added, which it deliberately is not. */}
                         <div
                           className="md-prose md-tight"
                           style={open ? expandedStyle : clampStyle}
@@ -490,17 +627,7 @@ export default function MemberProfileModal({
                           <button
                             type="button"
                             onClick={() => toggleRow(e.id)}
-                            style={{
-                              marginTop: 5,
-                              padding: 0,
-                              border: 'none',
-                              background: 'none',
-                              color: '#4040C8',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              fontFamily: 'inherit',
-                              cursor: 'pointer',
-                            }}
+                            style={{ ...linkButtonStyle, marginTop: 5, fontSize: 11 }}
                           >
                             {open ? 'Show less' : 'Show more'}
                           </button>
@@ -525,6 +652,8 @@ export default function MemberProfileModal({
     <div className="modal-overlay">
       <div
         className="modal-content"
+        // maxWidth overrides .modal-content's 96vw cap: at 96vw the panel ate
+        // the backdrop on a narrow window, leaving no room to click outside.
         style={{ width: 760, maxWidth: '92vw', padding: 0 }}
         role="dialog"
         aria-modal="true"
@@ -547,8 +676,8 @@ export default function MemberProfileModal({
               borderRadius: 12,
               flexShrink: 0,
               overflow: 'hidden',
-              background: profile.photoUri ? '#fff' : gradientFor(person.id),
-              border: profile.photoUri ? '1px solid #E2E4F0' : 'none',
+              background: photoUri ? '#fff' : gradientFor(person.id),
+              border: photoUri ? '1px solid #E2E4F0' : 'none',
               color: '#fff',
               fontWeight: 800,
               fontSize: 16,
@@ -557,9 +686,9 @@ export default function MemberProfileModal({
               justifyContent: 'center',
             }}
           >
-            {profile.photoUri ? (
+            {photoUri ? (
               <img
-                src={profile.photoUri}
+                src={photoUri}
                 alt={`${fullName} profile photo`}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
@@ -599,6 +728,11 @@ export default function MemberProfileModal({
               <span className={STATUS_BADGE[person.status]} style={badgeStyle}>
                 {STATUS_LABEL[person.status]}
               </span>
+              {!canEdit && (
+                <span className="b-gy" style={badgeStyle}>
+                  View only
+                </span>
+              )}
               {companyName && (
                 <span style={{ fontSize: 11, color: '#9BA3C4' }}>{companyName}</span>
               )}
@@ -654,102 +788,83 @@ export default function MemberProfileModal({
 
         {/* ── Photo + CV ──────────────────────────────────────────── */}
         <div style={{ padding: '18px 24px', borderBottom: '1px solid #ECEEF8' }}>
-          <div
-            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}
-          >
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div style={{ minWidth: 0 }}>
               <span className="fl-label">Profile Photo</span>
-              <BrandUploadBox
-                icon="🖼️"
-                prompt="Drag a photo here"
-                hint="JPG or PNG · up to 5 MB"
-                accept={PHOTO_ACCEPT}
-                error={photoError ?? undefined}
-                busy={photoBusy}
-                busyLabel="Preparing your photo…"
-                removeLabel="Remove photo"
-                onPick={(f) => void pickPhoto(f)}
-                filled={
-                  profile.photoUri && (
-                    <>
-                      <div className="ob-logo-thumb">
-                        <img src={profile.photoUri} alt={`${fullName} preview`} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div className="ob-logo-name">Profile photo</div>
-                        <div className="ob-logo-meta" style={nowrapStyle}>
-                          {PHOTO_WIDTH}×{PHOTO_HEIGHT} &middot;{' '}
-                          {formatBytes(dataUriBytes(profile.photoUri))}
-                        </div>
-                      </div>
-                    </>
-                  )
-                }
-              />
+              {canEdit ? (
+                <BrandUploadBox
+                  icon="🖼️"
+                  prompt="Drag a photo here"
+                  hint="JPG or PNG · up to 5 MB"
+                  accept={PHOTO_ACCEPT}
+                  error={photoError ?? undefined}
+                  busy={photoBusy || loading}
+                  busyLabel={loading ? 'Loading…' : 'Preparing your photo…'}
+                  removeLabel="Remove photo"
+                  onPick={(f) => void pickPhoto(f)}
+                  filled={photoFilled}
+                />
+              ) : (
+                <>
+                  <ReadOnlyBox empty="No photo uploaded" loading={loading} filled={photoFilled} />
+                  {photoError && <div className="fl-err">{photoError}</div>}
+                </>
+              )}
             </div>
 
             <div style={{ minWidth: 0 }}>
               <span className="fl-label">CV / Résumé</span>
-              <BrandUploadBox
-                icon="📄"
-                prompt="Drag a CV here"
-                hint="PDF or DOCX"
-                accept={DOC_ACCEPT}
-                error={cvError ?? undefined}
-                removeLabel="Remove CV"
-                onPick={pickCv}
-                filled={
-                  profile.cvName && (
-                    <>
-                      <div className="ob-logo-thumb" style={{ fontSize: 22 }} aria-hidden>
-                        📄
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div className="ob-logo-name" title={profile.cvName}>
-                          {profile.cvName}
-                        </div>
-                        <div className="ob-logo-meta" style={nowrapStyle}>
-                          {formatBytes(profile.cvSize ?? 0)}
-                        </div>
-                      </div>
-                    </>
-                  )
-                }
-              />
+              {canEdit ? (
+                <BrandUploadBox
+                  icon="📄"
+                  prompt="Drag a CV here"
+                  hint="PDF or DOCX · up to 10 MB"
+                  accept={DOC_ACCEPT}
+                  error={cvError ?? undefined}
+                  busy={cvBusy || loading}
+                  busyLabel={loading ? 'Loading…' : 'Uploading…'}
+                  removeLabel="Remove CV"
+                  onPick={(f) => void pickCv(f)}
+                  filled={cvFilled}
+                />
+              ) : (
+                <>
+                  <ReadOnlyBox empty="No CV uploaded" loading={loading} filled={cvFilled} />
+                  {cvError && <div className="fl-err">{cvError}</div>}
+                </>
+              )}
             </div>
           </div>
         </div>
 
         {/* ── Experience ──────────────────────────────────────────── */}
         <div style={{ padding: '18px 24px' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
             <span style={sectionTitleStyle}>Experience</span>
             <span className="uhead-count">{experiences.length}</span>
           </div>
 
-          {/* Once there is something to show, the list leads and the form
-              drops underneath as the "add another" step. With nothing added
-              yet the order flips: an empty table above an empty form says
-              nothing, so the form comes first. Reordered in the DOM rather
-              than with CSS `order`, so tab order still follows what is on
-              screen. */}
+          {/* Once there is something to show, the list leads and the form drops
+              underneath as the "add another" step. With nothing added yet the
+              order flips: an empty table above an empty form says nothing, so
+              the form comes first. Reordered in the DOM rather than with CSS
+              `order`, so tab order still follows what is on screen. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {experiences.length > 0 ? (
               <>
                 {experienceTable}
-                {experienceForm}
+                {canEdit && experienceForm}
               </>
             ) : (
               <>
-                {experienceForm}
+                {canEdit && experienceForm}
                 {experienceTable}
               </>
+            )}
+            {!canEdit && formError && (
+              <div role="alert" style={errorStyle}>
+                {formError}
+              </div>
             )}
           </div>
         </div>
@@ -782,6 +897,28 @@ export default function MemberProfileModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// The view-only counterpart to BrandUploadBox's filled row — the same .ob-*
+// shell and height, minus Replace and the remove button.
+function ReadOnlyBox({
+  filled,
+  empty,
+  loading,
+}: {
+  filled: React.ReactNode;
+  empty: string;
+  loading: boolean;
+}) {
+  if (filled) return <div className="ob-logo-preview">{filled}</div>;
+  return (
+    <div
+      className="ob-logo-preview"
+      style={{ minHeight: 78, color: '#9BA3C4', fontSize: 12, fontWeight: 600 }}
+    >
+      {loading ? 'Loading…' : empty}
     </div>
   );
 }

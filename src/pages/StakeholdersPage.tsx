@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
-import MemberProfileModal, {
-  type MemberProfile,
-} from '@/components/MemberProfileModal';
-import { team, type TeamMember } from '@/lib/api';
+import MemberProfileModal from '@/components/MemberProfileModal';
+import { team, type TeamExperience, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { canCreateFeature } from '@/lib/features';
 
@@ -86,6 +84,9 @@ const TAB_DEFAULT_POSITION: Record<TabKey, PositionType> = {
 
 interface Person {
   id: string;
+  // The usr_… address. Every /team/{user_id} sub-resource keys off this, not
+  // off `id` — they are different values and swapping them 404s.
+  userId: string | null;
   firstName: string;
   lastName: string;
   role: string;
@@ -93,6 +94,9 @@ interface Person {
   positionType: PositionType;
   bio: string;
   status: 'active' | 'inactive' | 'pending';
+  // Arrives with the roster via ?include=experience, so opening a card needs
+  // no extra request.
+  experiences: TeamExperience[];
 }
 
 const AVATAR_GRADIENTS = [
@@ -152,12 +156,14 @@ function teamMemberToPerson(m: TeamMember): Person {
   const { firstName, lastName } = splitFullName(m.full_name);
   return {
     id: m.id,
+    userId: m.user_id ?? null,
     firstName,
     lastName,
     role: m.title ?? '',
     email: m.email ?? '',
     positionType: toPositionType(m.position_type),
     bio: m.bio ?? '',
+    experiences: m.experience ?? [],
     status:
       m.status === 'inactive'
         ? 'inactive'
@@ -227,16 +233,32 @@ export default function StakeholdersPage() {
   // Board-member profile popup. Photo / CV / experience are frontend-only for
   // now, so they live here keyed by person id: closing the popup or switching
   // tabs keeps them, a refresh doesn't. Wire to the API when it exists.
-  const [selected, setSelected] = useState<Person | null>(null);
-  const [profiles, setProfiles] = useState<Record<string, MemberProfile>>({});
-  const profileOf = (id: string): MemberProfile =>
-    profiles[id] ?? { experiences: [] };
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Photos are deliberately absent from GET /team (~400 KB of base64 each), so
+  // they are only fetched when a card is opened. Caching them here means the
+  // roster card can show the photo afterwards without a second request.
+  const [photos, setPhotos] = useState<Record<string, string | null>>({});
+
+  const selected = people.find((p) => p.id === selectedId) ?? null;
+
+  // leadership emits read and create only — there is no `update` action, so
+  // create is what gates editing someone else's profile.
+  const canEditOthers = canCreatePerson;
+  const canEditPerson = (p: Person) =>
+    (!!p.userId && p.userId === user?.user_id) || canEditOthers;
+
+  const setExperiences = (personId: string, next: TeamExperience[]) =>
+    setPeople((list) =>
+      list.map((p) => (p.id === personId ? { ...p, experiences: next } : p)),
+    );
 
   const fetchPeople = async (id: string) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await team.list(id);
+      // One request for the whole roster including every member's history —
+      // without the param this page would fire one call per card.
+      const data = await team.list(id, { include: 'experience' });
       setPeople(data.map(teamMemberToPerson));
     } catch (err) {
       setLoadError(
@@ -423,20 +445,20 @@ export default function StakeholdersPage() {
             // Only board members have a profile popup — the other tabs' cards
             // stay inert, so override .person-card's blanket cursor: pointer.
             const clickable = p.positionType === 'board_member';
-            const photoUri = profiles[p.id]?.photoUri;
+            const photoUri = photos[p.id] ?? null;
             return (
             <div
               key={p.id}
               className="person-card"
               role={clickable ? 'button' : undefined}
               tabIndex={clickable ? 0 : undefined}
-              onClick={clickable ? () => setSelected(p) : undefined}
+              onClick={clickable ? () => setSelectedId(p.id) : undefined}
               onKeyDown={
                 clickable
                   ? (e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        setSelected(p);
+                        setSelectedId(p.id);
                       }
                     }
                   : undefined
@@ -647,17 +669,21 @@ export default function StakeholdersPage() {
         />
       )}
 
-      {selected && (
+      {selected && companyId && (
         <MemberProfileModal
+          companyId={companyId}
           person={selected}
           companyName={companyName}
           positionLabel={POSITION_LABELS[selected.positionType]}
           positionBadgeClass={POSITION_BADGE_CLASS[selected.positionType]}
-          profile={profileOf(selected.id)}
-          onChange={(next) =>
-            setProfiles((m) => ({ ...m, [selected.id]: next }))
+          canEdit={canEditPerson(selected)}
+          experiences={selected.experiences}
+          onExperiencesChange={(next) => setExperiences(selected.id, next)}
+          photoUri={photos[selected.id] ?? null}
+          onPhotoChange={(next) =>
+            setPhotos((m) => ({ ...m, [selected.id]: next }))
           }
-          onClose={() => setSelected(null)}
+          onClose={() => setSelectedId(null)}
         />
       )}
     </div>

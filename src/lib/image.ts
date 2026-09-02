@@ -19,6 +19,10 @@ export const PHOTO_ACCEPT = '.png,.jpg,.jpeg,image/png,image/jpeg';
 export const PHOTO_WIDTH = 1000;
 export const PHOTO_HEIGHT = 1250; // 4:5 portrait
 export const PHOTO_TARGET_BYTES = 400 * 1024;
+// PUT /team/{uid}/photo rejects anything over 1 MB decoded. The target above
+// is what we aim for; this is the line that must not be crossed, so failing
+// here gives a sentence about the image instead of a 422 from the server.
+export const PHOTO_SERVER_MAX_BYTES = 1024 * 1024;
 
 // Descending until the encode lands under PHOTO_TARGET_BYTES. A 1000×1250
 // headshot is ~250 KB at 0.82, so the first step almost always wins; the tail is
@@ -111,8 +115,10 @@ export async function readProfilePhoto(f: File): Promise<string> {
     out = canvas.toDataURL('image/jpeg', q);
     if (dataUriBytes(out) <= PHOTO_TARGET_BYTES) return out;
   }
-  // Past the last step the image is genuinely dense. Keep it rather than
-  // rejecting a valid photo over a soft budget — it is still far smaller than
-  // the 5 MB original.
+  // Past the last step the image is genuinely dense. The 400 KB target is a
+  // budget and worth missing quietly; the server's 1 MB cap is not.
+  if (dataUriBytes(out) > PHOTO_SERVER_MAX_BYTES) {
+    throw new Error('We couldn’t compress that image enough. Try another photo.');
+  }
   return out;
 }
