@@ -147,7 +147,12 @@ function fillRequired() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getPhoto.mockResolvedValue({ photo_base64: null });
+  getPhoto.mockResolvedValue({
+    photo_url: null,
+    content_type: null,
+    uploaded_at: null,
+    expires_at: null,
+  });
   getCv.mockRejectedValue(notFound());
   createExperience.mockImplementation((_c, _u, body) =>
     Promise.resolve({ id: 'new-1', ...body }),
@@ -163,8 +168,37 @@ describe('MemberProfileModal — loading', () => {
     await open();
     await waitFor(() => expect(getPhoto).toHaveBeenCalledWith('cmp_1', 'usr_board1'));
     expect(getCv).toHaveBeenCalledWith('cmp_1', 'usr_board1');
-    // Experience arrives with the roster via ?include=experience.
+    // Experience arrives with the roster via ?include=experience,photo.
     expect(listExperience).not.toHaveBeenCalled();
+  });
+
+  // The roster's signed URL expires an hour after the page loaded, so a popup
+  // opened on a long-lived tab must not reuse it.
+  it('lifts a freshly signed photo URL over the one the roster supplied', async () => {
+    getPhoto.mockResolvedValue({
+      photo_url: 'https://fresh-signed',
+      content_type: 'image/jpeg',
+      uploaded_at: '2026-09-02T09:47:14Z',
+      expires_at: '2026-09-02T11:00:00Z',
+    });
+    const { onPhotoChange } = await open({ photoUri: 'https://stale-from-roster' });
+    expect(onPhotoChange).toHaveBeenCalledWith('https://fresh-signed');
+  });
+
+  // Photo and CV disagree on how "nothing uploaded" is reported, and getting
+  // this backwards paints a red box on a perfectly normal member.
+  it('treats a null photo_url as the placeholder, not an error', async () => {
+    await open({ canEdit: false });
+    expect(await screen.findByText(/no photo uploaded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not load the photo/i)).toBeNull();
+  });
+
+  it('surfaces a real photo failure', async () => {
+    getPhoto.mockRejectedValue(
+      new ApiError(403, 'Forbidden', { detail: 'No access to that photo.' }, '/x'),
+    );
+    await open({ canEdit: false });
+    expect(await screen.findByText('No access to that photo.')).toBeInTheDocument();
   });
 
   it('treats a 404 from GET /cv as the empty state, not an error', async () => {

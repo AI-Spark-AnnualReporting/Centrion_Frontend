@@ -215,9 +215,10 @@ export default function MemberProfileModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Photo and CV are deliberately absent from GET /team — 400 KB of inline
-  // base64 per member would make the roster response multi-megabyte — so they
-  // are fetched here. Experience already arrived with the roster.
+  // The CV is absent from GET /team entirely, and the roster's signed photo
+  // URL expires an hour after the page loaded — a popup opened on a tab left
+  // open all afternoon would render a dead link. Both are re-read here; the
+  // calls are cheap. Experience already arrived with the roster.
   useEffect(() => {
     if (!userId) {
       setLoading(false);
@@ -231,9 +232,10 @@ export default function MemberProfileModal({
         team.cv.get(companyId, userId),
       ]);
       if (!live) return;
+      // No photo is a 200 with a null URL, not a 404 — the opposite of the CV.
       if (photoRes.status === 'fulfilled') {
-        onPhotoChange(photoRes.value.photo_base64);
-      } else if (!isNotFound(photoRes.reason)) {
+        onPhotoChange(photoRes.value.photo_url);
+      } else {
         setPhotoError(messageOf(photoRes.reason, 'Could not load the photo.'));
       }
       // No CV yet answers 404. That is the empty state, not a failure, and
@@ -316,6 +318,8 @@ export default function MemberProfileModal({
       }
       const dataUri = await readProfilePhoto(f);
       await team.photo.put(companyId, userId, dataUri);
+      // Show the bytes we just uploaded rather than round-tripping for a
+      // signed URL of the same image. The next roster load replaces it.
       onPhotoChange(dataUri);
     } catch (e) {
       setPhotoError(messageOf(e, 'Could not save that photo.'));

@@ -980,6 +980,9 @@ export interface TeamMember {
   created_at?: string | null;
   // Only present when the list was asked for ?include=experience.
   experience?: TeamExperience[] | null;
+  // Only present with ?include=photo. Signed and short-lived; null when the
+  // member has no headshot.
+  photo_url?: string | null;
 }
 
 export interface CreateTeamMemberBody {
@@ -1012,10 +1015,11 @@ export interface ListTeamQuery {
   position_type?: string;
   role?: string;
   include_inactive?: boolean;
-  // "experience" nests each member's history in the same response. Without it
-  // the Leadership page would need one request per card. Photo and CV are
-  // never included either way — they are too big for a list response.
-  include?: "experience";
+  // Nests each member's history and/or a signed headshot URL in the same
+  // response. Without it the Leadership page would need one request per card;
+  // the URLs are all signed in a single round-trip server-side, so asking for
+  // photo costs almost nothing. CV is never included.
+  include?: "experience" | "photo" | "experience,photo";
 }
 
 // POST response. `member` is the long-standing key; the rest arrived with
@@ -1071,6 +1075,17 @@ export interface CreateTeamExperienceBody {
  *  to_month means Present. Only send keys the user actually changed — unknown
  *  keys are a 422, so never spread a whole row back in. */
 export type UpdateTeamExperienceBody = Partial<CreateTeamExperienceBody>;
+
+/** GET /team/{uid}/photo. Unlike the CV, "no photo" is a 200 with a null
+ *  photo_url rather than a 404 — so a null here is the placeholder case, not
+ *  a failure. The URL is signed and expires in an hour: never persist it, and
+ *  re-fetch rather than reusing one from an earlier page load. */
+export interface TeamMemberPhoto {
+  photo_url: string | null;
+  content_type: string | null;
+  uploaded_at: string | null;
+  expires_at: string | null;
+}
 
 export interface TeamMemberCv {
   id: string;
@@ -1179,15 +1194,15 @@ export const team = {
   },
 
   // ── Profile photo ────────────────────────────────────────────────────────
-  // Kept off GET /team on purpose: ~400 KB of inline base64 per member would
-  // make the roster response multi-megabyte. Fetch it on the detail view.
+  // Asymmetric on purpose: the read is a signed URL, the write is still the
+  // inline data URI our canvas pipeline produces.
   photo: {
+    // The roster gets its headshots from ?include=photo. This is for a single
+    // member opened later, whose list URL may have aged past its hour.
     get: (companyId: string, userId: string) =>
-      request<{ photo_base64: string | null }>(
-        `${teamMemberPath(companyId, userId)}/photo`,
-      ),
+      request<TeamMemberPhoto>(`${teamMemberPath(companyId, userId)}/photo`),
 
-    /** `photoBase64` must be the full data URI, prefix included. */
+    /** `photoBase64` must be the full data URI, prefix included. 1 MB decoded. */
     put: (companyId: string, userId: string, photoBase64: string) =>
       noContent(`${teamMemberPath(companyId, userId)}/photo`, "PUT", {
         photo_base64: photoBase64,

@@ -94,9 +94,10 @@ interface Person {
   positionType: PositionType;
   bio: string;
   status: 'active' | 'inactive' | 'pending';
-  // Arrives with the roster via ?include=experience, so opening a card needs
-  // no extra request.
+  // Both arrive with the roster via ?include=experience,photo, so painting the
+  // grid needs no per-card request. photoUrl is signed and expires in an hour.
   experiences: TeamExperience[];
+  photoUrl: string | null;
 }
 
 const AVATAR_GRADIENTS = [
@@ -164,6 +165,7 @@ function teamMemberToPerson(m: TeamMember): Person {
     positionType: toPositionType(m.position_type),
     bio: m.bio ?? '',
     experiences: m.experience ?? [],
+    photoUrl: m.photo_url ?? null,
     status:
       m.status === 'inactive'
         ? 'inactive'
@@ -234,10 +236,12 @@ export default function StakeholdersPage() {
   // now, so they live here keyed by person id: closing the popup or switching
   // tabs keeps them, a refresh doesn't. Wire to the API when it exists.
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Photos are deliberately absent from GET /team (~400 KB of base64 each), so
-  // they are only fetched when a card is opened. Caching them here means the
-  // roster card can show the photo afterwards without a second request.
+  // Overrides for the roster's photo URLs: the popup re-reads a fresh signed
+  // URL on open, and replaces it outright after an upload. Absent here means
+  // "use whatever the roster gave us".
   const [photos, setPhotos] = useState<Record<string, string | null>>({});
+  const photoOf = (p: Person): string | null =>
+    p.id in photos ? photos[p.id] : p.photoUrl;
 
   const selected = people.find((p) => p.id === selectedId) ?? null;
 
@@ -256,9 +260,9 @@ export default function StakeholdersPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      // One request for the whole roster including every member's history —
-      // without the param this page would fire one call per card.
-      const data = await team.list(id, { include: 'experience' });
+      // One request paints the whole page — history and headshots. Without
+      // the param this would be a call per card for each.
+      const data = await team.list(id, { include: 'experience,photo' });
       setPeople(data.map(teamMemberToPerson));
     } catch (err) {
       setLoadError(
@@ -445,7 +449,7 @@ export default function StakeholdersPage() {
             // Only board members have a profile popup — the other tabs' cards
             // stay inert, so override .person-card's blanket cursor: pointer.
             const clickable = p.positionType === 'board_member';
-            const photoUri = photos[p.id] ?? null;
+            const photoUri = photoOf(p);
             return (
             <div
               key={p.id}
@@ -679,7 +683,7 @@ export default function StakeholdersPage() {
           canEdit={canEditPerson(selected)}
           experiences={selected.experiences}
           onExperiencesChange={(next) => setExperiences(selected.id, next)}
-          photoUri={photos[selected.id] ?? null}
+          photoUri={photoOf(selected)}
           onPhotoChange={(next) =>
             setPhotos((m) => ({ ...m, [selected.id]: next }))
           }
