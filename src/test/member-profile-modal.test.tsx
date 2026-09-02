@@ -578,13 +578,28 @@ describe('MemberProfileModal — layout', () => {
     ).toBeTruthy();
   });
 
-  it('puts the form first while there is nothing to list', async () => {
+  // An empty grid of column headers is chrome around a fact the section
+  // heading already states, so the table is not rendered at all until there
+  // is a row to put in it.
+  it('renders no table at all while there is nothing to list', async () => {
     await open();
-    const table = screen.getByRole('table');
-    expect(
-      table.compareDocumentPosition(jobTitle()) & Node.DOCUMENT_POSITION_PRECEDING,
-    ).toBeTruthy();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText(/no experience added yet/i)).toBeNull();
+    // The form is still the way in.
+    expect(jobTitle()).toBeInTheDocument();
+  });
+
+  it('tells a read-only viewer the history is empty, without the table', async () => {
+    await open({ canEdit: false });
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('columnheader')).toBeNull();
+    // Otherwise the section would be a heading over nothing.
     expect(screen.getByText(/no experience added yet/i)).toBeInTheDocument();
+  });
+
+  it('brings the table back as soon as there is a row', async () => {
+    await open({ experiences: [anExperience()] });
+    expect(screen.getByRole('table')).toBeInTheDocument();
   });
 });
 

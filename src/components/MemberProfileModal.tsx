@@ -631,8 +631,11 @@ export default function MemberProfileModal({
   );
 
   const columnCount = canEdit ? 4 : 3;
+  const hasExperience = experiences.length > 0;
 
-  const experienceTable = (
+  // Nothing to tabulate means no table: an empty grid of column headers is
+  // chrome around a fact the section heading already states.
+  const experienceTable = !hasExperience ? null : (
     <div style={{ border: '1px solid #E2E4F0', borderRadius: 12, overflow: 'hidden' }}>
       <table className="utable">
         <thead>
@@ -644,116 +647,100 @@ export default function MemberProfileModal({
           </tr>
         </thead>
         <tbody>
-          {experiences.length === 0 ? (
-            <tr>
-              <td
-                colSpan={columnCount}
-                style={{
-                  padding: '22px 16px',
-                  textAlign: 'center',
-                  fontSize: 12,
-                  color: '#9BA3C4',
-                }}
-              >
-                No experience added yet.
-              </td>
-            </tr>
-          ) : (
-            experiences.map((e) => {
-              const hasProse = e.responsibility.length > 0;
-              const open = expandedRows[e.id] ?? false;
-              const noRule = hasProse ? { borderBottom: 'none' as const } : undefined;
-              return (
-                // Two <tr> per entry, matching AdminUsersPage's RowGroup idiom:
-                // the facts stay on one scannable line and the prose gets the
-                // full width underneath, so a pasted job description can no
-                // longer stretch the row to 600px.
-                <Fragment key={e.id}>
-                  <tr
-                    className="urow"
-                    style={editingId === e.id ? { background: '#F6F6FF' } : undefined}
-                  >
-                    <td style={{ fontWeight: 700, ...noRule }}>{e.job_title}</td>
-                    <td style={noRule}>{e.company}</td>
-                    <td style={{ color: '#5A6080', whiteSpace: 'nowrap', ...noRule }}>
-                      {periodOf(e)}
-                    </td>
-                    {canEdit && (
-                      <td style={noRule}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            type="button"
-                            className="ob-logo-remove"
-                            onClick={() => startEdit(e)}
-                            aria-label={`Edit ${e.job_title} at ${e.company}`}
-                            title="Edit"
-                            style={{
-                              width: 26,
-                              height: 26,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              ...(editingId === e.id
-                                ? { borderColor: '#4040C8', color: '#4040C8' }
-                                : null),
-                            }}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                              <path
-                                d="M9.6 1.9a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9l-6.3 6.3-2.9.7.7-2.9 6-6.6Z"
-                                stroke="currentColor"
-                                strokeWidth="1.3"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            className="ob-logo-remove"
-                            onClick={() => void removeExperience(e.id)}
-                            aria-label={`Remove ${e.job_title} at ${e.company}`}
-                            title="Remove"
-                            style={{ width: 26, height: 26 }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                  {hasProse && (
-                    <tr className="urow">
-                      <td colSpan={columnCount} style={{ paddingTop: 0 }}>
-                        {/* Markdown, because people paste CV text straight out
-                            of a job description. Raw HTML in the source is
-                            escaped, not rendered: react-markdown only emits
-                            elements it builds itself unless rehype-raw is
-                            added, which it deliberately is not. */}
-                        <div
-                          className="md-prose md-tight"
-                          style={open ? expandedStyle : clampStyle}
+          {experiences.map((e) => {
+            const hasProse = e.responsibility.length > 0;
+            const open = expandedRows[e.id] ?? false;
+            const noRule = hasProse ? { borderBottom: 'none' as const } : undefined;
+            return (
+              // Two <tr> per entry, matching AdminUsersPage's RowGroup idiom:
+              // the facts stay on one scannable line and the prose gets the
+              // full width underneath, so a pasted job description can no
+              // longer stretch the row to 600px.
+              <Fragment key={e.id}>
+                <tr
+                  className="urow"
+                  style={editingId === e.id ? { background: '#F6F6FF' } : undefined}
+                >
+                  <td style={{ fontWeight: 700, ...noRule }}>{e.job_title}</td>
+                  <td style={noRule}>{e.company}</td>
+                  <td style={{ color: '#5A6080', whiteSpace: 'nowrap', ...noRule }}>
+                    {periodOf(e)}
+                  </td>
+                  {canEdit && (
+                    <td style={noRule}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="ob-logo-remove"
+                          onClick={() => startEdit(e)}
+                          aria-label={`Edit ${e.job_title} at ${e.company}`}
+                          title="Edit"
+                          style={{
+                            width: 26,
+                            height: 26,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            ...(editingId === e.id
+                              ? { borderColor: '#4040C8', color: '#4040C8' }
+                              : null),
+                          }}
                         >
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {e.responsibility}
-                          </ReactMarkdown>
-                        </div>
-                        {isLongProse(e.responsibility) && (
-                          <button
-                            type="button"
-                            onClick={() => toggleRow(e.id)}
-                            style={{ ...linkButtonStyle, marginTop: 5, fontSize: 11 }}
-                          >
-                            {open ? 'Show less' : 'Show more'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                          <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                            <path
+                              d="M9.6 1.9a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9l-6.3 6.3-2.9.7.7-2.9 6-6.6Z"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="ob-logo-remove"
+                          onClick={() => void removeExperience(e.id)}
+                          aria-label={`Remove ${e.job_title} at ${e.company}`}
+                          title="Remove"
+                          style={{ width: 26, height: 26 }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </td>
                   )}
-                </Fragment>
-              );
-            })
-          )}
+                </tr>
+                {hasProse && (
+                  <tr className="urow">
+                    <td colSpan={columnCount} style={{ paddingTop: 0 }}>
+                      {/* Markdown, because people paste CV text straight out
+                          of a job description. Raw HTML in the source is
+                          escaped, not rendered: react-markdown only emits
+                          elements it builds itself unless rehype-raw is
+                          added, which it deliberately is not. */}
+                      <div
+                        className="md-prose md-tight"
+                        style={open ? expandedStyle : clampStyle}
+                      >
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {e.responsibility}
+                        </ReactMarkdown>
+                      </div>
+                      {isLongProse(e.responsibility) && (
+                        <button
+                          type="button"
+                          onClick={() => toggleRow(e.id)}
+                          style={{ ...linkButtonStyle, marginTop: 5, fontSize: 11 }}
+                        >
+                          {open ? 'Show less' : 'Show more'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -965,15 +952,22 @@ export default function MemberProfileModal({
               the form comes first. Reordered in the DOM rather than with CSS
               `order`, so tab order still follows what is on screen. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {experiences.length > 0 ? (
+            {hasExperience ? (
               <>
                 {experienceTable}
                 {canEdit && experienceForm}
               </>
             ) : (
               <>
-                {canEdit && experienceForm}
-                {experienceTable}
+                {canEdit ? (
+                  experienceForm
+                ) : (
+                  // A read-only viewer gets a plain sentence rather than an
+                  // empty section — but without the table's chrome around it.
+                  <div style={{ fontSize: 12, color: '#9BA3C4', padding: '4px 2px' }}>
+                    No experience added yet.
+                  </div>
+                )}
               </>
             )}
             {!canEdit && formError && (
