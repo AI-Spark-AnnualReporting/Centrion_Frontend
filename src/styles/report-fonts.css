@@ -1,0 +1,36 @@
+/*
+ * report-fonts.css — @font-face rules for the six typefaces the Report
+ * Design modal offers on the typography picker. Loaded once from
+ * src/index.css so the modal + its live preview can render them without
+ * the app-shell needing every face.
+ *
+ * The `font-family` names here MUST match the backend allowlist verbatim
+ * (report_typography.FAMILIES) and the fc-family names installed inside
+ * the Playwright container — the preview and the exported PDF resolve
+ * fonts through completely independent stacks, and any mismatch means the
+ * modal shows one face while the PDF ships another.
+ *
+ * All woff2 files live in /public/fonts and are downloaded from
+ * Fontsource's jsdelivr CDN (OFL). See public/fonts/README.md.
+ *
+ * `font-display: swap` — if a woff2 is missing the modal falls back to
+ * system sans instead of blocking every render on a 404.
+ */
+
+@font-face { font-family: 'Inter';             font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/inter-regular.woff2')             format('woff2'); }
+@font-face { font-family: 'Inter';             font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/inter-bold.woff2')                format('woff2'); }
+
+@font-face { font-family: 'IBM Plex Sans';     font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/ibm-plex-sans-regular.woff2')     format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans';     font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/ibm-plex-sans-bold.woff2')        format('woff2'); }
+
+@font-face { font-family: 'Lato';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/lato-regular.woff2')              format('woff2'); }
+@font-face { font-family: 'Lato';              font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/lato-bold.woff2')                 format('woff2'); }
+
+@font-face { font-family: 'Source Serif 4';    font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/source-serif-4-regular.woff2')    format('woff2'); }
+@font-face { font-family: 'Source Serif 4';    font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/source-serif-4-bold.woff2')       format('woff2'); }
+
+@font-face { font-family: 'Merriweather';      font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/merriweather-regular.woff2')      format('woff2'); }
+@font-face { font-family: 'Merriweather';      font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/merriweather-bold.woff2')         format('woff2'); }
+
+@font-face { font-family: 'Libre Baskerville'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/libre-baskerville-regular.woff2') format('woff2'); }
+@font-face { font-family: 'Libre Baskerville'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/libre-baskerville-bold.woff2')    format('woff2'); }

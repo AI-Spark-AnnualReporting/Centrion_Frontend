@@ -15,6 +15,7 @@ import type {
   ColorPalette,
   CoverSelectionPayload,
   CoverTemplate,
+  Typography,
 } from '@/types/quarterly';
 import { errorMessage } from './board-helpers';
 
@@ -29,6 +30,7 @@ export function useBoardCover(
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [key, setKey] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandColors | null>(null);
+  const [typography, setTypography] = useState<Typography | null>(null);
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export function useBoardCover(
         if (cancelled) return;
         if (res?.cover_template_key) setKey(res.cover_template_key);
         if (res?.brand) setBrand(res.brand);
+        if (res?.typography) setTypography(res.typography);
       })
       .catch(() => {});
     return () => {
@@ -78,6 +81,7 @@ export function useBoardCover(
         // may not echo the selection back, which would reset the cover.
         setKey(res?.cover_template_key ?? payload.cover_template_key);
         setBrand(res?.brand ?? payload.brand);
+        if (payload.typography) setTypography(res?.typography ?? payload.typography);
         setOpen(false);
       } catch (err: unknown) {
         setError(errorMessage(err, 'Could not save the cover selection.'));
@@ -106,6 +110,7 @@ export function useBoardCover(
         palettes={palettes}
         initialTemplateKey={templateKey}
         initialBrand={coverBrand}
+        initialTypography={typography}
         applying={applying}
         error={error}
         onApply={apply}

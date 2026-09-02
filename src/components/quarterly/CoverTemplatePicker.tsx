@@ -1,22 +1,36 @@
-import { useEffect, useState } from 'react';
+/*
+ * CoverTemplatePicker — the Report Design modal.
+ *
+ * Two-pane layout: Layout / Brand Colour / Typography on the left, an
+ * A4-scaled live preview (Cover | Page toggle) on the right that repaints
+ * on every control change. Apply sends {cover_template_key, brand,
+ * typography} to the parent, which persists via PATCH .../cover-template
+ * on the quarterly / earnings / board endpoints — same modal, four
+ * flows, one save shape.
+ *
+ * Same props as before + `initialTypography` and `logoUrl` (both optional
+ * for parents that haven't been updated yet). The Branded template stays
+ * hidden — three visible cards.
+ *
+ * Styling: Tailwind for the new panes (matches the rest of the app);
+ * inline styles kept only for dynamic values (brand colour swatches,
+ * variant thumbnails). This is a new pattern for THIS file — the previous
+ * version was all inline styles.
+ */
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import type {
-  CoverTemplate,
-  ColorPalette,
   BrandColors,
+  ColorPalette,
   CoverSelectionPayload,
+  CoverTemplate,
+  Typography,
 } from '@/types/quarterly';
+import { LAYOUT_TYPOGRAPHY_DEFAULTS, DEFAULT_LAYOUT_KEY } from '@/types/quarterly';
+import { TypographyControls, hasCustomTypography } from './TypographyControls';
+import { ReportPreview, type PreviewVariant } from './ReportPreview';
 
-const ACCENT = '#4040C8';
-const DARK = '#1A1D2E';
-const MUTED = '#6B7280';
-const BODY = '#2A2E47';
 
-// What each brand color affects in the report — shown next to the pickers so the
-// user knows the impact before choosing.
-const PRIMARY_NOTE = 'Used for main headings, section titles, cover page, and table headers.';
-const SECONDARY_NOTE = 'Used for highlights, KPI numbers, dividers, and accent borders.';
-
-// ─── colour helpers ───────────────────────────────────────────────────────────
+// ─── colour helpers (unchanged from the previous modal) ─────────────
 function normalizeHex(v: string): string | null {
   let s = v.trim();
   if (!s.startsWith('#')) s = `#${s}`;
@@ -25,8 +39,6 @@ function normalizeHex(v: string): string | null {
   }
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : null;
 }
-
-// Relative luminance (0 = black, 1 = white) per WCAG.
 function luminance(hex: string): number {
   const h = normalizeHex(hex) ?? '#000000';
   const ch = [1, 3, 5].map((i) => {
@@ -37,34 +49,39 @@ function luminance(hex: string): number {
 }
 const isLight = (hex: string) => luminance(hex) > 0.7;
 
-// ─── thumbnail mini-preview (when a template has no thumbnail_url) ─────────────
-// Distinct look per design: match a known variant by key, otherwise cycle by
-// index so every card in the grid is visually differentiable.
-const MINI_VARIANTS = ['classic', 'bold', 'minimal'] as const;
+
+// ─── layout key normalisation ───────────────────────────────────────
+// Both CoverRenderer.variantFor and this modal collapse arbitrary
+// template keys to one of the three visible variants. Kept in sync
+// with src/components/quarterly/CoverRenderer.tsx.
+const VISIBLE_VARIANTS = ['classic', 'bold', 'minimal'] as const;
+
+function collapseVariant(templateKey: string | null | undefined): PreviewVariant {
+  const k = (templateKey || '').toLowerCase();
+  if (k.includes('bold')) return 'bold';
+  if (k.includes('minimal') || k.includes('clean')) return 'minimal';
+  return 'classic';
+}
+
+
+// ─── thumbnail mini-preview (unchanged from previous modal) ─────────
 function MiniCover({ templateKey, accent, index = 0 }: { templateKey: string; accent: string; index?: number }) {
-  const k = templateKey.toLowerCase();
-  const variant = k.includes('bold')
-    ? 'bold'
-    : k.includes('minimal') || k.includes('clean')
-      ? 'minimal'
-      : k.includes('classic')
-        ? 'classic'
-        : MINI_VARIANTS[index % MINI_VARIANTS.length];
+  const variant = collapseVariant(templateKey) || VISIBLE_VARIANTS[index % VISIBLE_VARIANTS.length];
   const shell: React.CSSProperties = {
     width: '100%', aspectRatio: '1 / 1.3', borderRadius: 6, background: '#fff',
     border: '1px solid #E5E7EF', overflow: 'hidden', display: 'flex', flexDirection: 'column',
   };
   const line = (w: string, c = '#E4E6F1') => (
-    <div style={{ height: 5, width: w, borderRadius: 3, background: c }} />
+    <div style={{ height: 4, width: w, borderRadius: 3, background: c }} />
   );
   if (variant === 'bold') {
     return (
       <div style={shell}>
-        <div style={{ background: accent, padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ height: 8, width: '70%', borderRadius: 3, background: 'rgba(255,255,255,.9)' }} />
-          <div style={{ height: 5, width: '45%', borderRadius: 3, background: 'rgba(255,255,255,.6)' }} />
+        <div style={{ background: accent, padding: '10px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ height: 6, width: '70%', borderRadius: 3, background: 'rgba(255,255,255,.9)' }} />
+          <div style={{ height: 4, width: '45%', borderRadius: 3, background: 'rgba(255,255,255,.6)' }} />
         </div>
-        <div style={{ flex: 1, padding: 12, display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'flex-end' }}>
+        <div style={{ flex: 1, padding: 10, display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'flex-end' }}>
           {line('60%')}{line('40%')}
         </div>
       </div>
@@ -72,31 +89,34 @@ function MiniCover({ templateKey, accent, index = 0 }: { templateKey: string; ac
   }
   if (variant === 'minimal') {
     return (
-      <div style={{ ...shell, padding: 14, justifyContent: 'center', gap: 8 }}>
-        <div style={{ height: 4, width: 26, borderRadius: 3, background: accent }} />
-        <div style={{ height: 8, width: '65%', borderRadius: 3, background: DARK }} />
+      <div style={{ ...shell, padding: 10, justifyContent: 'center', gap: 6 }}>
+        <div style={{ height: 3, width: 20, borderRadius: 3, background: accent }} />
+        <div style={{ height: 6, width: '65%', borderRadius: 3, background: '#1A1D2E' }} />
         {line('40%')}
       </div>
     );
   }
   return (
-    <div style={{ ...shell, padding: 14, gap: 8 }}>
-      <div style={{ height: 5, width: 40, borderRadius: 3, background: accent }} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
-        <div style={{ height: 8, width: '70%', borderRadius: 3, background: DARK }} />
+    <div style={{ ...shell, padding: 10, gap: 6 }}>
+      <div style={{ height: 4, width: 32, borderRadius: 3, background: accent }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, justifyContent: 'center' }}>
+        <div style={{ height: 6, width: '70%', borderRadius: 3, background: '#1A1D2E' }} />
         {line('45%')}
       </div>
-      <div style={{ height: 3, width: '100%', background: accent, borderRadius: 3 }} />
+      <div style={{ height: 2, width: '100%', background: accent, borderRadius: 3 }} />
     </div>
   );
 }
 
-// ─── the popup ────────────────────────────────────────────────────────────────
+
+// ─── the popup ──────────────────────────────────────────────────────
 export function CoverTemplatePicker({
   templates,
   palettes,
   initialTemplateKey,
   initialBrand,
+  initialTypography,
+  logoUrl,
   applying = false,
   error,
   onApply,
@@ -106,27 +126,45 @@ export function CoverTemplatePicker({
   palettes: ColorPalette[];
   initialTemplateKey: string | null;
   initialBrand: BrandColors | null;
+  initialTypography?: Typography | null;
+  logoUrl?: string | null;
   applying?: boolean;
   error?: string | null;
   onApply: (payload: CoverSelectionPayload) => void;
   onClose: () => void;
 }) {
+  const visibleTemplates = useMemo(
+    () => templates.filter((t) => t.key.toLowerCase() !== 'branded'),
+    [templates],
+  );
+
   const [designKey, setDesignKey] = useState<string>(
-    initialTemplateKey || templates[0]?.key || '',
+    initialTemplateKey || visibleTemplates[0]?.key || DEFAULT_LAYOUT_KEY,
   );
   const [brand, setBrand] = useState<BrandColors>(
     initialBrand ?? {
-      primary: palettes[0]?.primary ?? ACCENT,
-      secondary: palettes[0]?.secondary ?? ACCENT,
+      primary: palettes[0]?.primary ?? '#4B0082',
+      secondary: palettes[0]?.secondary ?? '#00B7C2',
       palette_key: palettes[0]?.key ?? '',
     },
   );
   const [customOpen, setCustomOpen] = useState(brand.palette_key === 'custom');
 
-  // The "Branded" design is hidden for now.
-  const visibleTemplates = templates.filter((t) => t.key.toLowerCase() !== 'branded');
+  // Typography state — seeded from the report's saved override if any,
+  // else from the picked layout's recommended defaults.
+  const layoutDefaults = useMemo(
+    () => templateDefaults(visibleTemplates, designKey),
+    [visibleTemplates, designKey],
+  );
+  const [typography, setTypography] = useState<Typography>(
+    initialTypography ?? templateDefaults(visibleTemplates, designKey),
+  );
 
-  // Escape to close.
+  // Layout-swap prompt state — pops when the user picks a different
+  // layout while their typography is customised. "Switch" replaces
+  // typography with the new layout's defaults; "Keep mine" dismisses.
+  const [swapPrompt, setSwapPrompt] = useState<{ from: string; to: string; toDefaults: Typography } | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -141,178 +179,231 @@ export function CoverTemplatePicker({
     setBrand((b) => ({ ...b, ...patch, palette_key: 'custom' }));
   };
 
+  const handleDesignChange = (nextKey: string) => {
+    if (nextKey === designKey) return;
+    const nextDefaults = templateDefaults(visibleTemplates, nextKey);
+    // Silent switch if typography still matches the current layout's
+    // defaults; otherwise prompt so a customised choice isn't lost.
+    if (hasCustomTypography(typography, layoutDefaults)) {
+      setSwapPrompt({
+        from: templateName(visibleTemplates, designKey),
+        to: templateName(visibleTemplates, nextKey),
+        toDefaults: nextDefaults,
+      });
+      setDesignKey(nextKey);
+    } else {
+      setDesignKey(nextKey);
+      setTypography(nextDefaults);
+    }
+  };
+
+  const currentVariant = collapseVariant(designKey);
   const lightWarn = isLight(brand.primary);
+
+  // Measure the preview pane so ReportPreview can compute a scale that
+  // fits the A4 mock without introducing horizontal scroll.
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const [paneWidth, setPaneWidth] = useState(280);
+  useLayoutEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const measure = () => setPaneWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Choose cover design and colors"
+      aria-label="Report design"
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1400,
         background: 'rgba(20,22,40,.45)', backdropFilter: 'blur(2px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-        animation: 'fade-in .2s ease-out',
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 'min(760px, 100%)', maxHeight: '86vh',
-          display: 'flex', flexDirection: 'column',
-          background: '#fff', borderRadius: 16,
-          boxShadow: '0 24px 60px rgba(20,22,40,.28)', overflow: 'hidden',
-        }}
+        className="flex max-h-[92vh] w-full max-w-[1080px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 22px', borderBottom: '1px solid #ECEEF8' }}>
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
           <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: DARK }}>Choose cover design & colors</div>
-            <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>Colors apply to accents &amp; headings; body text stays dark.</div>
+            <div className="text-[15px] font-extrabold text-slate-900">Report design</div>
+            <div className="mt-0.5 text-[12px] text-slate-500">Layout, colours and type. Changes preview live.</div>
           </div>
           <button
             type="button" onClick={onClose} aria-label="Close" title="Close"
-            style={{ width: 30, height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #E5E7EF', background: '#fff', borderRadius: 8, cursor: 'pointer', color: MUTED }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
           >
             <svg width="13" height="13" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '18px 22px', overflowY: 'auto' }}>
-          {/* Part A — designs */}
-          <SectionLabel>Cover design</SectionLabel>
-          {visibleTemplates.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#9BA3C4', padding: '6px 0 14px' }}>No cover designs available.</div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-              {visibleTemplates.map((t, i) => {
-                const active = t.key === designKey;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setDesignKey(t.key)}
-                    aria-pressed={active}
-                    style={{
-                      textAlign: 'left', padding: 10, borderRadius: 12, cursor: 'pointer',
-                      background: active ? '#EEEEFF' : '#fff',
-                      border: `1.5px solid ${active ? ACCENT : '#E4E6F1'}`,
-                      transition: 'border-color .12s, background .12s',
-                    }}
-                  >
-                    <div style={{ position: 'relative', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
-                      {t.preview_image_url ? (
-                        <img src={t.preview_image_url} alt={t.name} style={{ width: '100%', display: 'block', aspectRatio: '1 / 1.3', objectFit: 'cover' }} />
-                      ) : (
-                        <MiniCover templateKey={t.key} accent={brand.primary} index={i} />
-                      )}
-                      {active && (
-                        <span
-                          aria-hidden
-                          style={{
-                            position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%',
-                            background: ACCENT, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          }}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#2B2B8F' : DARK }}>{t.name}</div>
-                    {t.description && <div style={{ fontSize: 11, color: MUTED, marginTop: 2, lineHeight: 1.4 }}>{t.description}</div>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        {/* Body — 2 panes on desktop, stacks under ~900px */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,40%)]">
+          {/* Left pane */}
+          <div className="flex flex-col gap-6 overflow-y-auto px-6 py-5">
+            {/* Layout */}
+            <section aria-label="Layout">
+              <SectionHeader>Layout</SectionHeader>
+              {visibleTemplates.length === 0 ? (
+                <div className="py-2 text-[12px] text-slate-400">No cover designs available.</div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {visibleTemplates.map((t, i) => {
+                    const active = t.key === designKey;
+                    return (
+                      <button
+                        key={t.key} type="button"
+                        onClick={() => handleDesignChange(t.key)}
+                        aria-pressed={active}
+                        className={
+                          'rounded-lg border-2 p-2 text-left transition-colors '
+                          + (active
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-slate-200 bg-white hover:border-slate-300')
+                        }
+                      >
+                        <div className="relative mb-2 overflow-hidden rounded">
+                          {t.preview_image_url ? (
+                            <img src={t.preview_image_url} alt={t.name} className="block aspect-[1/1.3] w-full object-cover" />
+                          ) : (
+                            <MiniCover templateKey={t.key} accent={brand.primary} index={i} />
+                          )}
+                          {active && (
+                            <span
+                              aria-hidden
+                              className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 text-white"
+                            >
+                              <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            </span>
+                          )}
+                        </div>
+                        <div className={'text-[12px] font-bold ' + (active ? 'text-indigo-800' : 'text-slate-900')}>{t.name}</div>
+                        {t.description && <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{t.description}</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-          {/* Part B — brand color */}
-          <SectionLabel>Brand color</SectionLabel>
-          {/* Role legend — what each color affects (live swatches reflect the current choice). */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 14 }}>
-            <RoleNote color={brand.primary} label="Primary" note={PRIMARY_NOTE} />
-            <RoleNote color={brand.secondary} label="Secondary" note={SECONDARY_NOTE} />
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {palettes.map((p) => {
-              const active = brand.palette_key === p.key && !customOpen;
-              return (
+            {/* Brand color */}
+            <section aria-label="Brand colour">
+              <SectionHeader>Brand colour</SectionHeader>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {palettes.map((p) => {
+                  const active = brand.palette_key === p.key && !customOpen;
+                  return (
+                    <button
+                      key={p.key} type="button" onClick={() => applyPalette(p)} aria-pressed={active}
+                      className={
+                        'inline-flex items-center gap-2 rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition-colors '
+                        + (active
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-800'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300')
+                      }
+                    >
+                      <span className="inline-flex">
+                        <span style={{ width: 14, height: 14, borderRadius: '50% 0 0 50%', background: p.primary }} />
+                        <span style={{ width: 14, height: 14, borderRadius: '0 50% 50% 0', background: p.secondary }} />
+                      </span>
+                      {p.name}
+                    </button>
+                  );
+                })}
                 <button
-                  key={p.key}
-                  type="button"
-                  onClick={() => applyPalette(p)}
-                  aria-pressed={active}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 12px 7px 8px',
-                    borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
-                    color: active ? '#2B2B8F' : '#3A3F5C',
-                    background: active ? '#EEEEFF' : '#fff',
-                    border: `1.5px solid ${active ? ACCENT : '#E4E6F1'}`,
-                  }}
+                  type="button" onClick={() => setCustomOpen(true)} aria-pressed={customOpen}
+                  className={
+                    'inline-flex items-center rounded-full border-2 px-3 py-1.5 text-[12px] font-semibold transition-colors '
+                    + (customOpen
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300')
+                  }
                 >
-                  <span style={{ display: 'inline-flex' }}>
-                    <span style={{ width: 16, height: 16, borderRadius: '50% 0 0 50%', background: p.primary }} />
-                    <span style={{ width: 16, height: 16, borderRadius: '0 50% 50% 0', background: p.secondary }} />
-                  </span>
-                  {p.name}
+                  Custom
                 </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setCustomOpen(true)}
-              aria-pressed={customOpen}
-              style={{
-                padding: '7px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
-                color: customOpen ? '#2B2B8F' : '#3A3F5C',
-                background: customOpen ? '#EEEEFF' : '#fff',
-                border: `1.5px solid ${customOpen ? ACCENT : '#E4E6F1'}`,
-              }}
-            >
-              Custom
-            </button>
+              </div>
+              {customOpen && (
+                <div className="flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <HexField label="Primary" value={brand.primary} onChange={(v) => setCustom({ primary: v })} />
+                  <HexField label="Secondary" value={brand.secondary} onChange={(v) => setCustom({ secondary: v })} />
+                </div>
+              )}
+              {lightWarn && (
+                <div className="mt-2 flex items-center gap-2 text-[11.5px] text-amber-700">
+                  <span aria-hidden>⚠</span>
+                  This colour may be hard to read as an accent — it&apos;ll be darkened for text on white.
+                </div>
+              )}
+            </section>
+
+            {/* Typography */}
+            {swapPrompt && (
+              <div
+                role="alert"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900"
+              >
+                <span>Switch to {swapPrompt.to}&apos;s recommended type?</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button" onClick={() => setSwapPrompt(null)}
+                    className="rounded-md border border-amber-300 bg-white px-2 py-1 text-[11.5px] font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Keep mine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setTypography(swapPrompt.toDefaults); setSwapPrompt(null); }}
+                    className="rounded-md bg-amber-900 px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-amber-950"
+                  >
+                    Switch
+                  </button>
+                </div>
+              </div>
+            )}
+            <TypographyControls
+              value={typography}
+              onChange={setTypography}
+              layoutName={templateName(visibleTemplates, designKey)}
+              layoutDefaults={layoutDefaults}
+            />
           </div>
 
-          {customOpen && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginBottom: 14, padding: '12px 14px', border: '1px solid #ECEEF8', borderRadius: 10, background: '#FAFBFE' }}>
-              <HexField label="Primary" value={brand.primary} onChange={(v) => setCustom({ primary: v })} note={PRIMARY_NOTE} />
-              <HexField label="Secondary" value={brand.secondary} onChange={(v) => setCustom({ secondary: v })} note={SECONDARY_NOTE} />
+          {/* Right pane — sticky preview */}
+          <div className="hidden overflow-y-auto border-l border-slate-100 bg-slate-50/50 px-4 py-5 lg:block">
+            <div ref={previewRef} className="mx-auto max-w-[380px]">
+              <ReportPreview
+                variant={currentVariant}
+                brand={brand}
+                typography={typography}
+                logoUrl={logoUrl ?? null}
+                paneWidth={paneWidth}
+              />
             </div>
-          )}
-
-          {/* Live preview */}
-          <div style={{ border: '1px solid #ECEEF8', borderRadius: 10, padding: '14px 16px', background: '#fff' }}>
-            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', color: MUTED, marginBottom: 8 }}>Preview</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: brand.primary, lineHeight: 1.2 }}>Section heading</div>
-            <div style={{ display: 'flex', gap: 24, marginTop: 10, paddingBottom: 6, borderBottom: `2px solid ${brand.primary}`, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: brand.primary }}>
-              <span style={{ flex: 1 }}>Metric</span><span>Current</span>
-            </div>
-            <p style={{ margin: '10px 0 0', fontSize: 13, lineHeight: 1.6, color: BODY }}>
-              Body text stays dark and readable — the brand color only tints headings, table headers and accents.
-            </p>
           </div>
 
-          {lightWarn && (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#B45309', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span aria-hidden>⚠</span> This color may be hard to read as an accent — it’ll be darkened for text on white.
-            </div>
-          )}
-          {error && <div style={{ marginTop: 10, fontSize: 12, color: '#DC2626' }}>{error}</div>}
+          {/* Compact preview at the top on smaller widths — collapsible */}
+          <MobilePreview
+            variant={currentVariant} brand={brand} typography={typography} logoUrl={logoUrl ?? null}
+          />
         </div>
 
+        {error && <div className="border-t border-red-100 bg-red-50 px-6 py-2 text-[12px] text-red-700">{error}</div>}
+
         {/* Footer */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 22px', borderTop: '1px solid #ECEEF8' }}>
-          <button type="button" className="btn bs" onClick={onClose} disabled={applying} style={{ fontSize: 13, padding: '9px 18px' }}>
-            Cancel
-          </button>
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-3">
+          <button type="button" className="btn bs" onClick={onClose} disabled={applying}>Cancel</button>
           <button
-            type="button"
-            className="btn bp"
+            type="button" className="btn bp"
             disabled={applying || !designKey}
-            onClick={() => onApply({ cover_template_key: designKey, brand })}
-            style={{ fontSize: 13, padding: '10px 22px', opacity: applying || !designKey ? 0.6 : 1 }}
+            onClick={() => onApply({ cover_template_key: designKey, brand, typography })}
+            style={{ opacity: applying || !designKey ? 0.6 : 1 }}
           >
             {applying ? 'Applying…' : 'Apply'}
           </button>
@@ -322,42 +413,67 @@ export function CoverTemplatePicker({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+
+function MobilePreview({
+  variant, brand, typography, logoUrl,
+}: {
+  variant: PreviewVariant; brand: BrandColors; typography: Typography; logoUrl: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const [paneWidth, setPaneWidth] = useState(280);
+  useLayoutEffect(() => {
+    if (!open || !previewRef.current) return;
+    const el = previewRef.current;
+    const measure = () => setPaneWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
   return (
-    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#5A6080', marginBottom: 10 }}>
+    <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3 lg:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 text-[12px] font-semibold text-indigo-600 hover:underline"
+      >
+        {open ? 'Hide preview' : 'Show preview'}
+      </button>
+      {open && (
+        <div ref={previewRef} className="mx-auto max-w-[360px]">
+          <ReportPreview
+            variant={variant} brand={brand} typography={typography}
+            logoUrl={logoUrl} paneWidth={paneWidth}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
       {children}
     </div>
   );
 }
 
-// A live swatch + role label + usage note (Primary / Secondary).
-function RoleNote({ color, label, note }: { color: string; label: string; note: string }) {
-  return (
-    <div style={{ flex: '1 1 260px', minWidth: 240, display: 'flex', gap: 9, alignItems: 'flex-start' }}>
-      <span
-        style={{ width: 16, height: 16, borderRadius: 5, background: color, flexShrink: 0, marginTop: 1, border: '1px solid rgba(0,0,0,.12)' }}
-        aria-hidden
-      />
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#3A3F5C' }}>{label}</div>
-        <div style={{ fontSize: 11.5, color: MUTED, lineHeight: 1.45 }}>{note}</div>
-      </div>
-    </div>
-  );
-}
 
-function HexField({ label, value, onChange, note }: { label: string; value: string; onChange: (v: string) => void; note?: string }) {
+function HexField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   return (
-    <div style={{ maxWidth: 260 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#3A3F5C', marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="max-w-[220px]">
+      <div className="mb-1 text-[11px] font-bold text-slate-600">{label}</div>
+      <div className="flex items-center gap-2">
         <input
           type="color"
           value={normalizeHex(value) ?? '#4040c8'}
           onChange={(e) => onChange(e.target.value)}
-          style={{ width: 40, height: 34, padding: 0, border: '1px solid #E4E6F1', borderRadius: 8, background: '#fff', cursor: 'pointer' }}
+          className="h-9 w-10 cursor-pointer rounded-md border border-slate-200 bg-white p-0"
           aria-label={`${label} color`}
         />
         <input
@@ -369,10 +485,31 @@ function HexField({ label, value, onChange, note }: { label: string; value: stri
             if (hex) onChange(hex);
           }}
           placeholder="#4040C8"
-          style={{ width: 100, padding: '8px 10px', borderRadius: 8, border: '1.5px solid #E4E6F1', fontSize: 13, fontFamily: "'DM Mono', monospace", color: DARK, outline: 'none' }}
+          className="w-[110px] rounded-md border border-slate-200 bg-white px-2 py-2 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          style={{ fontFamily: "'DM Mono', monospace" }}
         />
       </div>
-      {note && <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.4, marginTop: 6 }}>{note}</div>}
     </div>
   );
+}
+
+
+// ── helpers ─────────────────────────────────────────────────────────
+
+function templateName(templates: CoverTemplate[], key: string): string {
+  return templates.find((t) => t.key === key)?.name || key || 'Classic';
+}
+
+// Prefer the template's own typography blueprint (loaded from the
+// server catalogue on modal open — quarterly_cover_templates.layout
+// .typography) so the "Recommended for X" hint tracks whatever the
+// migration wrote. Fall back to the hardcoded frontend defaults if the
+// backend hasn't shipped that layout key yet.
+function templateDefaults(templates: CoverTemplate[], key: string): Typography {
+  const tmpl = templates.find((t) => t.key === key);
+  const fromCatalogue = tmpl?.layout && (tmpl.layout as Record<string, unknown>).typography;
+  if (fromCatalogue && typeof fromCatalogue === 'object') {
+    return fromCatalogue as Typography;
+  }
+  return LAYOUT_TYPOGRAPHY_DEFAULTS[collapseVariant(key)] ?? LAYOUT_TYPOGRAPHY_DEFAULTS[DEFAULT_LAYOUT_KEY];
 }
