@@ -274,13 +274,13 @@ function PageView({
         </h3>
         <p style={{
           fontFamily: bodyFF, fontSize: typography.body.size, fontWeight: typography.body.weight,
-          lineHeight: typography.body.line_height, textAlign: 'justify', margin: '0 0 8px 0', color: '#1A1A1A',
+          lineHeight: 1.5, textAlign: 'justify', margin: '0 0 8px 0', color: '#1A1A1A',
         }}>
           Revenue grew twelve per cent year over year, driven by strong performance in upstream production and continued expansion of the downstream business.
         </p>
         <p style={{
           fontFamily: bodyFF, fontSize: typography.body.size, fontWeight: typography.body.weight,
-          lineHeight: typography.body.line_height, textAlign: 'justify', margin: '0 0 12px 0', color: '#1A1A1A',
+          lineHeight: 1.5, textAlign: 'justify', margin: '0 0 12px 0', color: '#1A1A1A',
         }}>
           Free cash flow of SAR 168.6 billion supported a base dividend of SAR 73.2 billion and the first performance-linked dividend of SAR 9.9 billion.
         </p>

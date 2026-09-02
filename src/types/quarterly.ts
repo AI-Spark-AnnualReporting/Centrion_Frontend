@@ -782,26 +782,27 @@ export type TypographyFamily =
   | "Libre Baskerville";
 
 export type TypographyWeight = 400 | 700;
-export type BodyLineHeight = 1.35 | 1.5 | 1.65;
 
 export interface TypographyRole {
   family: TypographyFamily;
   size: number;   // px, step 0.5, clamped to the per-role range
   weight: TypographyWeight;
 }
-export interface TypographyBody extends TypographyRole {
-  line_height: BodyLineHeight;
-}
+// Body deliberately keeps the same shape as heading/subheading — line
+// height is NOT user-controlled (always renders at 1.5). Any older
+// report payload that includes body.line_height is ignored at render
+// time; the field is accepted for backwards compat by the backend
+// validator but no longer part of the type or the modal.
 export interface Typography {
   heading: TypographyRole;
   subheading: TypographyRole;
-  body: TypographyBody;
+  body: TypographyRole;
 }
 
 // Client-side allowlists — mirror report_typography.FAMILIES /
-// _SIZE_RANGES / WEIGHTS / BODY_LINE_HEIGHTS. Any change here must be
-// mirrored server-side (and, for the family list, in the container's
-// installed fonts and in report-fonts.css @font-face names).
+// _SIZE_RANGES / WEIGHTS. Any change here must be mirrored server-side
+// (and, for the family list, in the container's installed fonts and in
+// report-fonts.css @font-face names).
 export const TYPOGRAPHY_ALLOWLISTS = {
   families: [
     "DejaVu Sans",
@@ -813,12 +814,11 @@ export const TYPOGRAPHY_ALLOWLISTS = {
     "Libre Baskerville",
   ] as const satisfies readonly TypographyFamily[],
   sizeRanges: {
-    heading:    { min: 12, max: 24, step: 0.5 },
-    subheading: { min: 10, max: 16, step: 0.5 },
-    body:       { min: 9,  max: 12, step: 0.5 },
+    heading:    { min: 14, max: 22, step: 0.5 },
+    subheading: { min: 11, max: 14, step: 0.5 },
+    body:       { min: 10, max: 12, step: 0.5 },
   },
   weights: [400, 700] as const satisfies readonly TypographyWeight[],
-  bodyLineHeights: [1.35, 1.5, 1.65] as const satisfies readonly BodyLineHeight[],
 };
 
 // Per-layout recommended defaults — the modal reads these to seed the
@@ -830,25 +830,27 @@ export const TYPOGRAPHY_ALLOWLISTS = {
 // that seeds it. Kept as a constant so a modal that opens BEFORE the
 // catalogue arrives can still render sensible defaults.
 export const LAYOUT_TYPOGRAPHY_DEFAULTS: Record<string, Typography> = {
+  // All defaults are inside the tightened size ranges above; body sizes
+  // stay whole numbers so the stepper's default position looks clean.
   classic: {
-    heading:    { family: "Libre Baskerville", size: 16,   weight: 700 },
-    subheading: { family: "Libre Baskerville", size: 12,   weight: 700 },
-    body:       { family: "Source Serif 4",    size: 11,   weight: 400, line_height: 1.5 },
+    heading:    { family: "Libre Baskerville", size: 16, weight: 700 },
+    subheading: { family: "Libre Baskerville", size: 12, weight: 700 },
+    body:       { family: "Source Serif 4",    size: 11, weight: 400 },
   },
   minimal: {
-    heading:    { family: "Inter", size: 16,   weight: 400 },
-    subheading: { family: "Inter", size: 11,   weight: 700 },
-    body:       { family: "Lato",  size: 10.5, weight: 400, line_height: 1.65 },
+    heading:    { family: "Inter", size: 16, weight: 400 },
+    subheading: { family: "Inter", size: 11, weight: 700 },
+    body:       { family: "Lato",  size: 11, weight: 400 },
   },
   bold: {
-    heading:    { family: "Inter", size: 18,   weight: 700 },
-    subheading: { family: "Inter", size: 12,   weight: 700 },
-    body:       { family: "Inter", size: 10.5, weight: 400, line_height: 1.5 },
+    heading:    { family: "Inter", size: 18, weight: 700 },
+    subheading: { family: "Inter", size: 12, weight: 700 },
+    body:       { family: "Inter", size: 11, weight: 400 },
   },
   branded: {
-    heading:    { family: "Inter", size: 18,   weight: 700 },
-    subheading: { family: "Inter", size: 12,   weight: 700 },
-    body:       { family: "Inter", size: 10.5, weight: 400, line_height: 1.5 },
+    heading:    { family: "Inter", size: 18, weight: 700 },
+    subheading: { family: "Inter", size: 12, weight: 700 },
+    body:       { family: "Inter", size: 11, weight: 400 },
   },
 };
 

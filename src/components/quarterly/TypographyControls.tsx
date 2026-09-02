@@ -19,7 +19,6 @@ import type {
   TypographyFamily,
   TypographyRole,
   TypographyWeight,
-  BodyLineHeight,
 } from '@/types/quarterly';
 import { TYPOGRAPHY_ALLOWLISTS } from '@/types/quarterly';
 
@@ -30,12 +29,6 @@ const ROLE_LABEL: Record<RoleKey, string> = {
   subheading: 'Subheading',
   body: 'Body',
 };
-
-const LH_OPTIONS: { label: string; value: BodyLineHeight }[] = [
-  { label: 'Tight',  value: 1.35 },
-  { label: 'Normal', value: 1.5  },
-  { label: 'Loose', value: 1.65 },
-];
 
 const WEIGHT_OPTIONS: { label: string; value: TypographyWeight }[] = [
   { label: 'Regular', value: 400 },
@@ -52,7 +45,6 @@ export function hasCustomTypography(current: Typography, defaults: Typography): 
     rolesEqual(current.heading, defaults.heading)
     && rolesEqual(current.subheading, defaults.subheading)
     && rolesEqual(current.body, defaults.body)
-    && current.body.line_height === defaults.body.line_height
   );
 }
 
@@ -135,17 +127,6 @@ export const TypographyControls = memo(function TypographyControls({
                 onChange={(weight) => patchRole(role, { weight })}
                 fieldId={`typo-weight-${role}`}
               />
-
-              {role === 'body' && (
-                <div className="col-span-4 mt-1 flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-slate-500">Line height</span>
-                  <LineHeightSegment
-                    value={(spec as Typography['body']).line_height}
-                    onChange={(line_height) => patchRole('body', { line_height })}
-                    fieldId="typo-lh-body"
-                  />
-                </div>
-              )}
             </div>
           );
         })}
@@ -203,13 +184,19 @@ function SizeStepper({
         min={min}
         max={max}
         value={value}
+        // Clamp on every keystroke, not just onBlur — a typed 999 snaps
+        // to `max` immediately so the preview never renders an out-of-range
+        // size and the value that goes to Apply is always within the range.
         onChange={(e) => {
-          const n = Number(e.target.value);
-          if (Number.isFinite(n)) onChange(n);
+          const raw = e.target.value;
+          if (raw === '') return;
+          const n = Number(raw);
+          if (Number.isFinite(n)) onChange(clamp(n));
         }}
         onBlur={(e) => onChange(clamp(Number(e.target.value) || min))}
         className="w-12 rounded-md border border-slate-200 bg-white px-1 py-1 text-center text-[12px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
         aria-label="Size in pixels"
+        title={`Between ${min} and ${max} px`}
       />
       <button
         type="button"
@@ -220,6 +207,9 @@ function SizeStepper({
       >
         +
       </button>
+      <span className="whitespace-nowrap text-[10px] text-slate-400" aria-hidden>
+        {min}–{max}px
+      </span>
     </div>
   );
 }
@@ -257,33 +247,3 @@ function WeightSegment({
 }
 
 
-function LineHeightSegment({
-  value, onChange, fieldId,
-}: { value: BodyLineHeight; onChange: (v: BodyLineHeight) => void; fieldId: string }) {
-  return (
-    <div
-      role="group"
-      aria-label="Body line height"
-      id={fieldId}
-      className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white"
-    >
-      {LH_OPTIONS.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(opt.value)}
-            className={
-              'px-2.5 py-1 text-[11.5px] transition-colors '
-              + (active ? 'bg-indigo-50 font-semibold text-indigo-700' : 'text-slate-500 hover:bg-slate-50')
-            }
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
