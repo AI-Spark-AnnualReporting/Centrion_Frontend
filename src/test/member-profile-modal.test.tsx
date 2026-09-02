@@ -147,6 +147,8 @@ function fillRequired() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // jsdom implements no layout, so Element.scrollIntoView is missing.
+  Element.prototype.scrollIntoView = vi.fn();
   getPhoto.mockResolvedValue({
     photo_url: null,
     content_type: null,
@@ -313,6 +315,113 @@ describe('MemberProfileModal — adding experience', () => {
       await screen.findByText('Requires permission: leadership:create'),
     ).toBeInTheDocument();
     expect(onExperiencesChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('MemberProfileModal — editing experience', () => {
+  const editButton = () => screen.getByRole('button', { name: /edit cfo at aramco/i });
+
+  it('loads the row into the form, Present included', async () => {
+    await open({ experiences: [anExperience({ responsibility: 'Owned the audit.' })] });
+    fireEvent.click(editButton());
+
+    expect(jobTitle()).toHaveValue('CFO');
+    expect(companyField()).toHaveValue('Aramco');
+    expect(monthInputs()[0]).toHaveValue('2019-03');
+    // to_month null is what Present means; without the box coming back ticked,
+    // saving would quietly give the entry an end date of ''.
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(monthInputs()[1]).toBeDisabled();
+    expect(screen.getByPlaceholderText(/led the finance function/i)).toHaveValue(
+      'Owned the audit.',
+    );
+    expect(screen.getByText(/editing this entry/i)).toBeInTheDocument();
+  });
+
+  it('PATCHes the edited row and swaps it into the list', async () => {
+    updateExperience.mockImplementation((_c, _u, id, body) =>
+      Promise.resolve({ id, sort_order: 0, ...body }),
+    );
+    const { onExperiencesChange } = await open({
+      experiences: [anExperience(), anExperience({ id: 'e2', job_title: 'CEO' })],
+    });
+    fireEvent.click(editButton());
+    fireEvent.change(jobTitle(), { target: { value: 'Group CFO' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(updateExperience).toHaveBeenCalledTimes(1));
+    const [, , id, body] = updateExperience.mock.calls[0];
+    expect(id).toBe('e1');
+    expect(body).toEqual({
+      job_title: 'Group CFO',
+      company: 'Aramco',
+      from_month: '2019-03',
+      to_month: null,
+      responsibility: '',
+    });
+    // sort_order is left out: an absent key means unchanged, and an unknown
+    // key would be a 422.
+    expect(body).not.toHaveProperty('sort_order');
+    expect(body).not.toHaveProperty('id');
+
+    // Only the edited row is replaced, and its neighbour keeps its place.
+    await waitFor(() =>
+      expect(onExperiencesChange).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'e1', job_title: 'Group CFO' }),
+        expect.objectContaining({ id: 'e2', job_title: 'CEO' }),
+      ]),
+    );
+    expect(createExperience).not.toHaveBeenCalled();
+    await waitFor(() => expect(jobTitle()).toHaveValue(''));
+    expect(screen.queryByText(/editing this entry/i)).toBeNull();
+  });
+
+  it('goes back to adding after Cancel', async () => {
+    const { onExperiencesChange } = await open({ experiences: [anExperience()] });
+    fireEvent.click(editButton());
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    expect(jobTitle()).toHaveValue('');
+    expect(screen.queryByText(/editing this entry/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /add experience/i })).toBeInTheDocument();
+    expect(onExperiencesChange).not.toHaveBeenCalled();
+
+    // The next save must create rather than patch the row we walked away from.
+    fillRequired();
+    fireEvent.click(screen.getByRole('button', { name: /add experience/i }));
+    await waitFor(() => expect(createExperience).toHaveBeenCalled());
+    expect(updateExperience).not.toHaveBeenCalled();
+  });
+
+  it('keeps the draft and shows the reason when the PATCH fails', async () => {
+    updateExperience.mockRejectedValue(
+      new ApiError(422, 'Unprocessable', { detail: 'from_month must be YYYY-MM.' }, '/x'),
+    );
+    const { onExperiencesChange } = await open({ experiences: [anExperience()] });
+    fireEvent.click(editButton());
+    fireEvent.change(jobTitle(), { target: { value: 'Group CFO' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(await screen.findByText('from_month must be YYYY-MM.')).toBeInTheDocument();
+    expect(onExperiencesChange).not.toHaveBeenCalled();
+    expect(jobTitle()).toHaveValue('Group CFO');
+  });
+
+  // Deleting the row the form is holding would leave it editing a record that
+  // no longer exists, and the next save would 404.
+  it('drops out of edit mode if the row being edited is deleted', async () => {
+    await open({ experiences: [anExperience()] });
+    fireEvent.click(editButton());
+    expect(screen.getByText(/editing this entry/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /remove cfo at aramco/i }));
+    await waitFor(() => expect(screen.queryByText(/editing this entry/i)).toBeNull());
+    expect(jobTitle()).toHaveValue('');
+  });
+
+  it('offers no pencil to a viewer who cannot edit', async () => {
+    await open({ canEdit: false, experiences: [anExperience()] });
+    expect(screen.queryByRole('button', { name: /edit cfo at aramco/i })).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
@@ -199,6 +199,9 @@ export default function MemberProfileModal({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  // The row the form is currently editing, or null when it is adding a new one.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
 
   const userId = person.userId;
   const fullName = [person.firstName, person.lastName].filter(Boolean).join(' ');
@@ -257,29 +260,75 @@ export default function MemberProfileModal({
   const setField = <K extends keyof DraftState>(key: K, value: DraftState[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  const canAdd =
+  const canSubmit =
     !!userId &&
     !saving &&
     draft.jobTitle.trim().length > 0 &&
     draft.company.trim().length > 0 &&
     draft.from.length > 0;
 
-  const addExperience = async () => {
-    if (!canAdd || !userId) return;
+  const startEdit = (e: TeamExperience) => {
+    setEditingId(e.id);
+    setFormError(null);
+    setDraft({
+      jobTitle: e.job_title,
+      company: e.company,
+      from: e.from_month,
+      to: e.to_month ?? '',
+      // A null to_month is what Present means, so the box has to come back
+      // ticked or saving would silently give the entry an end date of ''.
+      present: e.to_month === null,
+      responsibility: e.responsibility,
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setFormError(null);
+    setDraft(EMPTY_DRAFT);
+  };
+
+  // The form sits below the list, so on a long history the pencil would
+  // otherwise look like it did nothing.
+  useEffect(() => {
+    if (editingId) formRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [editingId]);
+
+  const submitExperience = async () => {
+    if (!canSubmit || !userId) return;
     setSaving(true);
     setFormError(null);
+    // Every key here is one the API knows — an unknown key is a 422, so this
+    // must never grow into a spread of the whole row. sort_order is left out
+    // on edit: an absent key means unchanged, and reordering is its own thing.
+    const body = {
+      job_title: draft.jobTitle.trim(),
+      company: draft.company.trim(),
+      from_month: draft.from,
+      // null is Present. Never '' — the API rejects an empty string with a
+      // 422, and an untouched <input type="month"> hands us exactly that.
+      to_month: draft.present ? null : draft.to || null,
+      responsibility: draft.responsibility.trim(),
+    };
     try {
-      const created = await team.experience.create(companyId, userId, {
-        job_title: draft.jobTitle.trim(),
-        company: draft.company.trim(),
-        from_month: draft.from,
-        // null is Present. Never '' — the API rejects an empty string with a
-        // 422, and an untouched <input type="month"> hands us exactly that.
-        to_month: draft.present ? null : draft.to || null,
-        responsibility: draft.responsibility.trim(),
-        sort_order: experiences.length,
-      });
-      onExperiencesChange([...experiences, created]);
+      if (editingId) {
+        const updated = await team.experience.update(
+          companyId,
+          userId,
+          editingId,
+          body,
+        );
+        onExperiencesChange(
+          experiences.map((e) => (e.id === editingId ? updated : e)),
+        );
+        setEditingId(null);
+      } else {
+        const created = await team.experience.create(companyId, userId, {
+          ...body,
+          sort_order: experiences.length,
+        });
+        onExperiencesChange([...experiences, created]);
+      }
       setDraft(EMPTY_DRAFT);
     } catch (e) {
       setFormError(messageOf(e, 'Could not save that experience.'));
@@ -294,6 +343,9 @@ export default function MemberProfileModal({
     try {
       await team.experience.remove(companyId, userId, id);
       onExperiencesChange(experiences.filter((e) => e.id !== id));
+      // Deleting the row the form is holding would leave it editing a record
+      // that no longer exists, and saving would 404.
+      if (editingId === id) cancelEdit();
     } catch (e) {
       setFormError(messageOf(e, 'Could not remove that experience.'));
     }
@@ -402,9 +454,10 @@ export default function MemberProfileModal({
 
   const experienceForm = (
     <div
+      ref={formRef}
       style={{
-        background: '#FAFBFE',
-        border: '1px solid #ECEEF8',
+        background: editingId ? '#F6F6FF' : '#FAFBFE',
+        border: `1px solid ${editingId ? '#C7CBF0' : '#ECEEF8'}`,
         borderRadius: 12,
         padding: 14,
         display: 'flex',
@@ -412,6 +465,11 @@ export default function MemberProfileModal({
         gap: 12,
       }}
     >
+      {editingId && (
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
+          Editing this entry
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div>
           <span className="fl-label">
@@ -528,11 +586,31 @@ export default function MemberProfileModal({
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {editingId && (
+          <button
+            type="button"
+            onClick={cancelEdit}
+            disabled={saving}
+            style={{
+              padding: '9px 18px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#5A6080',
+              background: '#fff',
+              border: '1.5px solid #E2E4F0',
+              borderRadius: 10,
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.5 : 1,
+            }}
+          >
+            Cancel
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => void addExperience()}
-          disabled={!canAdd}
+          onClick={() => void submitExperience()}
+          disabled={!canSubmit}
           style={{
             padding: '9px 18px',
             fontSize: 12,
@@ -541,12 +619,12 @@ export default function MemberProfileModal({
             background: '#4040C8',
             border: 'none',
             borderRadius: 10,
-            cursor: canAdd ? 'pointer' : 'not-allowed',
-            opacity: canAdd ? 1 : 0.55,
-            boxShadow: canAdd ? '0 3px 10px rgba(64,64,200,.25)' : 'none',
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            opacity: canSubmit ? 1 : 0.55,
+            boxShadow: canSubmit ? '0 3px 10px rgba(64,64,200,.25)' : 'none',
           }}
         >
-          {saving ? 'Saving…' : '+ Add Experience'}
+          {saving ? 'Saving…' : editingId ? 'Save changes' : '+ Add Experience'}
         </button>
       </div>
     </div>
@@ -562,7 +640,7 @@ export default function MemberProfileModal({
             <th>Job Title</th>
             <th>Company</th>
             <th style={{ width: 170 }}>Period</th>
-            {canEdit && <th style={{ width: 44 }} />}
+            {canEdit && <th style={{ width: 84 }} />}
           </tr>
         </thead>
         <tbody>
@@ -591,7 +669,10 @@ export default function MemberProfileModal({
                 // full width underneath, so a pasted job description can no
                 // longer stretch the row to 600px.
                 <Fragment key={e.id}>
-                  <tr className="urow">
+                  <tr
+                    className="urow"
+                    style={editingId === e.id ? { background: '#F6F6FF' } : undefined}
+                  >
                     <td style={{ fontWeight: 700, ...noRule }}>{e.job_title}</td>
                     <td style={noRule}>{e.company}</td>
                     <td style={{ color: '#5A6080', whiteSpace: 'nowrap', ...noRule }}>
@@ -599,15 +680,45 @@ export default function MemberProfileModal({
                     </td>
                     {canEdit && (
                       <td style={noRule}>
-                        <button
-                          type="button"
-                          className="ob-logo-remove"
-                          onClick={() => void removeExperience(e.id)}
-                          aria-label={`Remove ${e.job_title} at ${e.company}`}
-                          style={{ width: 26, height: 26 }}
-                        >
-                          ✕
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="ob-logo-remove"
+                            onClick={() => startEdit(e)}
+                            aria-label={`Edit ${e.job_title} at ${e.company}`}
+                            title="Edit"
+                            style={{
+                              width: 26,
+                              height: 26,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              ...(editingId === e.id
+                                ? { borderColor: '#4040C8', color: '#4040C8' }
+                                : null),
+                            }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                              <path
+                                d="M9.6 1.9a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9l-6.3 6.3-2.9.7.7-2.9 6-6.6Z"
+                                stroke="currentColor"
+                                strokeWidth="1.3"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="ob-logo-remove"
+                            onClick={() => void removeExperience(e.id)}
+                            aria-label={`Remove ${e.job_title} at ${e.company}`}
+                            title="Remove"
+                            style={{ width: 26, height: 26 }}
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
