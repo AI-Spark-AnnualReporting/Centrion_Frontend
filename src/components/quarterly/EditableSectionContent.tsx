@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProducedSection } from '@/types/quarterly';
 import { SectionContent } from '@/components/quarterly/SectionContent';
-import { asStringArray } from '@/components/quarterly/sectionState';
+import { asStringArray, isDataImage } from '@/components/quarterly/sectionState';
 
 const ACCENT = '#4040C8';
 const DARK = '#1F2340';
@@ -250,6 +250,20 @@ function TableEditor({
                   <tr key={ri}>
                     {cols.map((c) => {
                       const readOnly = READONLY_COLS.has(c);
+                      // A photo cell is a data URI, not text: show it rather
+                      // than putting a page of base64 into an input where an
+                      // accidental keystroke would corrupt the image.
+                      if (isDataImage(r[c])) {
+                        return (
+                          <td key={c} style={{ padding: '3px 4px' }}>
+                            <img
+                              src={r[c] as string}
+                              alt=""
+                              style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6, display: 'block' }}
+                            />
+                          </td>
+                        );
+                      }
                       return (
                         <td key={c} style={{ padding: '3px 4px' }}>
                           <input

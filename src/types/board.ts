@@ -94,13 +94,61 @@ export interface BoardSlotDocument {
   uploaded_at: string;
 }
 
+/**
+ * How a slot is filled. `documents` is the uploaded-file row; `meetings` is
+ * filled by ticking meetings already on the platform, so it never has documents.
+ * Absent on older payloads — read it through `slotKind()`, which defaults to
+ * `documents`.
+ */
+export type BoardSlotKind = "documents" | "meetings" | (string & {});
+
 export interface BoardSourceSlot {
   slot: string;
+  kind?: BoardSlotKind;
+  /** Meetings slots only — the section the picker reads and writes (BR35/BR36). */
+  section_code?: string;
   /** At least one mandatory section depends on this slot. */
   required: boolean;
+  /** `received` on a meetings slot means at least one meeting is ticked. */
   status: "received" | "pending" | (string & {});
   feeds: BoardSlotFeed[];
+  /** Always present — empty on a meetings slot. */
   documents: BoardSlotDocument[];
+  /** Meetings slots only. */
+  selected_ids?: string[];
+  selected_count?: number;
+}
+
+// ─── meeting picker (BR35 / BR36) ─────────────────────────────────────────────
+
+export interface BoardMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  meeting_time?: string | null;
+  meeting_type: string;
+  status?: string;
+  participant_count: number;
+  /** False → the meeting contributes one line to the register and nothing else. */
+  has_minutes: boolean;
+  attendance_recorded: boolean;
+  minutes_attachment_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardMeetingFilters {
+  meeting_type?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+export interface BoardMeetingsResponse {
+  /** What the server actually filtered on — seed the controls from this. */
+  filters: BoardMeetingFilters;
+  /** The type dropdown's options. Never hardcode the enum; `all` is also valid. */
+  meeting_types: string[];
+  selected_ids: string[];
+  meetings: BoardMeeting[];
 }
 
 export interface BoardSourcesResponse {
@@ -185,6 +233,12 @@ export interface BoardCitation {
 export type BoardCitations = Record<string, unknown> | BoardCitation[] | null;
 
 export interface BoardSectionFeeder {
+  /**
+   * `platform_data` — the section was built from data already on the platform
+   * (team profiles, selected meetings) rather than an uploaded document, so it
+   * carries no citations.
+   */
+  source?: string | null;
   /** Set when the content was reused from a prior year, e.g. "FY-2024". */
   carried_forward_from?: string | null;
   /** Says exactly what is missing (needs_input) or why it is empty. */

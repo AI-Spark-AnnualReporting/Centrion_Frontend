@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
 import type { DocumentBankResponse } from '@/types/report';
 import { documents } from '@/lib/api';
-import { asStringArray } from '@/components/quarterly/sectionState';
+import { asStringArray, isDataImage } from '@/components/quarterly/sectionState';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
 import { deriveUnits, gridValue, unitsCaption } from './figureUnits';
@@ -648,7 +648,19 @@ function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] 
         {rows.map((r, i) => (
           <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
             {cols.map((c) => (
-              <td key={c} style={{ padding: '9px 10px', color: DARK }}>{stringifyCell(r[c])}</td>
+              <td key={c} style={{ padding: '9px 10px', color: DARK }}>
+                {isDataImage(r[c]) ? (
+                  // A director headshot arrives inline as a data URI — printed
+                  // as text it dumps a page of base64 into the table.
+                  <img
+                    src={r[c] as string}
+                    alt=""
+                    style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block' }}
+                  />
+                ) : (
+                  stringifyCell(r[c])
+                )}
+              </td>
             ))}
           </tr>
         ))}

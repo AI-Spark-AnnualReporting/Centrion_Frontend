@@ -84,6 +84,52 @@ describe('SectionContent — explicit columns', () => {
     expect(headers()).toEqual(['Committee', 'Members']);
   });
 
+  it('leaves the row keys that are not columns out of the table', () => {
+    render(
+      <SectionContent
+        section={section({
+          columns: ['Name', 'Role'],
+          // Carried for linking (profile, CV, minutes file) — never cells.
+          rows: [{ Name: 'Nora Al-Qahtani', Role: 'Chair', user_id: 'u-1', cv_path: '/cv.pdf' }],
+        })}
+      />,
+    );
+    expect(headers()).toEqual(['Name', 'Role']);
+    expect(screen.queryByText('/cv.pdf')).not.toBeInTheDocument();
+  });
+
+  it('renders a data:image cell as an image, not as base64 text', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    const { container } = render(
+      <SectionContent
+        section={section({
+          columns: ['Photo', 'Name'],
+          rows: [{ Photo: png, Name: 'Nora Al-Qahtani' }],
+        })}
+      />,
+    );
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(png);
+    expect(screen.queryByText(png)).not.toBeInTheDocument();
+  });
+
+  it('renders both grids of a BR35 attendance + register payload', () => {
+    render(
+      <SectionContent
+        section={section({
+          title: 'Board & committee meeting attendance',
+          tables: [
+            { title: 'Attendance', columns: ['Director', '18 Feb'], rows: [{ Director: 'Nora Al-Qahtani', '18 Feb': '—' }] },
+            { title: 'Meeting register', columns: ['Date', 'Minutes'], rows: [{ Date: '18 Feb', Minutes: 'Minutes_Q1.docx', meeting_id: 'm-1' }] },
+          ],
+        })}
+      />,
+    );
+    expect(headers()).toEqual(['Director', '18 Feb', 'Date', 'Minutes']);
+    // An em dash means no minutes were filed — not "absent", and not blank.
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText('m-1')).not.toBeInTheDocument();
+  });
+
   // ── regression guard: everything quarterly/earnings send today ──────────────
 
   it('still renders a financial table when no columns are given', () => {

@@ -19,6 +19,7 @@ import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import type { BoardOutlineSection, BoardSection } from '@/types/board';
 import {
   BOARD_COMPANY_VOICE,
+  BOARD_MEETING_SECTIONS,
   canRefineSection,
   errorMessage,
   isBoardCoverSection,
@@ -1331,9 +1332,39 @@ function NeedsInput({
   // Local to the panel, which is remounted per section — no draft can leak from
   // one section to the next.
   const [draft, setDraft] = useState('');
+  const { reportId = '' } = useParams<{ reportId: string }>();
+  const navigate = useNavigate();
   const need = s.feeder?.message?.trim() || 'the content for this section';
 
   if (working) return <WorkingLine text={working} />;
+
+  // Built from meetings, not from a file: the normal starting state, answered
+  // on the Sources step. Neither the textarea nor the upload below would help —
+  // typing the attendance matrix by hand is not the ask.
+  if (BOARD_MEETING_SECTIONS.includes(s.section_code)) {
+    return (
+      <div
+        style={{
+          background: 'rgba(64,64,200,.05)',
+          border: '1px solid rgba(64,64,200,.2)',
+          borderRadius: 10,
+          padding: '14px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 14,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 13, color: INK }}>{need}</span>
+        {!readOnly && (
+          <button className="btn bs bsm" onClick={() => navigate(`/board-report/${reportId}/sources`)}>
+            Select meetings
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>

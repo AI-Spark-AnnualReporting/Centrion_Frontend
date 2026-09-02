@@ -14,6 +14,7 @@ import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import type { BoardSourceSlot, BoardSourcesResponse } from '@/types/board';
+import BoardMeetingPicker from './BoardMeetingPicker';
 import { errorMessage, readDuplicateSlots, readExistingRunId } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
@@ -219,6 +220,8 @@ export default function BoardSourcesPage() {
   const missingRequired = (sources?.slots ?? []).filter(
     (s) => s.required && s.status !== 'received' && !s.documents.length && !staged[s.slot]?.length,
   );
+  // Meetings rows are saved as they are ticked — nothing about them is staged,
+  // so `status` alone settles whether one is outstanding (handled above).
   const readOnly = locked || generated;
   // Nothing moves — not processing, not continuing — while a required document
   // is outstanding. Processing a partial set is what produced half-written
@@ -245,7 +248,7 @@ export default function BoardSourcesPage() {
         )}
         {!readOnly && missingRequired.length > 0 && (
           <Notice tone="amber">
-            Every required document is needed before the report can be built —{' '}
+            Every required source is needed before the report can be built —{' '}
             <b>{missingRequired.map((s) => s.slot).join(', ')}</b>{' '}
             {missingRequired.length === 1 ? 'is' : 'are'} still outstanding.
           </Notice>
@@ -269,7 +272,7 @@ export default function BoardSourcesPage() {
           >
             <div className="uhead" style={{ flexShrink: 0 }}>
               <span className="uhead-title">
-                Documents
+                Sources
                 <span className="uhead-count">
                   {sources.received}/{sources.total}
                 </span>
@@ -288,18 +291,36 @@ export default function BoardSourcesPage() {
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              {sources.slots.map((slot) => (
-                <SlotRow
-                  key={slot.slot}
-                  slot={slot}
-                  stagedFiles={staged[slot.slot] ?? []}
-                  duplicate={dupeSlots.includes(slot.slot)}
-                  disabled={readOnly}
-                  onStage={stageFiles}
-                  onUnstage={unstageFile}
-                  onRemove={removeDocument}
-                />
-              ))}
+              {sources.slots.map((slot) =>
+                // Same row, filled a different way: a meetings slot is ticked
+                // from what's already on the platform, never uploaded.
+                slot.kind === 'meetings' ? (
+                  <MeetingSlotRow
+                    key={slot.slot}
+                    reportId={reportId}
+                    slot={slot}
+                    // `locked`, not `readOnly`: a generated report freezes its
+                    // uploaded documents because swapping one would leave the
+                    // produced text describing something else. Picking meetings
+                    // feeds BR35/BR36 only, and those are still needs_input at
+                    // that point — freezing them here is what stranded the
+                    // "Select meetings" prompt on the Review step.
+                    disabled={locked}
+                    onSaved={() => void refetch().catch(() => {})}
+                  />
+                ) : (
+                  <SlotRow
+                    key={slot.slot}
+                    slot={slot}
+                    stagedFiles={staged[slot.slot] ?? []}
+                    duplicate={dupeSlots.includes(slot.slot)}
+                    disabled={readOnly}
+                    onStage={stageFiles}
+                    onUnstage={unstageFile}
+                    onRemove={removeDocument}
+                  />
+                ),
+              )}
             </div>
           </div>
         )}
@@ -311,10 +332,10 @@ export default function BoardSourcesPage() {
             hint={
               <span style={{ fontSize: 11.5, color: blocked ? AMBER : FAINT }}>
                 {blocked
-                  ? `${missingRequired.length} required document${missingRequired.length === 1 ? '' : 's'} still needed`
+                  ? `${missingRequired.length} required source${missingRequired.length === 1 ? '' : 's'} still needed`
                   : stagedCount > 0
                     ? `${stagedCount} attached, not yet processed`
-                    : 'All required documents are in.'}
+                    : 'All required sources are in.'}
               </span>
             }
           >
@@ -481,6 +502,70 @@ function SlotRow({
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// A `kind: "meetings"` slot: no file input, no staging — the picker writes
+// straight through and the screen refetches, so the row is either satisfied or
+// it isn't the moment the operator saves.
+function MeetingSlotRow({
+  reportId,
+  slot,
+  disabled,
+  onSaved,
+}: {
+  reportId: string;
+  slot: BoardSourceSlot;
+  disabled: boolean;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const feedTitles = slot.feeds.map((f) => f.title);
+  const feeds = feedTitles.slice(0, 3).join(' · ');
+  const moreFeeds = feedTitles.length - 3;
+  const count = slot.selected_count ?? slot.selected_ids?.length ?? 0;
+
+  return (
+    <div style={{ padding: '13px 18px', borderBottom: '1px solid #F4F5FB' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{slot.slot}</span>
+            {slot.required && <span className="badge b-gn">Required</span>}
+          </div>
+          {feeds && (
+            <div style={{ fontSize: 11, color: FAINT, marginTop: 3 }} title={feedTitles.join(' · ')}>
+              Feeds → {feeds}
+              {moreFeeds > 0 && ` + ${moreFeeds} more`}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: count > 0 ? ACCENT : AMBER,
+              fontFamily: MONO,
+            }}
+          >
+            {count} selected
+          </span>
+          <button className="btn bs bsm" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Close' : 'Select meetings'}
+          </button>
+        </div>
+      </div>
+
+      {open && slot.section_code && (
+        <BoardMeetingPicker
+          reportId={reportId}
+          sectionCode={slot.section_code}
+          disabled={disabled}
+          onSaved={onSaved}
+        />
       )}
     </div>
   );

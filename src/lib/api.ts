@@ -100,6 +100,8 @@ import type {
   BoardCompletion,
   BoardExportFormat,
   BoardIssuerProfile,
+  BoardMeetingFilters,
+  BoardMeetingsResponse,
   BoardOutlineResponse,
   BoardOutlineSavePayload,
   BoardProduceSectionResponse,
@@ -3389,6 +3391,30 @@ export const boardReports = {
     request<unknown>(
       boardPath(reportId, `/sources/${encodeURIComponent(documentId)}`),
       { method: "DELETE" },
+    ),
+
+  // The meetings a BR35/BR36 row can be filled from. All three filters are
+  // optional — omit them and the server answers board meetings over the report's
+  // fiscal year, and echoes what it filtered on in `filters`.
+  getSectionMeetings: (
+    reportId: string,
+    sectionCode: string,
+    filters?: BoardMeetingFilters,
+    signal?: AbortSignal,
+  ) =>
+    request<BoardMeetingsResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { query: filters, signal },
+    ),
+
+  // Replaces the whole selection — send every id that should stay ticked, not
+  // just the new one. Refetch /sources afterwards, as after an upload.
+  // 400 wrong section code · 404 an id isn't this company's meeting (reload the
+  // list rather than retrying) · 409 the report is locked.
+  setSectionMeetings: (reportId: string, sectionCode: string, meetingIds: string[]) =>
+    request<{ selected_ids: string[]; count: number }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { method: "PUT", body: { meeting_ids: meetingIds } },
     ),
 
   // Returns all 46 sections including the non-applicable ones, so the UI can

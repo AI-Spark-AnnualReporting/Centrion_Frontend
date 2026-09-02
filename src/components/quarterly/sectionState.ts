@@ -204,3 +204,12 @@ export function seedFromOutline(o: OutlineSection): ProducedSection {
     message: o.feeder.message,
   };
 }
+
+/**
+ * An inline image cell — a director's headshot arrives as a `data:image/…`
+ * URI in the grid. Printed as text it dumps a page of base64 into the table,
+ * so both the read-only and the editable renderer branch on this.
+ */
+export function isDataImage(v: unknown): v is string {
+  return typeof v === 'string' && v.startsWith('data:image/');
+}

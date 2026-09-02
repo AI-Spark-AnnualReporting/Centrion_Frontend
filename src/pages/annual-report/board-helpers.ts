@@ -203,6 +203,13 @@ export function boardContentMode(contentType?: string | null, content?: string |
 export const BOARD_COMPANY_VOICE = ['BR02', 'BR03', 'BR04'];
 
 /**
+ * The sections built from meetings ticked on the Sources step rather than from
+ * an uploaded document — BR35 board & committee, BR36 general assembly. They
+ * are `needs_input` until a meeting is selected, and no upload will fix that.
+ */
+export const BOARD_MEETING_SECTIONS = ['BR35', 'BR36'];
+
+/**
  * Whether the Refine control applies. Narrative content is now lifted verbatim
  * from the source document, so refining is how a reviewer turns extracted text
  * into prose — but only where there is text to rewrite, and never in the
