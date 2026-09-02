@@ -737,6 +737,12 @@ export type { ColorPalette, BrandColors } from "@/types/brand";
 export interface CoverSelectionPayload {
   cover_template_key: string;
   brand: BrandColors;
+  // Optional per-report typography override. Absent = the picked
+  // layout's blueprint defaults apply at render time. When present,
+  // the backend validates against report_typography.FAMILIES /
+  // WEIGHTS / BODY_LINE_HEIGHTS — every value here must be inside
+  // TYPOGRAPHY_ALLOWLISTS below.
+  typography?: Typography;
 }
 
 // GET .../cover-templates — the catalogue. `selected` is optional (if the
@@ -758,7 +764,98 @@ export interface ColorPalettesResponse {
 export interface CoverSelectionResponse {
   cover_template_key: string;
   brand: BrandColors;
+  typography?: Typography;
 }
+
+// ─── Typography ──────────────────────────────────────────────────────────────
+// Per-role choice for the Report Design modal. Values match the backend
+// allowlists in report_typography.py verbatim — the modal enforces them
+// client-side so a valid submission always passes the API's 422 check.
+
+export type TypographyFamily =
+  | "DejaVu Sans"
+  | "Inter"
+  | "IBM Plex Sans"
+  | "Lato"
+  | "Source Serif 4"
+  | "Merriweather"
+  | "Libre Baskerville";
+
+export type TypographyWeight = 400 | 700;
+export type BodyLineHeight = 1.35 | 1.5 | 1.65;
+
+export interface TypographyRole {
+  family: TypographyFamily;
+  size: number;   // px, step 0.5, clamped to the per-role range
+  weight: TypographyWeight;
+}
+export interface TypographyBody extends TypographyRole {
+  line_height: BodyLineHeight;
+}
+export interface Typography {
+  heading: TypographyRole;
+  subheading: TypographyRole;
+  body: TypographyBody;
+}
+
+// Client-side allowlists — mirror report_typography.FAMILIES /
+// _SIZE_RANGES / WEIGHTS / BODY_LINE_HEIGHTS. Any change here must be
+// mirrored server-side (and, for the family list, in the container's
+// installed fonts and in report-fonts.css @font-face names).
+export const TYPOGRAPHY_ALLOWLISTS = {
+  families: [
+    "DejaVu Sans",
+    "Inter",
+    "IBM Plex Sans",
+    "Lato",
+    "Source Serif 4",
+    "Merriweather",
+    "Libre Baskerville",
+  ] as const satisfies readonly TypographyFamily[],
+  sizeRanges: {
+    heading:    { min: 12, max: 24, step: 0.5 },
+    subheading: { min: 10, max: 16, step: 0.5 },
+    body:       { min: 9,  max: 12, step: 0.5 },
+  },
+  weights: [400, 700] as const satisfies readonly TypographyWeight[],
+  bodyLineHeights: [1.35, 1.5, 1.65] as const satisfies readonly BodyLineHeight[],
+};
+
+// Per-layout recommended defaults — the modal reads these to seed the
+// typography section when the user hasn't customised, to power the
+// "Reset" link, and to detect "Customised" (any field differs from the
+// picked layout's defaults). The picked layout's blueprint on the
+// backend (quarterly_cover_templates.layout.typography) is authoritative
+// once available on the CoverTemplate; these values match the migration
+// that seeds it. Kept as a constant so a modal that opens BEFORE the
+// catalogue arrives can still render sensible defaults.
+export const LAYOUT_TYPOGRAPHY_DEFAULTS: Record<string, Typography> = {
+  classic: {
+    heading:    { family: "Libre Baskerville", size: 16,   weight: 700 },
+    subheading: { family: "Libre Baskerville", size: 12,   weight: 700 },
+    body:       { family: "Source Serif 4",    size: 11,   weight: 400, line_height: 1.5 },
+  },
+  minimal: {
+    heading:    { family: "Inter", size: 16,   weight: 400 },
+    subheading: { family: "Inter", size: 11,   weight: 700 },
+    body:       { family: "Lato",  size: 10.5, weight: 400, line_height: 1.65 },
+  },
+  bold: {
+    heading:    { family: "Inter", size: 18,   weight: 700 },
+    subheading: { family: "Inter", size: 12,   weight: 700 },
+    body:       { family: "Inter", size: 10.5, weight: 400, line_height: 1.5 },
+  },
+  branded: {
+    heading:    { family: "Inter", size: 18,   weight: 700 },
+    subheading: { family: "Inter", size: 12,   weight: 700 },
+    body:       { family: "Inter", size: 10.5, weight: 400, line_height: 1.5 },
+  },
+};
+
+// The layout the modal falls back to when a template key is unknown or
+// no layout has been picked yet — matches the existing MiniCover.variantFor
+// collapse rule (classic/bold/minimal + hidden branded).
+export const DEFAULT_LAYOUT_KEY = "classic";
 
 // ─── Assembled Report (Part 7) ───────────────────────────────────────────────
 // GET .../assemble — the full report: cover + produced sections in display_order

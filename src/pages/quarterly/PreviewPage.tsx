@@ -9,7 +9,7 @@ import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis } from '@/types/quarterly';
+import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis, Typography } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
@@ -257,6 +257,7 @@ export default function PreviewPage() {
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandColors | null>(null);
+  const [typography, setTypography] = useState<Typography | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coverApplying, setCoverApplying] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
@@ -282,6 +283,7 @@ export default function PreviewPage() {
         if (res.selected) {
           setCoverTemplateKey(res.selected.cover_template_key);
           setBrand(res.selected.brand);
+          if (res.selected.typography) setTypography(res.selected.typography);
         } else {
           const def = list.find((t) => t.is_default) ?? list[0];
           if (def) setCoverTemplateKey(def.key);
@@ -323,6 +325,7 @@ export default function PreviewPage() {
         // may not echo cover_template_key/brand, which would reset to the default.
         setCoverTemplateKey(res?.cover_template_key ?? payload.cover_template_key);
         setBrand(res?.brand ?? payload.brand);
+        if (payload.typography) setTypography(res?.typography ?? payload.typography);
         setPickerOpen(false);
       } catch (err: unknown) {
         setCoverError(err instanceof Error ? err.message : 'Could not save the cover selection.');
@@ -704,6 +707,7 @@ export default function PreviewPage() {
           palettes={palettes}
           initialTemplateKey={coverTemplateKey}
           initialBrand={brand}
+          initialTypography={typography}
           applying={coverApplying}
           error={coverError}
           onApply={handleCoverApply}
