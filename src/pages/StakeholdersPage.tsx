@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
+import MemberProfileModal, {
+  type MemberProfile,
+} from '@/components/MemberProfileModal';
 import { team, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { canCreateFeature } from '@/lib/features';
@@ -221,6 +224,13 @@ export default function StakeholdersPage() {
   // the banner.
   const [createdCredential, setCreatedCredential] =
     useState<CreatedCredential | null>(null);
+  // Board-member profile popup. Photo / CV / experience are frontend-only for
+  // now, so they live here keyed by person id: closing the popup or switching
+  // tabs keeps them, a refresh doesn't. Wire to the API when it exists.
+  const [selected, setSelected] = useState<Person | null>(null);
+  const [profiles, setProfiles] = useState<Record<string, MemberProfile>>({});
+  const profileOf = (id: string): MemberProfile =>
+    profiles[id] ?? { experiences: [] };
 
   const fetchPeople = async (id: string) => {
     setLoading(true);
@@ -409,15 +419,34 @@ export default function StakeholdersPage() {
             marginBottom: 18,
           }}
         >
-          {visiblePeople.map((p) => (
+          {visiblePeople.map((p) => {
+            // Only board members have a profile popup — the other tabs' cards
+            // stay inert, so override .person-card's blanket cursor: pointer.
+            const clickable = p.positionType === 'board_member';
+            const photoUri = profiles[p.id]?.photoUri;
+            return (
             <div
               key={p.id}
               className="person-card"
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => setSelected(p) : undefined}
+              onKeyDown={
+                clickable
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelected(p);
+                      }
+                    }
+                  : undefined
+              }
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 14,
                 padding: 18,
+                cursor: clickable ? 'pointer' : 'default',
               }}
             >
               <div
@@ -441,7 +470,9 @@ export default function StakeholdersPage() {
                       width: 44,
                       height: 44,
                       borderRadius: 10,
-                      background: gradientFor(p.id),
+                      background: photoUri ? '#fff' : gradientFor(p.id),
+                      border: photoUri ? '1px solid #E2E4F0' : 'none',
+                      overflow: 'hidden',
                       color: '#fff',
                       fontWeight: 800,
                       fontSize: 13,
@@ -451,7 +482,15 @@ export default function StakeholdersPage() {
                       flexShrink: 0,
                     }}
                   >
-                    {initialsOf(p)}
+                    {photoUri ? (
+                      <img
+                        src={photoUri}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      initialsOf(p)
+                    )}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div
@@ -542,7 +581,8 @@ export default function StakeholdersPage() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {canCreatePerson && (
           <button
@@ -604,6 +644,20 @@ export default function StakeholdersPage() {
           onChange={updateForm}
           onCancel={closeModal}
           onSubmit={() => void handleSubmit()}
+        />
+      )}
+
+      {selected && (
+        <MemberProfileModal
+          person={selected}
+          companyName={companyName}
+          positionLabel={POSITION_LABELS[selected.positionType]}
+          positionBadgeClass={POSITION_BADGE_CLASS[selected.positionType]}
+          profile={profileOf(selected.id)}
+          onChange={(next) =>
+            setProfiles((m) => ({ ...m, [selected.id]: next }))
+          }
+          onClose={() => setSelected(null)}
         />
       )}
     </div>

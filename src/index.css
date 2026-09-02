@@ -1286,6 +1286,23 @@ section:hover .fig-remove,
 .md-prose tbody td { padding: 8px 10px; border-bottom: 1px solid #F1F2F8; vertical-align: top; }
 .md-prose tbody tr:last-child td { border-bottom: none; }
 
+/* Compact .md-prose, for the board-member experience rows. Same markup and the
+   same rules, but it renders inside a table cell under a one-line facts row, so
+   the type size and vertical rhythm come down to match .urow. */
+.md-tight { font-size: 11.5px; line-height: 1.55; color: #5A6080; }
+.md-tight p, .md-tight ul, .md-tight ol { margin: 0 0 6px; }
+.md-tight ul, .md-tight ol { padding-left: 18px; }
+.md-tight li { margin-bottom: 2px; }
+.md-tight h1, .md-tight h2, .md-tight h3, .md-tight h4 {
+  margin: 9px 0 4px; font-size: 12px; color: #1A1D2E;
+}
+.md-tight > :last-child { margin-bottom: 0; }
+/* A lone newline inside a paragraph stays a line break. Markdown would fold it
+   away, but people paste plain multi-line text into this field as often as they
+   paste markdown, and losing their line breaks is what made the raw text
+   unreadable in the first place. */
+.md-tight p { white-space: pre-wrap; }
+
 /* Disabled buttons must look disabled — `.btn` had no :disabled rule, so a
    locked report's controls stayed indistinguishable from live ones. */
 .btn:disabled, .btn[disabled] {
