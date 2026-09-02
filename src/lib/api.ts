@@ -3586,7 +3586,7 @@ export type ChatStreamEvent =
   | { type: "tool_end"; name: string }
   | { type: "token"; content: string }
   | { type: "error"; message: string }
-  | { type: "done" }
+  | { type: "done"; refusal?: boolean }
   | { type: string; [key: string]: unknown };
 
 // Internal: shared SSE consumer. Splits the response stream on `\n\n` and

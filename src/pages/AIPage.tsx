@@ -17,6 +17,10 @@ interface UiMessage {
   tools?: Array<{ name: string; done: boolean }>;
   streaming?: boolean;
   error?: string;
+  // Set when the backend's scope gate short-circuited this turn with a
+  // fixed refusal instead of a generated answer — rendered muted, not as
+  // an error (nothing broke; the question was just out of scope).
+  variant?: 'refusal';
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -182,6 +186,9 @@ export default function AIPage() {
             (ev as { message?: string }).message ?? 'The assistant ran into an error.';
           updateAssistant((m) => ({ ...m, error: message }));
         } else if (ev.type === 'done') {
+          if ((ev as { refusal?: boolean }).refusal) {
+            updateAssistant((m) => ({ ...m, variant: 'refusal' }));
+          }
           break;
         }
       }
@@ -472,7 +479,9 @@ export default function AIPage() {
                     </div>
                   )}
                   {m.role === 'assistant' ? (
-                    <div className="msg-bub md-bub">
+                    <div
+                      className={`msg-bub md-bub${m.variant === 'refusal' ? ' refusal' : ''}`}
+                    >
                       {m.content ? (
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {m.content}
