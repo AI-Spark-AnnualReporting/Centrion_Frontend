@@ -206,6 +206,15 @@ export interface ExtractionReviewResponse {
   // we were looking for. `summary` carries the extra counts alongside its own.
   tables?: UserExtractionTable[];
   period?: string | null;
+  // A pipeline is writing figures right now — the screen picks a re-upload back up
+  // after a reload rather than showing a half-ingested report as finished.
+  ingest_running?: boolean;
+  ingest_run_id?: string | null;
+  // What the report already uses, to pre-fill the "upload more files" dialog. The
+  // dialog's own pickers describe the NEW FILE and never write these back:
+  // financial_scale is the scale the whole report is printed in.
+  financial_currency?: string | null;
+  financial_scale?: string | null;
 }
 
 // ─── Custom-mode extraction (rename / delete, no yes-no) ────────────────────
@@ -262,6 +271,12 @@ export interface UserExtractionTable {
   column_count?: number;
   // The headings found inside the table ("Cost", "Accumulated depreciation").
   groups?: string[];
+  // Which upload this came from. (file, table) alone is not unique — "keep both"
+  // legitimately reads one file twice into different sections — so these are what
+  // make a stable key, and what lets the screen say which tables just arrived.
+  run_id?: string;
+  uploaded_at?: string;
+  upload_index?: number;
 }
 
 export interface UserExtractionSummary {
@@ -272,6 +287,8 @@ export interface UserExtractionSummary {
   section_count: number;
   assumed_count: number;
   confirmed_count: number;
+  // How many separate uploads fed this report.
+  upload_count: number;
 }
 
 // One edit per row: a new label, or gone. Renaming is not cosmetic — the
