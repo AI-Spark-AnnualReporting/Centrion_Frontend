@@ -22,6 +22,7 @@ import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import { initials } from '@/components/communications/helpers';
 import {
   MONTHS,
   SHORT_MONTHS,
@@ -196,6 +197,14 @@ const ICON_PEOPLE = (
 const ICON_DOC = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 1.5h5l3 3v8a.5.5 0 01-.5.5h-7.5a.5.5 0 01-.5-.5v-10.5a.5.5 0 01.5-.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /><path d="M8 1.5v3h3M4.5 8h5M4.5 10.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
 );
+
+// Same swatch for the same person on every render — matches the board cards.
+function avatarColor(seed: string): string {
+  const palette = ['#4040C8', '#0D9488', '#7C3AED', '#16A34A', '#B45309', '#DC2626', '#2563EB', '#0891B2'];
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+}
 
 function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
@@ -571,10 +580,37 @@ function MeetingDetailModal({
             <>
               <DetailRow icon={ICON_CAL} label="Date & Time">{fullDateTime(date)}</DetailRow>
               <DetailRow icon={ICON_CLOCK} label="Platform">{platformLabel(current.platform)}</DetailRow>
-              <DetailRow icon={ICON_PEOPLE} label="Attendees">
-                {current.participants.length === 0
-                  ? <span style={{ color: '#9BA3C4' }}>None</span>
-                  : `${current.participants.length} · ${current.participants.join(', ')}`}
+              <DetailRow
+                icon={ICON_PEOPLE}
+                label={`Attendees${current.participants.length ? ` · ${current.participants.length}` : ''}`}
+              >
+                {current.participants.length === 0 ? (
+                  <span style={{ color: '#9BA3C4' }}>None</span>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                    {current.participants.map((p) => (
+                      <span
+                        key={p}
+                        title={p}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
+                          padding: '3px 10px 3px 3px', borderRadius: 999,
+                          background: '#F6F7FC', border: '1px solid #ECEEF8',
+                        }}
+                      >
+                        <span style={{
+                          width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                          background: avatarColor(p), color: '#fff', fontSize: 8, fontWeight: 800,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>{initials(p)}</span>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, color: '#3A4060',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>{p.split('@')[0]}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </DetailRow>
               {!hasHappened && (
                 <DetailRow
