@@ -204,6 +204,10 @@ export default function MeetingMinutesPanel({
 
   const storedAttachment = removeAttachment ? null : saved?.attachment_url ? saved : null;
 
+  // A minutes record has to actually record something: typed notes or an
+  // attached document — either one alone is enough.
+  const hasBody = Boolean(draft.notes.trim() || pendingFile || storedAttachment);
+
   if (loading) {
     return (
       <div style={{ padding: '46px 0', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
@@ -218,7 +222,9 @@ export default function MeetingMinutesPanel({
       <div style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 18, maxHeight: '58vh', overflowY: 'auto' }}>
         {/* Minutes body — typed notes, an attached document, or both. */}
         <div>
-          <SectionLabel>Minutes</SectionLabel>
+          <SectionLabel>
+            Minutes{canEdit && <span style={{ color: '#E5484D' }}> *</span>}
+          </SectionLabel>
           {canEdit ? (
             <textarea
               className="inp"
@@ -293,6 +299,12 @@ export default function MeetingMinutesPanel({
               </>
             )}
           </div>
+
+          {canEdit && !hasBody && (
+            <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 7 }}>
+              Write the minutes or attach a document — at least one is required.
+            </div>
+          )}
 
         </div>
 
@@ -382,10 +394,11 @@ export default function MeetingMinutesPanel({
             <button
               className="btn bp"
               onClick={save}
-              disabled={submitting || !dirty}
-              style={{ padding: '9px 20px', opacity: submitting || !dirty ? 0.5 : 1, cursor: dirty && !submitting ? 'pointer' : 'default' }}
+              disabled={submitting || !dirty || !hasBody}
+              title={!hasBody ? 'Add minutes or attach a document first' : undefined}
+              style={{ padding: '9px 20px', opacity: submitting || !dirty || !hasBody ? 0.5 : 1, cursor: dirty && hasBody && !submitting ? 'pointer' : 'default' }}
             >
-              {submitting ? 'Saving…' : dirty ? 'Save minutes' : 'Saved'}
+              {submitting ? 'Saving…' : dirty || !hasBody ? 'Save minutes' : 'Saved'}
             </button>
           )}
         </div>
