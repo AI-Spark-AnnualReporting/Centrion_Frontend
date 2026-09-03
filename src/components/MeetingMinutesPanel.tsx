@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { meetings as meetingsApi } from '@/lib/api';
+import { meetings as meetingsApi, team } from '@/lib/api';
 import type { AttendanceStatus, Meeting, MeetingMinutes } from '@/types/meeting';
 import { Switch } from '@/components/ui/switch';
+import { useAuth } from '@/context/AuthContext';
+import { gradientFor, initialsOf } from '@/lib/avatar';
 
 /**
  * Minutes of a meeting that has already happened — notes (typed, attached, or
@@ -58,6 +60,17 @@ const draftFrom = (m: MeetingMinutes): Draft => ({
 // word can't be handled differently in two places.
 const isPresent = (v: AttendanceStatus | boolean | undefined) => v !== 'absent' && v !== false;
 
+// Participants are stored as bare addresses. A real name off the team list is
+// better, but "ahsan.raza@…" → "Ahsan Raza" is a decent stand-in for anyone who
+// isn't on it (external guests, people removed since the meeting).
+function nameFromEmail(email: string): string {
+  return (email.split('@')[0] || email)
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 function formatBytes(n: number): string {
   return n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -101,6 +114,31 @@ export default function MeetingMinutesPanel({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [removeAttachment, setRemoveAttachment] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // email → full name, for the attenders roster. Decoration only: the address
+  // is always shown too, so a failed lookup costs nothing.
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+  const companyId = useAuth().user?.company_id ?? null;
+
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    team
+      .list(companyId)
+      .then((members) => {
+        if (cancelled) return;
+        setTeamNames(
+          Object.fromEntries(
+            members.filter((m) => m.email && m.full_name).map((m) => [m.email, m.full_name]),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const displayName = (email: string) => teamNames[email]?.trim() || nameFromEmail(email);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,8 +388,21 @@ export default function MeetingMinutesPanel({
                       borderTop: i === 0 ? 'none' : '1px solid #ECEEF8',
                     }}
                   >
-                    <span style={{ fontSize: 12, color: '#1A1D2E', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {p}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span style={{
+                        width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                        background: gradientFor(p), color: '#fff', fontSize: 10, fontWeight: 800,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        opacity: on ? 1 : 0.45,
+                      }}>{initialsOf(displayName(p))}</span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#1A1D2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {displayName(p)}
+                        </span>
+                        <span style={{ display: 'block', fontSize: 10.5, color: '#9BA3C4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p}
+                        </span>
+                      </span>
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
                       <span style={{ fontSize: 10, fontWeight: 700, color: on ? '#0F9D6B' : '#9BA3C4', minWidth: 62, textAlign: 'right' }}>

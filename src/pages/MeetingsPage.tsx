@@ -22,7 +22,7 @@ import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
-import { initials } from '@/components/communications/helpers';
+import { gradientFor, initialsOf } from '@/lib/avatar';
 import {
   MONTHS,
   SHORT_MONTHS,
@@ -197,14 +197,6 @@ const ICON_PEOPLE = (
 const ICON_DOC = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 1.5h5l3 3v8a.5.5 0 01-.5.5h-7.5a.5.5 0 01-.5-.5v-10.5a.5.5 0 01.5-.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /><path d="M8 1.5v3h3M4.5 8h5M4.5 10.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
 );
-
-// Same swatch for the same person on every render — matches the board cards.
-function avatarColor(seed: string): string {
-  const palette = ['#4040C8', '#0D9488', '#7C3AED', '#16A34A', '#B45309', '#DC2626', '#2563EB', '#0891B2'];
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return palette[h % palette.length];
-}
 
 function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
@@ -598,9 +590,9 @@ function MeetingDetailModal({
                       >
                         <span style={{
                           width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                          background: avatarColor(p), color: '#fff', fontSize: 8, fontWeight: 800,
+                          background: gradientFor(p), color: '#fff', fontSize: 8, fontWeight: 800,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>{initials(p)}</span>
+                        }}>{initialsOf(p)}</span>
                         <span style={{
                           fontSize: 11, fontWeight: 600, color: '#3A4060',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
