@@ -430,13 +430,11 @@ function MeetingDetailModal({
     current.status !== 'cancelled' &&
     (current.status === 'completed' || date < new Date());
 
+  // Deliberately no backdrop-click close: minutes are typed straight into this
+  // modal, and a stray click outside would bin an unsaved draft.
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal-content"
-        style={{ width: 520, padding: 0 }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ width: 520, padding: 0 }}>
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {editing ? (
