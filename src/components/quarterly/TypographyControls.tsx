@@ -103,7 +103,11 @@ export const TypographyControls = memo(function TypographyControls({
           return (
             <div
               key={role}
-              className="grid grid-cols-[80px_minmax(0,1fr)_92px_auto] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+              // The stepper track is `auto`, not a fixed 92px: its contents are ~154px
+              // (two 24px buttons, a 48px input, three 4px gaps and the "14–22px"
+              // range hint), so a fixed track clipped the hint to "14-" in every
+              // container including this modal. The family column absorbs the change.
+              className="grid grid-cols-[80px_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
             >
               <label className="text-[12px] font-semibold text-slate-700">{ROLE_LABEL[role]}</label>
 

@@ -769,6 +769,18 @@ export interface CoverTemplatesResponse {
   cover_templates: CoverTemplate[];
   total?: number;
   selected?: CoverSelectionPayload | null;
+  // What the company saved on the Brand Identity page. Seeds the modal on a
+  // report that has never been styled, and is what its Reset link goes back to.
+  // Every field can be null — a company that has set nothing.
+  company_default?: CompanyDesignDefault | null;
+}
+
+export interface CompanyDesignDefault {
+  cover_template_key: string | null;
+  // Always resolved to real hex by the backend, so a swatch always has
+  // something to render even when the company never picked colours.
+  brand: BrandColors;
+  typography: Typography | null;
 }
 
 // GET .../color-palettes
@@ -782,6 +794,10 @@ export interface CoverSelectionResponse {
   cover_template_key: string;
   brand: BrandColors;
   typography?: Typography;
+  // The company's saved default from the Brand Identity page — returned by the
+  // earnings and board reads so their pickers can seed from it and point Reset
+  // at it, exactly as quarterly does off GET .../cover-templates.
+  company_default?: CompanyDesignDefault | null;
 }
 
 // ─── Typography ──────────────────────────────────────────────────────────────

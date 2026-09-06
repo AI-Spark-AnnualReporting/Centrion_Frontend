@@ -61,6 +61,7 @@ export function ReportPreview({
   typography,
   logoUrl,
   paneWidth,
+  view: fixedView,
 }: {
   variant: PreviewVariant;
   brand: BrandColors;
@@ -70,14 +71,20 @@ export function ReportPreview({
    * transform scale so the A4 mock fits without introducing horizontal
    * scroll. Height follows the aspect ratio. */
   paneWidth: number;
+  /** Pin the mock to one page and drop the Cover/Page toggle. The Brand
+   * Identity card shows both pages at once, so a per-mock toggle there would
+   * be two controls for one decision. Omitted (the modal) keeps the toggle. */
+  view?: ViewMode;
 }) {
-  const [view, setView] = useState<ViewMode>('cover');
+  const [ownView, setOwnView] = useState<ViewMode>('cover');
+  const view = fixedView ?? ownView;
   const scale = useMemo(() => (paneWidth > 0 ? paneWidth / A4_LOGICAL_W : 0.5), [paneWidth]);
   const scaledHeight = A4_LOGICAL_H * scale;
 
   return (
     <div className="flex flex-col gap-2">
       {/* Toggle */}
+      {!fixedView && (
       <div className="inline-flex self-center overflow-hidden rounded-md border border-slate-200 bg-white">
         {(['cover', 'page'] as const).map((m) => {
           const active = view === m;
@@ -85,7 +92,7 @@ export function ReportPreview({
             <button
               key={m}
               type="button"
-              onClick={() => setView(m)}
+              onClick={() => setOwnView(m)}
               aria-pressed={active}
               className={
                 'px-3 py-1 text-[11.5px] transition-colors '
@@ -97,6 +104,7 @@ export function ReportPreview({
           );
         })}
       </div>
+      )}
 
       {/* Canvas — logical A4 wrapped in a transform-scaled container so
        * every child renders at real CSS px on a 595-wide page, then the

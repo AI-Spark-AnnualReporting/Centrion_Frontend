@@ -12,7 +12,8 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
-import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, Typography } from '@/types/quarterly';
+import type {
+  CompanyDesignDefault, ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, Typography } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -124,6 +125,7 @@ export default function AssembledReportPage() {
 
   // picker catalogue
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coverApplying, setCoverApplying] = useState(false);
@@ -186,6 +188,7 @@ export default function AssembledReportPage() {
       });
 
     quarterlyReports.getCoverTemplates(companyId, reportId).then((res) => {
+      setCompanyDefault(res.company_default ?? null);
       if (cancelled) return;
       const t = res.cover_templates ?? [];
       setCoverTemplates(t);
@@ -446,6 +449,7 @@ export default function AssembledReportPage() {
           initialTemplateKey={coverTemplateKey}
           initialBrand={brand}
           initialTypography={typography}
+          companyDefault={companyDefault}
           applying={coverApplying}
           error={coverError}
           onApply={handleCoverApply}

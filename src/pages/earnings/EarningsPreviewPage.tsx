@@ -33,7 +33,8 @@ import { EditableProse } from '@/components/earnings/EditableProse';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { isNoDataPlaceholder, noDataMessage } from './preview-helpers';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type { CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, Typography } from '@/types/quarterly';
+import type {
+  CompanyDesignDefault, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, Typography } from '@/types/quarterly';
 import { INK, MUTED, FAINT, ACCENT, DANGER, BORDER_SOFT } from '@/components/earnings/tokens';
 import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
@@ -113,6 +114,7 @@ export default function EarningsFiguresPage() {
   // ── Cover design + brand color (mirrors the quarterly picker) ──
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [brand, setBrand] = useState<BrandColors | null>(null);
   const [typography, setTypography] = useState<Typography | null>(null);
@@ -175,6 +177,7 @@ export default function EarningsFiguresPage() {
         if (res?.cover_template_key) setCoverTemplateKey(res.cover_template_key);
         if (res?.brand) setBrand(res.brand);
         if (res?.typography) setTypography(res.typography);
+        setCompanyDefault(res?.company_default ?? null);
       })
       .catch(() => {});
     return () => {
@@ -1154,6 +1157,7 @@ export default function EarningsFiguresPage() {
           initialTemplateKey={coverTemplateKey}
           initialBrand={brand}
           initialTypography={typography}
+          companyDefault={companyDefault}
           applying={coverApplying}
           error={coverError}
           onApply={handleCoverApply}

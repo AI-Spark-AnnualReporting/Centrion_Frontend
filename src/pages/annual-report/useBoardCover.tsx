@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { boardReports, quarterlyReports } from '@/lib/api';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type {
+  CompanyDesignDefault,
   BrandColors,
   ColorPalette,
   CoverSelectionPayload,
@@ -34,6 +35,9 @@ export function useBoardCover(
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the company saved on Brand Identity — seeds the picker when this
+  // report has never been styled, and is what its Reset link goes back to.
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
 
   // The saved pick, so the picker opens on it rather than blank.
   useEffect(() => {
@@ -46,6 +50,7 @@ export function useBoardCover(
         if (res?.cover_template_key) setKey(res.cover_template_key);
         if (res?.brand) setBrand(res.brand);
         if (res?.typography) setTypography(res.typography);
+        setCompanyDefault(res?.company_default ?? null);
       })
       .catch(() => {});
     return () => {
@@ -111,6 +116,7 @@ export function useBoardCover(
         initialTemplateKey={templateKey}
         initialBrand={coverBrand}
         initialTypography={typography}
+        companyDefault={companyDefault}
         applying={applying}
         error={error}
         onApply={apply}

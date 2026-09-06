@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import type {
   BrandColors,
   ColorPalette,
+  CompanyDesignDefault,
   CoverSelectionPayload,
   CoverTemplate,
   Typography,
@@ -65,7 +66,7 @@ function collapseVariant(templateKey: string | null | undefined): PreviewVariant
 
 
 // ─── thumbnail mini-preview (unchanged from previous modal) ─────────
-function MiniCover({ templateKey, accent, index = 0 }: { templateKey: string; accent: string; index?: number }) {
+export function MiniCover({ templateKey, accent, index = 0 }: { templateKey: string; accent: string; index?: number }) {
   const variant = collapseVariant(templateKey) || VISIBLE_VARIANTS[index % VISIBLE_VARIANTS.length];
   const shell: React.CSSProperties = {
     width: '100%', aspectRatio: '1 / 1.3', borderRadius: 6, background: '#fff',
@@ -116,6 +117,7 @@ export function CoverTemplatePicker({
   initialTemplateKey,
   initialBrand,
   initialTypography,
+  companyDefault,
   logoUrl,
   applying = false,
   error,
@@ -127,6 +129,13 @@ export function CoverTemplatePicker({
   initialTemplateKey: string | null;
   initialBrand: BrandColors | null;
   initialTypography?: Typography | null;
+  /**
+   * What the company saved on the Brand Identity page. Used only where the
+   * report itself has made no choice — a report's own pick always wins — and as
+   * the target of the typography Reset link, so "reset" means "back to what our
+   * company set" rather than back to the layout's generic blueprint.
+   */
+  companyDefault?: CompanyDesignDefault | null;
   logoUrl?: string | null;
   applying?: boolean;
   error?: string | null;
@@ -139,10 +148,13 @@ export function CoverTemplatePicker({
   );
 
   const [designKey, setDesignKey] = useState<string>(
-    initialTemplateKey || visibleTemplates[0]?.key || DEFAULT_LAYOUT_KEY,
+    initialTemplateKey
+      || companyDefault?.cover_template_key
+      || visibleTemplates[0]?.key
+      || DEFAULT_LAYOUT_KEY,
   );
   const [brand, setBrand] = useState<BrandColors>(
-    initialBrand ?? {
+    initialBrand ?? companyDefault?.brand ?? {
       primary: palettes[0]?.primary ?? '#4B0082',
       secondary: palettes[0]?.secondary ?? '#00B7C2',
       palette_key: palettes[0]?.key ?? '',
@@ -152,12 +164,17 @@ export function CoverTemplatePicker({
 
   // Typography state — seeded from the report's saved override if any,
   // else from the picked layout's recommended defaults.
+  // What "recommended" means here. The company's saved type wins over the
+  // layout blueprint, so a user who matches their own company default is not
+  // labelled "Customised" and Reset does not throw that default away.
   const layoutDefaults = useMemo(
-    () => templateDefaults(visibleTemplates, designKey),
-    [visibleTemplates, designKey],
+    () => companyDefault?.typography ?? templateDefaults(visibleTemplates, designKey),
+    [companyDefault, visibleTemplates, designKey],
   );
   const [typography, setTypography] = useState<Typography>(
-    initialTypography ?? templateDefaults(visibleTemplates, designKey),
+    initialTypography
+      ?? companyDefault?.typography
+      ?? templateDefaults(visibleTemplates, designKey),
   );
 
   // Layout-swap prompt state — pops when the user picks a different

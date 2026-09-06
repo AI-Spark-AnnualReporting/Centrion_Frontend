@@ -9,7 +9,8 @@ import { SectionRefineChat } from '@/components/quarterly/SectionRefineChat';
 import SectionAnalysis, { ReadingBand } from '@/components/quarterly/SectionAnalysis';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
-import type { ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis, Typography } from '@/types/quarterly';
+import type {
+  CompanyDesignDefault, ProducedSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, SectionAnalysis as Analysis, Typography } from '@/types/quarterly';
 import {
   isCoverSection,
   sectionState,
@@ -259,6 +260,9 @@ export default function PreviewPage() {
   const [brand, setBrand] = useState<BrandColors | null>(null);
   const [typography, setTypography] = useState<Typography | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The company's saved report design (Brand Identity page). Seeds the picker
+  // when this report has never been styled; a report's own pick still wins.
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
   const [coverApplying, setCoverApplying] = useState(false);
   const [coverError, setCoverError] = useState<string | null>(null);
   // Real company + period for the cover (no placeholders).
@@ -708,6 +712,7 @@ export default function PreviewPage() {
           initialTemplateKey={coverTemplateKey}
           initialBrand={brand}
           initialTypography={typography}
+          companyDefault={companyDefault}
           applying={coverApplying}
           error={coverError}
           onApply={handleCoverApply}
