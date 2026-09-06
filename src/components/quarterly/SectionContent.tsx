@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
 import type { DocumentBankResponse } from '@/types/report';
 import { documents } from '@/lib/api';
+import { readNarrativeEnvelope } from '@/lib/sectionEnvelope';
 import { asStringArray, isDataImage } from '@/components/quarterly/sectionState';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
@@ -100,12 +101,17 @@ function SectionBody({
     // e.g. {heading, content} itself into a bogus 2-row table.
     const hasTableShape = Array.isArray(parsed.rows) || Array.isArray(parsed.tables);
     const tables = hasTableShape ? normalizeTables(parsed) : [];
-    const heading = asString(parsed.heading);
+    // Same reader the editor and the earnings screen use, so the three cannot
+    // drift again — this file's own copy is what let the edit box go on showing
+    // raw JSON after the read view had learned to unwrap it. Returns null for a
+    // table shape, hence the `??` back to the raw heading for {title, rows}.
+    const envelope = readNarrativeEnvelope(content);
+    const heading = envelope?.heading ?? asString(parsed.heading);
     // An array-shaped analysis/content is a list of discrete points, not
     // flowing prose — render those as bullets. A plain string is real prose
     // (its own \n\n breaks are paragraphs, not separate points).
     const narrativeItems = asProseItems(parsed.analysis) ?? asProseItems(parsed.content);
-    const narrativeText = asString(parsed.analysis) ?? asString(parsed.content);
+    const narrativeText = asString(parsed.analysis) ?? envelope?.body ?? asString(parsed.content);
     if (tables.some((t) => t.rows.length > 0) || narrativeItems || narrativeText || heading) {
       return (
         <>

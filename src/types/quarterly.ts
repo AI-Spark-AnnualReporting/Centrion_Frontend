@@ -206,6 +206,15 @@ export interface ExtractionReviewResponse {
   // we were looking for. `summary` carries the extra counts alongside its own.
   tables?: UserExtractionTable[];
   period?: string | null;
+  // A pipeline is writing figures right now — the screen picks a re-upload back up
+  // after a reload rather than showing a half-ingested report as finished.
+  ingest_running?: boolean;
+  ingest_run_id?: string | null;
+  // What the report already uses, to pre-fill the "upload more files" dialog. The
+  // dialog's own pickers describe the NEW FILE and never write these back:
+  // financial_scale is the scale the whole report is printed in.
+  financial_currency?: string | null;
+  financial_scale?: string | null;
 }
 
 // ─── Custom-mode extraction (rename / delete, no yes-no) ────────────────────
@@ -262,6 +271,12 @@ export interface UserExtractionTable {
   column_count?: number;
   // The headings found inside the table ("Cost", "Accumulated depreciation").
   groups?: string[];
+  // Which upload this came from. (file, table) alone is not unique — "keep both"
+  // legitimately reads one file twice into different sections — so these are what
+  // make a stable key, and what lets the screen say which tables just arrived.
+  run_id?: string;
+  uploaded_at?: string;
+  upload_index?: number;
 }
 
 export interface UserExtractionSummary {
@@ -272,6 +287,8 @@ export interface UserExtractionSummary {
   section_count: number;
   assumed_count: number;
   confirmed_count: number;
+  // How many separate uploads fed this report.
+  upload_count: number;
 }
 
 // One edit per row: a new label, or gone. Renaming is not cosmetic — the
@@ -737,6 +754,12 @@ export type { ColorPalette, BrandColors } from "@/types/brand";
 export interface CoverSelectionPayload {
   cover_template_key: string;
   brand: BrandColors;
+  // Optional per-report typography override. Absent = the picked
+  // layout's blueprint defaults apply at render time. When present,
+  // the backend validates against report_typography.FAMILIES /
+  // WEIGHTS / BODY_LINE_HEIGHTS — every value here must be inside
+  // TYPOGRAPHY_ALLOWLISTS below.
+  typography?: Typography;
 }
 
 // GET .../cover-templates — the catalogue. `selected` is optional (if the
@@ -746,6 +769,18 @@ export interface CoverTemplatesResponse {
   cover_templates: CoverTemplate[];
   total?: number;
   selected?: CoverSelectionPayload | null;
+  // What the company saved on the Brand Identity page. Seeds the modal on a
+  // report that has never been styled, and is what its Reset link goes back to.
+  // Every field can be null — a company that has set nothing.
+  company_default?: CompanyDesignDefault | null;
+}
+
+export interface CompanyDesignDefault {
+  cover_template_key: string | null;
+  // Always resolved to real hex by the backend, so a swatch always has
+  // something to render even when the company never picked colours.
+  brand: BrandColors;
+  typography: Typography | null;
 }
 
 // GET .../color-palettes
@@ -758,7 +793,104 @@ export interface ColorPalettesResponse {
 export interface CoverSelectionResponse {
   cover_template_key: string;
   brand: BrandColors;
+  typography?: Typography;
+  // The company's saved default from the Brand Identity page — returned by the
+  // earnings and board reads so their pickers can seed from it and point Reset
+  // at it, exactly as quarterly does off GET .../cover-templates.
+  company_default?: CompanyDesignDefault | null;
 }
+
+// ─── Typography ──────────────────────────────────────────────────────────────
+// Per-role choice for the Report Design modal. Values match the backend
+// allowlists in report_typography.py verbatim — the modal enforces them
+// client-side so a valid submission always passes the API's 422 check.
+
+export type TypographyFamily =
+  | "DejaVu Sans"
+  | "Inter"
+  | "IBM Plex Sans"
+  | "Lato"
+  | "Source Serif 4"
+  | "Merriweather"
+  | "Libre Baskerville";
+
+export type TypographyWeight = 400 | 700;
+
+export interface TypographyRole {
+  family: TypographyFamily;
+  size: number;   // px, step 0.5, clamped to the per-role range
+  weight: TypographyWeight;
+}
+// Body deliberately keeps the same shape as heading/subheading — line
+// height is NOT user-controlled (always renders at 1.5). Any older
+// report payload that includes body.line_height is ignored at render
+// time; the field is accepted for backwards compat by the backend
+// validator but no longer part of the type or the modal.
+export interface Typography {
+  heading: TypographyRole;
+  subheading: TypographyRole;
+  body: TypographyRole;
+}
+
+// Client-side allowlists — mirror report_typography.FAMILIES /
+// _SIZE_RANGES / WEIGHTS. Any change here must be mirrored server-side
+// (and, for the family list, in the container's installed fonts and in
+// report-fonts.css @font-face names).
+export const TYPOGRAPHY_ALLOWLISTS = {
+  families: [
+    "DejaVu Sans",
+    "Inter",
+    "IBM Plex Sans",
+    "Lato",
+    "Source Serif 4",
+    "Merriweather",
+    "Libre Baskerville",
+  ] as const satisfies readonly TypographyFamily[],
+  sizeRanges: {
+    heading:    { min: 14, max: 22, step: 0.5 },
+    subheading: { min: 11, max: 14, step: 0.5 },
+    body:       { min: 10, max: 12, step: 0.5 },
+  },
+  weights: [400, 700] as const satisfies readonly TypographyWeight[],
+};
+
+// Per-layout recommended defaults — the modal reads these to seed the
+// typography section when the user hasn't customised, to power the
+// "Reset" link, and to detect "Customised" (any field differs from the
+// picked layout's defaults). The picked layout's blueprint on the
+// backend (quarterly_cover_templates.layout.typography) is authoritative
+// once available on the CoverTemplate; these values match the migration
+// that seeds it. Kept as a constant so a modal that opens BEFORE the
+// catalogue arrives can still render sensible defaults.
+export const LAYOUT_TYPOGRAPHY_DEFAULTS: Record<string, Typography> = {
+  // All defaults are inside the tightened size ranges above; body sizes
+  // stay whole numbers so the stepper's default position looks clean.
+  classic: {
+    heading:    { family: "Libre Baskerville", size: 16, weight: 700 },
+    subheading: { family: "Libre Baskerville", size: 12, weight: 700 },
+    body:       { family: "Source Serif 4",    size: 11, weight: 400 },
+  },
+  minimal: {
+    heading:    { family: "Inter", size: 16, weight: 400 },
+    subheading: { family: "Inter", size: 11, weight: 700 },
+    body:       { family: "Lato",  size: 11, weight: 400 },
+  },
+  bold: {
+    heading:    { family: "Inter", size: 18, weight: 700 },
+    subheading: { family: "Inter", size: 12, weight: 700 },
+    body:       { family: "Inter", size: 11, weight: 400 },
+  },
+  branded: {
+    heading:    { family: "Inter", size: 18, weight: 700 },
+    subheading: { family: "Inter", size: 12, weight: 700 },
+    body:       { family: "Inter", size: 11, weight: 400 },
+  },
+};
+
+// The layout the modal falls back to when a template key is unknown or
+// no layout has been picked yet — matches the existing MiniCover.variantFor
+// collapse rule (classic/bold/minimal + hidden branded).
+export const DEFAULT_LAYOUT_KEY = "classic";
 
 // ─── Assembled Report (Part 7) ───────────────────────────────────────────────
 // GET .../assemble — the full report: cover + produced sections in display_order

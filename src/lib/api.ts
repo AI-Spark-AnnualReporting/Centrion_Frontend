@@ -469,6 +469,7 @@ async function postPipeline(
       estimatedDurationSeconds: body.estimated_duration_seconds ?? null,
       fileCount: body.file_count ?? null,
       isExisting: false,
+      outlineUnlocked: (body as { outline_unlocked?: boolean }).outline_unlocked ?? false,
     };
   }
 
@@ -1949,6 +1950,32 @@ export const quarterlyReports = {
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/custom-figures`,
       { method: "POST", body: { edits } },
     ),
+
+  // Add or replace a user-metrics report's financial data, from the Extraction
+  // screen, at any point in the flow. `onConflict` is required by the backend:
+  // "replace" wipes every figure on the report first, "keep_both" gives a table
+  // whose name matches an existing section a numbered sibling.
+  //
+  // postPipeline, not postForm — it already normalises the 202 and the
+  // already-running 409 into one handle, and a re-upload can hit either.
+  addQuarterlyFinancialFiles: (
+    companyId: string,
+    reportId: string,
+    files: File[],
+    opts: { currency?: string | null; scale?: string | null; onConflict: "replace" | "keep_both" },
+  ): Promise<PipelineHandle> => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("financial_files", f));
+    fd.append("on_conflict", opts.onConflict);
+    // Only when actually declared: both are hard overrides in the parser, so
+    // sending a default would disable its detection ladder.
+    if (opts.currency) fd.append("financial_currency", opts.currency);
+    if (opts.scale) fd.append("financial_scale", opts.scale);
+    return postPipeline(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/financial-files`,
+      fd,
+    );
+  },
 
   // ── Financial Data (Custom mode, the step before Extraction) ──
   // One statement per section, so nothing has to guess where a figure belongs.

@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap');
+@import './styles/report-fonts.css';
 
 @tailwind base;
 @tailwind components;
@@ -609,6 +610,78 @@ body {
 }
 .ob-char-count { margin-left: auto; font-size: 11px; font-weight: 600; color: #9BA3C4; }
 .ob-char-count.over { color: #E5484D; }
+
+/* Section heading inside a brand card ("Cover design", "Brand colors"). Quieter
+   than .ob-brand-title because these label a control group, not a card. */
+.ob-brand-label {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .06em; color: #6B7280; margin-bottom: 8px;
+}
+
+/* Report design — the cover layout tiles. Custom-bordered buttons, so the
+   browser default focus ring reads as foreign; this one has to stay visible
+   against both the white and the selected #EEEEFF ground, hence the offset. */
+.rd-tile:hover:not(:disabled) { border-color: #C7CBF0; }
+.rd-tile:focus-visible { outline: 2px solid #4040C8; outline-offset: 2px; }
+
+/* Report design — the card body's two panes: the settings on the left, the
+   live page on the right. Real CSS rather than Tailwind because the breakpoint
+   is a measured number rather than one of Tailwind's, and because the rest of
+   the card stays on this kit.
+
+   THE BODY HAS A MEASURE; THE CARD DOES NOT. Capping the card is what put a
+   band of empty page down its right and made it the odd one out beside its two
+   full-width siblings. Capping the content instead keeps the card in line and
+   turns the leftover into symmetric margin — the same fix, for the same reason,
+   as the document/rail pair on the earnings report page.
+
+   Every width below comes from what the controls actually need. The settings
+   column is CAPPED, not fluid: its widest child is one TypographyControls row,
+   whose only stretching part is the font <select>. Below 537px that select
+   collapses to a bare arrow; past ~700px it is more empty box than font name,
+   which is the "stretched select, tiny stepper" the old card cap was really
+   patching. 620 sits inside that band with room for the longest layout name.
+   The page pane takes what is left: it is the one child that keeps getting
+   better as it grows, since the A4 mock is transform-scaled from its own pane
+   width. Stacked, both share the 620 measure so the intro line, the controls
+   and the pane all start on one edge. */
+.rd-body { max-width: 620px; margin: 0 auto; }
+.rd-grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+.rd-controls { max-width: 620px; min-width: 0; border: 0; margin: 0; padding: 0; }
+
+/* Two panes only once BOTH fit at their real minimum at the same time:
+   620 for the settings + 24 gap + 380 for a page that is still legible = 1024,
+   inside a card that is itself viewport − 210 sidebar − 44 gutter − 36 body
+   padding. Hence 1320. Tailwind's lg (1024) fired nearly 300px too early: the
+   settings track was 390px there, so the typography rows — which need 537 —
+   grew a horizontal scrollbar of their own inside an otherwise roomy card. */
+@media (min-width: 1320px) {
+  /* 1464 = the 620 settings column + 24 gap + the 820 a page pane is worth
+     before the sheet inside it is swimming in its own backdrop. */
+  .rd-body { max-width: 1464px; }
+  .rd-grid { grid-template-columns: minmax(0, 620px) minmax(380px, 1fr); align-items: start; }
+  /* A grid item stretched to the row height cannot stick. */
+  .rd-preview { position: sticky; top: 16px; align-self: start; }
+}
+
+/* The page sits on its own ground, centred, with the panel running to the
+   card's edge. On a wide monitor the leftover width becomes backdrop around
+   the page rather than a gap beside it — the same way a document viewer
+   frames a sheet. */
+.rd-stage {
+  border: 1px solid #ECEEF8; border-radius: 12px;
+  background: #FAFBFE; padding: 14px 16px 16px;
+}
+.rd-stage-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.rd-stage-note { font-size: 10.5px; color: #9BA3C4; line-height: 1.45; }
+/* Capped at 500: the A4 mock is a fixed 595x842 canvas scaled by pane/595, so
+   past ~500 the column runs taller than a 900px laptop viewport and the sticky
+   pane stops fitting. At 500 the mock's body text renders ~9px — readable,
+   which is the whole point of the pane. */
+.rd-sheet { max-width: 500px; margin: 0 auto; }
 .ob-logo-preview {
   display: flex; align-items: center; gap: 14px;
   padding: 12px 14px; border: 1px solid #E8EAF3; border-radius: 12px; background: #FAFBFE;

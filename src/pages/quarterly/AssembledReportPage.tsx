@@ -12,7 +12,8 @@ import { EditableSectionContent } from '@/components/quarterly/EditableSectionCo
 import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
-import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
+import type {
+  CompanyDesignDefault, ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode, Typography } from '@/types/quarterly';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -39,7 +40,7 @@ function asBrand(v: unknown): BrandColors | null {
   }
   return null;
 }
-function readCoverSelection(res: unknown): { key: string | null; brand: BrandColors | null } {
+function readCoverSelection(res: unknown): { key: string | null; brand: BrandColors | null; typography: Typography | null } {
   const cover = pick(res, 'cover') ?? pick(res, 'selected') ?? pick(res, 'cover_template');
   const key =
     asStr(pick(res, 'cover_template_key')) ??
@@ -47,7 +48,13 @@ function readCoverSelection(res: unknown): { key: string | null; brand: BrandCol
     asStr(pick(cover, 'key')) ??
     asStr(pick(cover, 'template_key'));
   const brand = asBrand(pick(res, 'brand')) ?? asBrand(pick(cover, 'brand'));
-  return { key, brand };
+  // Typography lives on the assembled root (report_routes._assemble_
+  // quarterly_report attaches it), else on the cover for older shapes.
+  const rawTypography = pick(res, 'typography') ?? pick(cover, 'typography');
+  const typography = (rawTypography && typeof rawTypography === 'object')
+    ? (rawTypography as Typography)
+    : null;
+  return { key, brand, typography };
 }
 
 // The exact approval/lock field name isn't fixed either — read defensively
@@ -108,15 +115,17 @@ export default function AssembledReportPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
-  // cover + brand
+  // cover + brand + typography
   const [brand, setBrand] = useState<BrandColors | null>(null);
   const [coverTemplateKey, setCoverTemplateKey] = useState<string | null>(null);
+  const [typography, setTypography] = useState<Typography | null>(null);
   const [coverMeta, setCoverMeta] = useState<{ company: string | null; period: string | null; title: string | null; preparedOn: string | null }>({
     company: null, period: null, title: null, preparedOn: null,
   });
 
   // picker catalogue
   const [coverTemplates, setCoverTemplates] = useState<CoverTemplate[]>([]);
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coverApplying, setCoverApplying] = useState(false);
@@ -156,9 +165,10 @@ export default function AssembledReportPage() {
           .map(toProduced);
         setSections(list);
         setMetricsMode(res.metrics_mode ?? null);
-        const { key, brand: coverBrand } = readCoverSelection(res);
+        const { key, brand: coverBrand, typography: coverTypo } = readCoverSelection(res);
         if (coverBrand) setBrand(coverBrand);
         if (key) setCoverTemplateKey(key);
+        if (coverTypo) setTypography(coverTypo);
         const { approved: isApproved, approvedAt: at } = readApprovalStatus(res);
         setApproved(isApproved);
         setApprovedAt(at);
@@ -178,6 +188,7 @@ export default function AssembledReportPage() {
       });
 
     quarterlyReports.getCoverTemplates(companyId, reportId).then((res) => {
+      setCompanyDefault(res.company_default ?? null);
       if (cancelled) return;
       const t = res.cover_templates ?? [];
       setCoverTemplates(t);
@@ -233,9 +244,10 @@ export default function AssembledReportPage() {
       try {
         const res = await quarterlyReports.selectCoverTemplate(companyId, reportId, payload);
         // Prefer the payload the user picked — the PATCH response may not echo
-        // cover_template_key/brand, which would reset the cover to the default.
+        // cover_template_key/brand/typography, which would reset to defaults.
         setCoverTemplateKey(res?.cover_template_key ?? payload.cover_template_key);
         setBrand(res?.brand ?? payload.brand);
+        if (payload.typography) setTypography(res?.typography ?? payload.typography);
         setPickerOpen(false);
       } catch (err: unknown) {
         setCoverError(err instanceof Error ? err.message : 'Could not save the cover selection.');
@@ -436,6 +448,8 @@ export default function AssembledReportPage() {
           palettes={palettes}
           initialTemplateKey={coverTemplateKey}
           initialBrand={brand}
+          initialTypography={typography}
+          companyDefault={companyDefault}
           applying={coverApplying}
           error={coverError}
           onApply={handleCoverApply}

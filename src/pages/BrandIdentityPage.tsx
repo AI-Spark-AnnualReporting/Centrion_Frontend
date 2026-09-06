@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
+import BrandVoiceCard from '@/components/brand/BrandVoiceCard';
 import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
+import { ReportDesignCard } from '@/components/brand/ReportDesignCard';
+import type { ReportDesign } from '@/components/brand/ReportDesignCard';
 import { Spinner } from '@/components/shared/Spinner';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, auth, companies, quarterlyReports } from '@/lib/api';
 import type { BrandColors, ColorPalette } from '@/types/brand';
+import type { CoverTemplate } from '@/types/quarterly';
 import {
   DOC_ACCEPT,
   DOC_EXTS,
@@ -18,7 +21,7 @@ import {
   readLogoFile,
   validateLogoFile,
 } from '@/types/brand';
-import type { CompanyBrandUpdate } from '@/types/company';
+import type { BrandVoice, CompanyBrandUpdate } from '@/types/company';
 
 // The three brand values from onboarding step 3, editable after the fact —
 // visible to anyone with profile access (rendered as a section of the Company
@@ -44,7 +47,11 @@ type Baseline = {
   identity: string;
   colors: BrandColors;
   logoDataUri: string | null;
+  design: ReportDesign;
+  voice: BrandVoice | null;
 };
+
+const EMPTY_DESIGN: ReportDesign = { cover_template_key: null, typography: null };
 
 const FALLBACK_BRAND: BrandColors = {
   primary: FALLBACK_COLOR_PALETTES[0].primary,
@@ -61,8 +68,12 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
   const [identity, setIdentity] = useState('');
   const [colors, setColors] = useState<BrandColors>(FALLBACK_BRAND);
   const [logo, setLogo] = useState<LogoState>(null);
+  const [design, setDesign] = useState<ReportDesign>(EMPTY_DESIGN);
+  const [voice, setVoice] = useState<BrandVoice | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
 
   const [palettes, setPalettes] = useState<ColorPalette[]>(FALLBACK_COLOR_PALETTES);
+  const [templates, setTemplates] = useState<CoverTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,11 +102,23 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
               }
             : FALLBACK_BRAND;
         const savedLogo = logoRes.logo_base64 ?? null;
+        // Unlike colours, an unset design is left EMPTY rather than seeded with a
+        // fallback: a seeded value would make the page mount dirty, and "no
+        // company default" is a real, meaningful state here.
+        const savedDesign: ReportDesign = {
+          cover_template_key: company.report_design?.cover_template_key ?? null,
+          typography: company.report_design?.typography ?? null,
+        };
+
+        const savedVoice = company.brand_voice ?? null;
 
         setIdentity(savedIdentity);
         setColors(savedColors);
+        setDesign(savedDesign);
+        setVoice(savedVoice);
+        setVoiceStatus(company.brand_voice_status ?? null);
         setLogo(savedLogo ? { dataUri: savedLogo, name: null, size: dataUriBytes(savedLogo) } : null);
-        setBaseline({ identity: savedIdentity, colors: savedColors, logoDataUri: savedLogo });
+        setBaseline({ identity: savedIdentity, colors: savedColors, logoDataUri: savedLogo, design: savedDesign, voice: savedVoice });
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load brand identity');
@@ -118,6 +141,45 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
       .catch(() => { /* keep FALLBACK_COLOR_PALETTES */ });
     return () => { cancelled = true; };
   }, []);
+
+  // The same catalogue the report design modal reads. Non-blocking like the
+  // palettes above: if it fails the card simply offers no layouts rather than
+  // taking the whole page down with it.
+  useEffect(() => {
+    let cancelled = false;
+    quarterlyReports
+      .getCoverTemplatesGlobal()
+      .then((res) => {
+        if (!cancelled && res.cover_templates?.length) setTemplates(res.cover_templates);
+      })
+      .catch(() => { /* card renders without layouts */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Extraction runs in the background after a guideline is saved, so the rules
+  // land a few seconds after the PATCH returns. Poll only while it is actually
+  // running, and stop on the first non-processing answer.
+  useEffect(() => {
+    if (voiceStatus !== 'processing') return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      companies
+        .getMyCompany()
+        .then((company) => {
+          if (cancelled) return;
+          const status = company.brand_voice_status ?? null;
+          if (status === 'processing') return;
+          const next = company.brand_voice ?? null;
+          setVoiceStatus(status);
+          setVoice(next);
+          // Re-baseline too: this value came FROM the server, so it must not
+          // count as an unsaved local edit and light up the Save bar.
+          setBaseline((b) => (b ? { ...b, voice: next } : b));
+        })
+        .catch(() => { /* keep polling; a blip shouldn't strand the card */ });
+    }, 2500);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [voiceStatus]);
 
   const acceptLogo = (f: File | null) => {
     setLogoError('');
@@ -171,6 +233,8 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
     baseline !== null &&
     (trimmedIdentity !== baseline.identity ||
       JSON.stringify(colors) !== JSON.stringify(baseline.colors) ||
+      JSON.stringify(design) !== JSON.stringify(baseline.design) ||
+      JSON.stringify(voice) !== JSON.stringify(baseline.voice) ||
       (logo?.dataUri ?? null) !== baseline.logoDataUri);
 
   const handleSave = async () => {
@@ -185,6 +249,19 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
       // jsonb with no server-side merge, and the backend discards the entire
       // company value if primary is missing.
       payload.brand_colors = { ...colors };
+    }
+    if (JSON.stringify(design) !== JSON.stringify(baseline.design)) {
+      // Whole object, same reason as brand_colors: the PATCH overwrites the
+      // report_design jsonb without merging.
+      payload.report_design = { ...design };
+    }
+    // Sent only when the user actually edited the rules. That distinction is
+    // load-bearing on the server: a brand_voice in the same PATCH marks the voice
+    // as hand-corrected and SKIPS the re-extraction a new guideline would trigger,
+    // so sending it unchanged alongside a new document would suppress the very
+    // extraction the document was uploaded for.
+    if (JSON.stringify(voice) !== JSON.stringify(baseline.voice)) {
+      payload.brand_voice = voice;
     }
     const nextLogo = logo?.dataUri ?? null;
     if (nextLogo !== baseline.logoDataUri) payload.logo_base64 = nextLogo;
@@ -201,8 +278,14 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
       await companies.updateMyCompany(payload);
       // Re-baseline from the local values, not the response: PATCH returns the
       // full row including logo_base64, which GET deliberately strips.
-      setBaseline({ identity: trimmedIdentity, colors: { ...colors }, logoDataUri: nextLogo });
+      setBaseline({ identity: trimmedIdentity, colors: { ...colors }, logoDataUri: nextLogo, design: { ...design }, voice });
       setIdentity(trimmedIdentity);
+      // A new guideline kicks off background extraction; show the reading state
+      // immediately so the card below doesn't sit on the previous voice as if
+      // nothing were happening. The poll effect takes it from here.
+      if (payload.brand_identity !== undefined && payload.brand_voice === undefined) {
+        setVoiceStatus('processing');
+      }
       setSuccess('Brand identity updated successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -332,36 +415,33 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
             </div>
           </div>
 
-          {/* ── Colors ───────────────────────────────────────────── */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="ch">
-              <div>
-                <div className="ct">Brand colors</div>
-                <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
-                  Default colors for report headings and cover pages
-                </div>
-              </div>
-              <span aria-hidden style={{ display: 'inline-flex', borderRadius: 999, overflow: 'hidden', border: '1px solid rgba(0,0,0,.1)' }}>
-                <span style={{ width: 22, height: 14, background: colors.primary }} />
-                <span style={{ width: 22, height: 14, background: colors.secondary }} />
-              </span>
-            </div>
-            <div className="cb">
-              <p className="ob-brand-hint" style={{ marginTop: 0 }}>
-                You can still override these on any individual report.
-              </p>
-              {/* forget() first: a colour the user picked by hand must not be
-                  relabelled as "set from your logo", nor overwritten by a
-                  detection that is still in flight. */}
-              <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0 }}>
-              <BrandColorPicker
-                palettes={palettes}
-                value={colors}
-                onChange={(next) => { logoColors.forget(); setColors(next); }}
-              />
-              </fieldset>
-            </div>
-          </div>
+          <BrandVoiceCard
+            voice={voice}
+            status={voiceStatus}
+            hasGuideline={trimmedIdentity.length > 0}
+            canEdit={canEdit}
+            onChange={setVoice}
+          />
+
+          {/* ── Report design ─────────────────────────────────────
+              Two panes — the settings, and one live page of the result. The
+              card itself is deliberately uncapped: it sits under two
+              full-width siblings, and capping only this one is what left a
+              band of empty page down its right. The measures that the old cap
+              was really protecting now sit on the controls inside it. */}
+          <ReportDesignCard
+            templates={templates}
+            palettes={palettes}
+            colors={colors}
+            design={design}
+            logoUrl={logo?.dataUri ?? null}
+            canEdit={canEdit}
+            // forget() first — a colour picked by hand must not be relabelled
+            // as "set from your logo", nor overwritten by a detection still in
+            // flight.
+            onColorsChange={(next) => { logoColors.forget(); setColors(next); }}
+            onDesignChange={setDesign}
+          />
 
           {error && <Banner tone="error" spaced>{error}</Banner>}
           {success && <Banner tone="success" spaced>{success}</Banner>}

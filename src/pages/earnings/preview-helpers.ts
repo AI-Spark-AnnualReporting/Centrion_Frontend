@@ -1,3 +1,4 @@
+import { readNarrativeEnvelope } from '@/lib/sectionEnvelope';
 import type { EarningsProducedSection } from '@/types/earnings';
 
 // Pure content-shape helpers for the Preview screen. Section `content` arrives as a
@@ -136,19 +137,12 @@ export function normalizeTables(parsed: unknown): NormTable[] {
 // heading + prose block. Without this, the parsed object falls into
 // normalizeTables's generic "plain object → key/value table" branch and
 // prints "heading" / "content" as two table rows instead of real text.
-export interface NarrativeEnvelope {
-  heading: string | null;
-  body: string;
-}
-
-export function readNarrativeEnvelope(content: string): NarrativeEnvelope | null {
-  const parsed = tryParseJson(content);
-  if (!isRecord(parsed)) return null;
-  const body = parsed.content;
-  if (typeof body !== 'string' || body.trim() === '') return null;
-  const heading = typeof parsed.heading === 'string' && parsed.heading.trim() !== '' ? parsed.heading : null;
-  return { heading, body };
-}
+//
+// Moved to src/lib so quarterly can read the same shape with the same rules —
+// it lived under pages/earnings/, out of reach, and quarterly grew a second
+// copy that drifted. Re-exported here so this module's own callers are unchanged.
+export type { NarrativeEnvelope } from '@/lib/sectionEnvelope';
+export { readNarrativeEnvelope };
 
 // A section the backend "produced" but with nothing to say — a fixed
 // boilerplate sentence ("No forward-looking guidance was disclosed in the
