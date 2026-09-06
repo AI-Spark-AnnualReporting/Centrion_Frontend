@@ -165,4 +165,62 @@ describe('SectionContent — explicit columns', () => {
     );
     expect(headers()).toEqual(['Committee', 'Members']);
   });
+
+  // BR32 sends the responsibility text twice: `Experience` cut at 300 per job for
+  // the exported PDF, and `experience_full` uncut. On screen there is no page
+  // width, so the uncut one wins — and it must never become a column of its own.
+  it('prints the uncut text in the cut column, and never as a column', () => {
+    render(
+      <SectionContent
+        section={section({
+          columns: ['Name', 'Experience'],
+          rows: [
+            { Name: 'F. Al-Dosari', Experience: 'Chaired the…', experience_full: 'Chaired the audit committee.' },
+            { Name: 'A. Nasser', Experience: 'Board member.', experience_full: '' },
+          ],
+        })}
+      />,
+    );
+    expect(headers()).toEqual(['Name', 'Experience']);
+    expect(screen.getByText('Chaired the audit committee.')).toBeInTheDocument();
+    expect(screen.queryByText('Chaired the…')).not.toBeInTheDocument();
+    // Empty string, not null, for a director with no work history — the cut
+    // cell still prints rather than blanking.
+    expect(screen.getByText('Board member.')).toBeInTheDocument();
+  });
+
+  // Attendance grids arrive as one row per member and one column per meeting, so
+  // a quarter's worth of meetings runs off the side of the page. Wider than tall
+  // and every cell short → flip it, members across the top.
+  it('flips a short-celled matrix that is wider than it is tall', () => {
+    render(
+      <SectionContent
+        section={section({
+          columns: ['Member', 'Testing (30 Jul 2026)', 'Board meeting (30 Jul 2026)', 'Investor meeting (31 Jul 2026)', 'Annual board meeting (1 Aug 2026)'],
+          rows: [
+            { Member: 'Aizaz', 'Testing (30 Jul 2026)': 'Absent', 'Board meeting (30 Jul 2026)': '—', 'Investor meeting (31 Jul 2026)': 'Present', 'Annual board meeting (1 Aug 2026)': 'Present' },
+            { Member: 'Usama', 'Testing (30 Jul 2026)': 'Present', 'Board meeting (30 Jul 2026)': 'Absent', 'Investor meeting (31 Jul 2026)': '—', 'Annual board meeting (1 Aug 2026)': '—' },
+          ],
+        })}
+      />,
+    );
+    expect(headers()).toEqual(['', 'Aizaz', 'Usama']);
+    expect(screen.getByText('Testing (30 Jul 2026)')).toBeInTheDocument();
+  });
+
+  // The director profiles table is just as wide, but its cells are prose and a
+  // photo — flipping it would turn people into columns.
+  it('leaves a wide table of prose alone', () => {
+    render(
+      <SectionContent
+        section={section({
+          columns: ['Photo', 'Name', 'Job title', 'Company', 'Period', 'Experience'],
+          rows: [
+            { Photo: '', Name: 'F. Al-Dosari', 'Job title': 'Board Member', Company: 'Attock', Period: 'Jan 2025 – Mar 2026', Experience: 'Evaluate technology recommendations where appropriate.' },
+          ],
+        })}
+      />,
+    );
+    expect(headers()).toEqual(['Photo', 'Name', 'Job title', 'Company', 'Period', 'Experience']);
+  });
 });

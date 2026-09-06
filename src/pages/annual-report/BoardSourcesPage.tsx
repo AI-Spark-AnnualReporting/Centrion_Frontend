@@ -6,7 +6,7 @@
 // matched positionally, and only one job may run per report, so uploading on
 // pick would 409 on the second slot.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { boardReports } from '@/lib/api';
 import { startedRun } from '@/lib/run-handle';
@@ -14,8 +14,16 @@ import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import type { BoardSourceSlot, BoardSourcesResponse } from '@/types/board';
+import BoardDirectorPicker from './BoardDirectorPicker';
 import BoardMeetingPicker from './BoardMeetingPicker';
-import { errorMessage, readDuplicateSlots, readExistingRunId } from './board-helpers';
+import {
+  BOARD_PROFILE_SECTIONS,
+  errorMessage,
+  readDuplicateSlots,
+  readExistingRunId,
+  slotReceived,
+  slotSystemKind,
+} from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
 import { useFitFrame } from './useFitFrame';
@@ -28,6 +36,7 @@ import {
   INK,
   LockedNotice,
   MONO,
+  MUTED,
   Notice,
   RED,
   SetupCard,
@@ -218,10 +227,11 @@ export default function BoardSourcesPage() {
   // A file waiting to be sent counts: the gate is "have you got it", not "has
   // the server read it yet".
   const missingRequired = (sources?.slots ?? []).filter(
-    (s) => s.required && s.status !== 'received' && !s.documents.length && !staged[s.slot]?.length,
+    (s) => s.required && !slotReceived(s) && !s.documents.length && !staged[s.slot]?.length,
   );
-  // Meetings rows are saved as they are ticked — nothing about them is staged,
-  // so `status` alone settles whether one is outstanding (handled above).
+  // Meetings rows are saved as they are picked — nothing about them is staged,
+  // so `slotReceived` settles whether one is outstanding.
+  const received = (sources?.slots ?? []).filter(slotReceived).length;
   const readOnly = locked || generated;
   // Nothing moves — not processing, not continuing — while a required document
   // is outstanding. Processing a partial set is what produced half-written
@@ -274,53 +284,44 @@ export default function BoardSourcesPage() {
               <span className="uhead-title">
                 Sources
                 <span className="uhead-count">
-                  {sources.received}/{sources.total}
+                  {received}/{sources.total}
                 </span>
               </span>
               <span
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: sources.received < sources.total ? AMBER : '#16A34A',
+                  color: received < sources.total ? AMBER : '#16A34A',
                 }}
               >
-                {sources.received < sources.total
-                  ? `${sources.total - sources.received} pending`
+                {received < sources.total
+                  ? `${sources.total - received} pending`
                   : 'All received'}
               </span>
             </div>
 
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              {sources.slots.map((slot) =>
-                // Same row, filled a different way: a meetings slot is ticked
-                // from what's already on the platform, never uploaded.
-                slot.kind === 'meetings' ? (
-                  <MeetingSlotRow
-                    key={slot.slot}
-                    reportId={reportId}
-                    slot={slot}
-                    // `locked`, not `readOnly`: a generated report freezes its
-                    // uploaded documents because swapping one would leave the
-                    // produced text describing something else. Picking meetings
-                    // feeds BR35/BR36 only, and those are still needs_input at
-                    // that point — freezing them here is what stranded the
-                    // "Select meetings" prompt on the Review step.
-                    disabled={locked}
-                    onSaved={() => void refetch().catch(() => {})}
-                  />
-                ) : (
-                  <SlotRow
-                    key={slot.slot}
-                    slot={slot}
-                    stagedFiles={staged[slot.slot] ?? []}
-                    duplicate={dupeSlots.includes(slot.slot)}
-                    disabled={readOnly}
-                    onStage={stageFiles}
-                    onUnstage={unstageFile}
-                    onRemove={removeDocument}
-                  />
-                ),
-              )}
+              {sources.slots.map((slot) => (
+                <SlotRow
+                  key={slot.slot}
+                  reportId={reportId}
+                  slot={slot}
+                  stagedFiles={staged[slot.slot] ?? []}
+                  duplicate={dupeSlots.includes(slot.slot)}
+                  disabled={readOnly}
+                  // `locked`, not `readOnly`: a generated report freezes its
+                  // uploaded documents because swapping one would leave the
+                  // produced text describing something else. Picking meetings
+                  // feeds BR35/BR36 only, and those are still needs_input at
+                  // that point — freezing them here is what stranded the
+                  // "Select meetings" prompt on the Review step.
+                  systemDisabled={locked}
+                  onStage={stageFiles}
+                  onUnstage={unstageFile}
+                  onRemove={removeDocument}
+                  onSaved={() => void refetch().catch(() => {})}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -359,28 +360,81 @@ export default function BoardSourcesPage() {
   );
 }
 
+
+// One row per slot, whatever fills it. Most slots take a file; the two meetings
+// slots and the board-profiles slot can also be filled from data already on the
+// platform, so those carry both buttons — and only one of the two at a time,
+// because a section built from a document and from platform rows at once has no
+// single answer to "where did this come from".
 function SlotRow({
+  reportId,
   slot,
   stagedFiles,
   duplicate,
   disabled,
+  systemDisabled,
   onStage,
   onUnstage,
   onRemove,
+  onSaved,
 }: {
+  reportId: string;
   slot: BoardSourceSlot;
   stagedFiles: File[];
   duplicate: boolean;
   disabled: boolean;
+  /** Read-only gate for the platform side — see the call site's comment. */
+  systemDisabled: boolean;
   onStage: (slot: string, files: File[]) => void;
   onUnstage: (slot: string, index: number) => void;
   onRemove: (documentId: string) => void;
+  /** The platform selection changed — the screen refetches its slots. */
+  onSaved: () => void;
 }) {
+  const [mode, setMode] = useState<'system' | 'upload' | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   // Section titles, not codes — "BR04, BR19, BR30" told nobody what this
   // document is for. Three is enough to make the point; the rest are on hover.
   const feedTitles = slot.feeds.map((f) => f.title);
   const feeds = feedTitles.slice(0, 3).join(' · ');
   const moreFeeds = feedTitles.length - 3;
+
+  const systemKind = slotSystemKind(slot);
+  // The server names the section on a meetings slot; on the profiles slot it is
+  // the feed that identifies it.
+  const systemSection =
+    slot.section_code ??
+    slot.feeds.find((f) => BOARD_PROFILE_SECTIONS.includes(f.section_code))?.section_code;
+  const count = slot.selected_count ?? slot.selected_ids?.length ?? 0;
+  // How many the platform holds, when the server says — "2 of 4 selected".
+  const memberCount = slot.member_count;
+  const fedByFile = slot.fed_by === 'documents' && slot.documents.length > 0;
+
+  // Clearing the selection is what hands the section over to the attached file
+  // — the server prefers ticked meetings while any are ticked.
+  // Saved — the panel has nothing left to say, and the row's own count now says
+  // it. Collapse it rather than leaving a live picker over a stale summary.
+  const saved = () => {
+    setMode(null);
+    onSaved();
+  };
+
+  const switchToFile = async () => {
+    if (!slot.section_code) return;
+    setRowError(null);
+    setClearing(true);
+    try {
+      await boardReports.setSectionMeetings(reportId, slot.section_code, { meeting_ids: [] });
+      onSaved();
+    } catch (err: unknown) {
+      setRowError(errorMessage(err, 'Could not clear the meeting selection.'));
+    } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <div
@@ -405,34 +459,112 @@ function SlotRow({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* What the row is actually feeding from — a selection beats an
+              attached file, so the two can disagree and the row has to say
+              which one the section will use. */}
+          {systemKind && fedByFile && (
+            <span
+              style={{ fontSize: 11, fontWeight: 700, color: ACCENT, fontFamily: MONO }}
+              title={slot.documents.map((d) => d.file_name).join(', ')}
+            >
+              from {slot.documents[0]?.file_name}
+            </span>
+          )}
+          {systemKind && !fedByFile && count > 0 && (
+            <span
+              style={{ fontSize: 11, fontWeight: 700, color: ACCENT, fontFamily: MONO }}
+              // The period the selection came from — the count alone doesn't say
+              // which meetings, and the picker has to be opened to find out.
+              title={slot.date_from ? `${slot.date_from} → ${slot.date_to}` : undefined}
+            >
+              {count}
+              {systemKind === 'meetings'
+                ? ` meeting${count === 1 ? '' : 's'} selected`
+                : `${memberCount ? ` of ${memberCount}` : ''} selected`}
+            </span>
+          )}
+          {systemKind && (
+            <button
+              className="btn bs bsm"
+              onClick={() => setMode((m) => (m === 'system' ? null : 'system'))}
+            >
+              {mode === 'system' ? 'Close' : 'From system'}
+            </button>
+          )}
           {/* Always offered, however many are already attached — a register split
               across two files is ordinary, and the old row had no way to say so. */}
-          <label
+          <button
             className="btn bs bsm"
-            style={{
-              cursor: disabled ? 'not-allowed' : 'pointer',
-              marginBottom: 0,
-              opacity: disabled ? 0.55 : 1,
+            disabled={disabled}
+            onClick={() => {
+              setMode('upload');
+              fileRef.current?.click();
             }}
           >
             {stagedFiles.length
               ? 'Add another file'
               : slot.documents.length
                 ? 'Add file'
-                : 'Attach file'}
-            <input
-              type="file"
-              multiple
-              disabled={disabled}
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                onStage(slot.slot, Array.from(e.target.files ?? []));
-                e.target.value = '';
-              }}
-            />
-          </label>
+                : systemKind
+                  ? 'Upload file'
+                  : 'Attach file'}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            disabled={disabled}
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              onStage(slot.slot, Array.from(e.target.files ?? []));
+              e.target.value = '';
+            }}
+          />
         </div>
       </div>
+
+      {rowError && <div style={{ marginTop: 8, fontSize: 11.5, color: RED }}>{rowError}</div>}
+
+      {/* Both filled. The server uses the selection, so the file is dead weight
+          until the selection is cleared — one button does that. */}
+      {systemKind === 'meetings' && count > 0 && slot.documents.length > 0 && (
+        <div
+          style={{
+            marginTop: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            fontSize: 11.5,
+            color: MUTED,
+          }}
+        >
+          The attached file isn’t used while meetings are selected.
+          {!disabled && (
+            <button className="btn bs bsm" disabled={clearing} onClick={() => void switchToFile()}>
+              {clearing ? 'Clearing…' : 'Use the file instead'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {mode === 'system' && systemKind === 'meetings' && slot.section_code && (
+        <BoardMeetingPicker
+          reportId={reportId}
+          sectionCode={slot.section_code}
+          disabled={systemDisabled}
+          onSaved={saved}
+        />
+      )}
+
+      {mode === 'system' && systemKind === 'profiles' && systemSection && (
+        <BoardDirectorPicker
+          reportId={reportId}
+          sectionCode={systemSection}
+          disabled={systemDisabled}
+          onSaved={saved}
+        />
+      )}
 
       {/* Waiting to be sent — one row each, each removable on its own. */}
       {stagedFiles.length > 0 && (
@@ -454,14 +586,17 @@ function SlotRow({
                 {f.name}
               </span>
               <span style={{ fontSize: 10.5, fontFamily: MONO, color: FAINT }}>not yet sent</span>
-              <button className="btn bs bsm" disabled={disabled} onClick={() => onUnstage(slot.slot, i)}>
+              <button
+                className="btn bs bsm"
+                disabled={disabled}
+                onClick={() => onUnstage(slot.slot, i)}
+              >
                 Clear
               </button>
             </div>
           ))}
         </div>
       )}
-
       {slot.documents.length > 0 && (
         <div style={{ marginTop: 9, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {slot.documents.map((d) => (
@@ -502,70 +637,6 @@ function SlotRow({
             </div>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-// A `kind: "meetings"` slot: no file input, no staging — the picker writes
-// straight through and the screen refetches, so the row is either satisfied or
-// it isn't the moment the operator saves.
-function MeetingSlotRow({
-  reportId,
-  slot,
-  disabled,
-  onSaved,
-}: {
-  reportId: string;
-  slot: BoardSourceSlot;
-  disabled: boolean;
-  onSaved: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const feedTitles = slot.feeds.map((f) => f.title);
-  const feeds = feedTitles.slice(0, 3).join(' · ');
-  const moreFeeds = feedTitles.length - 3;
-  const count = slot.selected_count ?? slot.selected_ids?.length ?? 0;
-
-  return (
-    <div style={{ padding: '13px 18px', borderBottom: '1px solid #F4F5FB' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{slot.slot}</span>
-            {slot.required && <span className="badge b-gn">Required</span>}
-          </div>
-          {feeds && (
-            <div style={{ fontSize: 11, color: FAINT, marginTop: 3 }} title={feedTitles.join(' · ')}>
-              Feeds → {feeds}
-              {moreFeeds > 0 && ` + ${moreFeeds} more`}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: count > 0 ? ACCENT : AMBER,
-              fontFamily: MONO,
-            }}
-          >
-            {count} selected
-          </span>
-          <button className="btn bs bsm" onClick={() => setOpen((v) => !v)}>
-            {open ? 'Close' : 'Select meetings'}
-          </button>
-        </div>
-      </div>
-
-      {open && slot.section_code && (
-        <BoardMeetingPicker
-          reportId={reportId}
-          sectionCode={slot.section_code}
-          disabled={disabled}
-          onSaved={onSaved}
-        />
       )}
     </div>
   );

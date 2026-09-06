@@ -453,6 +453,7 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
 
 const TH: React.CSSProperties = {
   padding: '8px 10px',
+  whiteSpace: 'nowrap',
   color: BRAND, // table-header row → brand accent
   fontWeight: 700,
   fontSize: 11,
@@ -622,19 +623,51 @@ function FinancialTable({
   );
 }
 
-function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] }) {
+// ponytail: a matrix of short values (attendance: Present / Absent / —) with more
+// columns than rows runs off the side of the page. Flipping it puts the long axis
+// down the page, where there is room. Short cells only: a profile table has prose
+// and photos, and turning its people into columns would be nonsense. The rule is
+// stable under a payload that already comes the other way round — a tall matrix
+// is left alone — so screen and export can't fight over the orientation.
+function flipMatrix(rows: LooseRow[], cols: string[]): { rows: LooseRow[]; cols: string[] } | null {
+  if (cols.length <= 4 || cols.length <= rows.length) return null;
+  const [label, ...rest] = cols;
+  const heads = rows.map((r) => stringifyCell(r[label]));
+  // The row labels become column keys, so they have to be usable as such.
+  if (heads.some((h) => !h || h === label) || new Set(heads).size !== heads.length) return null;
+  if (rest.some((c) => rows.some((r) => stringifyCell(r[c]).length > 12))) return null;
+  return {
+    // Blank corner: the first column now holds what the header row used to.
+    cols: ['', ...heads],
+    rows: rest.map((c) =>
+      Object.fromEntries([['', c] as [string, unknown], ...rows.map((r, i): [string, unknown] => [heads[i], r[c]])]),
+    ),
+  };
+}
+
+function GenericTable({ rows: given, columns }: { rows: LooseRow[]; columns?: string[] }) {
   // ponytail: the derived fallback is Object.keys order, which puts integer-like
   // keys ("2024", "2025") first regardless of where they sit in the row. Send an
   // explicit `columns` when order matters; fixing the derivation itself is a
   // bigger diff than the bug and no current payload without `columns` hits it.
-  const cols =
+  const givenCols =
     columns ??
     Array.from(
-      rows.reduce((set, r) => {
+      given.reduce((set, r) => {
         Object.keys(r).forEach((k) => set.add(k));
         return set;
       }, new Set<string>()),
     );
+  const flip = flipMatrix(given, givenCols);
+  const rows = flip?.rows ?? given;
+  const cols = flip?.cols ?? givenCols;
+  // What a cell actually prints — the uncut text where the row carries one.
+  const cellText = (r: LooseRow, c: string) => stringifyCell(r[fullKey(c)]) || stringifyCell(r[c]);
+  // ponytail: longest cell decides. A column of dates or titles is kept on one
+  // line; a column of prose gets room and wraps. 24 chars is the eyeballed line
+  // between the two — swap it for a per-column hint if a payload ever needs one.
+  const tight = new Set(cols.filter((c) => rows.every((r) => cellText(r, c).length <= 24)));
+
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
@@ -648,7 +681,20 @@ function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] 
         {rows.map((r, i) => (
           <tr key={i} style={{ borderBottom: '1px solid #F1F2F6' }}>
             {cols.map((c) => (
-              <td key={c} style={{ padding: '9px 10px', color: DARK }}>
+              // A cell can hold one line per job (BR32's Job title / Company /
+              // Period / Experience read across), so keep the newlines and pin
+              // the rows to the top — centred cells break the reading-across.
+              <td
+                key={c}
+                style={{
+                  padding: '9px 10px',
+                  color: DARK,
+                  verticalAlign: 'top',
+                  // `pre` keeps a short column on one line, `pre-line` lets prose
+                  // wrap — both keep the newlines that separate a director's jobs.
+                  whiteSpace: tight.has(c) ? 'pre' : 'pre-line',
+                }}
+              >
                 {isDataImage(r[c]) ? (
                   // A director headshot arrives inline as a data URI — printed
                   // as text it dumps a page of base64 into the table.
@@ -658,7 +704,9 @@ function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] 
                     style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block' }}
                   />
                 ) : (
-                  stringifyCell(r[c])
+                  // The uncut text when the row carries one — the cell is cut
+                  // for the PDF's page width, which the screen doesn't have.
+                  stringifyCell(r[fullKey(c)]) || stringifyCell(r[c])
                 )}
               </td>
             ))}
@@ -668,6 +716,11 @@ function GenericTable({ rows, columns }: { rows: LooseRow[]; columns?: string[] 
     </table>
   );
 }
+
+// The row key holding a cell's uncut text, e.g. "Experience" → experience_full.
+// It is never in `columns`: the cut version exists for the exported PDF, which
+// has a page width — on screen there is nothing to save by hiding it.
+export const fullKey = (col: string) => `${col.toLowerCase().replace(/ /g, '_')}_full`;
 
 function ChangeCell({ value, dir }: { value: unknown; dir: unknown }) {
   const pct = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : null;

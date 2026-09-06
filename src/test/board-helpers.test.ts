@@ -21,6 +21,8 @@ import {
   readDuplicateSlots,
   readCompletionFromError,
   readExistingRunId,
+  slotReceived,
+  slotSystemKind,
 } from '@/pages/annual-report/board-helpers';
 
 const outlineSection = (over: Partial<BoardOutlineSection>): BoardOutlineSection => ({
@@ -378,5 +380,45 @@ describe('error-body readers', () => {
   it('returns null for a 409 that is not a completion payload', () => {
     expect(readCompletionFromError(conflict({ detail: 'Report is locked' }))).toBeNull();
     expect(readCompletionFromError(new ApiError(500, 'Server Error', {}, '/x'))).toBeNull();
+  });
+});
+
+describe('slotSystemKind', () => {
+  const feed = (section_code: string) => ({
+    section_code,
+    title: 'x',
+    requirement: 'M' as const,
+    on_missing: 'block' as const,
+  });
+
+  it('reads the kind the server sent for a meetings slot', () => {
+    expect(slotSystemKind(slot({ kind: 'meetings', section_code: 'BR35' }))).toBe('meetings');
+  });
+
+  it('spots the profiles slot by the section it feeds, not by its name', () => {
+    // The slot is called "Board member profiles / CVs" today and will be
+    // reworded; BR32 is the registry's and will not.
+    expect(slotSystemKind(slot({ slot: 'Anything at all', feeds: [feed('BR32')] }))).toBe('profiles');
+  });
+
+  it('leaves an ordinary document slot upload-only', () => {
+    expect(slotSystemKind(slot({ feeds: [feed('BR19')] }))).toBeNull();
+    // `kind` is omitted entirely on document rows.
+    expect(slotSystemKind(slot({}))).toBeNull();
+  });
+});
+
+describe('slotReceived', () => {
+  it('counts a meetings slot with a saved selection, whatever its status says', () => {
+    expect(slotReceived(slot({ kind: 'meetings', selected_count: 3 }))).toBe(true);
+    expect(slotReceived(slot({ kind: 'meetings', selected_ids: ['a', 'b'] }))).toBe(true);
+    // Otherwise the row says "3 selected" while the counter says 0 received and
+    // Continue stays blocked.
+    expect(slotReceived(slot({ kind: 'meetings', selected_count: 0 }))).toBe(false);
+  });
+
+  it('still defers to the server for a document slot', () => {
+    expect(slotReceived(slot({ status: 'received' }))).toBe(true);
+    expect(slotReceived(slot({}))).toBe(false);
   });
 });

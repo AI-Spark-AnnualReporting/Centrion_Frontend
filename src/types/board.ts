@@ -117,6 +117,13 @@ export interface BoardSourceSlot {
   /** Meetings slots only. */
   selected_ids?: string[];
   selected_count?: number;
+  /** Meetings/profiles slots — how many the platform holds, for "2 of 4". */
+  member_count?: number;
+  /** What the slot is actually feeding its sections from. A selection wins. */
+  fed_by?: "meetings" | "documents" | null;
+  /** Meetings slots — the saved period the selection was resolved from. */
+  date_from?: string | null;
+  date_to?: string | null;
 }
 
 // ─── meeting picker (BR35 / BR36) ─────────────────────────────────────────────
@@ -149,6 +156,29 @@ export interface BoardMeetingsResponse {
   meeting_types: string[];
   selected_ids: string[];
   meetings: BoardMeeting[];
+  /** How many of `meetings` would actually print — the rest have no minutes. */
+  with_minutes_count?: number;
+  /** The period already saved for this section, if any. Seeds the date inputs. */
+  saved_period?: { date_from: string; date_to: string } | null;
+}
+
+// ─── director picker (BR32) ───────────────────────────────────────────────────
+
+export interface BoardDirector {
+  id: string;
+  full_name: string;
+  title?: string | null;
+  position_type?: string | null;
+  /** False → the person still gets a table row, just an empty CV cell. */
+  has_cv: boolean;
+  has_photo: boolean;
+  cv_file_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardDirectorsResponse {
+  selected_ids: string[];
+  directors: BoardDirector[];
 }
 
 export interface BoardSourcesResponse {
@@ -257,6 +287,13 @@ export interface BoardSectionFeeder {
   refined?: boolean;
 }
 
+/**
+ * How a section prints. `table` (or absent) is the generic table renderer; the
+ * `cards_*` values are the profile-card layouts BR32 offers. Saved on the
+ * section so the exported PDF matches the screen.
+ */
+export type BoardSectionLayout = "table" | "cards_grid" | "cards_band" | "cards_row";
+
 export interface BoardSection {
   section_code: string;
   title: string;
@@ -270,6 +307,8 @@ export interface BoardSection {
   /** Prose sections hold text; the rest hold JSON as a string. */
   content: string | null;
   feeder?: BoardSectionFeeder | null;
+  /** Absent/null on a server without the layout choice — read it as `table`. */
+  layout?: BoardSectionLayout | null;
 }
 
 export interface BoardSectionsResponse {

@@ -1,21 +1,19 @@
-// Board report · step 1 — the meetings picker behind a `kind: "meetings"` slot.
+// Board report · step 1 — the meetings behind a `kind: "meetings"` slot.
 //
 // BR35 (board & committee) and BR36 (general assembly) aren't filled by
-// uploading anything: the meetings are already on the platform, so the operator
-// ticks which of them the section is built from. PUT replaces the whole list —
-// there is no add/remove endpoint — and the Sources screen refetches afterwards
-// exactly as it does after an upload.
+// uploading anything: the meetings are already on the platform. The operator
+// picks a period and every meeting held in it goes into the section — there is
+// no per-meeting judgement to make, so no list is offered. Saving PUTs the
+// window itself; the server resolves it, drops the meetings with no minutes and
+// answers with what will print. The Sources screen refetches afterwards exactly
+// as it does after an upload.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, boardReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
 import type { BoardMeetingFilters, BoardMeetingsResponse } from '@/types/board';
 import { errorMessage } from './board-helpers';
 import { ACCENT, BORDER, BORDER_SOFT, FAINT, INK, MONO, MUTED, RED } from './board-ui';
-
-// Omitting a date doesn't widen the range — the server falls back to the
-// report's fiscal year — so "every date" has to be asked for explicitly.
-const ALL_DATES = { date_from: '1990-01-01', date_to: '2100-12-31' };
 
 /**
  * Set or clear one date bound. Clearing drops the key entirely rather than
@@ -33,8 +31,6 @@ function setDate(
   return next;
 }
 
-const label = (t: string) => t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-
 export default function BoardMeetingPicker({
   reportId,
   sectionCode,
@@ -48,17 +44,16 @@ export default function BoardMeetingPicker({
   onSaved: () => void;
 }) {
   // The user's overrides only — a key that isn't here is left to the server's
-  // default and displayed from the `filters` it echoes back.
-  //
-  // `meeting_type` is overridden from the start: the server defaults to
-  // `board_meeting`, which is the wrong list for BR36 (a general assembly is not
-  // a board meeting, so that row opened on an empty list every time). Start wide
-  // and let the operator narrow.
+  // default and displayed from the `filters` it echoes back. `meeting_type` is
+  // always `all`: the section decides what it accepts, and the server's
+  // `board_meeting` default is the wrong list for BR36.
   const [filters, setFilters] = useState<BoardMeetingFilters>({ meeting_type: 'all' });
   const [data, setData] = useState<BoardMeetingsResponse | null>(null);
-  const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // What the last save actually stored, until the next load says otherwise.
+  const [justSaved, setJustSaved] = useState<number | null>(null);
+  const seeded = useRef(false);
 
   const load = useCallback(
     async (f: BoardMeetingFilters) => {
@@ -66,9 +61,12 @@ export default function BoardMeetingPicker({
       try {
         const res = await boardReports.getSectionMeetings(reportId, sectionCode, f);
         setData(res);
-        // The server's selection is the truth on every load — a stale local tick
-        // would silently un-select a meeting on the next save.
-        setTicked(new Set(res.selected_ids ?? []));
+        // Adopt the saved period once, so the dates on screen are the ones the
+        // section is actually built from — and the preview below matches them.
+        if (!seeded.current) {
+          seeded.current = true;
+          if (res.saved_period) setFilters((prev) => ({ ...prev, ...res.saved_period }));
+        }
       } catch (err: unknown) {
         setError(errorMessage(err, 'Could not load the meetings.'));
       }
@@ -80,17 +78,24 @@ export default function BoardMeetingPicker({
     void load(filters);
   }, [load, filters]);
 
+  // The period itself is the selection. Never called on an empty one — the
+  // button is off, so a mis-typed date can't wipe a saved selection.
   const save = async () => {
+    if (!data) return;
     setSaving(true);
     setError(null);
     try {
-      await boardReports.setSectionMeetings(reportId, sectionCode, [...ticked]);
+      const res = await boardReports.setSectionMeetings(reportId, sectionCode, {
+        date_from: from,
+        date_to: to,
+      });
+      setJustSaved(res.count);
       onSaved();
     } catch (err: unknown) {
-      // 404 — one of the ids isn't this company's meeting any more. Reloading is
-      // the fix; retrying the same list would just 404 again.
-      if (err instanceof ApiError && err.status === 404) {
-        setError('One of those meetings is no longer available — the list has been refreshed.');
+      // 400 — the server wouldn't take that window. Reloading shows what it does
+      // hold; retrying the same dates would just 400 again.
+      if (err instanceof ApiError && err.status === 400) {
+        setError('The server would not accept that period — check the dates.');
         await load(filters);
       } else {
         setError(errorMessage(err, 'Could not save that selection.'));
@@ -100,19 +105,19 @@ export default function BoardMeetingPicker({
     }
   };
 
-  const toggle = (id: string) =>
-    setTicked((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-
-  const types = data?.meeting_types ?? [];
   // What a control shows: the operator's own value where they set one, otherwise
   // whatever the server said it filtered on. Never the raw echo — the server
   // re-asserts its defaults, so a cleared date would spring back on the reload.
   const shown = <K extends keyof BoardMeetingFilters>(k: K): string =>
     (k in filters ? filters[k] : data?.filters?.[k]) ?? '';
+
+  const from = shown('date_from');
+  const to = shown('date_to');
+  const inPeriod = data?.meetings.length ?? 0;
+  // Meetings with no minutes are dropped server-side, so this — not the window
+  // size — is what the section will contain.
+  const willPrint = data?.with_minutes_count ?? inPeriod;
+  const saved = justSaved ?? data?.selected_ids?.length ?? 0;
 
   return (
     <div
@@ -134,19 +139,7 @@ export default function BoardMeetingPicker({
           borderBottom: `1px solid ${BORDER_SOFT}`,
         }}
       >
-        <select
-          className="inp"
-          value={shown('meeting_type') || 'all'}
-          onChange={(e) => setFilters((f) => ({ ...f, meeting_type: e.target.value }))}
-          style={{ fontSize: 12, padding: '6px 8px', width: 'auto' }}
-        >
-          <option value="all">All types</option>
-          {types.map((t) => (
-            <option key={t} value={t}>
-              {label(t)}
-            </option>
-          ))}
-        </select>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: INK }}>Pick duration</span>
         {/* Native date inputs — no picker library for two dates. */}
         <input
           type="date"
@@ -164,18 +157,20 @@ export default function BoardMeetingPicker({
           style={{ fontSize: 12, padding: '6px 8px', width: 'auto' }}
         />
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: FAINT }}>{ticked.size} selected</span>
-        <button className="btn bp bsm" disabled={disabled || saving || !data} onClick={save}>
+        <button
+          className="btn bp bsm"
+          disabled={disabled || saving || !data || willPrint === 0 || !from || !to}
+          title={data && willPrint === 0 ? 'No minutes in this period' : undefined}
+          onClick={save}
+        >
           {saving ? 'Saving…' : 'Save selection'}
         </button>
       </div>
 
-      {error && (
-        <div style={{ padding: '8px 12px', fontSize: 11.5, color: RED }}>{error}</div>
-      )}
+      {error && <div style={{ padding: '8px 12px', fontSize: 11.5, color: RED }}>{error}</div>}
 
-      {/* Filtering stays live so the selection can still be read — but nothing
-          can be changed, and a dead checkbox with no explanation reads as a bug. */}
+      {/* Dates stay live so the period can still be read — but nothing can be
+          changed, and a dead Save button with no explanation reads as a bug. */}
       {disabled && (
         <div style={{ padding: '8px 12px', fontSize: 11.5, color: MUTED }}>
           This report is approved, so its meeting selection is read-only.
@@ -184,73 +179,30 @@ export default function BoardMeetingPicker({
 
       {!data ? (
         <Spinner pad={24} />
-      ) : data.meetings.length === 0 ? (
-        // The dates default to the report's fiscal year, so a company whose
-        // meetings sit outside it opens on an empty list with no obvious way
-        // out. One click drops every filter.
-        <div
-          style={{
-            padding: '16px 12px',
-            fontSize: 12,
-            color: MUTED,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span>No meetings match those filters.</span>
-          <button
-            className="btn bs bsm"
-            onClick={() => setFilters({ meeting_type: 'all', ...ALL_DATES })}
-          >
-            Show all meetings
-          </button>
-        </div>
       ) : (
-        <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-          {data.meetings.map((m) => (
-            <label
-              key={m.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                padding: '9px 12px',
-                borderBottom: `1px solid ${BORDER_SOFT}`,
-                cursor: disabled ? 'not-allowed' : 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={ticked.has(m.id)}
-                disabled={disabled}
-                onChange={() => toggle(m.id)}
-                style={{ marginTop: 2 }}
-              />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{m.title}</span>
-                <span style={{ display: 'block', fontSize: 11, color: FAINT, marginTop: 2 }}>
-                  <span style={{ fontFamily: MONO }}>{m.meeting_date}</span> · {label(m.meeting_type)} ·{' '}
-                  {m.participant_count} participant{m.participant_count === 1 ? '' : 's'}
-                  {m.attendance_recorded ? ' · attendance recorded' : ''}
+        <div style={{ padding: '14px 12px', fontSize: 12, color: MUTED }}>
+          {willPrint > 0 ? (
+            <>
+              <span style={{ fontFamily: MONO, fontWeight: 700, color: ACCENT }}>{willPrint}</span>{' '}
+              meeting{willPrint === 1 ? '' : 's'} will be included.{' '}
+              {inPeriod > willPrint && (
+                <span style={{ color: FAINT }}>
+                  {inPeriod - willPrint} other{inPeriod - willPrint === 1 ? '' : 's'} in this period
+                  have no minutes.{' '}
                 </span>
-              </span>
-              {/* The one thing worth seeing before ticking: a meeting with no
-                  minutes adds a line to the register and nothing else. */}
-              <span
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  color: m.has_minutes ? ACCENT : FAINT,
-                  flexShrink: 0,
-                }}
-                title={m.minutes_attachment_name ?? undefined}
-              >
-                {m.has_minutes ? m.minutes_attachment_name || 'Minutes' : 'No minutes'}
-              </span>
-            </label>
-          ))}
+              )}
+              {saved > 0 && (
+                <span style={{ color: FAINT }}>
+                  {saved} currently saved — Save selection replaces it.
+                </span>
+              )}
+            </>
+          ) : (
+            <span>
+              No minutes in this period. Widen the dates, or close this and upload the minutes
+              instead.
+            </span>
+          )}
         </div>
       )}
     </div>

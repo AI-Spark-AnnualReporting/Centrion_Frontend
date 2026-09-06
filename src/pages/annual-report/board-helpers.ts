@@ -22,6 +22,7 @@ import type {
   BoardReportSummary,
   BoardRequirement,
   BoardSection,
+  BoardSourceSlot,
   BoardSourcesResponse,
 } from '@/types/board';
 import type { ProducedSection } from '@/types/quarterly';
@@ -89,6 +90,15 @@ export function profileFromCompany(
  * dump the operator back on Profile — pick the furthest step its server state
  * justifies.
  */
+/**
+ * Whether a slot's requirement is met. A meetings slot is met by its saved
+ * selection: the server sets `status: received` for that too, but the row shows
+ * the count, and a row reading "11 selected" over a counter reading 0/12 is the
+ * screen contradicting itself.
+ */
+export const slotReceived = (s: Pick<BoardSourceSlot, 'status' | 'selected_count' | 'selected_ids'>) =>
+  s.status === 'received' || (s.selected_count ?? s.selected_ids?.length ?? 0) > 0;
+
 export function initialStep(
   report: Pick<BoardReportSummary, 'status'> | null,
   sources: Pick<BoardSourcesResponse, 'slots'> | null,
@@ -97,7 +107,7 @@ export function initialStep(
   if (report && report.status !== 'draft') return 4;
   if (outline?.some((s) => s.status === 'produced' || s.status === 'locked')) return 4;
   const required = sources?.slots.filter((s) => s.required) ?? [];
-  if (required.length > 0 && required.every((s) => s.status === 'received')) return 3;
+  if (required.length > 0 && required.every(slotReceived)) return 3;
   return 1;
 }
 
@@ -208,6 +218,49 @@ export const BOARD_COMPANY_VOICE = ['BR02', 'BR03', 'BR04'];
  * are `needs_input` until a meeting is selected, and no upload will fix that.
  */
 export const BOARD_MEETING_SECTIONS = ['BR35', 'BR36'];
+
+/**
+ * The sections built from the director profiles already on the platform — CVs
+ * and headshots come from the team records, not from a document.
+ */
+export const BOARD_PROFILE_SECTIONS = ['BR32'];
+
+/** The three profile-card layouts BR32 can print in. */
+export type BoardCardVariant = 'grid' | 'band' | 'row';
+
+/**
+ * The card layout this section prints in, or null for the table.
+ *
+ * Section code as well as layout: only the profile sections have cards to
+ * render, so a stray `cards_*` on any other section stays a table rather than
+ * being fed to a renderer that expects director rows.
+ */
+export function boardCardVariant(s: Pick<BoardSection, 'section_code' | 'layout'>): BoardCardVariant | null {
+  if (!BOARD_PROFILE_SECTIONS.includes(s.section_code)) return null;
+  const v = s.layout?.startsWith('cards_') ? s.layout.slice(6) : null;
+  return v === 'grid' || v === 'band' || v === 'row' ? v : null;
+}
+
+/**
+ * Sections filled by a picker on the Sources step rather than by an upload.
+ * Each is `needs_input` until a selection is saved, and no document will fix it.
+ */
+export const BOARD_PLATFORM_SECTIONS = [...BOARD_MEETING_SECTIONS, ...BOARD_PROFILE_SECTIONS];
+
+/** Which platform data a slot can be filled from instead of a file, if any. */
+export type SlotSystemKind = 'meetings' | 'profiles' | null;
+
+/**
+ * Whether this slot offers a "From system" alternative to uploading.
+ *
+ * Read off the feeds' section codes rather than the slot's name: the name is
+ * display text and gets reworded, the codes are the registry's.
+ */
+export function slotSystemKind(slot: BoardSourceSlot): SlotSystemKind {
+  if (slot.kind === 'meetings') return 'meetings';
+  if (slot.feeds.some((f) => BOARD_PROFILE_SECTIONS.includes(f.section_code))) return 'profiles';
+  return null;
+}
 
 /**
  * Whether the Refine control applies. Narrative content is now lifted verbatim
