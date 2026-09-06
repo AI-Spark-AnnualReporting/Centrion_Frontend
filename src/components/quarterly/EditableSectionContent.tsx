@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { readNarrativeEnvelope, writeNarrativeEnvelope } from '@/lib/sectionEnvelope';
 import type { ProducedSection } from '@/types/quarterly';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { asStringArray } from '@/components/quarterly/sectionState';
@@ -61,12 +62,22 @@ export function EditableSectionContent({
       />
     );
   }
+  // A narrative section stores {heading, content} as a JSON string — the report
+  // prints that heading above the paragraph. Edit the prose and the heading as
+  // two fields; the textarea used to be seeded with the raw JSON, and saving it
+  // back silently destroyed the heading (or the whole envelope). A section that
+  // is NOT an envelope — plain prose, or JSON already broken by hand — still
+  // opens on its raw string, so it stays fixable.
+  const envelope = readNarrativeEnvelope(section.content);
   return (
     <ProseEditor
-      value={section.content ?? ''}
+      value={envelope ? envelope.body : (section.content ?? '')}
+      heading={envelope ? envelope.heading : undefined}
       saving={saving}
       error={error}
-      onSave={onSave}
+      onSave={(body, heading) =>
+        onSave(envelope ? writeNarrativeEnvelope(section.content, heading, body) : body)
+      }
       onCancel={onCancel}
     />
   );
@@ -75,23 +86,31 @@ export function EditableSectionContent({
 // ─── prose editor (blur / ⌘-Enter save · Esc cancel) ──────────────────────────
 function ProseEditor({
   value,
+  heading: initialHeading,
   saving,
   error,
   onSave,
   onCancel,
 }: {
   value: string;
+  /** undefined for a plain-prose section — it has no heading to edit. */
+  heading?: string | null;
   saving: boolean;
   error: string | null;
-  onSave: (v: string) => void;
+  onSave: (body: string, heading: string | null) => void;
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(value);
+  const [heading, setHeading] = useState<string | null>(initialHeading ?? null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const headingRef = useRef<HTMLInputElement>(null);
   const cancelledRef = useRef(false);
+  const hasHeading = initialHeading !== undefined;
+  const headingChanged = (heading ?? '') !== (initialHeading ?? '');
 
   useEffect(() => {
     setDraft(value);
+    setHeading(initialHeading ?? null);
     cancelledRef.current = false;
     requestAnimationFrame(() => {
       const el = taRef.current;
@@ -102,10 +121,49 @@ function ProseEditor({
         el.setSelectionRange(el.value.length, el.value.length);
       }
     });
-  }, [value]);
+  }, [value, initialHeading]);
+
+  const commit = () => {
+    const t = draft.trim();
+    if (!t) return;
+    onSave(t, hasHeading ? (heading ?? '').trim() || null : null);
+  };
 
   return (
     <div>
+      {/* Only when the section actually carries one — offering an empty box on
+          plain prose would invent a shape the producer never wrote. */}
+      {hasHeading && (
+        <input
+          ref={headingRef}
+          value={heading ?? ''}
+          disabled={saving}
+          placeholder="Section heading"
+          onChange={(e) => setHeading(e.target.value)}
+          onBlur={(e) => {
+            if (cancelledRef.current || saving) return;
+            if (e.relatedTarget && e.relatedTarget === taRef.current) return;
+            if (draft.trim() && (draft.trim() !== value || headingChanged)) commit();
+            else onCancel();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelledRef.current = true;
+              onCancel();
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              taRef.current?.focus();
+            }
+          }}
+          style={{
+            width: '100%', padding: '9px 14px', marginBottom: 8, borderRadius: 8,
+            border: `1.5px solid ${ACCENT}`, fontSize: 13, fontWeight: 700,
+            color: DARK, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+            background: '#fff',
+          }}
+        />
+      )}
       <textarea
         ref={taRef}
         value={draft}
@@ -115,10 +173,13 @@ function ProseEditor({
           e.target.style.height = 'auto';
           e.target.style.height = `${e.target.scrollHeight}px`;
         }}
-        onBlur={() => {
+        onBlur={(e) => {
           if (cancelledRef.current || saving) return;
+          // Moving up to the heading field is not leaving the editor; committing
+          // there would close it before the heading could be typed.
+          if (e.relatedTarget && e.relatedTarget === headingRef.current) return;
           const t = draft.trim();
-          if (t && t !== value) onSave(t);
+          if (t && (t !== value || headingChanged)) commit();
           else onCancel();
         }}
         onKeyDown={(e) => {
@@ -128,7 +189,7 @@ function ProseEditor({
             onCancel();
           } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            if (draft.trim()) onSave(draft.trim());
+            commit();
           }
         }}
         rows={4}
@@ -147,9 +208,9 @@ function ProseEditor({
             mark the section hand-edited, which then makes produce skip it. */}
         <button
           className="btn bp"
-          disabled={saving || !draft.trim() || draft.trim() === value.trim()}
+          disabled={saving || !draft.trim() || (draft.trim() === value.trim() && !headingChanged)}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onSave(draft.trim())}
+          onClick={commit}
           style={{ fontSize: 12.5, padding: '8px 18px' }}
         >
           {saving ? 'Saving…' : 'Save'}
