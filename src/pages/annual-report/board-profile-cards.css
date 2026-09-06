@@ -42,6 +42,10 @@
 
 .bpc-photo {
   object-fit: cover;
+  /* Anchored to the top, not the middle. A headshot is portrait and the face
+     sits in its upper third; the grid photo's box is a 321x158 letterbox, so a
+     centred crop lands on the chin and throat and cuts the face off. */
+  object-position: center top;
   display: block;
 }
 .bpc-initials {
