@@ -10,17 +10,16 @@
 // The three variants differ only in how the cards are arranged on the page, so
 // the card's own content is written once. Modelled on CoverRenderer, which
 // likewise renders one payload three ways.
+//
+// Every visual value lives in board-profile-cards.css, not here: the exporter
+// renders the PDF and DOCX from that same file, and a style written inline would
+// be a style the download doesn't have.
 
-import type { ReactNode } from 'react';
 import { SectionContent } from '@/components/quarterly/SectionContent';
 import { fullKey, isDataImage } from '@/components/quarterly/sectionState';
 import type { ProducedSection } from '@/types/quarterly';
 import type { BoardCardVariant } from './board-helpers';
-import { BORDER_SOFT, FAINT, INK, MUTED } from './board-ui';
-
-// Report content follows the report's chosen brand colour, exactly as the table
-// headers do (see SectionContent).
-const BRAND = 'var(--brand-primary, #4040C8)';
+import './board-profile-cards.css';
 
 // The columns `jobs` replaces. Everything else the payload lists becomes a
 // labelled block of its own — dormant today, but a Qualifications or Memberships
@@ -81,7 +80,7 @@ export default function BoardProfileCards({
 
   if (variant === 'grid') {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(232px, 1fr))', gap: 18 }}>
+      <div className="bpc-grid">
         {parsed.rows.map((r, i) => (
           <GridCard key={i} row={r} blockCols={blockCols} />
         ))}
@@ -90,7 +89,7 @@ export default function BoardProfileCards({
   }
   if (variant === 'band') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <div className="bpc-stack">
         {parsed.rows.map((r, i) => (
           <BandCard key={i} row={r} blockCols={blockCols} />
         ))}
@@ -98,7 +97,7 @@ export default function BoardProfileCards({
     );
   }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="bpc-stack bpc-stack--rows">
       {parsed.rows.map((r, i) => (
         <RowCard key={i} row={r} blockCols={blockCols} />
       ))}
@@ -124,16 +123,14 @@ const jobLine = (j: Job) =>
 function Block({ label, values }: { label: string; values: string[] }) {
   if (!values.length) return null;
   return (
-    <div style={{ breakInside: 'avoid', marginBottom: 12 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: BRAND, marginBottom: 3 }}>{label}:</div>
+    <div className="bpc-block">
+      <div className="bpc-label">{label}:</div>
       {values.length === 1 ? (
-        <div style={{ fontSize: 12.5, color: INK, lineHeight: 1.5 }}>{values[0]}</div>
+        <div className="bpc-value">{values[0]}</div>
       ) : (
-        <ol style={{ margin: '2px 0 0', paddingLeft: 24, fontSize: 12.5, color: INK, lineHeight: 1.45 }}>
+        <ol className="bpc-list">
           {values.map((v, i) => (
-            <li key={i} style={{ marginBottom: 3 }}>
-              {v}
-            </li>
+            <li key={i}>{v}</li>
           ))}
         </ol>
       )}
@@ -169,10 +166,10 @@ const isEmpty = (row: Row, blockCols: string[]) =>
  * The headshot, or the director's initials when the row has none — a person
  * with no photo still gets a card the same size as everyone else's.
  */
-function Photo({ row, style }: { row: Row; style: React.CSSProperties }) {
+function Photo({ row, className }: { row: Row; className: string }) {
   const photo = row.Photo;
   if (isDataImage(photo)) {
-    return <img src={photo as string} alt="" style={{ ...style, objectFit: 'cover', display: 'block' }} />;
+    return <img className={`bpc-photo ${className}`} src={photo as string} alt="" />;
   }
   const initials = str(row.Name)
     .split(/\s+/)
@@ -180,115 +177,39 @@ function Photo({ row, style }: { row: Row; style: React.CSSProperties }) {
     .map((w) => w[0] ?? '')
     .join('')
     .toUpperCase();
-  return (
-    <div
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#F2F3FA',
-        color: FAINT,
-        fontSize: 28,
-        fontWeight: 800,
-      }}
-    >
-      {initials || '—'}
-    </div>
-  );
+  return <div className={`bpc-initials ${className}`}>{initials || '—'}</div>;
 }
 
 const name = (row: Row) => str(row.Name) || '—';
 
 /** Nothing recorded for this person yet — say so rather than leave a blank card. */
-function Nothing() {
-  return (
-    <div style={{ fontSize: 12, color: FAINT, fontStyle: 'italic' }}>
-      No positions recorded for this board member.
-    </div>
-  );
-}
-
-function shell(children: ReactNode, extra?: React.CSSProperties) {
-  return (
-    <article
-      style={{
-        border: `1px solid ${BORDER_SOFT}`,
-        borderRadius: 12,
-        background: '#fff',
-        overflow: 'hidden',
-        breakInside: 'avoid',
-        ...extra,
-      }}
-    >
-      {children}
-    </article>
-  );
-}
+const Nothing = () => <div className="bpc-empty">No positions recorded for this board member.</div>;
 
 // ─── grid: photo on top, name in a brand strip ────────────────────────────────
 
 function GridCard({ row, blockCols }: { row: Row; blockCols: string[] }) {
-  const empty = isEmpty(row, blockCols);
-  return shell(
-    <>
-      <Photo row={row} style={{ width: '100%', height: 158 }} />
-      <div
-        style={{
-          background: BRAND,
-          color: '#fff',
-          padding: '8px 12px',
-          fontSize: 13.5,
-          fontWeight: 700,
-        }}
-      >
-        {name(row)}
+  return (
+    <article className="bpc-card">
+      <Photo row={row} className="bpc-grid-photo" />
+      <div className="bpc-name-strip">{name(row)}</div>
+      <div className="bpc-card-body">
+        {isEmpty(row, blockCols) ? <Nothing /> : <Blocks row={row} blockCols={blockCols} />}
       </div>
-      <div style={{ padding: '12px 12px 2px' }}>
-        {empty ? <Nothing /> : <Blocks row={row} blockCols={blockCols} />}
-      </div>
-    </>,
+    </article>
   );
 }
 
-// ─── band: photo top-left, name across a dark strip, blocks in two columns ────
+// ─── band: the photo stands over a brand banner, blocks in two columns ───────
 
 function BandCard({ row, blockCols }: { row: Row; blockCols: string[] }) {
-  const empty = isEmpty(row, blockCols);
   return (
-    <article style={{ breakInside: 'avoid' }}>
-      {/* The photo stands taller than the banner and overlaps it, which is what
-          makes this read as the printed board section rather than a card. The
-          padding above the banner is the overhang. */}
-      <div style={{ position: 'relative', paddingTop: 46 }}>
-        <div
-          style={{
-            height: 84,
-            display: 'flex',
-            alignItems: 'center',
-            paddingLeft: 180,
-            paddingRight: 16,
-            color: '#fff',
-            fontSize: 15,
-            fontWeight: 700,
-            lineHeight: 1.3,
-            // The company's own colour, fading out to the right so the page shows
-            // through — the reference's grey banner, in the report's brand. The
-            // scrim over the left is what keeps the name legible on a pale brand,
-            // which a hex we don't have here couldn't be tested for.
-            background: `linear-gradient(90deg, rgba(0,0,0,.42) 0%, rgba(0,0,0,.12) 46%, transparent 100%),
-                         linear-gradient(90deg, ${BRAND} 0%, ${BRAND} 52%, transparent 100%)`,
-            borderBottom: `3px solid var(--brand-secondary, ${BRAND})`,
-          }}
-        >
-          {name(row)}
-        </div>
-        <Photo row={row} style={{ position: 'absolute', left: 10, bottom: 3, width: 150, height: 127 }} />
+    <article className="bpc-band">
+      <div className="bpc-band-head">
+        <div className="bpc-banner">{name(row)}</div>
+        <Photo row={row} className="bpc-band-photo" />
       </div>
-
-      {/* Two columns the content flows down, one block never split across them. */}
-      <div style={{ padding: '16px 2px 0', columns: 2, columnGap: 40 }}>
-        {empty ? <Nothing /> : <Blocks row={row} blockCols={blockCols} />}
+      <div className="bpc-cols">
+        {isEmpty(row, blockCols) ? <Nothing /> : <Blocks row={row} blockCols={blockCols} />}
       </div>
     </article>
   );
@@ -297,32 +218,21 @@ function BandCard({ row, blockCols }: { row: Row; blockCols: string[] }) {
 // ─── row: photo left, everything else right ──────────────────────────────────
 
 function RowCard({ row, blockCols }: { row: Row; blockCols: string[] }) {
-  const empty = isEmpty(row, blockCols);
-  return shell(
-    <div style={{ display: 'flex', gap: 18, padding: 16, alignItems: 'flex-start' }}>
-      <Photo row={row} style={{ width: 132, height: 132, borderRadius: 8, flex: '0 0 auto' }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 16,
-            fontWeight: 700,
-            color: INK,
-            borderBottom: `2px solid ${BRAND}`,
-            paddingBottom: 7,
-            marginBottom: 12,
-          }}
-        >
-          {name(row)}
+  return (
+    <article className="bpc-card">
+      <div className="bpc-row">
+        <Photo row={row} className="bpc-row-photo" />
+        <div className="bpc-row-main">
+          <div className="bpc-row-name">{name(row)}</div>
+          {isEmpty(row, blockCols) ? (
+            <Nothing />
+          ) : (
+            <div className="bpc-row-cols">
+              <Blocks row={row} blockCols={blockCols} />
+            </div>
+          )}
         </div>
-        {empty ? (
-          <Nothing />
-        ) : (
-          // Same two columns as the band, without the photo taking the first one.
-          <div style={{ columns: 2, columnGap: 28, color: MUTED }}>
-            <Blocks row={row} blockCols={blockCols} />
-          </div>
-        )}
       </div>
-    </div>,
+    </article>
   );
 }
