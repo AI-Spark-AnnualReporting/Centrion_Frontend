@@ -5,7 +5,7 @@ import type { ProducedSection } from '@/types/quarterly';
 import type { DocumentBankResponse } from '@/types/report';
 import { documents } from '@/lib/api';
 import { readNarrativeEnvelope } from '@/lib/sectionEnvelope';
-import { asStringArray, isDataImage } from '@/components/quarterly/sectionState';
+import { asStringArray, fullKey, isDataImage } from '@/components/quarterly/sectionState';
 // One shared rule for reading a figure's units, also used by the extraction screen
 // and mirrored in report_export.py — the screen and the download must agree.
 import { deriveUnits, gridValue, unitsCaption } from './figureUnits';
@@ -722,11 +722,6 @@ function GenericTable({ rows: given, columns }: { rows: LooseRow[]; columns?: st
     </table>
   );
 }
-
-// The row key holding a cell's uncut text, e.g. "Experience" → experience_full.
-// It is never in `columns`: the cut version exists for the exported PDF, which
-// has a page width — on screen there is nothing to save by hiding it.
-export const fullKey = (col: string) => `${col.toLowerCase().replace(/ /g, '_')}_full`;
 
 function ChangeCell({ value, dir }: { value: unknown; dir: unknown }) {
   const pct = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : null;

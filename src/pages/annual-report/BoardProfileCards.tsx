@@ -12,8 +12,8 @@
 // likewise renders one payload three ways.
 
 import type { ReactNode } from 'react';
-import { SectionContent, fullKey } from '@/components/quarterly/SectionContent';
-import { isDataImage } from '@/components/quarterly/sectionState';
+import { SectionContent } from '@/components/quarterly/SectionContent';
+import { fullKey, isDataImage } from '@/components/quarterly/sectionState';
 import type { ProducedSection } from '@/types/quarterly';
 import type { BoardCardVariant } from './board-helpers';
 import { BORDER_SOFT, FAINT, INK, MUTED } from './board-ui';

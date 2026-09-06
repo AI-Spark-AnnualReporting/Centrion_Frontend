@@ -213,3 +213,9 @@ export function seedFromOutline(o: OutlineSection): ProducedSection {
 export function isDataImage(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith('data:image/');
 }
+
+// The row key holding a cell's uncut text, e.g. "Experience" → experience_full.
+// It is never in `columns`: the cut version exists for the exported PDF, which
+// has a page width — on screen there is nothing to save by hiding it. Read by
+// the table renderer and by the board profile cards, so one rule serves both.
+export const fullKey = (col: string) => `${col.toLowerCase().replace(/ /g, '_')}_full`;
