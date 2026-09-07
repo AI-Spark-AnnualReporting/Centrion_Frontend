@@ -225,6 +225,37 @@ export const BOARD_MEETING_SECTIONS = ['BR35', 'BR36'];
  */
 export const BOARD_PROFILE_SECTIONS = ['BR32'];
 
+/**
+ * Whether BR32's card should open the profile TABLE rather than the generic
+ * cell editor.
+ *
+ * True when the section was built from people read out of an uploaded CV: the
+ * server stamps `source: "upload"` on every such row (`"team"` on a ticked board
+ * member), which is not in `columns` and so never prints.
+ *
+ * Why the distinction matters. `PATCH .../sections/{code}/content` edits the
+ * RENDERED grid, which the next produce rebuilds from scratch — an edit made
+ * there would not survive, could not add or delete a person, and has nowhere to
+ * put a headshot. The profile table edits the people the grid is built FROM.
+ * A ticked board member is edited on the Team screen, not here, so that case
+ * keeps the ordinary editor.
+ *
+ * Read off the content rather than fetching: the answer is already on screen,
+ * and a wrong guess here only picks the wrong editor, never throws.
+ */
+export function boardUsesProfileEditor(s: Pick<BoardSection, 'section_code' | 'content'>): boolean {
+  if (!BOARD_PROFILE_SECTIONS.includes(s.section_code) || !s.content) return false;
+  try {
+    const parsed = JSON.parse(s.content) as { rows?: unknown };
+    return (
+      Array.isArray(parsed?.rows) &&
+      parsed.rows.some((r) => isRec(r) && r.source === 'upload')
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** The three profile-card layouts BR32 can print in. */
 export type BoardCardVariant = 'grid' | 'band' | 'row';
 

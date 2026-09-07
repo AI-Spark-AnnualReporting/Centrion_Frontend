@@ -100,7 +100,7 @@ export interface BoardSlotDocument {
  * Absent on older payloads — read it through `slotKind()`, which defaults to
  * `documents`.
  */
-export type BoardSlotKind = "documents" | "meetings" | (string & {});
+export type BoardSlotKind = "documents" | "meetings" | "profiles" | (string & {});
 
 export interface BoardSourceSlot {
   slot: string;
@@ -119,8 +119,18 @@ export interface BoardSourceSlot {
   selected_count?: number;
   /** Meetings/profiles slots — how many the platform holds, for "2 of 4". */
   member_count?: number;
-  /** What the slot is actually feeding its sections from. A selection wins. */
-  fed_by?: "meetings" | "documents" | null;
+  /**
+   * Profiles slot — how many people were read out of an uploaded CV file. The
+   * row shows the count only; the table itself is edited in BR32's card on the
+   * Review screen, so there is one editable copy in one place.
+   */
+  profile_count?: number;
+  /**
+   * What the slot is actually feeding its sections from. A selection wins over
+   * an attached file, and on the profiles slot uploaded people win over ticked
+   * team members — the author is offered one path or the other.
+   */
+  fed_by?: "meetings" | "documents" | "profiles" | "team" | null;
   /** Meetings slots — the saved period the selection was resolved from. */
   date_from?: string | null;
   date_to?: string | null;
@@ -179,6 +189,53 @@ export interface BoardDirector {
 export interface BoardDirectorsResponse {
   selected_ids: string[];
   directors: BoardDirector[];
+}
+
+// ─── profiles read out of an uploaded CV (BR32) ────────────────────────────────
+//
+// The other way to fill BR32, for an issuer whose directors are not platform
+// users. The upload pipeline reads the people out of the file; these are what
+// the author then corrects, in a table inside BR32's card on the Review screen.
+
+export interface BoardProfileJob {
+  job_title: string;
+  company: string;
+  /** "YYYY-MM", or null when the CV gave no dates. */
+  from_month: string | null;
+  /** null means the job is current. */
+  to_month: string | null;
+  responsibility: string;
+  sort_order?: number;
+}
+
+export interface BoardProfile {
+  /** Minted server-side. Absent on a row the operator has just added. */
+  id?: string;
+  full_name: string;
+  /** The role on the BOARD, not the current job — that is an experience entry. */
+  title: string;
+  has_photo?: boolean;
+  /** The headshot inline: the storage bucket is private, so there is no URL. */
+  photo_data_uri?: string | null;
+  source_document_id?: string | null;
+  /** The file this person was read out of. Null for one typed in by hand. */
+  source_filename?: string | null;
+  experience: BoardProfileJob[];
+  /**
+   * Write-only. A full `data:image/…;base64,…` URI replaces the headshot, null
+   * clears it, and omitting the key keeps what is there — three distinct
+   * meanings, so never send it as an empty string.
+   */
+  photo_base64?: string | null;
+}
+
+export interface BoardProfilesResponse {
+  report_id: string;
+  section_code: string;
+  profiles: BoardProfile[];
+  count: number;
+  /** The CV files filed under the slot, for a "read from …" line. */
+  documents: { id: string; filename: string }[];
 }
 
 export interface BoardSourcesResponse {

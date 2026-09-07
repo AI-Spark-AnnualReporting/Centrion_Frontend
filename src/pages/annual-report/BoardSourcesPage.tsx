@@ -412,6 +412,11 @@ function SlotRow({
   // How many the platform holds, when the server says — "2 of 4 selected".
   const memberCount = slot.member_count;
   const fedByFile = slot.fed_by === 'documents' && slot.documents.length > 0;
+  // People read out of an uploaded CV. A COUNT only: this row stays a status
+  // line, and the table those people are edited in lives in BR32's card on the
+  // Review screen, so there is one editable copy of them in one place.
+  const profileCount = slot.profile_count ?? 0;
+  const fedByProfiles = slot.fed_by === 'profiles' && profileCount > 0;
 
   // Clearing the selection is what hands the section over to the attached file
   // — the server prefers ticked meetings while any are ticked.
@@ -462,7 +467,16 @@ function SlotRow({
           {/* What the row is actually feeding from — a selection beats an
               attached file, so the two can disagree and the row has to say
               which one the section will use. */}
-          {systemKind && fedByFile && (
+          {fedByProfiles && (
+            <span
+              style={{ fontSize: 11, fontWeight: 700, color: ACCENT, fontFamily: MONO }}
+              title={slot.documents.map((d) => d.file_name).join(', ')}
+            >
+              {profileCount} profile{profileCount === 1 ? '' : 's'} read
+              {slot.documents[0] ? ` from ${slot.documents[0].file_name}` : ''}
+            </span>
+          )}
+          {systemKind && !fedByProfiles && fedByFile && (
             <span
               style={{ fontSize: 11, fontWeight: 700, color: ACCENT, fontFamily: MONO }}
               title={slot.documents.map((d) => d.file_name).join(', ')}
@@ -470,7 +484,7 @@ function SlotRow({
               from {slot.documents[0]?.file_name}
             </span>
           )}
-          {systemKind && !fedByFile && count > 0 && (
+          {systemKind && !fedByProfiles && !fedByFile && count > 0 && (
             <span
               style={{ fontSize: 11, fontWeight: 700, color: ACCENT, fontFamily: MONO }}
               // The period the selection came from — the count alone doesn't say
@@ -483,7 +497,7 @@ function SlotRow({
                 : `${memberCount ? ` of ${memberCount}` : ''} selected`}
             </span>
           )}
-          {systemKind && (
+          {systemKind && !fedByProfiles && (
             <button
               className="btn bs bsm"
               onClick={() => setMode((m) => (m === 'system' ? null : 'system'))}

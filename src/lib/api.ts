@@ -99,6 +99,8 @@ import type {
   BoardAssembleResponse,
   BoardCompletion,
   BoardDirectorsResponse,
+  BoardProfile,
+  BoardProfilesResponse,
   BoardSectionLayout,
   BoardExportFormat,
   BoardIssuerProfile,
@@ -3435,6 +3437,27 @@ export const boardReports = {
     request<{ selected_ids: string[]; count: number }>(
       boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/directors`),
       { method: "PUT", body: { director_ids: directorIds } },
+    ),
+
+  // The people read out of a CV file uploaded under the profiles slot — the
+  // other way to fill BR32, for an issuer whose directors are not platform
+  // users. Extraction happens inside the upload run, so these are already there
+  // by the time it reports done.
+  getSectionProfiles: (reportId: string, sectionCode: string, signal?: AbortSignal) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { signal },
+    ),
+
+  // One call covers edit, add, remove and headshots: the array IS the table.
+  // Leave a person out to delete them, omit `id` to add one, send a row back
+  // changed to edit it. The response is the saved table, so no refetch is
+  // needed — but BR32 still has to be re-produced for the printed grid to catch
+  // up, which is the caller's next step.
+  setSectionProfiles: (reportId: string, sectionCode: string, profiles: BoardProfile[]) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { method: "PUT", body: { profiles } },
     ),
 
   // The meetings a BR35/BR36 row can be filled from. All three filters are

@@ -22,6 +22,7 @@ import {
   BOARD_PLATFORM_SECTIONS,
   BOARD_PROFILE_SECTIONS,
   boardCardVariant,
+  boardUsesProfileEditor,
   canRefineSection,
   errorMessage,
   isBoardCoverSection,
@@ -37,6 +38,7 @@ import { useFitFrame } from './useFitFrame';
 import { BoardRefinePanel } from './BoardRefinePanel';
 import BoardLayoutPicker from './BoardLayoutPicker';
 import BoardProfileCards from './BoardProfileCards';
+import BoardProfileTable from './BoardProfileTable';
 import {
   ACCENT,
   AMBER,
@@ -283,6 +285,34 @@ export default function BoardPreviewPage() {
       });
   }, [uploadPoll.state.phase, upload, reportId, load, uploadPoll.state.run?.error_message]);
 
+  // The profile table saved. Its rows are what BR32 is BUILT from, not the
+  // section's content, so the printed grid is now behind — re-produce it before
+  // reloading, or the reviewer sees their edit vanish.
+  //
+  // regenerate: the fingerprint would catch the change on its own, but waiting
+  // for that means one more click before the card matches what was just typed.
+  const handleProfilesSaved = useCallback(
+    async (code: string) => {
+      setSaving(true);
+      setSectionError(null);
+      try {
+        await boardReports.produceSection(reportId, code, true);
+        setEditing(false);
+        setSaved(true);
+      } catch (err: unknown) {
+        // The profiles ARE saved — only the rebuild failed, so say so rather
+        // than implying the edit was lost.
+        setSectionError(
+          errorMessage(err, 'Your changes are saved, but rebuilding the section failed. Produce it again.'),
+        );
+      } finally {
+        await load().catch(() => {});
+        setSaving(false);
+      }
+    },
+    [reportId, load],
+  );
+
   const handleConfirm = useCallback(
     async (code: string) => {
       setBusy('confirm');
@@ -449,8 +479,10 @@ export default function BoardPreviewPage() {
                 busy={busy}
                 error={sectionError}
                 history={history[active.section_code] ?? []}
+                reportId={reportId}
                 onEdit={setEditing}
                 onSave={handleSave}
+                onProfilesSaved={handleProfilesSaved}
                 onRefine={handleRefine}
                 onConfirm={handleConfirm}
                 onUploadFile={handleUploadFile}
@@ -848,6 +880,7 @@ function SectionPanel({
   index,
   meta,
   locked,
+  reportId,
   editing,
   saving,
   saved,
@@ -856,6 +889,7 @@ function SectionPanel({
   history,
   onEdit,
   onSave,
+  onProfilesSaved,
   onRefine,
   onConfirm,
   onUploadFile,
@@ -866,6 +900,8 @@ function SectionPanel({
   index: number;
   meta?: BoardOutlineSection;
   locked: boolean;
+  /** Only the profile table needs it — it fetches and saves its own rows. */
+  reportId: string;
   editing: boolean;
   saving: boolean;
   saved: boolean;
@@ -874,6 +910,8 @@ function SectionPanel({
   history: string[];
   onEdit: (v: boolean) => void;
   onSave: (code: string, content: string) => void;
+  /** The profile table saved — re-produce the section so the grid matches. */
+  onProfilesSaved: (code: string) => void;
   onRefine: (code: string, instruction: string) => void;
   onConfirm: (code: string) => void;
   onUploadFile: (code: string, slot: string, file: File) => void;
@@ -890,6 +928,10 @@ function SectionPanel({
   const companyVoice = BOARD_COMPANY_VOICE.includes(s.section_code);
   const refinable = !readOnly && canRefineSection(s);
   const cardVariant = boardCardVariant(s);
+  // BR32 built from an uploaded CV edits the PEOPLE, not the rendered grid —
+  // see boardUsesProfileEditor. A BR32 built from ticked team members keeps the
+  // ordinary editor: those people are edited on the Team screen.
+  const profileEditor = boardUsesProfileEditor(s);
   const statusMeta = STATUS_META[s.status] ?? { label: s.status, color: FAINT, bg: '#F2F3FA' };
   const refining = busy === 'refine';
   // The source slot this section is fed by — where an uploaded file gets filed.
@@ -988,6 +1030,17 @@ function SectionPanel({
         )}
       </div>
 
+      {/* These people were read out of a CV by a model and are going into a
+          regulatory disclosure. The pencil is the standard affordance, but on
+          this one section it is worth saying what it opens — nobody expects the
+          edit button to lead to a photo upload. */}
+      {profileEditor && !editing && (
+        <div style={{ fontSize: 11.5, color: FAINT, marginBottom: 12 }}>
+          Read from the uploaded CV — open the editor to correct a name, add someone the file
+          missed, or add a photograph.
+        </div>
+      )}
+
       {/* The chairman's statement is the chairman's, not the model's. */}
       {companyVoice && (
         <div style={{ fontSize: 11.5, color: FAINT, marginBottom: 12 }}>
@@ -1037,7 +1090,7 @@ function SectionPanel({
           {/* The editor works on raw Markdown, not the rendered preview — a
               small trigger rather than a permanent banner, so it doesn't
               compete with the content on every section that's ever edited. */}
-          {editing && (
+          {editing && !profileEditor && (
             <button
               type="button"
               // The editor saves-or-cancels on blur (see ProseEditor), so a
@@ -1072,7 +1125,15 @@ function SectionPanel({
           <div style={{ opacity: refining ? 0.5 : 1, pointerEvents: refining ? 'none' : undefined }}>
             {/* Cards are a way of reading the section, not of editing it — the
                 pencil always opens the same table of rows. */}
-            {!editing && cardVariant ? (
+            {editing && profileEditor ? (
+              <BoardProfileTable
+                reportId={reportId}
+                sectionCode={s.section_code}
+                disabled={readOnly || saving}
+                onSaved={() => onProfilesSaved(s.section_code)}
+                onCancel={() => onEdit(false)}
+              />
+            ) : !editing && cardVariant ? (
               <BoardProfileCards section={toBoardProduced(s)} variant={cardVariant} />
             ) : (
               <EditableSectionContent
