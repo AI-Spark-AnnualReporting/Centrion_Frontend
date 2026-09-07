@@ -2,12 +2,13 @@
 //
 // The server reads the paragraphs from the user's own documents that were matched
 // to each prose section and proposes the subheadings that section will be broken
-// into. The reviewer renames, deletes and reorders them; what they approve is what
-// prints.
+// into. The reviewer renames and reorders them; what they approve is what prints.
 //
 // Three rules are enforced server-side and shape this whole screen:
 //   · headings cannot be ADDED — there is no "+ Add" control, and a heading whose
 //     id the server did not propose is a 422 ("subheadings cannot be added")
+//   · headings cannot be REMOVED — every proposed heading prints; the reviewer
+//     renames and reorders only
 //   · the proposal is made ONCE per report — there is no "regenerate suggestions"
 //   · approval freezes it — `editable: false`, and every PUT is then a 409
 //
@@ -257,22 +258,6 @@ export default function BoardOutlinePage() {
     [scheduleSave],
   );
 
-  // Delete is expressed by omission — the id simply stops being in the array.
-  const remove = useCallback(
-    (sectionCode: string, id: number) => {
-      setSections((prev) => {
-        const next = prev.map((s) =>
-          s.section_code === sectionCode
-            ? { ...s, subheadings: s.subheadings.filter((h) => h.id !== id) }
-            : s,
-        );
-        scheduleSave(next, sectionCode);
-        return next;
-      });
-    },
-    [scheduleSave],
-  );
-
   const moveHeading = useCallback(
     (from: DragRef, to: DragRef) => {
       // Refused rather than fudged — the API cannot express a cross-section move,
@@ -401,7 +386,7 @@ export default function BoardOutlinePage() {
     >
       <SetupCard
         title="Section outline"
-        sub="Rename, remove or reorder the subheadings — changes save as you go"
+        sub="Rename or reorder the subheadings — changes save as you go"
       >
         {(error || reportError) && <Notice tone="red">{error ?? reportError}</Notice>}
         {readOnly && <LockedNotice />}
@@ -467,7 +452,6 @@ export default function BoardOutlinePage() {
                 readOnly={readOnly}
                 dragOver={dragOver}
                 onRename={rename}
-                onRemove={remove}
                 onDragStart={(ref) => (dragFromRef.current = ref)}
                 onDragOver={setDragOver}
                 onDrop={(to) => {
@@ -561,7 +545,6 @@ function SectionRow({
   readOnly,
   dragOver,
   onRename,
-  onRemove,
   onDragStart,
   onDragOver,
   onDrop,
@@ -572,7 +555,6 @@ function SectionRow({
   readOnly: boolean;
   dragOver: DragRef | null;
   onRename: (sectionCode: string, id: number, heading: string) => void;
-  onRemove: (sectionCode: string, id: number) => void;
   onDragStart: (ref: DragRef) => void;
   onDragOver: (ref: DragRef | null) => void;
   onDrop: (ref: DragRef) => void;
@@ -684,26 +666,6 @@ function SectionRow({
                       e.currentTarget.style.background = 'transparent';
                     }}
                   />
-                  {!readOnly && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(s.section_code, h.id)}
-                      aria-label={`Remove ${h.heading}`}
-                      title="Remove this subheading"
-                      style={{
-                        flexShrink: 0,
-                        background: 'none',
-                        border: 'none',
-                        padding: '2px 6px',
-                        fontSize: 13,
-                        lineHeight: 1,
-                        color: FAINT,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
                 </div>
               );
             })
