@@ -73,6 +73,7 @@ describe("Report team card", () => {
 
   it("sends each role to a different workspace", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    fireEvent.click(screen.getByText("Human Resources"));
     const paths = links().map((h) => new URL(h).searchParams.get("next"));
     expect(paths).toEqual([
       "/pm",
@@ -81,8 +82,17 @@ describe("Report team card", () => {
     ]);
   });
 
+  it("tells the SAR tab where to come back to", () => {
+    // Without this the nav button over there resolves to the CLIENT's
+    // dashboard, which this role must never see.
+    render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    const back = new URL(links()[0]).searchParams.get("back");
+    expect(back).toBe(window.location.href);
+  });
+
   it("carries the token and the acting company on every link", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    fireEvent.click(screen.getByText("Human Resources"));
     for (const href of links()) {
       const q = new URL(href).searchParams;
       expect(q.get("token")).toBe("jwt-abc");
@@ -93,37 +103,67 @@ describe("Report team card", () => {
 
   it("opens in a new tab, and can't reach back into this one", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    fireEvent.click(screen.getByText("Human Resources"));
     for (const a of document.querySelectorAll("a")) {
       expect(a.getAttribute("target")).toBe("_blank");
       expect(a.getAttribute("rel")).toBe("noopener noreferrer");
     }
   });
 
-  it("follows the department switcher", () => {
+  it("hides each department's roles until its row is clicked", () => {
+    render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    // Collapsed: only the PM can be opened.
+    expect(links()).toHaveLength(1);
+    expect(screen.queryByText("DEPARTMENT HEAD")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Human Resources"));
+    expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
+    expect(screen.getByText("DEPARTMENT USER")).toBeInTheDocument();
+
+    const paths = links().map((h) => new URL(h).searchParams.get("next"));
+    expect(paths).toEqual([
+      "/pm",
+      "/hod/sessions/sess_hr",
+      "/department/sessions/sess_hr",
+    ]);
+  });
+
+  it("collapses again, and only one department is open at a time", () => {
     const withTwo: CycleDepartmentProgress[] = [
       DEPTS[0],
       { ...DEPTS[1], session_id: "sess_fin" },
     ];
     render(<ReportTeamCard cycle={CYCLE} departments={withTwo} pmName="Sara Nasser" />);
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "dep_fin" } });
-    const paths = links().map((h) => new URL(h).searchParams.get("next"));
+
+    fireEvent.click(screen.getByText("Human Resources"));
+    let paths = links().map((h) => new URL(h).searchParams.get("next"));
+    expect(paths).toContain("/hod/sessions/sess_hr");
+
+    // Opening another closes the first — otherwise two "DEPARTMENT HEAD"
+    // headings would be on screen with no way to tell them apart.
+    fireEvent.click(screen.getByText("Finance"));
+    paths = links().map((h) => new URL(h).searchParams.get("next"));
     expect(paths).toContain("/hod/sessions/sess_fin");
     expect(paths).not.toContain("/hod/sessions/sess_hr");
+
+    fireEvent.click(screen.getByText("Finance"));
+    expect(screen.queryByText("DEPARTMENT HEAD")).not.toBeInTheDocument();
   });
 
-  it("disables the department rows when there is no session to open", () => {
+  it("still expands a department with no session, but can't open it", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={[DEPTS[1]]} pmName="Sara Nasser" />);
-    // PM is cycle-level and stays available; the other two have nowhere to go.
+    fireEvent.click(screen.getByText("Finance"));
+    // The roles are visible so you can see who they are...
+    expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
+    // ...but PM is cycle-level and the only thing openable.
     expect(links()).toHaveLength(1);
     expect(new URL(links()[0]).searchParams.get("next")).toBe("/pm");
   });
 
   it("still renders when nothing is assigned", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={[]} pmName={undefined} />);
-    // Both the PM and the Head row read "Not set" with nothing assigned.
-    expect(screen.getAllByText("Not set")).toHaveLength(2);
-    expect(screen.getByText("Nobody")).toBeInTheDocument();
-    expect(screen.getByText(/No departments assigned yet/)).toBeInTheDocument();
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+    expect(screen.getByText(/No departments assigned to this cycle yet/)).toBeInTheDocument();
   });
 
   it("falls back to the cycle's company when acting on none", () => {

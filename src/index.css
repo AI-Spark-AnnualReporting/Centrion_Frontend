@@ -424,10 +424,14 @@ body {
 /* Left accent bar on hover via the first cell */
 .urow > td:first-child::before {
   content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
-  border-radius: 0 3px 3px 0; background: transparent; transition: background .12s ease;
+  border-radius: 0 3px 3px 0; transition: background .12s ease;
+  /* A row may colour its own bar by setting --row-accent (used to show session
+     status at a glance). Rows that don't behave exactly as before: invisible
+     until hover, then indigo. */
+  background: var(--row-accent, transparent);
 }
 .urow:hover { background: #FAFBFE; }
-.urow:hover > td:first-child::before { background: #4040C8; }
+.urow:hover > td:first-child::before { background: var(--row-accent, #4040C8); }
 
 /* Avatar ring */
 .av-ring { box-shadow: 0 0 0 2px #fff, 0 2px 8px rgba(26,29,46,.16); }
