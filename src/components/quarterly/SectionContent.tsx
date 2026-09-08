@@ -17,6 +17,11 @@ import { splitAnalysis } from './analysisText';
 const GREEN = '#10B981';
 const RED = '#EF4444';
 const MUTED = '#6B7280';
+// The attendance matrix prints marks, not words (board_people.PRESENT_MARK).
+// The word the minutes used stays on the row's `_full` key and shows on hover,
+// so drawing a cross never loses an "Apologies". The em dash is left alone — no
+// minutes filed is not an absence and must not be coloured like one.
+const MARK_COLOR: Record<string, string> = { '✓': GREEN, '✗': RED };
 const DARK = '#1F2340';
 const MONO = "'DM Mono', 'Courier New', monospace";
 // Report-content accent — the chosen brand color (falls back to app indigo when
@@ -646,7 +651,15 @@ function flipMatrix(rows: LooseRow[], cols: string[]): { rows: LooseRow[]; cols:
     // Blank corner: the first column now holds what the header row used to.
     cols: ['', ...heads],
     rows: rest.map((c) =>
-      Object.fromEntries([['', c] as [string, unknown], ...rows.map((r, i): [string, unknown] => [heads[i], r[c]])]),
+      Object.fromEntries([
+        ['', c] as [string, unknown],
+        // Both the cell and its uncut text: dropping the second here is what
+        // would leave a flipped attendance matrix with marks and no words.
+        ...rows.flatMap((r, i): [string, unknown][] => [
+          [heads[i], r[c]],
+          [fullKey(heads[i]), r[fullKey(c)]],
+        ]),
+      ]),
     ),
   };
 }
@@ -709,6 +722,15 @@ function GenericTable({ rows: given, columns }: { rows: LooseRow[]; columns?: st
                     alt=""
                     style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block' }}
                   />
+                ) : MARK_COLOR[stringifyCell(r[c])] ? (
+                  // A mark prints as itself, coloured. `_full` is the word the
+                  // minutes used, which belongs on hover rather than in the cell.
+                  <span
+                    style={{ color: MARK_COLOR[stringifyCell(r[c])], fontWeight: 600 }}
+                    title={stringifyCell(r[fullKey(c)]) || undefined}
+                  >
+                    {stringifyCell(r[c])}
+                  </span>
                 ) : (
                   // The uncut text when the row carries one — the cell is cut
                   // for the PDF's page width, which the screen doesn't have.
