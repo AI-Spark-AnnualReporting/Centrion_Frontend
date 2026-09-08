@@ -13,6 +13,7 @@ import { ShareholderCommsCard } from '@/components/dashboard/ShareholderCommsCar
 import { ReportingFrameworksCard } from '@/components/dashboard/ReportingFrameworksCard';
 import { EsgComparisonsCard } from '@/components/dashboard/EsgComparisonsCard';
 import { AskCopilotCard } from '@/components/dashboard/AskCopilotCard';
+import { isAdminLevel } from '@/constants/roles';
 
 /**
  * Personal welcome dashboard — shown after onboarding once report documents have
@@ -116,7 +117,7 @@ function StyleEmptyState({
 export function DashboardWorkspace({ company: companyProp, companyName }: { company: Company | null; companyName: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isAdminLevel(user?.role);
   const companyId = user?.company_id ?? null;
 
   const [company, setCompany] = useState<Company | null>(companyProp);

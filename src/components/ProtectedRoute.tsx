@@ -8,6 +8,7 @@ import type { AuthUser } from "@/types/auth";
 
 const CHANGE_PASSWORD_PATH = "/change-password";
 const ONBOARDING_PATH = "/onboarding";
+export const SPARK_COMPANIES_PATH = "/companies";
 
 export function ProtectedRoute({
   children,
@@ -20,7 +21,7 @@ export function ProtectedRoute({
   // Gate on the backend-computed visible_features list instead of/alongside role.
   requiredFeature?: FeatureKey;
 }) {
-  const { user, loading } = useAuth();
+  const { user, loading, actingCompany } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -56,21 +57,6 @@ export function ProtectedRoute({
     return null; // render nothing while the hard redirect happens
   }
 
-  // Spark belongs to no company, so every other page in the app — all of which
-  // read the caller's company off the JWT — has nothing to show them. Pin them
-  // to /spark here rather than at each entry point, so login, a bookmark and a
-  // refresh all land the same place.
-  // The change-password exemption is load-bearing, not defensive: the rotation
-  // gate above sends them to /change-password, and pinning that back to /spark
-  // would bounce between the two forever with the form never reachable.
-  if (
-    user.role === "spark_admin" &&
-    !onChangePasswordPage &&
-    !location.pathname.startsWith("/spark")
-  ) {
-    return <Navigate to="/spark" replace />;
-  }
-
   // Onboarding gate — only self-registered admins who haven't finished it.
   // Strict === checks so older sessions (field absent/undefined) are never
   // bounced; invited users (project_manager / department_user) skip it.
@@ -82,8 +68,30 @@ export function ProtectedRoute({
   ) {
     return <Navigate to={ONBOARDING_PATH} replace />;
   }
-  if (onOnboardingPage && user.onboarding_completed === true) {
+  // Spark staff run this wizard for companies they create, over and over, so
+  // their own completed flag must not lock them out of it.
+  if (
+    onOnboardingPage &&
+    user.onboarding_completed === true &&
+    user.role !== "spark_internal"
+  ) {
     return <Navigate to="/dashboard" replace />;
+  }
+
+  // Spark staff have no company until they pick one, so every company-scoped
+  // page below would render empty or 403. Send them to the directory instead.
+  //
+  // This one gate replaces role-aware handling at all six places that assume
+  // /dashboard is home (the three bounces above, the two gates below,
+  // AuthPages' post-login navigate('/') and the index route): they all land on
+  // /dashboard, which lands here. /companies and the wizard are the exemptions.
+  if (
+    user.role === "spark_internal" &&
+    !actingCompany &&
+    location.pathname !== SPARK_COMPANIES_PATH &&
+    !onOnboardingPage
+  ) {
+    return <Navigate to={SPARK_COMPANIES_PATH} replace />;
   }
 
   // Role gate (e.g. the Admin Console). Non-matching roles bounce to the app.

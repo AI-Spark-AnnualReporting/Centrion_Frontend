@@ -50,6 +50,7 @@ export default function SetupInProgressAnimation({
   files = [],
   force = false,
   overlay = false,
+  landingPath = '/dashboard',
 }: {
   // null when this runs OUTSIDE onboarding (the Upload Reports page): onboarding is
   // already complete and there's no payload to submit, so completeOnboarding is
@@ -61,6 +62,15 @@ export default function SetupInProgressAnimation({
   // Cover the app shell instead of stretching a 100vh block inside its content
   // column. Only the in-app page needs this; /onboarding is already shell-less.
   overlay?: boolean;
+  // Where to go when the run finishes. Defaults to the dashboard, which is right
+  // for a client admin's own first run and for the Upload Reports page.
+  // /onboarding overrides it for Spark staff, who are setting up someone else's
+  // company and want its annual report.
+  //
+  // A default rather than a conditional on purpose: on the Upload Reports page
+  // this navigate is the ONLY exit from a fixed full-screen overlay with no
+  // cancel, so a destination that could ever be empty would trap the user.
+  landingPath?: string;
 }) {
   const navigate = useNavigate();
   const { completeOnboarding, user } = useAuth();
@@ -86,11 +96,11 @@ export default function SetupInProgressAnimation({
     if (user?.company_id) companyIdRef.current = user.company_id;
   }, [user?.company_id]);
 
-  const enterDashboard = useCallback(() => {
+  const enterApp = useCallback(() => {
     if (doneRef.current) return;
     doneRef.current = true;
-    navigate('/dashboard', { replace: true, state: { justUploaded: filesRef.current.length > 0 } });
-  }, [navigate]);
+    navigate(landingPath, { replace: true, state: { justUploaded: filesRef.current.length > 0 } });
+  }, [navigate, landingPath]);
 
   // One robust flow: complete onboarding → kick off the ingest → poll the REAL progress
   // (companies.onboarding_progress / report_extraction_status) → open the dashboard.
@@ -119,7 +129,7 @@ export default function SetupInProgressAnimation({
             /* still enter — onboarding is best-effort at this point */
           }
         }
-        if (!cancelled) enterDashboard();
+        if (!cancelled) enterApp();
       };
 
       // Nothing to ingest → just finalize + enter.
@@ -132,7 +142,7 @@ export default function SetupInProgressAnimation({
             return;
           }
         }
-        if (!cancelled) enterDashboard();
+        if (!cancelled) enterApp();
         return;
       }
 
@@ -174,7 +184,7 @@ export default function SetupInProgressAnimation({
 
     run();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [retryTick, completeOnboarding, enterDashboard, force]);
+  }, [retryTick, completeOnboarding, enterApp, force]);
 
   // Rotate the playful gerund + the tips (text updates in place — no remount).
   useEffect(() => {

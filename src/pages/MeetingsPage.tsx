@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import { isAdminLevel } from '@/constants/roles';
 import {
   MONTHS,
   SHORT_MONTHS,
@@ -563,7 +564,7 @@ export default function MeetingsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = isAdminLevel(user?.role);
     (async () => {
       const [rRes, cRes, coRes] = await Promise.allSettled([
         companyId

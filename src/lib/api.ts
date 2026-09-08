@@ -15,6 +15,7 @@ import type {
   OnboardingPayload,
   OnboardingResponse,
 } from "@/types/auth";
+import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import type { DetectedBrandColors } from "@/types/brand";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -135,12 +136,6 @@ import type {
 } from "@/types/admin";
 import { normalizeOverview } from "@/types/admin";
 import type {
-  SparkOverview,
-  SparkReportRow,
-  SparkUserRow,
-} from "@/types/spark";
-import { normalizeTrends } from "@/types/spark";
-import type {
   CandidatesResponse,
   CertificateVerification,
   CertifiedRun,
@@ -198,9 +193,21 @@ const USER_STORAGE_KEY = "centriton_user";
 // `ngrok-skip-browser-warning` bypasses ngrok's HTML interstitial on the free
 // tier. Azure ignores unknown headers, so it's safe to leave on permanently —
 // the backend switches but this header stays.
-const DEFAULT_REQUEST_HEADERS: Record<string, string> = {
+const STATIC_REQUEST_HEADERS: Record<string, string> = {
   "ngrok-skip-browser-warning": "true",
 };
+
+// Headers every outbound call gets. A function, not a const, because the acting
+// company changes at runtime: a Spark (`spark_internal`) session carries no
+// company of its own and names one per request in X-Company-Id, which both
+// backends swap onto the caller and ignore outright for every other role.
+// Read fresh each call — see lib/acting-company.ts on why nothing is cached.
+function defaultRequestHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { ...STATIC_REQUEST_HEADERS };
+  const acting = getActingCompany();
+  if (acting) headers["X-Company-Id"] = acting.id;
+  return headers;
+}
 
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") return null;
@@ -379,11 +386,18 @@ interface RequestOptions {
   // Override the host the call targets (defaults to API_BASE_URL). Used by
   // sarRequest() to hit the separate SAR backend while reusing all this logic.
   baseUrl?: string;
+  // Suppress X-Company-Id for this call. Set on the /spark/* endpoints, which a
+  // Spark user hits BEFORE picking a company and must keep reaching after. If a
+  // company they are acting as is ever deleted the header 404s every request —
+  // without this the company directory itself becomes unreachable and the only
+  // way out is logging out.
+  noActingCompany?: boolean;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = `${opts.baseUrl ?? API_BASE_URL}${path}${buildQuery(opts.query)}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS, ...(opts.headers ?? {}) };
+  const headers: Record<string, string> = { ...defaultRequestHeaders(), ...(opts.headers ?? {}) };
+  if (opts.noActingCompany) delete headers["X-Company-Id"];
 
   let body: BodyInit | undefined;
   if (opts.form) {
@@ -419,7 +433,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 // the browser must set the multipart boundary, so we never set Content-Type.
 async function postForm<T>(path: string, form: FormData): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const headers: Record<string, string> = { ...defaultRequestHeaders() };
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -443,7 +457,7 @@ async function postPipeline(
   query?: QueryParams,
 ): Promise<PipelineHandle> {
   const url = `${API_BASE_URL}${path}${buildQuery(query)}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const headers: Record<string, string> = { ...defaultRequestHeaders() };
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -1395,7 +1409,7 @@ export const complianceValidation = {
   ): Promise<{ blob: Blob; filename: string | null }> => {
     const url = `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certificate.pdf`;
     const full = `${API_BASE_URL}${url}`;
-    const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+    const headers: Record<string, string> = { ...defaultRequestHeaders() };
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -3923,12 +3937,20 @@ export interface ThreadAttachment {
   download_url: string;
 }
 
+// One @mention on a message. The name is already inside `body` as
+// "@Full Name" — this says which names in that text are mentions.
+export interface MessageMention {
+  user_id: string;
+  full_name: string;
+}
+
 export interface ThreadMessage {
   id: string;
   kind: ThreadMessageKind;
   sender: MessageSender;
   body: string;
   mentioned_user_ids: string[];
+  mentions: MessageMention[];
   created_at: string;
   // Only present on kind === "attachment" messages.
   attachment?: ThreadAttachment | null;
@@ -4653,38 +4675,58 @@ export const adminUserPermissions = {
 };
 
 // ---------------------------------------------------------------------------
-// Spark console — platform-owner (cross-tenant) reads. Unlike `admin` /
-// `adminConsole` above, these are NOT scoped to the caller's company: they span
-// every tenant, and the backend authorises them on the `spark_admin` role.
-// Read-only by design; anything that mutates a tenant goes through that
-// tenant's own admin endpoints.
+// Spark internal — the platform-staff company directory and tenant creation.
+// The only endpoints a `spark_internal` user can call before choosing a company,
+// so every one of them opts out of the X-Company-Id header.
 // ---------------------------------------------------------------------------
 
-export const spark = {
-  // Cards + the Companies tab in one call — each company carries its own user
-  // and report counts, so the tab needs nothing further.
-  overview: () => request<SparkOverview>("/api/v1/spark/overview"),
+export interface SparkCompanyRow {
+  id: string;
+  name: string;
+  /** Annual reporting cycles this company has. Deliberately the only metric. */
+  cycle_count: number;
+}
 
-  // Flat lists; the page groups them by company_id. Tolerates a bare array or a
-  // `{ users: [...] }` / `{ reports: [...] }` envelope, same as the admin lists.
-  listUsers: () =>
-    request<SparkUserRow[] | { users: SparkUserRow[] }>(
-      "/api/v1/spark/users",
-    ).then((raw) => unwrap<SparkUserRow[]>(raw, "users") ?? []),
+/** The directory's headline numbers. Computed on the same two reads as the rows. */
+export interface SparkDirectoryStats {
+  companies: number;
+  active_cycles: number;
+  /** How many distinct clients those active cycles belong to. */
+  active_client_count: number;
+  /** Active cycles whose submission deadline has passed. */
+  past_deadline: number;
+  oldest_overdue_days: number;
+  /** Cycles due within 30 days. */
+  due_soon: number;
+  next_due: { company_name: string | null; date: string } | null;
+}
 
-  listReports: () =>
-    request<SparkReportRow[] | { reports: SparkReportRow[] }>(
-      "/api/v1/spark/reports",
-    ).then((raw) => unwrap<SparkReportRow[]>(raw, "reports") ?? []),
+export interface CreateSparkCompanyPayload {
+  name: string;
+  sector_id?: string | null;
+  jurisdiction?: string | null;
+}
 
-  // Report counts by type over time, for the comparison chart. `year` buckets
-  // by month (zero-filled); omitting it buckets by year. `month` is supported
-  // server-side but deliberately unused here — it collapses the response to a
-  // single bucket. 422 if month is sent without a year.
-  reportTrends: (params: { year?: number; company_id?: string } = {}) =>
-    request<unknown>("/api/v1/spark/report-trends", { query: params }).then(
-      normalizeTrends,
+export const sparkInternal = {
+  /** Every active company, with its cycle count. Backs the directory at /companies.
+   *
+   *  `mine` narrows it to the companies this Spark user created — the directory's
+   *  default tab. It scopes `stats` as well as the rows, so the headline numbers
+   *  describe whatever is listed underneath them rather than the whole platform.
+   *  Always sent, so the request says which scope it is asking for. */
+  companies: ({ mine = false }: { mine?: boolean } = {}) =>
+    request<{ companies: SparkCompanyRow[]; total: number; stats: SparkDirectoryStats }>(
+      "/api/v1/spark/companies",
+      { noActingCompany: true, query: { mine } },
     ),
+
+  /** Create a tenant so Spark staff can run onboarding for it themselves. */
+  createCompany: (body: CreateSparkCompanyPayload) =>
+    request<{ company: { id: string; name: string } }>("/api/v1/spark/companies", {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -4712,7 +4754,19 @@ function unwrap<T>(raw: unknown, key: string): T {
 // Raw department row as the SAR backend actually returns it. The `*_percentage`
 // / `status` / `user_*` keys are the backend's names; the optional frontend-name
 // fields let `overview()` normalise either shape (see below).
+/** SAR's sentinel for "no one is assigned" — see the mapper below. */
+function unknownAsAbsent(name: string | undefined): string | undefined {
+  return name === "Unknown" ? undefined : name;
+}
+
 interface RawCycleDepartment {
+  // The backend has always sent these three; they were simply not declared here,
+  // so the mapper below dropped them. session_id is what makes a deep link to a
+  // department's workspace possible, and hod_* is the only department -> lead
+  // mapping available on a non-draft cycle (listDepartments is draft-only).
+  session_id?: string;
+  hod_user_id?: string | null;
+  hod_name?: string | null;
   department_id: string;
   department_name: string;
   department_code: string;
@@ -4730,7 +4784,8 @@ interface RawCycleDepartment {
   progress?: number;
 }
 
-interface RawCycleOverview extends Omit<CycleOverview, "departments"> {
+interface RawCycleOverview extends Omit<CycleOverview, "departments" | "cycle"> {
+  cycle: RawCycle;
   departments?: RawCycleDepartment[];
 }
 
@@ -4793,12 +4848,28 @@ export const sarCycles = {
     );
     return {
       ...raw,
+      // The backend sends the PM's name as `pm_name` (get_cycle_with_pm resolves
+      // it); sarCycles.list() maps it and this didn't. Without it the detail page
+      // falls back to searching the role=project_manager list, which misses any
+      // PM not in it — a Spark-run cycle, for one — and renders "—".
+      cycle: {
+        ...raw.cycle,
+        project_manager_name: raw.cycle?.project_manager_name ?? raw.cycle?.pm_name,
+      },
       departments: (raw.departments ?? []).map((d) => ({
+        session_id: d.session_id,
+        hod_user_id: d.hod_user_id ?? null,
+        hod_name: d.hod_name ?? null,
         department_id: d.department_id,
         department_name: d.department_name,
         department_code: d.department_code,
         assigned_user_id: d.assigned_user_id ?? d.user_id ?? null,
-        assigned_user_name: d.assigned_user_name ?? d.user_name,
+        // SAR sends the literal string "Unknown" for an unassigned session
+        // (cycle_service.py: `user_info.get("full_name") or "Unknown"`), which is
+        // truthy and so defeats every "nobody assigned" fallback downstream.
+        // Normalise it here, where the rest of this payload's shape is already
+        // translated, rather than changing a field the SAR app also renders.
+        assigned_user_name: unknownAsAbsent(d.assigned_user_name ?? d.user_name),
         assigned_user_email: d.assigned_user_email ?? d.user_email,
         session_status: (d.session_status ?? d.status) as SessionStatus,
         progress: d.progress ?? d.progress_percentage ?? 0,
@@ -5086,6 +5157,9 @@ export function logout(): void {
   if (typeof localStorage === "undefined") return;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
+  // Otherwise the next person to log in on this browser inherits a Spark
+  // session's acting company and silently sends it on every request.
+  clearActingCompany();
 }
 
 export function getToken(): string | null {
@@ -5165,7 +5239,7 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   const token = getToken();
   const headers = new Headers(options.headers);
-  for (const [k, v] of Object.entries(DEFAULT_REQUEST_HEADERS)) {
+  for (const [k, v] of Object.entries(defaultRequestHeaders())) {
     if (!headers.has(k)) headers.set(k, v);
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -5201,7 +5275,7 @@ export async function getSectors(): Promise<Sector[]> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
-      headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+      headers: { accept: "application/json", ...defaultRequestHeaders() },
     });
   } catch {
     throw new Error("Unable to connect. Check your connection.");
@@ -5273,7 +5347,7 @@ export async function createCompany(
       `${API_BASE_URL}/api/v1/companies/?${query.toString()}`,
       {
         method: "POST",
-        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+        headers: { accept: "application/json", ...defaultRequestHeaders() },
       },
     );
   } catch {

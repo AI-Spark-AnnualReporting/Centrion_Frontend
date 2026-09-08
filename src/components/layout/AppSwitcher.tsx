@@ -19,6 +19,11 @@ export function AppSwitcher() {
   const { user } = useAuth();
   const apps = user?.apps ?? [];
 
+  // Spark staff hold both app keys, so this would otherwise render a button that
+  // hard-redirects them out of Centriton — losing the company they are acting
+  // as. They reach the Annual Report through the sidebar instead.
+  if (user?.role === "spark_internal") return null;
+
   if (apps.length <= 1) return null;
 
   const other = apps.find((a) => a !== 'centriton_dashboard');

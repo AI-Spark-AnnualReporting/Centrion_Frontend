@@ -162,4 +162,19 @@ export const ROLE_FEATURE_DEFAULTS: Record<BackendRole, Record<string, FeaturePe
     "app:centriton_dashboard": { access: true },
     "app:spark_studio": { access: false },
   },
+  // Everything on, both apps. Mirrors ROLE_FEATURE_DEFAULTS["spark_internal"]
+  // in the backend's constants.py. Note these client-side defaults are only a
+  // fallback — the authoritative permissions arrive baked into the JWT.
+  spark_internal: {
+    command_center: { read: true },
+    quarterly_report: { read: true, create: true },
+    earnings_report: { read: true, create: true },
+    board_report: { read: true, create: true },
+    esg_validator: { read: true, create: true },
+    compliance_validation: { read: true, create: true },
+    board_meetings: { read: true, create: true },
+    leadership: { read: true, create: true },
+    "app:centriton_dashboard": { access: true },
+    "app:spark_studio": { access: true },
+  },
 };
