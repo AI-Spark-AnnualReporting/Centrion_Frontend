@@ -30,6 +30,7 @@ import {
   readExistingRunId,
   REQ_TEXT,
   toBoardProduced,
+  withPhotoPlaceholders,
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
@@ -1137,7 +1138,10 @@ function SectionPanel({
               <BoardProfileCards section={toBoardProduced(s)} variant={cardVariant} />
             ) : (
               <EditableSectionContent
-                section={toBoardProduced(s)}
+                // Placeholders while reading, never while editing: the cell
+                // editor would otherwise let someone save a silhouette into the
+                // section's own content.
+                section={editing ? toBoardProduced(s) : withPhotoPlaceholders(toBoardProduced(s))}
                 editing={editing}
                 saving={saving}
                 error={editing ? error : null}

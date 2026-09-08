@@ -181,6 +181,66 @@ export function toBoardProduced(
 }
 
 /**
+ * A muted silhouette, as a data URI so the generic table renderer draws it with
+ * no change: `isDataImage` already routes a `data:image/…` cell to an <img>.
+ */
+const AVATAR_PLACEHOLDER =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">' +
+      '<rect width="44" height="44" rx="6" fill="#FAFBFE" stroke="#E8EAF3"/>' +
+      '<circle cx="22" cy="17" r="6" fill="none" stroke="#C7CBF0" stroke-width="2"/>' +
+      '<path d="M10 35c0-6 5.5-9.5 12-9.5S34 29 34 35" fill="none" stroke="#C7CBF0" ' +
+      'stroke-width="2" stroke-linecap="round"/>' +
+      '</svg>',
+  );
+
+/**
+ * BR32's produced table with an avatar in every director's Photo cell.
+ *
+ * ON SCREEN ONLY. The server drops a Photo column nobody filled, which is right
+ * for the download — a signed-off report should not print a column of grey
+ * silhouettes — but wrong for the review screen, where a missing photograph is
+ * the thing the author still has to act on and an absent column says nothing.
+ *
+ * Only rows read out of an uploaded CV get one: those are the people the profile
+ * editor owns, so the placeholder points at a fix the author can actually make.
+ * A director ticked off the team page gets their photo from the team page.
+ *
+ * Returns the section untouched on anything unexpected — this is decoration, and
+ * it must never be the reason a section fails to render.
+ */
+export function withPhotoPlaceholders(section: ProducedSection): ProducedSection {
+  if (section.section_code !== 'BR32' || typeof section.content !== 'string') return section;
+
+  try {
+    const payload = JSON.parse(section.content) as Record<string, unknown>;
+    const rows = payload.rows;
+    const columns = payload.columns;
+    if (!Array.isArray(rows) || !Array.isArray(columns)) return section;
+
+    // The row that OPENS a person carries `jobs`; the rest are that person's
+    // remaining jobs and share their photo cell, which stays empty.
+    const opensAPerson = (r: Record<string, unknown>) =>
+      Array.isArray(r.jobs) && r.source === 'upload';
+    if (!rows.some((r) => opensAPerson(r as Record<string, unknown>))) return section;
+
+    const nextRows = rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      if (!opensAPerson(row) || typeof row.Photo === 'string' && row.Photo.startsWith('data:')) {
+        return row;
+      }
+      return { ...row, Photo: AVATAR_PLACEHOLDER };
+    });
+
+    const nextColumns = columns.includes('Photo') ? columns : ['Photo', ...columns];
+    return { ...section, content: JSON.stringify({ ...payload, columns: nextColumns, rows: nextRows }) };
+  } catch {
+    return section;
+  }
+}
+
+/**
  * How to render a section's content. `content_type` is authoritative — narrative
  * and generated sections hold a plain string; everything else holds JSON as a
  * string. Falls back to sniffing the payload when the field is absent.
