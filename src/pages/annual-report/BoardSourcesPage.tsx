@@ -191,7 +191,7 @@ export default function BoardSourcesPage() {
       }
       setError(errorMessage(err, 'Could not process those documents.'));
     }
-  }, [reportId, staged]);
+  }, [reportId, staged, refetch]);
 
   const removeDocument = useCallback(
     async (documentId: string) => {
