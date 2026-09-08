@@ -7,14 +7,8 @@ import { useRef, useState } from 'react';
 // the same .ob-* classes, so the onboarding tests still cover it.
 //
 // The full-size .ob-drop is left alone; CompanyIntelStep still uses it.
-//
-// `stacked` turns the same control vertical. The default row wants about 300px
-// — icon, prompt, hint and the Browse button side by side — and BR32's
-// per-director photo cell has 168, because widening it pushes that person's job
-// fields onto a second line. Everything else is identical, so there is still
-// one image picker in the product.
 export default function BrandUploadBox({
-  icon, prompt, hint, accept, error, busy, busyLabel, filled, removeLabel, onPick, stacked,
+  icon, prompt, hint, accept, error, busy, busyLabel, filled, removeLabel, onPick,
 }: {
   icon: string;
   prompt: string;
@@ -26,7 +20,6 @@ export default function BrandUploadBox({
   filled?: React.ReactNode;
   removeLabel: string;
   onPick: (f: File | null) => void;
-  stacked?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -49,7 +42,7 @@ export default function BrandUploadBox({
   return (
     <>
       {filled ? (
-        <div className={`ob-logo-preview${stacked ? ' ob-logo-preview-stacked' : ''}`}>
+        <div className="ob-logo-preview">
           {filled}
           <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
             Replace
@@ -66,7 +59,7 @@ export default function BrandUploadBox({
         </div>
       ) : (
         <div
-          className={`ob-drop ${stacked ? 'ob-drop-stacked' : 'ob-drop-compact'}${dragOver ? ' over' : ''}`}
+          className={`ob-drop ob-drop-compact${dragOver ? ' over' : ''}`}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => {

@@ -101,39 +101,6 @@ describe("brand upload box", () => {
     expect(screen.queryByText(TOO_MANY_FILES)).toBeNull();
   });
 
-  it("is the wide row by default and the vertical box when stacked", () => {
-    // BR32 gives each director's photo 168px, where the row's icon, prompt,
-    // hint and Browse button cannot sit side by side. Every other caller must
-    // keep the row it has.
-    const { unmount } = render(
-      <BrandUploadBox
-        icon="🖼️"
-        prompt="Drag your logo here"
-        hint="PNG or JPG · up to 1 MB"
-        accept=".png,.jpg"
-        removeLabel="Remove logo"
-        onPick={vi.fn()}
-      />,
-    );
-    expect(document.querySelector(".ob-drop-compact")).not.toBeNull();
-    expect(document.querySelector(".ob-drop-stacked")).toBeNull();
-    unmount();
-
-    render(
-      <BrandUploadBox
-        stacked
-        icon="🧑"
-        prompt="Add a photo"
-        hint="PNG or JPG, up to 1 MB"
-        accept=".png,.jpg"
-        removeLabel="Remove photo"
-        onPick={vi.fn()}
-      />,
-    );
-    expect(document.querySelector(".ob-drop-stacked")).not.toBeNull();
-    expect(document.querySelector(".ob-drop-compact")).toBeNull();
-  });
-
   it("still shows the parent's own error", () => {
     render(
       <BrandUploadBox

@@ -716,19 +716,15 @@ body {
   min-height: 78px;
   padding: 12px 14px; text-align: left; border-radius: 12px;
 }
-/* Stacked variant — the same control turned vertical for a narrow column.
-   BR32 gives each director's photo 168px, where the compact ROW cannot fit its
-   icon, prompt, hint and button side by side: the prompt broke to one word per
-   line and the button landed on top of the hint. */
-.ob-drop.ob-drop-stacked {
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 14px 12px; text-align: center; border-radius: 12px;
+/* One director in BR32's profile editor. The hover is deliberately faint — the
+   row is a form, not a list to pick from, so it should acknowledge the pointer
+   without competing with the fields inside it. */
+.bpt-person:hover { background: #FCFCFE; }
+.bpt-person button:focus-visible,
+.bpt-person input:focus-visible,
+.bpt-person textarea:focus-visible {
+  outline: 2px solid #4040C8; outline-offset: 1px;
 }
-.ob-drop-stacked .ob-browse-inline { width: 100%; }
-.ob-logo-preview.ob-logo-preview-stacked {
-  flex-direction: column; gap: 8px; text-align: center;
-}
-.ob-logo-preview-stacked .ob-upload-btn { width: 100%; }
 
 .ob-drop-prompt { font-size: 13px; font-weight: 700; color: #3A3F5C; }
 .ob-drop-hint { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; min-height: 15px; }

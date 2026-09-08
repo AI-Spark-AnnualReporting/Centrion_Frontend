@@ -13,11 +13,14 @@
 //
 // A CV rarely carries a usable photograph, which is why the picture is a field
 // the operator fills rather than something the extraction is expected to find.
+// That is exactly why the empty state is a placeholder with a named "Upload
+// picture" action rather than a file field: a director with no face is the
+// NORMAL outcome of an upload, and the person reading this screen has to be
+// told so on the row, not left to discover a control.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { boardReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
-import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import { LOGO_ACCEPT, readLogoFile, validateLogoFile } from '@/types/brand';
 import type { BoardProfile, BoardProfileJob } from '@/types/board';
 import { errorMessage } from './board-helpers';
@@ -258,6 +261,139 @@ export default function BoardProfileTable({
   );
 }
 
+// ─── one director's photograph ───────────────────────────────────────────────
+//
+// Two states, and the empty one is the point. A CV almost never carries a usable
+// portrait, so "no picture" is what an upload normally produces — the row has to
+// say so and offer the fix in the same breath, rather than showing a file field
+// and leaving the operator to work out that it is theirs to fill.
+//
+// The avatar is the same 56px square either way, so nothing on the row moves
+// when a picture lands.
+
+const AVATAR = 56;
+
+/** The muted figure drawn where a director has no photograph yet. */
+const PERSON_GLYPH = (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <circle cx="12" cy="8" r="3.6" stroke="currentColor" strokeWidth="1.6" />
+    <path
+      d="M4.8 20c0-3.6 3.2-5.8 7.2-5.8s7.2 2.2 7.2 5.8"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+function PhotoCell({
+  profile,
+  disabled,
+  onPick,
+}: {
+  profile: BoardProfile;
+  disabled: boolean;
+  onPick: (file: File | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const photo = profile.photo_data_uri;
+  const who = profile.full_name || 'this board member';
+
+  const open = () => {
+    if (!disabled) inputRef.current?.click();
+  };
+
+  const action = {
+    display: 'block',
+    width: '100%',
+    marginTop: 6,
+    padding: '4px 6px',
+    fontFamily: 'inherit' as const,
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: 1.3,
+    borderRadius: 6,
+    border: '1px solid transparent',
+    background: 'none',
+    color: ACCENT,
+    cursor: disabled ? 'default' : 'pointer',
+  };
+
+  return (
+    <>
+      {/* The avatar is itself the target in both states, so the whole cell is
+          one thing to hit rather than a picture beside a separate control. */}
+      <button
+        type="button"
+        onClick={open}
+        disabled={disabled}
+        aria-label={photo ? `Change the photo of ${who}` : `Upload a photo of ${who}`}
+        title={photo ? 'Change this photo' : 'Upload a photo'}
+        style={{
+          width: AVATAR,
+          height: AVATAR,
+          padding: 0,
+          borderRadius: 10,
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: disabled ? 'default' : 'pointer',
+          border: photo ? `1px solid ${BORDER}` : `1.5px dashed ${BORDER}`,
+          background: photo ? '#fff' : '#FAFBFE',
+          color: FAINT,
+        }}
+      >
+        {photo ? (
+          <img
+            src={photo}
+            alt={profile.full_name || 'Board member'}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : (
+          PERSON_GLYPH
+        )}
+      </button>
+
+      {photo ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" style={action} onClick={open} disabled={disabled}>
+            ✏ Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => !disabled && onPick(null)}
+            disabled={disabled}
+            aria-label={`Remove the photo of ${who}`}
+            title="Remove this photo"
+            style={{ ...action, width: 'auto', color: FAINT, fontWeight: 600 }}
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        // Named, and on the row. Hiding this behind the avatar would leave a
+        // director with no face and nothing saying it was ever an option.
+        <button type="button" style={action} onClick={open} disabled={disabled}>
+          Upload picture
+        </button>
+      )}
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept={LOGO_ACCEPT}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          onPick(e.target.files?.[0] ?? null);
+          e.target.value = ''; // re-picking the same file must still fire onChange
+        }}
+      />
+    </>
+  );
+}
+
+
 // ─── one person ───────────────────────────────────────────────────────────────
 
 function ProfileRow({
@@ -305,33 +441,17 @@ function ProfileRow({
     (badDate(v) ? { ...field, borderColor: RED } : field);
 
   return (
-    <div style={{ padding: '14px 13px', borderBottom: `1px solid ${BORDER_SOFT}` }}>
+    <div className="bpt-person" style={{ padding: '14px 13px', borderBottom: `1px solid ${BORDER_SOFT}` }}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        {/* The photograph. Same control and the same 1 MB PNG/JPEG rule as the
-            brand logo, so there is one image picker in the product. */}
-        <div style={{ width: 168, flexShrink: 0 }}>
+        <div style={{ width: 96, flexShrink: 0 }}>
           <span style={label}>Photo</span>
-          <BrandUploadBox
-            stacked
-            icon="🧑"
-            prompt="Add a photo"
-            hint="PNG or JPG, up to 1 MB"
-            accept={LOGO_ACCEPT}
-            removeLabel={`Remove ${profile.full_name || 'this'} photo`}
-            filled={
-              profile.photo_data_uri ? (
-                <img
-                  src={profile.photo_data_uri}
-                  alt={profile.full_name || 'Board member'}
-                  style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }}
-                />
-              ) : undefined
-            }
-            onPick={onPickPhoto}
-          />
+          <PhotoCell profile={profile} disabled={disabled} onPick={onPickPhoto} />
         </div>
 
-        <div style={{ flex: 1, minWidth: 240 }}>
+        {/* minWidth 0, not 240: a flex item defaults to min-content, so one
+            long director name would otherwise widen the whole row rather than
+            wrapping inside it. */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 160 }}>
               <span style={label}>Name</span>
