@@ -285,6 +285,30 @@ export const BOARD_MEETING_SECTIONS = ['BR35', 'BR36'];
  */
 export const BOARD_PROFILE_SECTIONS = ['BR32'];
 
+/** Every type the platform ingests. Mirrors config.ALLOWED_EXTENSIONS. */
+export const BOARD_UPLOAD_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt';
+
+/**
+ * The same, without the spreadsheet the CV slot refuses. Mirrors
+ * _DIRECTOR_SLOT_REJECTS in routes/board.py — that check is the one that
+ * enforces it, because `accept` is a hint a user can step past in the OS
+ * dialog. This only stops them picking the wrong file by accident.
+ */
+export const BOARD_CV_UPLOAD_ACCEPT = '.pdf,.docx,.csv,.txt';
+
+/**
+ * What a slot's file picker should offer, given the sections it feeds.
+ *
+ * Keyed on section CODES, not the slot's name: the name is display text and
+ * gets reworded, the codes are the registry's. Same reasoning as
+ * slotSystemKind.
+ */
+export function boardUploadAccept(sectionCodes: readonly (string | null | undefined)[]): string {
+  return sectionCodes.some((code) => code && BOARD_PROFILE_SECTIONS.includes(code))
+    ? BOARD_CV_UPLOAD_ACCEPT
+    : BOARD_UPLOAD_ACCEPT;
+}
+
 /**
  * Whether BR32's card should open the profile TABLE rather than the generic
  * cell editor.

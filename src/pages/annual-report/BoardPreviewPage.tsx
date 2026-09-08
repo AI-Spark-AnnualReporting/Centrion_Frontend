@@ -22,6 +22,7 @@ import {
   BOARD_PLATFORM_SECTIONS,
   BOARD_PROFILE_SECTIONS,
   boardCardVariant,
+  boardUploadAccept,
   boardUsesProfileEditor,
   canRefineSection,
   errorMessage,
@@ -1420,6 +1421,7 @@ function AttachDocument({
     >
       <input
         type="file"
+        accept={boardUploadAccept([code])}
         disabled={!usable}
         style={{ display: 'none' }}
         onChange={(e) => {

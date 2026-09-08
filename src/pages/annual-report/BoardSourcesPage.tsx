@@ -18,6 +18,7 @@ import BoardDirectorPicker from './BoardDirectorPicker';
 import BoardMeetingPicker from './BoardMeetingPicker';
 import {
   BOARD_PROFILE_SECTIONS,
+  boardUploadAccept,
   errorMessage,
   readDuplicateSlots,
   readExistingRunId,
@@ -527,6 +528,9 @@ function SlotRow({
             ref={fileRef}
             type="file"
             multiple
+            // Per slot, not one constant: the CV row refuses a spreadsheet and
+            // every other row still takes one.
+            accept={boardUploadAccept(slot.feeds.map((f) => f.section_code))}
             disabled={disabled}
             style={{ display: 'none' }}
             onChange={(e) => {

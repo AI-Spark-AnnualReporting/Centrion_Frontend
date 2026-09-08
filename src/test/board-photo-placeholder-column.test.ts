@@ -9,7 +9,7 @@
 // untouched.
 
 import { describe, expect, it } from 'vitest';
-import { withPhotoPlaceholders } from '@/pages/annual-report/board-helpers';
+import { boardUploadAccept, withPhotoPlaceholders } from '@/pages/annual-report/board-helpers';
 import type { ProducedSection } from '@/types/quarterly';
 
 const PNG = 'data:image/png;base64,AAAA';
@@ -81,5 +81,30 @@ describe('withPhotoPlaceholders', () => {
 
     const noRows = section({ columns: ['Name'] });
     expect(withPhotoPlaceholders(noRows)).toBe(noRows);
+  });
+});
+
+// The file picker offers what the slot will actually accept. `accept` is only a
+// hint — the OS dialog lets a determined user pick anything, and the server is
+// what refuses it — so this is about not choosing the wrong file by accident.
+describe('boardUploadAccept', () => {
+  it('drops the spreadsheet on the slot that feeds BR32', () => {
+    expect(boardUploadAccept(['BR32'])).toBe('.pdf,.docx,.csv,.txt');
+    expect(boardUploadAccept(['BR32'])).not.toContain('xlsx');
+  });
+
+  it('offers everything on every other slot', () => {
+    // A financial statement IS a spreadsheet. Narrowing this would be the bug.
+    expect(boardUploadAccept(['BR24'])).toContain('.xlsx');
+    expect(boardUploadAccept(['BR35', 'BR36'])).toContain('.xlsx');
+    expect(boardUploadAccept([])).toContain('.xlsx');
+  });
+
+  it('narrows a slot that feeds BR32 among others', () => {
+    expect(boardUploadAccept(['BR24', 'BR32'])).not.toContain('xlsx');
+  });
+
+  it('survives a slot whose feeds carry no code', () => {
+    expect(boardUploadAccept([null, undefined])).toContain('.xlsx');
   });
 });
