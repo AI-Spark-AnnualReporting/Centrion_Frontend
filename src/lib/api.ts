@@ -4771,7 +4771,8 @@ interface RawCycleDepartment {
   progress?: number;
 }
 
-interface RawCycleOverview extends Omit<CycleOverview, "departments"> {
+interface RawCycleOverview extends Omit<CycleOverview, "departments" | "cycle"> {
+  cycle: RawCycle;
   departments?: RawCycleDepartment[];
 }
 
@@ -4834,6 +4835,14 @@ export const sarCycles = {
     );
     return {
       ...raw,
+      // The backend sends the PM's name as `pm_name` (get_cycle_with_pm resolves
+      // it); sarCycles.list() maps it and this didn't. Without it the detail page
+      // falls back to searching the role=project_manager list, which misses any
+      // PM not in it — a Spark-run cycle, for one — and renders "—".
+      cycle: {
+        ...raw.cycle,
+        project_manager_name: raw.cycle?.project_manager_name ?? raw.cycle?.pm_name,
+      },
       departments: (raw.departments ?? []).map((d) => ({
         session_id: d.session_id,
         hod_user_id: d.hod_user_id ?? null,

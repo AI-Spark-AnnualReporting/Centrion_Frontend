@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { sarCycles, adminConsole } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 import type { ContentLanguage, CreateCyclePayload, Cycle } from '@/types/cycles';
 import type { AdminUserRow } from '@/types/admin';
 
@@ -39,7 +40,14 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
   const [name, setName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
   const [contentLanguage, setContentLanguage] = useState<ContentLanguage>('english');
-  const [projectManagerId, setProjectManagerId] = useState('');
+  // Spark staff run the cycles they create for a client, so they are the PM by
+  // default. Client PMs stay in the list below — this is a starting point, not a
+  // lock. Every other role opens on the placeholder exactly as before.
+  const { user } = useAuth();
+  const isSpark = user?.role === 'spark_internal';
+  const [projectManagerId, setProjectManagerId] = useState(
+    isSpark ? (user?.user_id ?? '') : '',
+  );
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [submissionDeadline, setSubmissionDeadline] = useState('');
@@ -202,6 +210,9 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
             <label className="fl-label">Project Manager *</label>
             <select className="inp sel" value={projectManagerId} onChange={(e) => setProjectManagerId(e.target.value)}>
               <option value="">Select a Project Manager</option>
+              {isSpark && user?.user_id && (
+                <option value={user.user_id}>{user.full_name} (you)</option>
+              )}
               {pms.map((pm) => {
                 const id = pm.user_id || pm.id;
                 return (

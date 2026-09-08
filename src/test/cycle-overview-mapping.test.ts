@@ -18,8 +18,11 @@ function jsonResponse(body: unknown) {
   });
 }
 
-const overviewPayload = (dept: Record<string, unknown>) => ({
-  cycle: { id: "cyc_1" },
+const overviewPayload = (
+  dept: Record<string, unknown>,
+  cycle: Record<string, unknown> = {},
+) => ({
+  cycle: { id: "cyc_1", project_manager_id: "usr_pm", ...cycle },
   stats: {},
   departments: [
     {
@@ -73,6 +76,31 @@ describe("sarCycles.overview mapping", () => {
     const [d] = (await sarCycles.overview("cyc_1")).departments;
 
     expect(d.assigned_user_name).toBe("Sara Khalid");
+  });
+
+  it("keeps the PM's name, which the page has no other way to resolve", async () => {
+    // CycleDetailPage falls back to searching the role=project_manager list, so
+    // any PM outside it — a Spark-run cycle, for one — renders as "—" without
+    // this. list() has always mapped it; overview() did not.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse(overviewPayload({ user_name: "Sara Khalid" }, { pm_name: "Spark Staff" })),
+    ));
+    const { sarCycles } = await import("@/lib/api");
+    const { cycle } = await sarCycles.overview("cyc_1");
+
+    expect(cycle.project_manager_name).toBe("Spark Staff");
+  });
+
+  it("prefers an explicit project_manager_name over pm_name", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse(overviewPayload({}, {
+        project_manager_name: "Explicit", pm_name: "Fallback",
+      })),
+    ));
+    const { sarCycles } = await import("@/lib/api");
+    const { cycle } = await sarCycles.overview("cyc_1");
+
+    expect(cycle.project_manager_name).toBe("Explicit");
   });
 
   it("still maps the renamed status and progress fields", async () => {
