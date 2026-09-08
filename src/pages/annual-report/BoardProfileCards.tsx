@@ -74,6 +74,11 @@ export default function BoardProfileCards({
     return <SectionContent section={section} />;
   }
 
+  // The table is one row per JOB, and only the row that OPENS a director
+  // carries `jobs`. The rest are that person's remaining jobs, already inside
+  // that array — drawn on their own they would each be an empty card.
+  const people = parsed.rows.filter((r) => Array.isArray(r.jobs));
+
   const blockCols = parsed.columns.filter(
     (c) => c !== 'Photo' && c !== 'Name' && !JOB_COLS.includes(c),
   );
@@ -81,7 +86,7 @@ export default function BoardProfileCards({
   if (variant === 'grid') {
     return (
       <div className="bpc-grid">
-        {parsed.rows.map((r, i) => (
+        {people.map((r, i) => (
           <GridCard key={i} row={r} blockCols={blockCols} />
         ))}
       </div>
@@ -90,7 +95,7 @@ export default function BoardProfileCards({
   if (variant === 'band') {
     return (
       <div className="bpc-stack">
-        {parsed.rows.map((r, i) => (
+        {people.map((r, i) => (
           <BandCard key={i} row={r} blockCols={blockCols} />
         ))}
       </div>
@@ -98,7 +103,7 @@ export default function BoardProfileCards({
   }
   return (
     <div className="bpc-stack bpc-stack--rows">
-      {parsed.rows.map((r, i) => (
+      {people.map((r, i) => (
         <RowCard key={i} row={r} blockCols={blockCols} />
       ))}
     </div>

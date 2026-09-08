@@ -1,8 +1,10 @@
-// A BR32 row prints its jobs as four stacked cells for the table and carries
-// them structurally as `jobs` for the cards — the cells can't be split back
-// apart, because a director's own line breaks inside Experience mean job 2 is
-// not line 2 of the Company cell. These check the cards read `jobs`, and that a
-// row without one (produced before the backend sent it) prints as the table.
+// BR32's table is one row per JOB, and only the row that OPENS a director
+// carries `jobs` — the rest are that person's remaining jobs, already inside
+// that array. The cards are built from `jobs`, so they must be built from THOSE
+// rows only: a continuation row drawn as a card is a card with no name and no
+// positions. These check the cards read `jobs`, skip the continuation rows, and
+// that a section with no `jobs` at all (produced before the backend sent it)
+// falls back to the table.
 
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -60,7 +62,32 @@ const photoOnly = {
   jobs: [],
 };
 
+// A director's second job: the continuation row the table prints under them.
+// No name, no `jobs` — everything about the person is on the row above.
+const continuationRow = {
+  Photo: '',
+  Name: '',
+  'Job title': 'CFO',
+  Company: 'Raidah',
+  Period: 'Jan 2020 – Dec 2024',
+  Experience: 'Ran the desk.',
+};
+
 describe('BoardProfileCards', () => {
+  it('draws one card per person, not one per continuation row', () => {
+    // Three table rows, one director. Counting rows would draw two blank cards
+    // under the real one.
+    const { container } = render(
+      <BoardProfileCards
+        section={section({ columns: COLUMNS, rows: [threeJobs, continuationRow, continuationRow] })}
+        variant="grid"
+      />,
+    );
+
+    expect(container.querySelectorAll('.bpc-card')).toHaveLength(1);
+    expect(screen.getAllByText('F. Al-Dosari')).toHaveLength(1);
+  });
+
   it('builds one block per job from `jobs`, not from the stacked cells', () => {
     render(
       <BoardProfileCards section={section({ columns: COLUMNS, rows: [threeJobs] })} variant="band" />,
