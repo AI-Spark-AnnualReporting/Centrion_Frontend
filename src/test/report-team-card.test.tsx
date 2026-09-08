@@ -166,6 +166,19 @@ describe("Report team card", () => {
     expect(screen.getByText(/No departments assigned to this cycle yet/)).toBeInTheDocument();
   });
 
+  it("says Nobody, not Unknown, when a department has no assignee", () => {
+    // SAR sends the literal "Unknown" for an unassigned session; api.ts maps it
+    // to undefined so this fallback can fire. If that mapping regresses the
+    // screen quietly reads "Unknown" and nothing fails.
+    const unassigned: CycleDepartmentProgress[] = [
+      { ...DEPTS[0], assigned_user_name: undefined, assigned_user_email: undefined },
+    ];
+    render(<ReportTeamCard cycle={CYCLE} departments={unassigned} pmName="Sara Nasser" />);
+    fireEvent.click(screen.getByText("Human Resources"));
+    expect(screen.getByText("Nobody")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+  });
+
   it("falls back to the cycle's company when acting on none", () => {
     // A client admin reading their own cycle has no acting company.
     actingCompany = null;

@@ -206,7 +206,6 @@ export default function ReportTeamCard({
             <tr style={{ background: "#FAFBFE" }}>
               <th style={th}>Department</th>
               <th style={th}>Head of department</th>
-              <th style={th}>Assigned to</th>
               <th style={th}>Status</th>
               <th style={th}>Progress</th>
               <th style={{ ...th, width: 60 }} />
@@ -241,20 +240,6 @@ export default function ReportTeamCard({
                       <div style={{ fontSize: 10, color: MUTED }}>{d.department_code}</div>
                     </td>
                     <td style={td}>{d.hod_name ?? muted("Not set")}</td>
-                    <td style={td}>
-                      {d.assigned_user_name ? (
-                        <>
-                          <div>{d.assigned_user_name}</div>
-                          {d.assigned_user_email && (
-                            <div style={{ fontSize: 10, color: MUTED }}>
-                              {d.assigned_user_email}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        muted("Nobody")
-                      )}
-                    </td>
                     <td style={td}>
                       <SessionStatusBadge status={d.session_status} />
                     </td>
@@ -298,7 +283,7 @@ export default function ReportTeamCard({
                   {isOpen && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         style={{
                           background: "#FAFBFE",
                           padding: "4px 16px 14px",

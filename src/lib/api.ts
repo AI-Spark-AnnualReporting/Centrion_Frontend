@@ -4741,6 +4741,11 @@ function unwrap<T>(raw: unknown, key: string): T {
 // Raw department row as the SAR backend actually returns it. The `*_percentage`
 // / `status` / `user_*` keys are the backend's names; the optional frontend-name
 // fields let `overview()` normalise either shape (see below).
+/** SAR's sentinel for "no one is assigned" — see the mapper below. */
+function unknownAsAbsent(name: string | undefined): string | undefined {
+  return name === "Unknown" ? undefined : name;
+}
+
 interface RawCycleDepartment {
   // The backend has always sent these three; they were simply not declared here,
   // so the mapper below dropped them. session_id is what makes a deep link to a
@@ -4837,7 +4842,12 @@ export const sarCycles = {
         department_name: d.department_name,
         department_code: d.department_code,
         assigned_user_id: d.assigned_user_id ?? d.user_id ?? null,
-        assigned_user_name: d.assigned_user_name ?? d.user_name,
+        // SAR sends the literal string "Unknown" for an unassigned session
+        // (cycle_service.py: `user_info.get("full_name") or "Unknown"`), which is
+        // truthy and so defeats every "nobody assigned" fallback downstream.
+        // Normalise it here, where the rest of this payload's shape is already
+        // translated, rather than changing a field the SAR app also renders.
+        assigned_user_name: unknownAsAbsent(d.assigned_user_name ?? d.user_name),
         assigned_user_email: d.assigned_user_email ?? d.user_email,
         session_status: (d.session_status ?? d.status) as SessionStatus,
         progress: d.progress ?? d.progress_percentage ?? 0,
