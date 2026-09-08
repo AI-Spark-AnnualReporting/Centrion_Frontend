@@ -2,17 +2,13 @@
 // Admin Console (and anywhere else that shows a role). Never hardcode display
 // names inline — import from here.
 
-// `spark_admin` is the platform owner (Spark), not a tenant role: it sits
-// outside every company and is the only role allowed on /spark. It is
-// deliberately absent from ROLE_ORDER and ASSIGNABLE_ROLES below — it never
-// appears on a company's Users & Roles screen and can never be granted there.
 export type BackendRole =
   | "admin"
   | "project_manager"
   | "hod"
   | "department_user"
   | "ir"
-  | "spark_admin";
+  | "spark_internal";
 
 export interface RoleMeta {
   label: string; // Display name shown to users
@@ -55,11 +51,14 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     badgeClass: "b-gy",
     dot: "#9BA3C4",
   },
-  spark_admin: {
-    label: "Spark",
-    description: "Platform owner — read-only across every company",
+  // Spark's own staff, not a customer role. Present so member lists and the
+  // topbar render a badge rather than falling back to "IR"; deliberately absent
+  // from ROLE_ORDER and ASSIGNABLE_ROLES below. Mirrors constants.py.
+  spark_internal: {
+    label: "Spark Internal",
+    description: "Spark staff — acts on any company",
     badgeClass: "b-dk",
-    dot: "#1A1D2E",
+    dot: "#4040C8",
   },
 };
 
@@ -80,6 +79,17 @@ export const ASSIGNABLE_ROLES: BackendRole[] = [
   "department_user",
   "ir",
 ];
+
+// Roles carrying platform-admin reach: every feature, the admin-only screens,
+// and (for spark_internal) cross-company access. Use `isAdminLevel` wherever a
+// `role === "admin"` check meant "is this an admin-level account" rather than
+// "is this literally the admin role". Named to match the backend's
+// constants.ADMIN_LEVEL_ROLES so one grep finds both repos.
+export const ADMIN_LEVEL_ROLES: BackendRole[] = ["admin", "spark_internal"];
+
+export function isAdminLevel(role: string | null | undefined): boolean {
+  return !!role && ADMIN_LEVEL_ROLES.includes(role as BackendRole);
+}
 
 export function roleMeta(role: string | null | undefined): RoleMeta {
   return (role && ROLE_DISPLAY[role as BackendRole]) || ROLE_DISPLAY.ir;

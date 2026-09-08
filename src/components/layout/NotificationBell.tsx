@@ -100,15 +100,23 @@ const SCOPED_CSS = `
 const REFRESH_MS = 45000;
 
 export function NotificationBell() {
+  // Threads are company-scoped. A Spark session that hasn't picked a company
+  // would render a permanently empty bell and re-poll every 45s for nothing, so
+  // hide it entirely — the same self-hiding contract AppSwitcher and
+  // ActingCompanyChip use. Role-gated, so no other role is affected.
+  const { user, actingCompany } = useAuth();
+  const hideForCompanylessSpark = user?.role === 'spark_internal' && !actingCompany;
+
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Threads live inside a company, so a user without one (the platform-owner
-  // `spark_admin`) has no notifications to poll for — the request 400s every
-  // 45 seconds. Same guard ComplianceRunsContext already applies to its own
+  // Threads live inside a company, so a user without one has no notifications
+  // to poll for — the request 400s every 45 seconds. `user.company_id` is
+  // already the acting company's id for a Spark session (see AuthContext's
+  // effectiveUser), so this also re-enables polling once Spark picks one.
+  // Same guard ComplianceRunsContext already applies to its own
   // company-scoped sweep.
   const enabled = !!user?.company_id;
 
@@ -177,9 +185,9 @@ export function NotificationBell() {
     });
   };
 
-  // After the hooks, so the bell simply isn't there for a company-less user
-  // rather than sitting in the topbar permanently empty.
-  if (!enabled) return null;
+  // After the hooks, never before them — so the bell simply isn't there for a
+  // company-less user rather than sitting in the topbar permanently empty.
+  if (!enabled || hideForCompanylessSpark) return null;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>

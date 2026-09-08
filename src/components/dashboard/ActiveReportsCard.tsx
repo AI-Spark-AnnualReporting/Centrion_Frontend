@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import type { Cycle } from '@/types/cycles';
 import { ProgressBar, safePct } from '@/pages/annual-report/cycle-ui';
 import { statusPill, type StatusPill } from './report-status';
+import { isAdminLevel } from '@/constants/roles';
 
 /**
  * Active Reports — real reports from reports.list (status derived from generation_config),
@@ -105,7 +106,7 @@ export function ActiveReportsCard() {
 
   useEffect(() => {
     // Annual-report cycles live on a separate, admin-only backend — best-effort.
-    if (user?.role !== 'admin') { setCycles([]); return; }
+    if (!isAdminLevel(user?.role)) { setCycles([]); return; }
     let cancelled = false;
     sarCycles.list()
       .then((cs) => { if (!cancelled) setCycles(cs ?? []); })

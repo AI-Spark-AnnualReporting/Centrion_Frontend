@@ -14,9 +14,14 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 // A regular company user — these tests are about route-based hiding, not the
-// separate `spark_admin` (no company_id) case covered elsewhere.
+// separate `spark_internal` (no company_id) case covered elsewhere. AppLayout
+// also keys the compliance provider on the acting company so a Spark user
+// switching tenants doesn't carry the previous one's polled runs across.
 vi.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ user: { user_id: "u1", company_id: "co-1", role: "admin" } }),
+  useAuth: () => ({
+    user: { user_id: "u1", company_id: "co-1", role: "admin" },
+    actingCompany: null,
+  }),
 }));
 vi.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <nav /> }));
 vi.mock("@/components/layout/Topbar", () => ({

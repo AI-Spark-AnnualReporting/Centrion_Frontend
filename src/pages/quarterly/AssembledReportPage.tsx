@@ -13,6 +13,7 @@ import { ReportHubPanel } from '@/components/communications/ReportHubPanel';
 import { ReportStatusCard, formatApprovedDate } from '@/components/shared/ReportStatusCard';
 import { isCoverSection, byDisplayOrder } from '@/components/quarterly/sectionState';
 import type { ProducedSection, AssembledSection, CoverTemplate, ColorPalette, BrandColors, CoverSelectionPayload, MetricsMode } from '@/types/quarterly';
+import { isAdminLevel } from '@/constants/roles';
 
 const ACCENT = '#4040C8';
 const GREEN = '#10B981';
@@ -101,7 +102,7 @@ export default function AssembledReportPage() {
   const companyId = user?.company_id ?? null;
   // Approve & Lock is admin-only — a non-admin has nothing to do with the
   // button, so it isn't there at all rather than sitting greyed out.
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isAdminLevel(user?.role);
 
   const [sections, setSections] = useState<ProducedSection[]>([]);
   const [loading, setLoading] = useState(true);
