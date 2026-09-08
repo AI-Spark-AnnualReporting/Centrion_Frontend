@@ -3,8 +3,8 @@
 //
 //   - miss `company` and every scoped route in the SAR app answers
 //     "Select a company first" — the tab opens on a broken page, not an error;
-//   - miss `next` and all three rows land in the same place, which is exactly
-//     the bug the department switcher exists to avoid;
+//   - miss `next` and every row lands in the same place, which is exactly the
+//     bug the department switcher exists to avoid;
 //   - link a department with no session yet and the tab opens on nothing.
 //
 // It must also stay a NEW tab: a same-tab hop loses the acting company.
@@ -75,11 +75,7 @@ describe("Report team card", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
     fireEvent.click(screen.getByText("Human Resources"));
     const paths = links().map((h) => new URL(h).searchParams.get("next"));
-    expect(paths).toEqual([
-      "/pm",
-      "/hod/sessions/sess_hr",
-      "/department/sessions/sess_hr",
-    ]);
+    expect(paths).toEqual(["/pm", "/hod/sessions/sess_hr"]);
   });
 
   it("tells the SAR tab where to come back to", () => {
@@ -118,14 +114,9 @@ describe("Report team card", () => {
 
     fireEvent.click(screen.getByText("Human Resources"));
     expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
-    expect(screen.getByText("DEPARTMENT USER")).toBeInTheDocument();
 
     const paths = links().map((h) => new URL(h).searchParams.get("next"));
-    expect(paths).toEqual([
-      "/pm",
-      "/hod/sessions/sess_hr",
-      "/department/sessions/sess_hr",
-    ]);
+    expect(paths).toEqual(["/pm", "/hod/sessions/sess_hr"]);
   });
 
   it("collapses again, and only one department is open at a time", () => {
@@ -166,14 +157,15 @@ describe("Report team card", () => {
     expect(screen.getByText(/No departments assigned to this cycle yet/)).toBeInTheDocument();
   });
 
-  it("says Nobody, not Unknown, when a department has no assignee", () => {
-    // SAR sends the literal "Unknown" for an unassigned session; api.ts maps it
-    // to undefined so this fallback can fire. If that mapping regresses the
-    // screen quietly reads "Unknown" and nothing fails.
-    const unassigned: CycleDepartmentProgress[] = [
-      { ...DEPTS[0], assigned_user_name: undefined, assigned_user_email: undefined },
+  it("says Nobody, not Unknown, when a department has no head", () => {
+    // SAR sends the literal "Unknown" for an empty name; api.ts maps it to
+    // undefined so this fallback can fire. The mapping itself is now guarded by
+    // cycle-overview-mapping.test.ts and by CycleDetailPage's Assigned user
+    // column — this only holds the rendering end of it.
+    const headless: CycleDepartmentProgress[] = [
+      { ...DEPTS[0], hod_name: undefined },
     ];
-    render(<ReportTeamCard cycle={CYCLE} departments={unassigned} pmName="Sara Nasser" />);
+    render(<ReportTeamCard cycle={CYCLE} departments={headless} pmName="Sara Nasser" />);
     fireEvent.click(screen.getByText("Human Resources"));
     expect(screen.getByText("Nobody")).toBeInTheDocument();
     expect(screen.queryByText("Unknown")).not.toBeInTheDocument();

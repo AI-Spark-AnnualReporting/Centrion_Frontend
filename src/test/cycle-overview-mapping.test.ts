@@ -6,6 +6,9 @@
 //   - SAR sends the literal string "Unknown" for an unassigned session
 //     (cycle_service: `user_info.get("full_name") or "Unknown"`), which is
 //     truthy, so every "nobody assigned" fallback downstream silently loses.
+//     Downstream is now CycleDetailPage's Assigned user column — the Report
+//     team card stopped listing the assignee — so this is the only place the
+//     assigned_user_* half of that mapping is pinned at all.
 //
 // Both fail by rendering something plausible, so they need pinning here.
 

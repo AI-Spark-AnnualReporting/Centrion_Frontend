@@ -2,9 +2,10 @@
 // of a reporting cycle.
 //
 // The PM is pinned at the top because they are cycle-level. Below that, one row
-// per department; clicking a row opens an area underneath showing the roles that
-// department carries on THIS cycle — its head and whoever was assigned to answer
-// — each with its own Open.
+// per department; clicking a row opens an area underneath showing that
+// department's head on THIS cycle, with their own Open. The person assigned to
+// answer is not offered here — the head's workspace is where that work is done,
+// and the row read "Nobody" until someone was routed a question.
 //
 // Open does NOT log you in as anyone. It hands over your own token, which is why
 // you arrive as yourself with your own permissions. A new tab, not a redirect,
@@ -218,10 +219,6 @@ export default function ReportTeamCard({
                 d.session_id ? `/hod/sessions/${d.session_id}` : null,
                 companyId,
               );
-              const userHref = workspaceUrl(
-                d.session_id ? `/department/sessions/${d.session_id}` : null,
-                companyId,
-              );
               return (
                 <Fragment key={d.department_id}>
                   <tr
@@ -296,14 +293,6 @@ export default function ReportTeamCard({
                           who={d.hod_name}
                           sub={d.department_name}
                           href={hodHref}
-                          disabledReason={noSession}
-                        />
-                        <RoleLine
-                          role="DEPARTMENT USER"
-                          blurb="Answers assigned questions"
-                          who={d.assigned_user_name}
-                          sub={d.assigned_user_email}
-                          href={userHref}
                           disabledReason={noSession}
                         />
                       </td>
