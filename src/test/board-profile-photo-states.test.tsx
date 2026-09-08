@@ -156,3 +156,49 @@ describe('BR32 profile photo states', () => {
     );
   });
 });
+
+// The actions live above the members, and only the members scroll. A board runs
+// to a dozen people with several jobs each, so Save used to sit under all of
+// them — and "+ Add a person" was furthest from the list it appends to.
+describe('BR32 profile editor layout', () => {
+  const SAVE = 'Save and rebuild the section';
+
+  it('puts Save, Cancel and Add a person above the first member', async () => {
+    stubProfiles([withPhoto, withoutPhoto]);
+    renderEditor();
+
+    const firstRow = await waitFor(() => rowFor('Yousif H. Mansoor'));
+
+    for (const label of [SAVE, 'Cancel', '+ Add a person']) {
+      const button = screen.getByText(label);
+      const isAbove = button.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING;
+      expect(isAbove, `${label} should come before the members`).toBeTruthy();
+    }
+  });
+
+  it('scrolls the members and nothing else', async () => {
+    stubProfiles([withPhoto, withoutPhoto]);
+    renderEditor();
+
+    const row = await waitFor(() => rowFor('Yousif H. Mansoor'));
+    const list = row.parentElement as HTMLElement;
+
+    expect(list.style.overflowY).toBe('auto');
+    expect(list.style.maxHeight).toBe('55vh');
+    // The save button must NOT be inside the box that scrolls.
+    expect(list.contains(screen.getByText(SAVE))).toBe(false);
+  });
+
+  it('adds a person to the scrolling list, not beside the buttons', async () => {
+    stubProfiles([withPhoto]);
+    renderEditor();
+
+    const row = await waitFor(() => rowFor('Yousif H. Mansoor'));
+    const list = row.parentElement as HTMLElement;
+    expect(list.querySelectorAll('.bpt-person')).toHaveLength(1);
+
+    fireEvent.click(screen.getByText('+ Add a person'));
+
+    await waitFor(() => expect(list.querySelectorAll('.bpt-person')).toHaveLength(2));
+  });
+});

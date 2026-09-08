@@ -117,8 +117,20 @@ export default function BoardProfileTable({
   const removeProfile = (index: number) =>
     setProfiles((list) => (list ? list.filter((_, i) => i !== index) : list));
 
-  const addProfile = () =>
+  // The member list scrolls on its own so the actions above it can stay put.
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const addProfile = () => {
     setProfiles((list) => (list ? [...list, emptyProfile()] : [emptyProfile()]));
+    // The new person is appended at the bottom of a list that is usually taller
+    // than its box, so without this the button appears to do nothing.
+    requestAnimationFrame(() => {
+      // Guarded: jsdom does not implement scrollTo on an element, and neither
+      // does every browser we still see.
+      const list = listRef.current;
+      if (list?.scrollTo) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+    });
+  };
 
   /**
    * Read a picked headshot to the data URI the API takes, or clear it.
@@ -180,15 +192,29 @@ export default function BoardProfileTable({
   const full = profiles.length >= MAX_PROFILES;
 
   return (
-    <div style={{ border: `1px solid ${BORDER}`, borderRadius: 10, overflow: 'hidden' }}>
+    // No overflow:hidden — it would make this box a scroll container, and the
+    // sticky bar would then stick to a box that never scrolls instead of to the
+    // review card that does. The bar carries the top corners itself.
+    <div style={{ border: `1px solid ${BORDER}`, borderRadius: 10 }}>
+      {/* Everything the operator can DO, above everything they can read. A board
+          runs to a dozen people with several jobs each, and the actions used to
+          sit under all of it — so saving meant scrolling past every director,
+          and "+ Add a person" was furthest from the list it appends to. Sticky
+          rather than merely first, because this box lives inside the review
+          screen's own scrolling card. */}
       <div
         style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           flexWrap: 'wrap',
           padding: '10px 13px',
-          borderBottom: `1px solid ${BORDER_SOFT}`,
+          borderBottom: `1px solid ${BORDER}`,
+          borderTopLeftRadius: 9,
+          borderTopRightRadius: 9,
           background: '#FAFBFE',
         }}
       >
@@ -204,6 +230,22 @@ export default function BoardProfileTable({
             {sourceFiles.length > 1 && ` + ${sourceFiles.length - 1} more`}
           </span>
         )}
+        <span style={{ flex: 1 }} />
+        <button
+          className="btn bs bsm"
+          type="button"
+          disabled={disabled || saving || full}
+          title={full ? `At most ${MAX_PROFILES} people per report` : undefined}
+          onClick={addProfile}
+        >
+          + Add a person
+        </button>
+        <button className="btn bs bsm" type="button" disabled={saving} onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn bp bsm" type="button" disabled={disabled || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save and rebuild the section'}
+        </button>
       </div>
 
       <div style={{ padding: '11px 13px', fontSize: 11.5, color: MUTED, borderBottom: `1px solid ${BORDER_SOFT}` }}>
@@ -218,52 +260,30 @@ export default function BoardProfileTable({
         </div>
       )}
 
-      {profiles.length === 0 ? (
-        <div style={{ padding: '18px 13px', fontSize: 12, color: MUTED }}>
-          Nobody was read out of the uploaded file. Add the board members by hand below, or go
-          back to Sources and upload a different CV.
-        </div>
-      ) : (
-        profiles.map((profile, index) => (
-          <ProfileRow
-            key={profile.id ?? `new-${index}`}
-            profile={profile}
-            index={index}
-            disabled={disabled || saving}
-            onChange={(next) => update(index, next)}
-            onRemove={() => removeProfile(index)}
-            onPickPhoto={(file) => pickPhoto(index, profile, file)}
-          />
-        ))
-      )}
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
-          padding: '11px 13px',
-          background: '#FAFBFE',
-        }}
-      >
-        <button
-          className="btn bs bsm"
-          type="button"
-          disabled={disabled || saving || full}
-          title={full ? `At most ${MAX_PROFILES} people per report` : undefined}
-          onClick={addProfile}
-        >
-          + Add a person
-        </button>
-        <span style={{ flex: 1 }} />
-        <button className="btn bs bsm" type="button" disabled={saving} onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="btn bp bsm" type="button" disabled={disabled || saving} onClick={save}>
-          {saving ? 'Saving…' : 'Save and rebuild the section'}
-        </button>
+      {/* Only this scrolls. 55vh leaves the section's own heading and the bar
+          above in view on a laptop, and the box shrinks to its content when
+          there are two directors rather than twelve. */}
+      <div ref={listRef} style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+        {profiles.length === 0 ? (
+          <div style={{ padding: '18px 13px', fontSize: 12, color: MUTED }}>
+            Nobody was read out of the uploaded file. Add the board members by hand with
+            "+ Add a person" above, or go back to Sources and upload a different CV.
+          </div>
+        ) : (
+          profiles.map((profile, index) => (
+            <ProfileRow
+              key={profile.id ?? `new-${index}`}
+              profile={profile}
+              index={index}
+              disabled={disabled || saving}
+              onChange={(next) => update(index, next)}
+              onRemove={() => removeProfile(index)}
+              onPickPhoto={(file) => pickPhoto(index, profile, file)}
+            />
+          ))
+        )}
       </div>
+
     </div>
   );
 }
