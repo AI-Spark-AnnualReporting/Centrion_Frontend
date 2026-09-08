@@ -21,16 +21,23 @@ const initials = (name?: string | null) =>
 // questions route to that department's lead (role key `hod`), set in the admin console.
 // A department with no lead assigned is blocked. Nothing persists until the page's Submit
 // (assign only; the cycle stays draft and only goes active when the PM kicks off).
+//
+// `selfLeadName` is the Spark case: staff running a cycle themselves lead every
+// department in it, so their name replaces the client's lead on every row rather
+// than filling in for a missing one. The backend makes the same substitution from
+// the caller's own identity, so the chip is not just a label.
 export default function AssignDepartmentsSection({
   allDepartments,
   assigned,
   onAdd,
   onRemove,
+  selfLeadName,
 }: {
   allDepartments: Department[];
   assigned: DepartmentAssignment[];
   onAdd: (dept: Department) => void;
   onRemove: (departmentId: string) => void;
+  selfLeadName?: string | null;
 }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
@@ -176,8 +183,11 @@ export default function AssignDepartmentsSection({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {assigned.map((row) => {
               const dept = deptById.get(row.department_id);
-              const hasHod = dept?.has_hod ?? !!dept?.hod_user_id;
-              const hodName = dept?.hod_name;
+              const leadName = selfLeadName ?? dept?.hod_name;
+              const hasLead = !!selfLeadName || (dept?.has_hod ?? !!dept?.hod_user_id);
+              const leadLabel = selfLeadName
+                ? `${selfLeadName} (you)`
+                : leadName || `${row.department_code} Lead`;
               return (
                 <div
                   key={row.department_id}
@@ -186,9 +196,9 @@ export default function AssignDepartmentsSection({
                     alignItems: 'center',
                     gap: 12,
                     padding: '10px 12px',
-                    border: `1px solid ${hasHod ? '#ECEEF8' : '#F4C7C7'}`,
+                    border: `1px solid ${hasLead ? '#ECEEF8' : '#F4C7C7'}`,
                     borderRadius: 10,
-                    background: hasHod ? '#FAFBFE' : '#FFF7F7',
+                    background: hasLead ? '#FAFBFE' : '#FFF7F7',
                   }}
                 >
                   <span
@@ -213,7 +223,7 @@ export default function AssignDepartmentsSection({
                     <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A1D2E' }}>
                       {row.department_name}
                     </div>
-                    {hasHod ? (
+                    {hasLead ? (
                       <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 2 }}>{row.department_code} Lead</div>
                     ) : (
                       <div style={{ fontSize: 10.5, color: '#B45309', marginTop: 2, fontWeight: 600 }}>
@@ -221,7 +231,7 @@ export default function AssignDepartmentsSection({
                       </div>
                     )}
                   </div>
-                  {hasHod ? (
+                  {hasLead ? (
                     <div
                       style={{
                         width: 210,
@@ -250,7 +260,7 @@ export default function AssignDepartmentsSection({
                           flexShrink: 0,
                         }}
                       >
-                        {initials(hodName)}
+                        {initials(leadName)}
                       </span>
                       <span
                         style={{
@@ -261,9 +271,9 @@ export default function AssignDepartmentsSection({
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
                         }}
-                        title={hodName ?? undefined}
+                        title={leadLabel}
                       >
-                        {hodName || `${row.department_code} Lead`}
+                        {leadLabel}
                       </span>
                     </div>
                   ) : (

@@ -14,6 +14,7 @@ import type {
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
+import { everyDepartmentHasLead } from './departmentLead';
 import ReportTeamCard from './ReportTeamCard';
 import { isAdminLevel } from '@/constants/roles';
 import {
@@ -306,13 +307,14 @@ export default function CycleDetailPage() {
   const removeDepartment = (departmentId: string) =>
     setAssigned((prev) => prev.filter((a) => a.department_id !== departmentId));
 
-  const deptHasHod = (departmentId: string) => {
-    const d = allDepartments.find((x) => x.id === departmentId);
-    return d?.has_hod ?? !!d?.hod_user_id;
-  };
+  // Spark staff run the cycles they submit, so they lead every department in one
+  // — the backend makes the same substitution from the caller's own identity.
+  const selfLeadName = user?.role === 'spark_internal' ? (user.full_name || 'You') : null;
 
   // Every added department must have an HR Lead before the cycle can be submitted.
-  const canSubmit = assigned.length > 0 && assigned.every((a) => deptHasHod(a.department_id));
+  // Shared with the section so the gate and the warning badge can't disagree.
+  const canSubmit =
+    assigned.length > 0 && everyDepartmentHasLead(assigned, allDepartments, selfLeadName);
 
   // Submit = assign departments (bulk). The cycle stays in draft; it only goes
   // active when the PM submits the kickoff brief and generates questions.
@@ -450,6 +452,7 @@ export default function CycleDetailPage() {
             assigned={assigned}
             onAdd={addDepartment}
             onRemove={removeDepartment}
+            selfLeadName={selfLeadName}
           />
         </div>
       )}
