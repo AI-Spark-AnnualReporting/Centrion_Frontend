@@ -4742,6 +4742,13 @@ function unwrap<T>(raw: unknown, key: string): T {
 // / `status` / `user_*` keys are the backend's names; the optional frontend-name
 // fields let `overview()` normalise either shape (see below).
 interface RawCycleDepartment {
+  // The backend has always sent these three; they were simply not declared here,
+  // so the mapper below dropped them. session_id is what makes a deep link to a
+  // department's workspace possible, and hod_* is the only department -> lead
+  // mapping available on a non-draft cycle (listDepartments is draft-only).
+  session_id?: string;
+  hod_user_id?: string | null;
+  hod_name?: string | null;
   department_id: string;
   department_name: string;
   department_code: string;
@@ -4823,6 +4830,9 @@ export const sarCycles = {
     return {
       ...raw,
       departments: (raw.departments ?? []).map((d) => ({
+        session_id: d.session_id,
+        hod_user_id: d.hod_user_id ?? null,
+        hod_name: d.hod_name ?? null,
         department_id: d.department_id,
         department_name: d.department_name,
         department_code: d.department_code,

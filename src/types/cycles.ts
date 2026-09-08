@@ -73,6 +73,13 @@ export type SessionStatus =
   | "approved";
 
 export interface CycleDepartmentProgress {
+  // The session this department's work lives in. Needed to link straight to a
+  // department's workspace in the SAR app; absent until the cycle is activated.
+  session_id?: string;
+  // The department's lead, straight off the cycle overview. Distinct from
+  // Department.hod_* (admin/departments), which is only fetched on drafts.
+  hod_user_id?: string | null;
+  hod_name?: string | null;
   department_id: string;
   department_name: string;
   department_code: string;

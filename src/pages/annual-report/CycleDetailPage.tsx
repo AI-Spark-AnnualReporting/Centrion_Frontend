@@ -14,6 +14,7 @@ import type {
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
+import ReportTeamCard from './ReportTeamCard';
 import { isAdminLevel } from '@/constants/roles';
 import {
   CycleStatusBadge,
@@ -451,6 +452,14 @@ export default function CycleDetailPage() {
             onRemove={removeDepartment}
           />
         </div>
+      )}
+
+      {/* Spark staff run this cycle for a client, so they get a way straight into
+          each role's workspace. Every cycle status — unlike Assign Departments
+          (drafts only) and Department Sessions (non-drafts only), which are
+          exact complements and so leave one of the two views without it. */}
+      {user?.role === 'spark_internal' && (
+        <ReportTeamCard cycle={cycle} departments={departments} pmName={pmName} />
       )}
 
       {/* Stat tiles — in draft, Total Departments tracks the live local count */}
