@@ -4700,11 +4700,16 @@ export interface CreateSparkCompanyPayload {
 }
 
 export const sparkInternal = {
-  /** Every active company, with its cycle count. Backs the directory at /companies. */
-  companies: () =>
+  /** Every active company, with its cycle count. Backs the directory at /companies.
+   *
+   *  `mine` narrows it to the companies this Spark user created — the directory's
+   *  default tab. It scopes `stats` as well as the rows, so the headline numbers
+   *  describe whatever is listed underneath them rather than the whole platform.
+   *  Always sent, so the request says which scope it is asking for. */
+  companies: ({ mine = false }: { mine?: boolean } = {}) =>
     request<{ companies: SparkCompanyRow[]; total: number; stats: SparkDirectoryStats }>(
       "/api/v1/spark/companies",
-      { noActingCompany: true },
+      { noActingCompany: true, query: { mine } },
     ),
 
   /** Create a tenant so Spark staff can run onboarding for it themselves. */

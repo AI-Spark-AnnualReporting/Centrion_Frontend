@@ -4,6 +4,11 @@
 // acting company before navigating (get that order wrong and the dashboard
 // loads against a NULL company), and a company created here goes to setup
 // rather than to a dashboard with nothing in it.
+//
+// Yours/All is a SERVER filter, one request per tab, so the tests here are about
+// what is asked for and what is rendered from the answer — not about filtering a
+// list in the browser. That is also why the stat tiles can be trusted to match
+// the rows: they are computed from the same response.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -17,7 +22,7 @@ const navigate = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   sparkInternal: {
-    companies: () => companies(),
+    companies: (opts: unknown) => companies(opts),
     createCompany: (body: unknown) => createCompany(body),
   },
 }));
@@ -114,20 +119,44 @@ describe("Spark company directory", () => {
     expect(screen.getByText("nothing due")).toBeInTheDocument();
   });
 
-  it("filters by cycle activity", async () => {
+  it("opens on Yours, and asks the server for it", async () => {
     render(<SparkCompaniesPage />);
     await screen.findByText("Acme Corporation");
-    fireEvent.click(screen.getByText(/Not started 1/));
-    expect(screen.queryByText("Acme Corporation")).not.toBeInTheDocument();
-    expect(screen.getByText("Bahri")).toBeInTheDocument();
+    expect(companies).toHaveBeenCalledWith({ mine: true });
+  });
+
+  it("re-asks for the whole platform when All is picked", async () => {
+    // Not a view of one list: the tab decides what is fetched, which is what
+    // lets the tiles above the table describe the rows in it.
+    render(<SparkCompaniesPage />);
+    await screen.findByText("Acme Corporation");
+
+    companies.mockResolvedValue({
+      companies: [...ROWS, { id: "cmp_3", name: "Zed Holdings", cycle_count: 1 }],
+      total: 3,
+      stats: { ...STATS, companies: 3 },
+    });
+    fireEvent.click(screen.getByText("All"));
+
+    expect(await screen.findByText("Zed Holdings")).toBeInTheDocument();
+    expect(companies).toHaveBeenLastCalledWith({ mine: false });
+  });
+
+  it("says so plainly when you have not added anything yet", async () => {
+    // The default tab, so an empty one is the first thing a new Spark user sees.
+    // "Try a different filter or search" would be wrong advice for it.
+    companies.mockResolvedValue({ companies: [], total: 0, stats: { ...STATS, companies: 0 } });
+    render(<SparkCompaniesPage />);
+    expect(await screen.findByText("You haven't added any companies")).toBeInTheDocument();
+    expect(screen.getByText(/switch to All to see every client/)).toBeInTheDocument();
   });
 
   it("shows no status or progress for a company", async () => {
     const { container } = render(<SparkCompaniesPage />);
     await screen.findByText("Acme Corporation");
     expect(screen.queryByText(/progress/i)).not.toBeInTheDocument();
-    // No per-company status pill and no bar. (The "Active" filter tab is a
-    // control, not a row status, so scope the check to the table.)
+    // No per-company status pill and no bar. Scoped to the table so the tab
+    // controls above it can never satisfy the assertion by accident.
     expect(container.querySelector("table .badge")).toBeNull();
     expect(container.querySelector("table progress")).toBeNull();
   });

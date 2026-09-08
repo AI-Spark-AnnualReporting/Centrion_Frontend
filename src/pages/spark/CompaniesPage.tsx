@@ -26,11 +26,14 @@ import { gradientFor, initialsOf } from "@/lib/avatar";
 
 const PRIMARY = "#4040C8";
 
-type Filter = "all" | "active" | "idle";
+// Server-side, not a view of one list: each tab is its own request, so the
+// stat tiles above describe whatever is listed underneath them. Which is also
+// why the tabs carry no counts — only one scope's total is known at a time, and
+// the Companies tile already shows it.
+type Filter = "mine" | "all";
 const FILTERS: { key: Filter; label: string }[] = [
+  { key: "mine", label: "Yours" },
   { key: "all", label: "All" },
-  { key: "active", label: "Active" },
-  { key: "idle", label: "Not started" },
 ];
 
 const th: React.CSSProperties = {
@@ -197,7 +200,7 @@ export default function SparkCompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("mine");
   const [adding, setAdding] = useState(false);
 
   // Catch-all: the sidebar button and the "Acting as" chip already clear before
@@ -213,35 +216,37 @@ export default function SparkCompaniesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-runs on the tab, because the scope is the server's to decide — the stats
+  // are computed from whichever companies it returns, so they cannot be narrowed
+  // here. Re-arm `loading` or the stale list stays on screen under new numbers.
   useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
     sparkInternal
-      .companies()
+      .companies({ mine: filter === "mine" })
       .then((res) => {
+        if (!live) return;
         setCompanies(res.companies ?? []);
         setStats(res.stats ?? null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load companies."))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => {
+        if (live) setError(e instanceof Error ? e.message : "Failed to load companies.");
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [filter]);
 
-  const counts = useMemo(
-    () => ({
-      all: companies.length,
-      active: companies.filter((c) => c.cycle_count > 0).length,
-      idle: companies.filter((c) => c.cycle_count === 0).length,
-    }),
-    [companies],
-  );
-
+  // Search only — the tab is applied server-side.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return companies.filter((c) => {
-      if (filter === "active" && c.cycle_count === 0) return false;
-      if (filter === "idle" && c.cycle_count > 0) return false;
-      if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [companies, filter, search]);
+    if (!q) return companies;
+    return companies.filter((c) => (c.name ?? "").toLowerCase().includes(q));
+  }, [companies, search]);
 
   // Enter a company and go where its work actually is — its annual report,
   // not the Command Center.
@@ -360,7 +365,7 @@ export default function SparkCompaniesPage() {
                 className={`tab ${filter === f.key ? "act" : ""}`}
                 onClick={() => setFilter(f.key)}
               >
-                {f.label} {counts[f.key]}
+                {f.label}
               </button>
             ))}
           </div>
@@ -394,12 +399,18 @@ export default function SparkCompaniesPage() {
         ) : filtered.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#1A1D2E" }}>
-              {companies.length === 0 ? "No companies yet" : "No companies match"}
+              {companies.length > 0
+                ? "No companies match"
+                : filter === "mine"
+                  ? "You haven't added any companies"
+                  : "No companies yet"}
             </div>
             <div style={{ fontSize: 12, color: "#9BA3C4", marginTop: 4 }}>
-              {companies.length === 0
-                ? "Add your first company to get started."
-                : "Try a different filter or search."}
+              {companies.length > 0
+                ? "Try a different search."
+                : filter === "mine"
+                  ? "Add one, or switch to All to see every client."
+                  : "Add your first company to get started."}
             </div>
           </div>
         ) : (
