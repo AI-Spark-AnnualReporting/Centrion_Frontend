@@ -14,6 +14,7 @@ import type {
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
+import { isAdminLevel } from '@/constants/roles';
 import {
   CycleStatusBadge,
   ProgressBar,
@@ -165,7 +166,7 @@ export default function CycleDetailPage() {
   const { cycleId = '' } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const canManage = user?.role === 'admin';
+  const canManage = isAdminLevel(user?.role);
 
   const [overview, setOverview] = useState<CycleOverview | null>(null);
   const [sections, setSections] = useState<CycleSection[]>([]);

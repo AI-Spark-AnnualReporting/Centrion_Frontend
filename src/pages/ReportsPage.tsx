@@ -265,12 +265,19 @@ export default function ReportsPage() {
     null,
   );
 
-  useEffect(() => {
-    setResumableRun(loadActivePipeline());
-  }, []);
-
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+
+  // The stored run carries the company it belongs to, and until this check it was
+  // never compared: a Spark user who left one client and entered another saw the
+  // FIRST client's resume banner, and Continue passed that client's id back into
+  // the flow. Comparing here (rather than clearing the record on a company change)
+  // also means returning to the original company still finds its run waiting.
+  // A no-op for every other role — their two ids are always the same.
+  useEffect(() => {
+    const stored = loadActivePipeline();
+    setResumableRun(stored && stored.companyId === companyId ? stored : null);
+  }, [companyId]);
   const location = useLocation();
   const navigate = useNavigate();
   // View is driven by the route: /reports → ESG, /reports/quarterly → Quarterly

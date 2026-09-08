@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Cycle } from '@/types/cycles';
 import { deriveEvents, splitEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
+import { isAdminLevel } from '@/constants/roles';
 
 /**
  * Disclosure Timeline — top-right card on the Home dashboard. Read-only: shows a
@@ -27,7 +28,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
 
   useEffect(() => {
     let cancelled = false;
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = isAdminLevel(user?.role);
     (async () => {
       const [rRes, mRes, cRes] = await Promise.allSettled([
         companyId

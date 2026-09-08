@@ -28,7 +28,10 @@ export interface AuthUser {
   full_name: string;
   // `ir` users come from the Admin Console invite flow — read-only.
   // `hod` (HR Lead) works in the SAR app like PM/department_user.
-  role: "admin" | "project_manager" | "hod" | "department_user" | "ir";
+  // `spark_internal` is Spark's own staff: no company of their own, every
+  // permission, and they act inside whichever company they pick (see
+  // src/lib/acting-company.ts). Never assignable from the Admin Console.
+  role: "admin" | "project_manager" | "hod" | "department_user" | "ir" | "spark_internal";
   company_id?: string | null;
   company_name?: string | null;
   // Set TRUE for users created via /companies/{id}/team — backend flags

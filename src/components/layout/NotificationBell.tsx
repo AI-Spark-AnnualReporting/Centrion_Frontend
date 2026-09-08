@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { communications, ApiError, type ThreadSummary } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
@@ -99,6 +100,13 @@ const SCOPED_CSS = `
 const REFRESH_MS = 45000;
 
 export function NotificationBell() {
+  // Threads are company-scoped. A Spark session that hasn't picked a company
+  // would render a permanently empty bell and re-poll every 45s for nothing, so
+  // hide it entirely — the same self-hiding contract AppSwitcher and
+  // ActingCompanyChip use. Role-gated, so no other role is affected.
+  const { user, actingCompany } = useAuth();
+  const hideForCompanylessSpark = user?.role === 'spark_internal' && !actingCompany;
+
   const navigate = useNavigate();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
@@ -166,6 +174,9 @@ export function NotificationBell() {
       }
     });
   };
+
+  // After the hooks, never before them.
+  if (hideForCompanylessSpark) return null;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>

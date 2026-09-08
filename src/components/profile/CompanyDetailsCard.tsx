@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import type { Company, CompanyEditableFields, Sector } from '@/types/company';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import { REPORTING_CURRENCIES } from '@/constants/currency';
+import { isAdminLevel } from '@/constants/roles';
 
 // Fields an admin may PATCH. Save diffs these against the loaded company so we
 // only send what actually changed.
@@ -83,7 +84,7 @@ function Toggle({
 
 export function CompanyDetailsCard() {
   const { user } = useAuth();
-  const canEdit = user?.role === 'admin';
+  const canEdit = isAdminLevel(user?.role);
 
   const [company, setCompany] = useState<Company | null>(null);
   const [form, setForm] = useState<Partial<Company>>({});

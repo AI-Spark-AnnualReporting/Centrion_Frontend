@@ -13,6 +13,11 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 
+// AppLayout keys the compliance provider on the acting company so a Spark user
+// switching tenants doesn't carry the previous one's polled runs across.
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ user: { role: "admin" }, actingCompany: null }),
+}));
 vi.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <nav /> }));
 vi.mock("@/components/layout/Topbar", () => ({
   Topbar: ({ pageName }: { pageName: string }) => <header>{pageName}</header>,

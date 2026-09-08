@@ -4,12 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { sarCycles } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useFeaturePermissions } from '@/lib/features';
+import { isAdminLevel } from '@/constants/roles';
 import type { Cycle, CycleStatus } from '@/types/cycles';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import CycleForm from './CycleForm';
 import {
   CycleStatusBadge,
-  ProgressBar,
   formatCycleDate,
   isOverdue,
 } from './cycle-ui';
@@ -23,15 +23,6 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'draft', label: 'Draft' },
   { key: 'completed', label: 'Completed' },
 ];
-
-// Cycle progress as a 0–100 number, tolerant of which field the API populates.
-function cyclePct(c: Cycle): number {
-  if (typeof c.progress === 'number') return c.progress;
-  if (typeof c.completion_rate === 'number') return c.completion_rate;
-  if (c.total_departments && c.submitted != null)
-    return Math.round((c.submitted / c.total_departments) * 100);
-  return 0;
-}
 
 function StatTile({
   icon,
@@ -92,7 +83,7 @@ export default function CyclesListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { canCreate: canCreateAnnual, canRead: canReadAnnual } = useFeaturePermissions('annual_report');
-  const canManage = user?.role === 'admin' && canCreateAnnual;
+  const canManage = isAdminLevel(user?.role) && canCreateAnnual;
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -126,17 +117,6 @@ export default function CyclesListPage() {
       completed: byStatus('completed'),
     };
   }, [cycles]);
-
-  const avgProgress = useMemo(() => {
-    if (cycles.length === 0) return 0;
-    const sum = cycles.reduce((acc, c) => acc + cyclePct(c), 0);
-    return Math.round(sum / cycles.length);
-  }, [cycles]);
-
-  const overdueCount = useMemo(
-    () => cycles.filter((c) => isOverdue(c.submission_deadline, c.status)).length,
-    [cycles],
-  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -200,13 +180,6 @@ export default function CyclesListPage() {
           label="Completed"
           hint="published"
         />
-        <StatTile
-          amber
-          icon={<svg viewBox="0 0 14 14" width="15" height="15" fill="none"><path d="M1.5 9.5l3-3.5 2 2.5L9 5l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><rect x="1" y="1" width="11" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2" /></svg>}
-          value={`${avgProgress}%`}
-          label="Avg. progress"
-          hint={`${overdueCount} overdue`}
-        />
       </div>
 
       {/* Filters + search */}
@@ -266,14 +239,12 @@ export default function CyclesListPage() {
                 <th style={th}>Cycle name</th>
                 <th style={th}>Project manager</th>
                 <th style={th}>Deadline</th>
-                <th style={th}>Progress</th>
                 <th style={th}>Status</th>
                 <th style={{ ...th, width: 90 }} />
               </tr>
             </thead>
             <tbody>
               {filtered.map((c) => {
-                const pct = cyclePct(c);
                 const overdue = isOverdue(c.submission_deadline, c.status);
                 return (
                   <tr key={c.id} style={{ borderTop: '1px solid #F4F5FB' }}>
@@ -292,17 +263,6 @@ export default function CyclesListPage() {
                     <td style={{ ...td, color: overdue ? '#DC2626' : '#5A6080', fontWeight: overdue ? 700 : 400 }}>
                       {overdue && <span style={{ marginRight: 4 }}>⚑</span>}
                       {formatCycleDate(c.submission_deadline)}
-                    </td>
-                    <td style={td}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {c.submitted != null && c.total_departments != null && (
-                          <span style={{ fontSize: 11, color: PRIMARY, fontWeight: 700, fontFamily: "'DM Mono', monospace" }}>
-                            {c.submitted}/{c.total_departments}
-                          </span>
-                        )}
-                        <ProgressBar pct={pct} width={90} />
-                        <span style={{ fontSize: 11, color: '#5A6080', fontFamily: "'DM Mono', monospace" }}>{pct}%</span>
-                      </div>
                     </td>
                     <td style={td}>
                       <CycleStatusBadge status={c.status} />

@@ -3,6 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import type { EarningsApproveBlocker, EarningsExportFormat } from '@/types/earnings';
 import { ReportStatusCard } from '@/components/shared/ReportStatusCard';
 import { INK, MUTED, FAINT, DANGER } from './tokens';
+import { isAdminLevel } from '@/constants/roles';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
@@ -49,7 +50,7 @@ export function PublishBar({
   const { user } = useAuth();
   // Approve & lock is admin-only — a non-admin has nothing to do with the
   // button, so it isn't there at all rather than sitting greyed out.
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isAdminLevel(user?.role);
   const [exporting, setExporting] = useState<EarningsExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 

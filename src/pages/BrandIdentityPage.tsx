@@ -19,6 +19,7 @@ import {
   validateLogoFile,
 } from '@/types/brand';
 import type { CompanyBrandUpdate } from '@/types/company';
+import { isAdminLevel } from '@/constants/roles';
 
 // The three brand values from onboarding step 3, editable after the fact —
 // visible to anyone with profile access (rendered as a section of the Company
@@ -56,7 +57,7 @@ const FALLBACK_BRAND: BrandColors = {
 // header already says "Brand Identity"; repeating it here would be redundant.
 export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boolean } = {}) {
   const { user } = useAuth();
-  const canEdit = user?.role === 'admin';
+  const canEdit = isAdminLevel(user?.role);
   const [baseline, setBaseline] = useState<Baseline | null>(null);
   const [identity, setIdentity] = useState('');
   const [colors, setColors] = useState<BrandColors>(FALLBACK_BRAND);

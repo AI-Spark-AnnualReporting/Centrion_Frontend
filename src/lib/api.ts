@@ -15,6 +15,7 @@ import type {
   OnboardingPayload,
   OnboardingResponse,
 } from "@/types/auth";
+import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import type { DetectedBrandColors } from "@/types/brand";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -192,9 +193,21 @@ const USER_STORAGE_KEY = "centriton_user";
 // `ngrok-skip-browser-warning` bypasses ngrok's HTML interstitial on the free
 // tier. Azure ignores unknown headers, so it's safe to leave on permanently —
 // the backend switches but this header stays.
-const DEFAULT_REQUEST_HEADERS: Record<string, string> = {
+const STATIC_REQUEST_HEADERS: Record<string, string> = {
   "ngrok-skip-browser-warning": "true",
 };
+
+// Headers every outbound call gets. A function, not a const, because the acting
+// company changes at runtime: a Spark (`spark_internal`) session carries no
+// company of its own and names one per request in X-Company-Id, which both
+// backends swap onto the caller and ignore outright for every other role.
+// Read fresh each call — see lib/acting-company.ts on why nothing is cached.
+function defaultRequestHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { ...STATIC_REQUEST_HEADERS };
+  const acting = getActingCompany();
+  if (acting) headers["X-Company-Id"] = acting.id;
+  return headers;
+}
 
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") return null;
@@ -373,11 +386,18 @@ interface RequestOptions {
   // Override the host the call targets (defaults to API_BASE_URL). Used by
   // sarRequest() to hit the separate SAR backend while reusing all this logic.
   baseUrl?: string;
+  // Suppress X-Company-Id for this call. Set on the /spark/* endpoints, which a
+  // Spark user hits BEFORE picking a company and must keep reaching after. If a
+  // company they are acting as is ever deleted the header 404s every request —
+  // without this the company directory itself becomes unreachable and the only
+  // way out is logging out.
+  noActingCompany?: boolean;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = `${opts.baseUrl ?? API_BASE_URL}${path}${buildQuery(opts.query)}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS, ...(opts.headers ?? {}) };
+  const headers: Record<string, string> = { ...defaultRequestHeaders(), ...(opts.headers ?? {}) };
+  if (opts.noActingCompany) delete headers["X-Company-Id"];
 
   let body: BodyInit | undefined;
   if (opts.form) {
@@ -413,7 +433,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 // the browser must set the multipart boundary, so we never set Content-Type.
 async function postForm<T>(path: string, form: FormData): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const headers: Record<string, string> = { ...defaultRequestHeaders() };
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -437,7 +457,7 @@ async function postPipeline(
   query?: QueryParams,
 ): Promise<PipelineHandle> {
   const url = `${API_BASE_URL}${path}${buildQuery(query)}`;
-  const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+  const headers: Record<string, string> = { ...defaultRequestHeaders() };
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -1389,7 +1409,7 @@ export const complianceValidation = {
   ): Promise<{ blob: Blob; filename: string | null }> => {
     const url = `${COMPLIANCE_BASE}/runs/${encodeURIComponent(runId)}/certificate.pdf`;
     const full = `${API_BASE_URL}${url}`;
-    const headers: Record<string, string> = { ...DEFAULT_REQUEST_HEADERS };
+    const headers: Record<string, string> = { ...defaultRequestHeaders() };
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -4647,6 +4667,56 @@ export const adminUserPermissions = {
 };
 
 // ---------------------------------------------------------------------------
+// Spark internal — the platform-staff company directory and tenant creation.
+// The only endpoints a `spark_internal` user can call before choosing a company,
+// so every one of them opts out of the X-Company-Id header.
+// ---------------------------------------------------------------------------
+
+export interface SparkCompanyRow {
+  id: string;
+  name: string;
+  /** Annual reporting cycles this company has. Deliberately the only metric. */
+  cycle_count: number;
+}
+
+/** The directory's headline numbers. Computed on the same two reads as the rows. */
+export interface SparkDirectoryStats {
+  companies: number;
+  active_cycles: number;
+  /** How many distinct clients those active cycles belong to. */
+  active_client_count: number;
+  /** Active cycles whose submission deadline has passed. */
+  past_deadline: number;
+  oldest_overdue_days: number;
+  /** Cycles due within 30 days. */
+  due_soon: number;
+  next_due: { company_name: string | null; date: string } | null;
+}
+
+export interface CreateSparkCompanyPayload {
+  name: string;
+  sector_id?: string | null;
+  jurisdiction?: string | null;
+}
+
+export const sparkInternal = {
+  /** Every active company, with its cycle count. Backs the directory at /companies. */
+  companies: () =>
+    request<{ companies: SparkCompanyRow[]; total: number; stats: SparkDirectoryStats }>(
+      "/api/v1/spark/companies",
+      { noActingCompany: true },
+    ),
+
+  /** Create a tenant so Spark staff can run onboarding for it themselves. */
+  createCompany: (body: CreateSparkCompanyPayload) =>
+    request<{ company: { id: string; name: string } }>("/api/v1/spark/companies", {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+};
+
+// ---------------------------------------------------------------------------
 // SAR — Annual Report (Cycles). Separate backend (VITE_SAR_URL, :8010 local).
 // `sarRequest` is just `request` pinned to the SAR host; the Centriyon JWT is
 // still attached for token passthrough.
@@ -5045,6 +5115,9 @@ export function logout(): void {
   if (typeof localStorage === "undefined") return;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
+  // Otherwise the next person to log in on this browser inherits a Spark
+  // session's acting company and silently sends it on every request.
+  clearActingCompany();
 }
 
 export function getToken(): string | null {
@@ -5124,7 +5197,7 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   const token = getToken();
   const headers = new Headers(options.headers);
-  for (const [k, v] of Object.entries(DEFAULT_REQUEST_HEADERS)) {
+  for (const [k, v] of Object.entries(defaultRequestHeaders())) {
     if (!headers.has(k)) headers.set(k, v);
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -5160,7 +5233,7 @@ export async function getSectors(): Promise<Sector[]> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
-      headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+      headers: { accept: "application/json", ...defaultRequestHeaders() },
     });
   } catch {
     throw new Error("Unable to connect. Check your connection.");
@@ -5232,7 +5305,7 @@ export async function createCompany(
       `${API_BASE_URL}/api/v1/companies/?${query.toString()}`,
       {
         method: "POST",
-        headers: { accept: "application/json", ...DEFAULT_REQUEST_HEADERS },
+        headers: { accept: "application/json", ...defaultRequestHeaders() },
       },
     );
   } catch {
