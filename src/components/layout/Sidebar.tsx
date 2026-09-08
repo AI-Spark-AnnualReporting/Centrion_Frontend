@@ -9,16 +9,21 @@ import { isAdminLevel } from '@/constants/roles';
 // generation flows offered on the Reports page. (ESG Validator lives under
 // "Reports Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
 // Spark staff are an admin for every company's ANNUAL REPORT, not general-purpose
-// admins — so they get the directory plus the three cross-cutting workspaces, and
-// nothing else. The annual report itself has no nav entry by design: it is where
-// clicking a company lands you (see pages/spark/CompaniesPage.tsx).
-// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank.
+// admins — so they get the directory, an Annual Report tab, the three
+// cross-cutting workspaces below, and nothing else.
+// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank. The
+// annual report is NOT one of them and can't be: this set is only ever consulted
+// against top-level NAV_ITEMS, while `annual` is a REPORT_CHILDREN key nested
+// under Reports — which spark never sees. Hence its own hand-rolled tab below,
+// the same shape as the Companies button.
 const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs']);
 
 const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean; allowedRoles?: ('admin' | 'ir')[] }[] = [
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly', featureKey: 'quarterly_report' },
   { key: 'earnings', label: 'Earnings', path: '/earnings/setup', featureKey: 'earnings_report' },
-  // Annual cycles are only managed in-app (admin/ir); every other role's
+  // Annual cycles are only managed in-app (admin/ir). Spark reaches the same
+  // page through its own top-level tab, so it is deliberately not in this list —
+  // it would be a second entry for the one route. Every other role's
   // annual_report access lives in the spark_studio workspace app, reached via
   // the app switcher — not a per-item deep link.
   { key: 'annual', label: 'Annual', path: '/annual-report', featureKey: 'annual_report', allowedRoles: ['admin', 'ir'] },
@@ -223,6 +228,32 @@ export function Sidebar() {
             Companies
           </button>
           <div className="sb-div" />
+        </div>
+      )}
+      {/* The only way back to a client's annual report that KEEPS the client.
+          Companies (above) and the "Acting as" chip both clear it first, so
+          without this, returning meant picking the same company again.
+
+          A sibling of the Spark block rather than part of it: that block is
+          gated on isSpark alone and so also renders on /companies, where this
+          link would bounce straight back (ProtectedRoute's spark company gate).
+          Repeating !sparkAwaitingCompany per top-level block is what the Admin
+          section does too. The feature gate mirrors the route's own
+          requiredFeature — a missing one redirects to /dashboard, which is
+          itself feature-gated, so an ungated link here can loop.
+
+          Prefix match, not ===, to stay lit on /annual-report/cycles/:id. The
+          label must not contain "Companies" — a sidebar test matches that
+          button by an unanchored name regex. */}
+      {isSpark && !sparkAwaitingCompany && isVisible('annual_report') && (
+        <div>
+          <button
+            className={`sb-item ${location.pathname.startsWith('/annual-report') ? 'act' : ''}`}
+            onClick={() => handleNav('/annual-report')}
+          >
+            {icons.doc}
+            Annual Report
+          </button>
         </div>
       )}
       {!sparkAwaitingCompany && NAV_ITEMS.map((section) => (

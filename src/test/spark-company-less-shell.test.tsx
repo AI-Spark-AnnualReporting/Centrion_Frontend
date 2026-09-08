@@ -1,9 +1,11 @@
 // The directory is a company-less state: while you're choosing a client you are
 // not inside one, so nothing company-shaped should be on screen.
 //
-// Four things vanish on their own once actingCompany is null (sidebar nav, the
-// Admin Console, the "Acting as" chip, the breadcrumb's company name). Two do
-// not, and are what this file guards:
+// Four things vanish once actingCompany is null (sidebar nav, the Admin Console,
+// the "Acting as" chip, the breadcrumb's company name) — though the Annual
+// Report tab among them is hand-rolled and vanishes only because of an explicit
+// guard, which spark-sidebar.test.tsx holds. Two do not vanish at all, and are
+// what this file guards:
 //   - the "Ask Centriyon" chatbot, which on the directory was a DEAD button:
 //     it routes to /ai, which the spark gate bounces straight back here;
 //   - the notifications bell, which loads company-scoped threads and would

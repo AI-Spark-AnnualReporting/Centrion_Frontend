@@ -87,6 +87,8 @@ describe("picking and leaving a company, end to end", () => {
     await screen.findByText("Acme Corporation");
     // Scoped by role: "Companies" is also the page's own <h1>.
     expect(screen.getByRole("button", { name: /Companies/ })).toBeInTheDocument();
+    // Hand-rolled like the directory button, so nothing hides it for free.
+    expect(screen.queryByText("Annual Report")).not.toBeInTheDocument();
     expect(screen.queryByText("AI Copilot")).not.toBeInTheDocument();
     expect(screen.queryByText("Admin Console")).not.toBeInTheDocument();
   });
@@ -118,6 +120,23 @@ describe("picking and leaving a company, end to end", () => {
     // Still set a tick later — not cleared out from under us.
     await new Promise((r) => setTimeout(r, 20));
     expect(localStorage.getItem("centriton_acting_company")).not.toBeNull();
+  });
+
+  it("the Annual Report tab goes back to the report and KEEPS the client", async () => {
+    // The mirror of the test below, and the reason the tab exists: Companies
+    // clears the client, this must not. Worth proving here rather than against
+    // a spy — this file runs the real context and the real localStorage store.
+    renderBoth();
+    fireEvent.click(await screen.findByText("Acme Corporation"));
+    await waitFor(() => expect(screen.getByText("AI Copilot")).toBeInTheDocument());
+    navigate.mockClear(); // picking the row already navigated there once
+
+    fireEvent.click(screen.getByText("Annual Report"));
+
+    expect(navigate).toHaveBeenLastCalledWith("/annual-report");
+    expect(localStorage.getItem("centriton_acting_company")).not.toBeNull();
+    // Still inside the client: the nav did not collapse back to the directory.
+    expect(screen.getByText("AI Copilot")).toBeInTheDocument();
   });
 
   it("clicking Companies in the nav collapses it again and clears storage", async () => {

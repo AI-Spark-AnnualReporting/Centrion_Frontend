@@ -90,6 +90,20 @@ describe("spark_internal routing", () => {
     expect(screen.getByText("DASHBOARD")).toBeInTheDocument();
   });
 
+  it("lets them into the annual report — where the sidebar tab points", () => {
+    // The tab is only half of it; this is the gate it has to clear. Note the
+    // ProtectedRoute here is mounted bare, so this exercises the company gate
+    // only — re-declaring App.tsx's requiredRole list would just assert a copy
+    // of itself.
+    mockAuth = {
+      user: SPARK,
+      loading: false,
+      actingCompany: { id: "cmp_1", name: "Acme" },
+    };
+    renderAt("/annual-report");
+    expect(screen.getByText("CYCLES")).toBeInTheDocument();
+  });
+
   it("lets them run the wizard again for a second company", () => {
     // onboarding_completed is true on their own row and must not lock them out:
     // the flag means "finished setting up MY company", and they set up others'.
