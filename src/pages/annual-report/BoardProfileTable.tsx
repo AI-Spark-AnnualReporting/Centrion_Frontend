@@ -297,6 +297,7 @@ function ProfileRow({
         <div style={{ width: 168, flexShrink: 0 }}>
           <span style={label}>Photo</span>
           <BrandUploadBox
+            stacked
             icon="🧑"
             prompt="Add a photo"
             hint="PNG or JPG, up to 1 MB"
