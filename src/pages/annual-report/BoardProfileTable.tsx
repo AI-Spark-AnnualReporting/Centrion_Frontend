@@ -57,8 +57,15 @@ const monthValue = (v: string | null | undefined): string => v ?? '';
 /** Empty means "not stated", which the API spells `null`, not `""`. */
 const monthOrNull = (v: string): string | null => (v.trim() ? v : null);
 
-/** What the API keeps: a month, or a year on its own. Mirrors _month(). */
-const DATE_SHAPE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
+/**
+ * What the API keeps: a month, a year on its own, or the word "present".
+ * Mirrors _month() on the server.
+ *
+ * "present" is a real value, not an empty one. Blank means the document never
+ * said where the job ended, and the report prints those differently — "2018 –
+ * present" against "from 1986".
+ */
+const DATE_SHAPE = /^(\d{4}(-(0[1-9]|1[0-2]))?|present)$/i;
 
 /** Typed but unusable — the server would store null and the year would vanish. */
 const badDate = (v: string | null | undefined): boolean =>
@@ -519,15 +526,15 @@ function ProfileRow({
                   />
                 </div>
                 <div style={{ width: 132 }}>
-                  {/* Empty is not missing data — it is the job they still hold,
-                      which is what the report prints as "present". */}
-                  <span style={label}>To — blank if current</span>
+                  {/* Three answers, not two: a date, "present" for a job still
+                      held, or blank for one the document never ended. */}
+                  <span style={label}>To — or "present"</span>
                   <input
                     style={dateField(job.to_month)}
                     value={monthValue(job.to_month)}
                     disabled={disabled}
-                    placeholder="2019-06 or 2019"
-                    aria-label="To — year, or year and month; blank if current"
+                    placeholder="2019 or present"
+                    aria-label={'To — a year, "present" if still held, or blank if not stated'}
                     onChange={(e) => setJob(jobIndex, { ...job, to_month: monthOrNull(e.target.value) })}
                   />
                 </div>

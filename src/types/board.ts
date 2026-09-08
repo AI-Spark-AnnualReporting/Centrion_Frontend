@@ -200,9 +200,13 @@ export interface BoardDirectorsResponse {
 export interface BoardProfileJob {
   job_title: string;
   company: string;
-  /** "YYYY-MM", or null when the CV gave no dates. */
+  /** "YYYY-MM", a bare "YYYY", or null when the CV gave no date. */
   from_month: string | null;
-  /** null means the job is current. */
+  /**
+   * Same, plus the literal "present" for a job still held. null is NOT that —
+   * it means the document never said where the job ended, which prints as
+   * "from 1986" rather than "1986 – present".
+   */
   to_month: string | null;
   responsibility: string;
   sort_order?: number;
