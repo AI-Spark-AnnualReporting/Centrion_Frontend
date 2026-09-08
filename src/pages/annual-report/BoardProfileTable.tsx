@@ -42,15 +42,24 @@ const emptyProfile = (): BoardProfile => ({
 });
 
 /**
- * A month input's value for one of the two date bounds.
+ * A date bound as the field shows it.
  *
- * `<input type="month">` speaks "YYYY-MM" natively — the exact format the API
- * stores — so there is no parsing on either side and no third-party picker.
+ * Plain text, not `<input type="month">`: CVs are written in years — "moved to
+ * Dubai in 2007, retired in 2019" — and the API keeps a bare "2007" for exactly
+ * that reason, which a month input cannot hold or even display. It would show
+ * blank and quietly drop the year on the next save.
  */
 const monthValue = (v: string | null | undefined): string => v ?? '';
 
 /** Empty means "not stated", which the API spells `null`, not `""`. */
 const monthOrNull = (v: string): string | null => (v.trim() ? v : null);
+
+/** What the API keeps: a month, or a year on its own. Mirrors _month(). */
+const DATE_SHAPE = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
+
+/** Typed but unusable — the server would store null and the year would vanish. */
+const badDate = (v: string | null | undefined): boolean =>
+  !!v && v.trim() !== '' && !DATE_SHAPE.test(v.trim());
 
 /** Replace one item in a list without mutating it. */
 function replaceAt<T>(list: T[], index: number, next: T): T[] {
@@ -289,6 +298,12 @@ function ProfileRow({
 
   const label = { fontSize: 10.5, fontWeight: 700, color: FAINT, marginBottom: 3, display: 'block' };
 
+  // A date the server would refuse is marked in the field rather than accepted
+  // and silently stored as "not stated" — losing a date to a typo is the kind
+  // of edit nobody notices until the report is out.
+  const dateField = (v: string | null | undefined) =>
+    (badDate(v) ? { ...field, borderColor: RED } : field);
+
   return (
     <div style={{ padding: '14px 13px', borderBottom: `1px solid ${BORDER_SOFT}` }}>
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -372,25 +387,27 @@ function ProfileRow({
                     onChange={(e) => setJob(jobIndex, { ...job, company: e.target.value })}
                   />
                 </div>
-                <div style={{ width: 128 }}>
+                <div style={{ width: 132 }}>
                   <span style={label}>From</span>
                   <input
-                    type="month"
-                    style={field}
+                    style={dateField(job.from_month)}
                     value={monthValue(job.from_month)}
                     disabled={disabled}
+                    placeholder="2007-03 or 2007"
+                    aria-label="From — year, or year and month"
                     onChange={(e) => setJob(jobIndex, { ...job, from_month: monthOrNull(e.target.value) })}
                   />
                 </div>
-                <div style={{ width: 128 }}>
+                <div style={{ width: 132 }}>
                   {/* Empty is not missing data — it is the job they still hold,
                       which is what the report prints as "present". */}
                   <span style={label}>To — blank if current</span>
                   <input
-                    type="month"
-                    style={field}
+                    style={dateField(job.to_month)}
                     value={monthValue(job.to_month)}
                     disabled={disabled}
+                    placeholder="2019-06 or 2019"
+                    aria-label="To — year, or year and month; blank if current"
                     onChange={(e) => setJob(jobIndex, { ...job, to_month: monthOrNull(e.target.value) })}
                   />
                 </div>
