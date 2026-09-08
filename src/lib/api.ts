@@ -909,6 +909,15 @@ export const companies = {
 // Documents
 // ---------------------------------------------------------------------------
 
+// Spec 5 (Personas-Provenance): shape of GET /documents/{companyId}/{id},
+// now signed with a download_url the same way list()/byReport() already are.
+export interface DocumentDetail {
+  id: string;
+  filename: string;
+  download_url: string | null;
+  [key: string]: unknown;
+}
+
 export const documents = {
   // Async: returns 202 with a PipelineHandle; caller should poll agentRuns.get.
   upload: (companyId: string, body: UploadDocumentsBody): Promise<PipelineHandle> => {
@@ -928,8 +937,8 @@ export const documents = {
       query: { expires_in: expiresInSeconds },
     }),
 
-  get: <T = unknown>(companyId: string, documentId: string) =>
-    request<T>(
+  get: (companyId: string, documentId: string) =>
+    request<{ document: DocumentDetail }>(
       `/api/v1/documents/${encodeURIComponent(companyId)}/${encodeURIComponent(documentId)}`,
     ),
 
@@ -3564,10 +3573,48 @@ export interface ChatToolCall {
   args?: Record<string, unknown> | null;
 }
 
+// Spec 5 (Personas-Provenance): one retrieval source chip. section_or_page is
+// null for a source_doc citation — this system has no page-number data on
+// uploaded-document chunks, so it's never fabricated, just omitted.
+export interface ChatProvenanceSource {
+  source_type: "report_section" | "source_doc" | string;
+  name: string | null;
+  section_or_page: string | null;
+  period: string | null;
+  approval_state: string | null;
+  approved_date: string | null;
+  report_id: string | null;
+  report_type: string | null;
+  document_id: string | null;
+}
+
+// Mirrors get_figures' own return shape — cited separately from
+// ChatProvenanceSource, never merged into it (a figure is a different kind
+// of fact from retrieved prose).
+export interface ChatFigureCitation {
+  period: string;
+  value: number | null;
+  unit: string | null;
+  source_page: number | null;
+  confidence: number | null;
+}
+
+export type ChatDisclosureStatus = "disclosed" | "internal_only" | "not_found";
+
+// Persisted assistant-turn metadata — the backend reuses the existing
+// tool_calls JSONB column for this rather than adding a second column.
+export interface ChatTurnProvenance {
+  calls: ChatToolCall[];
+  disclosure_status: ChatDisclosureStatus | null;
+  sources: ChatProvenanceSource[];
+  figures: ChatFigureCitation[];
+}
+
 export interface ChatHistoryMessage extends ChatMessage {
   created_at?: string;
-  // Only present on assistant turns; omitted (or null) on user turns.
-  tool_calls?: ChatToolCall[] | null;
+  // Only present on assistant turns; omitted (or null) on user turns. Now a
+  // richer shape (Spec 5) rather than a bare array — see ChatTurnProvenance.
+  tool_calls?: ChatTurnProvenance | null;
 }
 
 export interface ChatSessionResponse {
@@ -3583,7 +3630,18 @@ export interface ChatSendBody {
 
 export type ChatStreamEvent =
   | { type: "tool_start"; name: string; args?: Record<string, unknown> }
-  | { type: "tool_end"; name: string }
+  | {
+      type: "tool_end";
+      name: string;
+      // Spec 5 (Personas-Provenance): present only for search_content/
+      // get_figures, and only when that tool's own output parsed cleanly on
+      // the backend — absent (not just empty) on any other tool, or on a
+      // malformed/error tool result. Never merge sources and figures — they
+      // cite different kinds of facts (DoD 5).
+      disclosure_status?: ChatDisclosureStatus;
+      sources?: ChatProvenanceSource[];
+      figures?: ChatFigureCitation[];
+    }
   | { type: "token"; content: string }
   | { type: "error"; message: string }
   | { type: "done"; refusal?: boolean }

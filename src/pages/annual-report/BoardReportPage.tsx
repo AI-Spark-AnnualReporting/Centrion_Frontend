@@ -9,7 +9,7 @@
 // so the preview and the PDF can't drift.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { boardReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
@@ -54,6 +54,7 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 export default function BoardReportPage() {
   const { reportId = '' } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const { locked, period, error: reportError } = useBoardReport(reportId);
@@ -229,6 +230,25 @@ export default function BoardReportPage() {
     s.status === 'produced' || s.status === 'locked' || s.status === 'empty';
   const readyBody = body.filter(isSectionReady);
   const missingBody = body.filter((s) => !isSectionReady(s));
+
+  // Spec 5 (Personas-Provenance): a Copilot source chip deep-links here as
+  // ?section=<title> — no machine section_code is stored against a chunk,
+  // only the human-readable title, so this is a best-effort case-insensitive
+  // match against the sections already loaded. No match -> the report still
+  // opened, just without a scroll; never an error.
+  useEffect(() => {
+    const wanted = searchParams.get('section');
+    if (!wanted || readyBody.length === 0) return;
+    const target = readyBody.find(
+      (s) => s.title.trim().toLowerCase() === wanted.trim().toLowerCase(),
+    );
+    if (target) {
+      document
+        .getElementById(`sec-${target.section_code}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, readyBody.length]);
 
   // Surface it once per visit, not on every re-render (a save/refetch
   // shouldn't reopen a popup the user already dismissed) — and not at all

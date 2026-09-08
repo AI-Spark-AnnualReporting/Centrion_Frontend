@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
 import { Spinner } from '@/components/shared/Spinner';
@@ -103,6 +103,7 @@ export function toProduced(s: AssembledSection): ProducedSection {
 export default function AssembledReportPage() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   // Approve & Lock is admin-only — a non-admin has nothing to do with the
@@ -277,6 +278,25 @@ export default function AssembledReportPage() {
 
   const bodySections = sections.filter((s) => !isCoverSection(s));
 
+  // Spec 5 (Personas-Provenance): a Copilot source chip deep-links here as
+  // ?section=<title> — no machine section_code is stored against a chunk,
+  // only the human-readable title, so this is a best-effort case-insensitive
+  // match against the sections already loaded. No match -> the report still
+  // opened, just without a scroll; never an error.
+  useEffect(() => {
+    const wanted = searchParams.get('section');
+    if (!wanted || bodySections.length === 0) return;
+    const target = bodySections.find(
+      (s) => s.title.trim().toLowerCase() === wanted.trim().toLowerCase(),
+    );
+    if (target) {
+      document
+        .getElementById(`quarterly-sec-${target.section_code}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, bodySections.length]);
+
   return (
     // height 100%: see OutlinePage — the 48px double-counted the inner stepper.
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
@@ -372,7 +392,7 @@ export default function AssembledReportPage() {
               {bodySections.map((s, i) => {
                 const isEditing = editingCode === s.section_code;
                 return (
-                  <section key={s.section_code} style={{ marginBottom: 34 }}>
+                  <section key={s.section_code} id={`quarterly-sec-${s.section_code}`} style={{ marginBottom: 34 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                       <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: BRAND }}>{pad2(i + 1)}</span>
                       <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: BRAND, flex: 1, minWidth: 0, lineHeight: 1.25 }}>{s.title}</h2>

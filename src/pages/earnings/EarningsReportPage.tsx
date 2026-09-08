@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRememberStep } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { earnings, agentRuns, ApiError } from '@/lib/api';
@@ -72,6 +72,7 @@ export default function EarningsReportPage() {
   // middle of the flow — see earnings-resume.
   useRememberStep(reportId, 'report');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
 
@@ -417,6 +418,20 @@ export default function EarningsReportPage() {
     setActiveCode(code);
     document.getElementById(`earnings-sec-${code}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+
+  // Spec 5 (Personas-Provenance): a Copilot source chip deep-links here as
+  // ?section=<title> — no machine section_code is stored against a chunk,
+  // only the human-readable title, so this is a best-effort case-insensitive
+  // match against the sections we already loaded. No match -> the report
+  // still opened, just without a scroll; never an error.
+  useEffect(() => {
+    const wanted = searchParams.get('section');
+    if (!wanted || sections.length === 0) return;
+    const target = sections.find(
+      (s) => s.title.trim().toLowerCase() === wanted.trim().toLowerCase(),
+    );
+    if (target) selectSection(target.section_code);
+  }, [searchParams, sections]);
 
   // ── Loading / error ─────────────────────────────────────────────────────────
   if (loading) {

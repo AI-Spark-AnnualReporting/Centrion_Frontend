@@ -2,8 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { chat, type ChatHistoryMessage, type ChatToolCall } from '@/lib/api';
+import {
+  chat,
+  type ChatDisclosureStatus,
+  type ChatFigureCitation,
+  type ChatHistoryMessage,
+  type ChatProvenanceSource,
+  type ChatToolCall,
+} from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { ProvenanceChips } from '@/components/chat/ProvenanceChips';
 
 // One row in the message list. v2 backend owns the persisted history; this
 // shape mirrors what GET /chat/session returns plus a few UI-only flags
@@ -21,6 +29,11 @@ interface UiMessage {
   // fixed refusal instead of a generated answer — rendered muted, not as
   // an error (nothing broke; the question was just out of scope).
   variant?: 'refusal';
+  // Spec 5 (Personas-Provenance): last-call-wins per turn, both live (from
+  // tool_end events) and hydrated from history's reshaped tool_calls column.
+  disclosureStatus?: ChatDisclosureStatus;
+  sources?: ChatProvenanceSource[];
+  figures?: ChatFigureCitation[];
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -84,7 +97,13 @@ export default function AIPage() {
           id: nextId(),
           role: m.role,
           content: m.content,
-          tools: m.role === 'assistant' ? hydrateTools(m.tool_calls) : undefined,
+          tools: m.role === 'assistant' ? hydrateTools(m.tool_calls?.calls) : undefined,
+          // Spec 5: reload a past conversation with the same chips it showed
+          // live — tool_calls is the reshaped {calls, disclosure_status,
+          // sources, figures} dict, not the bare array it used to be.
+          disclosureStatus: m.tool_calls?.disclosure_status ?? undefined,
+          sources: m.tool_calls?.sources,
+          figures: m.tool_calls?.figures,
         }),
       );
       setMessages(hydrated);
@@ -175,11 +194,20 @@ export default function AIPage() {
           }));
         } else if (ev.type === 'tool_end') {
           const name = (ev as { name?: string }).name ?? '';
+          // Spec 5: last-call-wins, not accumulated — mirrors the backend's
+          // own persistence choice (routes/chat_routes.py::_stream_and_persist).
+          const disclosureStatus = (ev as { disclosure_status?: ChatDisclosureStatus })
+            .disclosure_status;
+          const sources = (ev as { sources?: ChatProvenanceSource[] }).sources;
+          const figures = (ev as { figures?: ChatFigureCitation[] }).figures;
           updateAssistant((m) => ({
             ...m,
             tools: (m.tools ?? []).map((t) =>
               t.name === name && !t.done ? { ...t, done: true } : t,
             ),
+            disclosureStatus: disclosureStatus ?? m.disclosureStatus,
+            sources: sources ?? m.sources,
+            figures: figures ?? m.figures,
           }));
         } else if (ev.type === 'error') {
           const message =
@@ -526,6 +554,12 @@ export default function AIPage() {
                           {m.error}
                         </div>
                       )}
+                      <ProvenanceChips
+                        disclosureStatus={m.disclosureStatus}
+                        sources={m.sources}
+                        figures={m.figures}
+                        companyId={user?.company_id}
+                      />
                     </div>
                   ) : (
                     <div
