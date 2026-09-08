@@ -44,8 +44,9 @@ const ADMIN = { ...SPARK, role: "admin" };
 
 const ALLOWED = ["Companies", "Annual Report", "AI Copilot", "Communication Hub", "Document Bank"];
 // What renders unguarded: the section header and the expandable parent. Its
-// children (Users & Roles, Departments) sit behind `adminOpen`, collapsed by
-// default for every role — see the expand test below.
+// children sit behind `adminOpen`, collapsed by default for every role — see the
+// expand test below. Spark gets only one of them: Departments is part of running
+// a client's report, its user accounts are not.
 const ADMIN_ITEMS = ["Admin", "Admin Console"];
 const HIDDEN = [
   "Command Center",
@@ -138,11 +139,12 @@ describe("sidebar for spark_internal", () => {
     expect(screen.getByText("AI Copilot")).toBeInTheDocument();
   });
 
-  it("reveals Users & Roles and Departments when the console is expanded", () => {
+  it("reveals Departments but not Users & Roles when the console is expanded", () => {
     renderSidebar();
     fireEvent.click(screen.getByText("Admin Console"));
-    expect(screen.getByText("Users & Roles")).toBeInTheDocument();
     expect(screen.getByText("Departments")).toBeInTheDocument();
+    // Whoever owns the client owns its accounts.
+    expect(screen.queryByText("Users & Roles")).not.toBeInTheDocument();
   });
 
   it("shows only the directory before a company is chosen", () => {
@@ -191,5 +193,14 @@ describe("sidebar for everyone else", () => {
   it("does not give an admin the Spark tab — theirs lives under Reports", () => {
     renderSidebar();
     expect(screen.queryByText("Annual Report")).not.toBeInTheDocument();
+  });
+
+  it("still gives an admin Users & Roles", () => {
+    // The other half of hiding it from Spark: without this, a filter that hid it
+    // from everybody would look just as green.
+    renderSidebar();
+    fireEvent.click(screen.getByText("Admin Console"));
+    expect(screen.getByText("Users & Roles")).toBeInTheDocument();
+    expect(screen.getByText("Departments")).toBeInTheDocument();
   });
 });

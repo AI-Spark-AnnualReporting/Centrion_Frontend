@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
-import { isAdminLevel } from '@/constants/roles';
+import { isAdminLevel, type BackendRole } from '@/constants/roles';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. (ESG Validator lives under
@@ -58,8 +58,22 @@ const PROFILE_CHILDREN: { key: string; label: string; path: string; end?: boolea
 // to admins as an expandable nav item (same pattern as Reports). `end` marks the
 // index route so it's only "active" on an exact match.
 // Overview isn't listed — clicking the "Admin Console" parent lands on it.
-const ADMIN_CHILDREN: { key: string; label: string; path: string; end?: boolean }[] = [
-  { key: 'users', label: 'Users & Roles', path: '/admin-console/users' },
+//
+// allowedRoles is BackendRole[], not REPORT_CHILDREN's ('admin' | 'ir')[] — that
+// narrower type forces a cast at the filter, which would exclude spark_internal
+// by accident rather than by intent. Here it is the intent, so it should be
+// stated in the type.
+const ADMIN_CHILDREN: {
+  key: string;
+  label: string;
+  path: string;
+  end?: boolean;
+  allowedRoles?: BackendRole[];
+}[] = [
+  // Spark runs a client's annual report, not its payroll of accounts — whoever
+  // owns the client owns its users. The page itself is still reachable by URL;
+  // this is about what the nav offers, not access.
+  { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
 ];
 
@@ -170,6 +184,9 @@ export function Sidebar() {
   );
   const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter((child) =>
     isVisible(child.featureKey),
+  );
+  const visibleAdminChildren = ADMIN_CHILDREN.filter(
+    (child) => !child.allowedRoles || (!!user && child.allowedRoles.includes(user.role)),
   );
 
   const handleLogout = () => {
@@ -449,9 +466,9 @@ export function Sidebar() {
         </div>
       ))}
       {/* Spark staff get this too: they run each client's annual report AS that
-          client's admin, and Users & Roles / Departments are part of that job.
-          Still gated on having picked a company — the console is company-scoped
-          and would 400 without one. */}
+          client's admin, and Departments are part of that job. Users & Roles is
+          not — see ADMIN_CHILDREN. Still gated on having picked a company: the
+          console is company-scoped and would 400 without one. */}
       {isAdminLevel(user?.role) && !sparkAwaitingCompany && (
         <div>
           <div className="sb-div" />
@@ -500,7 +517,7 @@ export function Sidebar() {
           </button>
           {adminOpen && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {ADMIN_CHILDREN.map((child) => {
+              {visibleAdminChildren.map((child) => {
                 const childActive = child.end
                   ? location.pathname === child.path
                   : location.pathname.startsWith(child.path);
