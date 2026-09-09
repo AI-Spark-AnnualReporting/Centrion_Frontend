@@ -643,6 +643,8 @@ export interface ReindexResponse {
   report_id: string;
   run_id: string | null;
   poll_url: string | null;
+  /** "Q3 2025 earnings report" — how a person refers to it, for the success toast. */
+  report_label?: string | null;
 }
 
 // Loose aliases for values sourced from API lookups.

@@ -12,6 +12,7 @@ import {
   type ThreadSummary,
 } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
@@ -177,6 +178,7 @@ export function NotificationBell() {
   const hideForCompanylessSpark = user?.role === 'spark_internal' && !actingCompany;
 
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [open, setOpen] = useState(false);
@@ -197,21 +199,23 @@ export function NotificationBell() {
   // rather than the dependency list so a retry never re-creates the poller.
   const loadRef = useRef<() => Promise<void>>(async () => {});
 
-  // Watch a queued retry to its end, then refresh. On success the backend clears
-  // the warning, so the row simply disappears; on a repeat failure it replaces
-  // its own row and the timestamp moves.
-  const watchRun = useCallback(async (pollUrl: string | null) => {
-    if (!pollUrl) return;
+  // Watch a queued retry to its end. On success the backend clears the warning,
+  // so the row simply disappears; on a repeat failure it replaces its own row and
+  // the timestamp moves. Returns how it ended, or null if we stopped watching —
+  // which is NOT a failure, so the caller must not claim one.
+  const watchRun = useCallback(async (pollUrl: string | null): Promise<string | null> => {
+    if (!pollUrl) return null;
     const started = Date.now();
     while (Date.now() - started < POLL_CAP_MS) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       try {
         const run = await agentRuns.getByPollUrl(pollUrl);
-        if (run.status === 'completed' || run.status === 'failed') break;
+        if (run.status === 'completed' || run.status === 'failed') return run.status;
       } catch {
         // A transient poll failure is not a retry failure — keep watching.
       }
     }
+    return null;
   }, []);
 
   const buildReadinessNotifications = useCallback(
@@ -247,14 +251,26 @@ export function NotificationBell() {
                         kind === 'earnings'
                           ? await earnings.reindexEarningsReport(reportId)
                           : await quarterlyReports.reindexReport(companyId ?? '', reportId);
-                      await watchRun(res.poll_url);
+                      const outcome = await watchRun(res.poll_url);
                       await loadRef.current();
+                      // Only on a confirmed success. The warning vanishing is
+                      // quiet enough to miss right after pressing a button, and
+                      // null means we stopped watching, not that it worked.
+                      if (outcome === 'completed') {
+                        toast({
+                          variant: 'success',
+                          title: '✓ The assistant can read this report now',
+                          description:
+                            `${res.report_label || 'Your report'} is ready — ` +
+                            'you can ask the assistant about it.',
+                        });
+                      }
                     },
                   }
                 : undefined,
           };
         }),
-    [companyId, watchRun],
+    [companyId, watchRun, toast],
   );
 
   const load = useCallback(async () => {

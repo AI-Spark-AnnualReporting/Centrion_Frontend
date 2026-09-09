@@ -17,6 +17,7 @@ const reindexEarnings = vi.fn();
 const reindexQuarterly = vi.fn();
 const getByPollUrl = vi.fn();
 const navigate = vi.fn();
+const toast = vi.fn();
 
 const auth: { user: Record<string, unknown> | null; actingCompany: unknown } = {
   user: { user_id: "u_admin", role: "admin", company_id: "cmp_1" },
@@ -32,6 +33,7 @@ vi.mock("@/lib/api", () => ({
   ApiError: class extends Error {},
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => auth }));
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => navigate }));
 
 const { NotificationBell } = await import("@/components/layout/NotificationBell");
@@ -69,6 +71,7 @@ describe("report-readiness notifications", () => {
     reindexQuarterly.mockReset().mockResolvedValue({ report_id: "rep-1", run_id: null, poll_url: null });
     getByPollUrl.mockReset();
     navigate.mockReset();
+    toast.mockReset();
   });
 
   it("shows the warning and offers a way to fix it", async () => {
@@ -141,6 +144,39 @@ describe("report-readiness notifications", () => {
     });
     await openBell();
     expect(screen.getByText("Budget review")).toBeTruthy();
+  });
+
+  it("confirms with a green toast once the retry actually finishes", async () => {
+    reindexEarnings.mockResolvedValue({
+      report_id: "rep-1", run_id: "run-1", poll_url: "/api/v1/agent_runs/run-1",
+      report_label: "Q3 2025 earnings report",
+    });
+    getByPollUrl.mockResolvedValue({ status: "completed" });
+
+    await openBell();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalled(), { timeout: 6000 });
+    const arg = toast.mock.calls[0][0];
+    expect(arg.variant).toBe("success");
+    expect(arg.title).toContain("can read this report now");
+    expect(arg.description).toContain("Q3 2025 earnings report");
+  });
+
+  it("says nothing when the retry fails again", async () => {
+    // The warning row stays and speaks for itself; a toast claiming success
+    // would contradict it.
+    reindexEarnings.mockResolvedValue({
+      report_id: "rep-1", run_id: "run-1", poll_url: "/api/v1/agent_runs/run-1",
+      report_label: "Q3 2025 earnings report",
+    });
+    getByPollUrl.mockResolvedValue({ status: "failed" });
+
+    await openBell();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(getByPollUrl).toHaveBeenCalled(), { timeout: 6000 });
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it("leaves out the button when there is no report to act on", async () => {
