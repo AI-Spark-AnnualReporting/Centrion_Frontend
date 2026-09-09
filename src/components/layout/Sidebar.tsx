@@ -3,14 +3,27 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
+import { isAdminLevel, type BackendRole } from '@/constants/roles';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. (ESG Validator lives under
 // "Reports Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
+// Spark staff are an admin for every company's ANNUAL REPORT, not general-purpose
+// admins — so they get the directory, an Annual Report tab, the three
+// cross-cutting workspaces below, and nothing else.
+// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank. The
+// annual report is NOT one of them and can't be: this set is only ever consulted
+// against top-level NAV_ITEMS, while `annual` is a REPORT_CHILDREN key nested
+// under Reports — which spark never sees. Hence its own hand-rolled tab below,
+// the same shape as the Companies button.
+const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs']);
+
 const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean; allowedRoles?: ('admin' | 'ir')[] }[] = [
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly', featureKey: 'quarterly_report' },
   { key: 'earnings', label: 'Earnings', path: '/earnings/setup', featureKey: 'earnings_report' },
-  // Annual cycles are only managed in-app (admin/ir); every other role's
+  // Annual cycles are only managed in-app (admin/ir). Spark reaches the same
+  // page through its own top-level tab, so it is deliberately not in this list —
+  // it would be a second entry for the one route. Every other role's
   // annual_report access lives in the spark_studio workspace app, reached via
   // the app switcher — not a per-item deep link.
   { key: 'annual', label: 'Annual', path: '/annual-report', featureKey: 'annual_report', allowedRoles: ['admin', 'ir'] },
@@ -45,8 +58,22 @@ const PROFILE_CHILDREN: { key: string; label: string; path: string; end?: boolea
 // to admins as an expandable nav item (same pattern as Reports). `end` marks the
 // index route so it's only "active" on an exact match.
 // Overview isn't listed — clicking the "Admin Console" parent lands on it.
-const ADMIN_CHILDREN: { key: string; label: string; path: string; end?: boolean }[] = [
-  { key: 'users', label: 'Users & Roles', path: '/admin-console/users' },
+//
+// allowedRoles is BackendRole[], not REPORT_CHILDREN's ('admin' | 'ir')[] — that
+// narrower type forces a cast at the filter, which would exclude spark_internal
+// by accident rather than by intent. Here it is the intent, so it should be
+// stated in the type.
+const ADMIN_CHILDREN: {
+  key: string;
+  label: string;
+  path: string;
+  end?: boolean;
+  allowedRoles?: BackendRole[];
+}[] = [
+  // Spark runs a client's annual report, not its payroll of accounts — whoever
+  // owns the client owns its users. The page itself is still reachable by URL;
+  // this is about what the nav offers, not access.
+  { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
 ];
 
@@ -121,8 +148,14 @@ const icons: Record<string, JSX.Element> = {
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, actingCompany, leaveCompany } = useAuth();
   const { isVisible } = useFeatureAccess();
+
+  // Spark staff work inside a company they choose. Until they have, every
+  // tenant-scoped page below would render empty or 403, so the directory is the
+  // only thing worth offering — ProtectedRoute bounces them there anyway.
+  const isSpark = user?.role === 'spark_internal';
+  const sparkAwaitingCompany = isSpark && !actingCompany;
 
   // Excludes the bare '/reports' path — that's ESG Validator's route, now
   // under "Reports Validator" below — but still covers /reports/quarterly.
@@ -152,6 +185,9 @@ export function Sidebar() {
   const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter((child) =>
     isVisible(child.featureKey),
   );
+  const visibleAdminChildren = ADMIN_CHILDREN.filter(
+    (child) => !child.allowedRoles || (!!user && child.allowedRoles.includes(user.role)),
+  );
 
   const handleLogout = () => {
     logout();
@@ -159,7 +195,9 @@ export function Sidebar() {
   };
 
   const displayName = user?.full_name ?? 'Ahmad Al-Rashid';
-  const displayRole = user?.role ?? 'ESG Manager';
+  // Backend-resolved label, falling back to the raw role so a session stored
+  // before the backend sent `display_role` still shows something.
+  const displayRole = user?.display_role || user?.role || 'ESG Manager';
   const initials = (user?.full_name ?? 'AR')
     .split(' ')
     .map((p) => p[0])
@@ -186,11 +224,65 @@ export function Sidebar() {
       </div>
       {/* Sidebar search hidden until it's wired up. */}
       <div style={{ height: 10 }} />
-      {NAV_ITEMS.map((section) => (
+      {isSpark && (
+        <div>
+          <div className="sb-sec">Spark</div>
+          <button
+            className={`sb-item ${location.pathname === '/companies' ? 'act' : ''}`}
+            onClick={() => {
+              // The directory is a company-less state: you are either inside a
+              // client or choosing one. Clearing BEFORE navigating means the page
+              // mounts already company-less, so the AppLayout key never flips and
+              // the directory isn't fetched twice.
+              leaveCompany();
+              handleNav('/companies');
+            }}
+          >
+            <span className="sb-ico">
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+                <rect x="2" y="5" width="5" height="9" rx="1" stroke="currentColor" strokeWidth="1.2" />
+                <rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            </span>
+            Companies
+          </button>
+          <div className="sb-div" />
+        </div>
+      )}
+      {/* The only way back to a client's annual report that KEEPS the client.
+          Companies (above) and the "Acting as" chip both clear it first, so
+          without this, returning meant picking the same company again.
+
+          A sibling of the Spark block rather than part of it: that block is
+          gated on isSpark alone and so also renders on /companies, where this
+          link would bounce straight back (ProtectedRoute's spark company gate).
+          Repeating !sparkAwaitingCompany per top-level block is what the Admin
+          section does too. The feature gate mirrors the route's own
+          requiredFeature — a missing one redirects to /dashboard, which is
+          itself feature-gated, so an ungated link here can loop.
+
+          Prefix match, not ===, to stay lit on /annual-report/cycles/:id. The
+          label must not contain "Companies" — a sidebar test matches that
+          button by an unanchored name regex. */}
+      {isSpark && !sparkAwaitingCompany && isVisible('annual_report') && (
+        <div>
+          <button
+            className={`sb-item ${location.pathname.startsWith('/annual-report') ? 'act' : ''}`}
+            onClick={() => handleNav('/annual-report')}
+          >
+            {icons.doc}
+            Annual Report
+          </button>
+        </div>
+      )}
+      {!sparkAwaitingCompany && NAV_ITEMS.map((section) => (
         <div key={section.section}>
-          <div className="sb-sec">{section.section}</div>
+          {/* The spark allowlist leaves a single item in each of three sections;
+              headers and dividers there would read as three empty groups. */}
+          {!isSpark && <div className="sb-sec">{section.section}</div>}
           {section.items
-            .filter((i) => !i.adminOnly || user?.role === 'admin')
+            .filter((i) => !isSpark || SPARK_NAV_KEYS.has(i.key))
+            .filter((i) => !i.adminOnly || isAdminLevel(user?.role))
             .filter((i) => !i.featureKey || isVisible(i.featureKey))
             .filter((i) => i.key !== 'reports' || visibleReportChildren.length > 0)
             .filter((i) => i.key !== 'reportsValidation' || visibleValidationChildren.length > 0)
@@ -372,10 +464,14 @@ export function Sidebar() {
               </button>
             ),
           )}
-          {section.section !== 'Workspace' && <div className="sb-div" />}
+          {!isSpark && section.section !== 'Workspace' && <div className="sb-div" />}
         </div>
       ))}
-      {user?.role === 'admin' && (
+      {/* Spark staff get this too: they run each client's annual report AS that
+          client's admin, and Departments are part of that job. Users & Roles is
+          not — see ADMIN_CHILDREN. Still gated on having picked a company: the
+          console is company-scoped and would 400 without one. */}
+      {isAdminLevel(user?.role) && !sparkAwaitingCompany && (
         <div>
           <div className="sb-div" />
           <div className="sb-sec">Admin</div>
@@ -423,7 +519,7 @@ export function Sidebar() {
           </button>
           {adminOpen && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {ADMIN_CHILDREN.map((child) => {
+              {visibleAdminChildren.map((child) => {
                 const childActive = child.end
                   ? location.pathname === child.path
                   : location.pathname.startsWith(child.path);

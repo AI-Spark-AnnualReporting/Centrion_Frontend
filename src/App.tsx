@@ -50,6 +50,7 @@ import EarningsReportPage from "./pages/earnings/EarningsReportPage";
 // Admin Console pages — code-split (recharts etc. stay off the main bundle).
 // They render inside AppLayout so the main sidebar drives navigation.
 const AdminOverviewPage = lazy(() => import("./pages/admin/AdminOverviewPage"));
+const SparkCompaniesPage = lazy(() => import("./pages/spark/CompaniesPage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
@@ -148,6 +149,16 @@ const App = () => (
         {/* First-login onboarding — also shell-less, same as change-password. */}
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route element={<AppLayout />}>
+          {/* Spark staff land here instead of the dashboard until they pick a
+              company — see ProtectedRoute's spark_internal gate. Deliberately
+              OUTSIDE the command_center feature gate: isFeatureVisible fails
+              closed, so a Spark token missing that feature would bounce
+              /companies → /dashboard → /companies for ever. Role alone is the
+              right gate here, and moving only this route leaves every other
+              role's routing untouched. */}
+          <Route element={<ProtectedRoute requiredRole="spark_internal" />}>
+            <Route path="/companies" element={<SparkCompaniesPage />} />
+          </Route>
           <Route element={<ProtectedRoute requiredFeature="command_center" />}>
             <Route index element={<DashboardPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
@@ -256,12 +267,12 @@ const App = () => (
           {/* The onboarding upload step, reachable after the fact — onboarding
               can be skipped, which otherwise leaves the account with no
               documents and no way to run the ingest. Admin-only to match. */}
-          <Route element={<ProtectedRoute requiredRole="admin" />}>
+          <Route element={<ProtectedRoute requiredRole={["admin", "spark_internal"]} />}>
             <Route path="/upload-reports" element={<UploadReportsPage />} />
           </Route>
           {/* Admin Console — admin-only, rendered inside the main shell so the
               sidebar's expandable Admin section drives navigation. */}
-          <Route element={<ProtectedRoute requiredRole="admin" />}>
+          <Route element={<ProtectedRoute requiredRole={["admin", "spark_internal"]} />}>
             <Route path="/admin-console" element={<AdminOverviewPage />} />
             <Route path="/admin-console/users" element={<AdminUsersPage />} />
             <Route
@@ -273,7 +284,7 @@ const App = () => (
               sidebar + topbar stay. Admins manage cycles; IR is read-only
               (create/edit hidden in the pages). No separate /new route — the
               create form lives on the list page (ESG-style). */}
-          <Route element={<ProtectedRoute requiredRole={["admin", "ir"]} requiredFeature="annual_report" />}>
+          <Route element={<ProtectedRoute requiredRole={["admin", "ir", "spark_internal"]} requiredFeature="annual_report" />}>
             <Route path="/annual-report" element={<CyclesListPage />} />
             <Route
               path="/annual-report/cycles/:cycleId"

@@ -38,6 +38,7 @@ import { useBoardReport } from './useBoardReport';
 import { useBoardCover } from './useBoardCover';
 import { useFitFrame } from './useFitFrame';
 import { ACCENT, AMBER, BORDER_SOFT, FAINT, GREEN, INK, MUTED, Notice } from './board-ui';
+import { isAdminLevel } from '@/constants/roles';
 
 const BRAND = 'var(--brand-primary, #4040C8)';
 const DOC_WIDTH = 820;
@@ -86,7 +87,7 @@ export default function BoardReportPage() {
 
   const isLocked = locked || approvedNow;
   // Approving is one-way, so on the board pack it's the admin's call alone.
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isAdminLevel(user?.role);
   // The cover design & colours, shared with the Review step.
   const cover = useBoardCover(reportId, {
     templateKey: assembled?.cover?.template_key ?? null,

@@ -5,9 +5,12 @@ import { Topbar } from './Topbar';
 import { FloatingChatbot } from '../shared/FloatingChatbot';
 import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
 import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
+import { useAuth } from '@/context/AuthContext';
 import { BackToOrigin } from '../shared/BackToOrigin';
+import { useAuth } from '@/context/AuthContext';
 
 const PAGE_NAMES: Record<string, string> = {
+  '/companies': 'Companies',
   '/dashboard': 'Command Center',
   '/reports': 'Reports',
   '/reports/quarterly': 'Quarterly Reports',
@@ -28,6 +31,10 @@ const PAGE_NAMES: Record<string, string> = {
   '/board-report': 'Board Report',
   '/annual-report/cycles/new': 'New Cycle',
   '/earnings/setup': 'Earnings Report',
+  '/spark': 'Spark Admin',
+  '/spark/companies': 'Companies',
+  '/spark/reports': 'Reports',
+  '/spark/users': 'Users',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -95,6 +102,7 @@ function isReportFlowRoute(pathname: string): boolean {
 
 export function AppLayout() {
   const location = useLocation();
+  const { user, actingCompany } = useAuth();
   const pageName =
     PAGE_NAMES[location.pathname] ??
     PAGE_NAME_PREFIXES.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ??
@@ -108,14 +116,31 @@ export function AppLayout() {
   // just relaunch the page you're already on. The page also runs full-height,
   // same as the report flow, so it needs the launcher's clearance freed up too.
   const aiPage = location.pathname === '/ai';
+  // The directory is company-less, and the chatbot answers questions about a
+  // company's data — on this page it would be a dead button (it routes to /ai,
+  // which the spark gate bounces straight back here). Only Spark reaches
+  // /companies, so this is scoped to that role by the path alone.
+  const companyDirectory = location.pathname === '/companies';
+  // The copilot answers questions about the caller's company, so it also has
+  // nothing to work with for a Spark session that hasn't picked one yet.
   const chatbotShown =
-    location.pathname !== '/dashboard' && !boardBuilder && !reportFlow && !aiPage;
+    location.pathname !== '/dashboard' &&
+    !boardBuilder &&
+    !reportFlow &&
+    !aiPage &&
+    !companyDirectory &&
+    !!user?.company_id;
 
   return (
     // Wraps the whole authenticated shell so a compliance run stays watched
     // wherever the user goes next — and unmounts with it on logout, taking its
     // timers and its knowledge of another company's runs with it.
-    <ComplianceRunsProvider>
+    //
+    // Keyed on the acting company for the same reason: a Spark user switching
+    // from company A to company B must not carry A's polled run ids across.
+    // Because this wraps Sidebar, Topbar and the <Outlet/>, the key remounts the
+    // whole shell, which also clears every page still holding A's data.
+    <ComplianceRunsProvider key={actingCompany?.id ?? 'own'}>
       <div className="app-shell">
         <Sidebar />
         <div className="main">

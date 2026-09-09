@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { communications, ApiError, type ThreadSummary } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
@@ -99,14 +100,30 @@ const SCOPED_CSS = `
 const REFRESH_MS = 45000;
 
 export function NotificationBell() {
+  // Threads are company-scoped. A Spark session that hasn't picked a company
+  // would render a permanently empty bell and re-poll every 45s for nothing, so
+  // hide it entirely — the same self-hiding contract AppSwitcher and
+  // ActingCompanyChip use. Role-gated, so no other role is affected.
+  const { user, actingCompany } = useAuth();
+  const hideForCompanylessSpark = user?.role === 'spark_internal' && !actingCompany;
+
   const navigate = useNavigate();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // Threads live inside a company, so a user without one has no notifications
+  // to poll for — the request 400s every 45 seconds. `user.company_id` is
+  // already the acting company's id for a Spark session (see AuthContext's
+  // effectiveUser), so this also re-enables polling once Spark picks one.
+  // Same guard ComplianceRunsContext already applies to its own
+  // company-scoped sweep.
+  const enabled = !!user?.company_id;
+
   const unreadCount = items.filter((n) => n.unread).length;
 
   const load = useCallback(async () => {
+    if (!enabled) return;
     try {
       const res = await communications.listThreads();
       setItems(buildThreadNotifications(res.threads));
@@ -115,14 +132,15 @@ export function NotificationBell() {
       // failure just leaves the bell empty rather than surfacing an error.
       if (e instanceof ApiError && e.status === 401) return;
     }
-  }, []);
+  }, [enabled]);
 
   // Poll in the background so the badge stays roughly live.
   useEffect(() => {
+    if (!enabled) return;
     void load();
     const id = window.setInterval(() => void load(), REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, enabled]);
 
   // Refresh on open so the panel reflects the latest read state.
   useEffect(() => {
@@ -166,6 +184,10 @@ export function NotificationBell() {
       }
     });
   };
+
+  // After the hooks, never before them — so the bell simply isn't there for a
+  // company-less user rather than sitting in the topbar permanently empty.
+  if (!enabled || hideForCompanylessSpark) return null;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>

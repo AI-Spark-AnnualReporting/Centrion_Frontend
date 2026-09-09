@@ -12,6 +12,7 @@ import WizardStepper from '@/pages/onboarding/WizardStepper';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
 import { ApiError, companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
+import { useAuth } from '@/context/AuthContext';
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -121,6 +122,13 @@ const Checkbox = ({ label, checked, onChange }: { label: string; checked: boolea
 );
 
 export default function OnboardingPage() {
+  const { user } = useAuth();
+  // Spark staff run this wizard for a company they just created on someone
+  // else's behalf, so the Command Center is not where their work is — the
+  // client's annual report is, matching what clicking an existing company does.
+  // Everyone else is setting up their OWN company and still lands on it.
+  const landingPath = user?.role === 'spark_internal' ? '/annual-report' : '/dashboard';
+
   const [step, setStep] = useState<Step>('loading');
   const [urlFailed, setUrlFailed] = useState(false);
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
@@ -350,7 +358,13 @@ export default function OnboardingPage() {
   }
 
   if (step === 'processing') {
-    return <SetupInProgressAnimation payload={buildPayload()} files={uploadedFiles} />;
+    return (
+      <SetupInProgressAnimation
+        payload={buildPayload()}
+        files={uploadedFiles}
+        landingPath={landingPath}
+      />
+    );
   }
 
   const stepNumber = { intel: 1, review: 2, brand: 3, departments: 4, upload: 5 }[step];
@@ -548,7 +562,11 @@ export default function OnboardingPage() {
                 // Persist intent across the post-onboarding ProtectedRoute redirect
                 // (which strips router state) so the dashboard lands on the
                 // personal workspace, not the welcome screen.
-                if (files.length) sessionStorage.setItem('centriyon:freshUpload', '1');
+                // Only DashboardPage reads this. Setting it while landing
+                // somewhere else leaves it to fire on an unrelated later visit.
+                if (files.length && landingPath === '/dashboard') {
+                  sessionStorage.setItem('centriyon:freshUpload', '1');
+                }
                 setUploadedFiles(files);
                 setStep('processing');
               }}
