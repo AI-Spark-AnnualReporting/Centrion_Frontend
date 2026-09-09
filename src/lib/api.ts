@@ -100,6 +100,7 @@ import type {
   BoardAssembleResponse,
   BoardCompletion,
   BoardExportFormat,
+  BoardIndexFailure,
   BoardIssuerProfile,
   BoardOutlineResponse,
   BoardOutlineSavePayload,
@@ -3466,6 +3467,21 @@ export const boardReports = {
   // completion payload, so the caller can list exactly what is missing.
   approve: (reportId: string) =>
     request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
+
+  // Approved board reports whose background embedding job failed, for the
+  // notification bell. Only the newest run per report is reported, and only
+  // when it failed — so a successful retry makes the row disappear on its own
+  // and a repeat failure brings it back. No notifications row is involved.
+  listIndexFailures: (signal?: AbortSignal) =>
+    request<{ failures: BoardIndexFailure[] }>("/api/v1/board/index-failures", { signal }),
+
+  // Re-run a failed embedding job. 202 — the work happens in the background.
+  // Safe to call repeatedly: the indexer reuses the stored PDF and replaces the
+  // report's chunks rather than duplicating them. 409 if not approved yet.
+  retryIndex: (reportId: string) =>
+    request<{ run_id: string | null; status: string }>(
+      boardPath(reportId, "/index/retry"), { method: "POST" },
+    ),
 
   // The cover design + colours already saved on this report, so the picker
   // opens on the current choice rather than blank.

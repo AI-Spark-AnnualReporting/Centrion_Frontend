@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 const listThreads = vi.fn();
+const listIndexFailures = vi.fn();
 const auth: { user: Record<string, unknown> | null; actingCompany: unknown } = {
   user: null,
   actingCompany: null,
@@ -18,6 +19,7 @@ const auth: { user: Record<string, unknown> | null; actingCompany: unknown } = {
 
 vi.mock("@/lib/api", () => ({
   communications: { listThreads: () => listThreads(), markThreadRead: vi.fn() },
+  boardReports: { listIndexFailures: () => listIndexFailures(), retryIndex: vi.fn() },
   ApiError: class extends Error {},
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => auth }));
@@ -28,6 +30,7 @@ const { NotificationBell } = await import("@/components/layout/NotificationBell"
 describe("notification bell scoping", () => {
   beforeEach(() => {
     listThreads.mockReset().mockResolvedValue({ threads: [] });
+    listIndexFailures.mockReset().mockResolvedValue({ failures: [] });
     auth.actingCompany = null;
   });
 
@@ -35,6 +38,7 @@ describe("notification bell scoping", () => {
     auth.user = { user_id: "u_spark", role: "spark_internal", company_id: null };
     const { container } = render(<NotificationBell />);
     await waitFor(() => expect(listThreads).not.toHaveBeenCalled());
+    expect(listIndexFailures).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
   });
 
