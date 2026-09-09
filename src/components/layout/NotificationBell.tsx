@@ -1,24 +1,41 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { communications, ApiError, type ThreadSummary } from '@/lib/api';
+import {
+  agentRuns,
+  communications,
+  earnings,
+  quarterlyReports,
+  sarNotifications,
+  ApiError,
+  type SarNotification,
+  type ThreadSummary,
+} from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
 
-   Today it surfaces one kind of notification — an unread thread message —
-   built from the live Communication Hub feed. The model is deliberately
-   type-driven so future kinds slot in without touching the UI:
+   Two kinds today, from two different feeds:
+
+     thread_message    an unread Communication Hub thread, from this backend.
+     report_not_ready  a finalised report that could not be prepared for the AI
+                       assistant, from the SHARED notifications table (read via
+                       the SAR backend — see sarNotifications in lib/api).
+
+   The model is deliberately type-driven so future kinds slot in without
+   touching the UI:
 
      1. add a code to NotificationType
      2. add an entry to NOTIF_META (icon + accent)
      3. add a builder that returns AppNotification[]
 
-   Everything below (list, badge, empty state, click-through) is generic.
+   Everything below (list, badge, empty state, click-through) is generic. A row
+   may also carry an `action`, which renders as a button inside the row and does
+   NOT open the notification — report_not_ready uses it for "Try again".
 ═══════════════════════════════════════════════════════════════════════ */
 
-export type NotificationType = 'thread_message'; // | 'report_published' | 'mention' | …
+export type NotificationType = 'thread_message' | 'report_not_ready';
 
 export interface AppNotification {
   id: string;
@@ -34,6 +51,8 @@ export interface AppNotification {
   unread: boolean;
   /** Route opened when the row is clicked. */
   navigateTo?: string;
+  /** In-row button. Its click never opens the notification. */
+  action?: { label: string; busyLabel: string; run: () => Promise<void> };
 }
 
 interface NotifMeta {
@@ -59,7 +78,40 @@ const NOTIF_META: Record<NotificationType, NotifMeta> = {
       </svg>
     ),
   },
+  report_not_ready: {
+    label: 'Needs attention',
+    // #B45309 is the app-wide warning ink (SheetReadingDialog, EditableProse…).
+    accent: '#B45309',
+    bg: '#FFF7ED',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M8 2.6 14.4 13H1.6L8 2.6z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+        <path d="M8 6.6v2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11.2" r=".75" fill="currentColor" />
+      </svg>
+    ),
+  },
 };
+
+// What identifies OUR rows in the shared notifications table.
+//
+// Not `category`, even though the backend writes one: SAR's NotificationResponse
+// does not return that column at all, so a reader never sees it. This pair does
+// come back, and nothing else in the table uses either half.
+//
+// The filter is not optional. Centriyon also writes Communication Hub rows into
+// this same table, and those already reach the bell through the thread feed
+// below — without it, every @mention would be listed twice.
+//
+// Keep in step with TYPE_REPORT_AI_READINESS / RELATED_TYPE_REPORT in the
+// backend's notifications.py.
+const READINESS_TYPE = 'alert';
+const READINESS_RELATED_TYPE = 'report';
 
 // Turn the Communication Hub feed into notifications: one per thread with
 // unread messages, newest first (the feed is already sorted updated_at desc).
@@ -83,6 +135,14 @@ function buildThreadNotifications(threads: ThreadSummary[]): AppNotification[] {
     });
 }
 
+/** Which report a readiness notification is about, read off its deep link. */
+function reportKind(actionUrl: string | null | undefined): 'earnings' | 'quarterly' | null {
+  if (!actionUrl) return null;
+  if (actionUrl.startsWith('/earnings/')) return 'earnings';
+  if (actionUrl.startsWith('/quarterly-report/')) return 'quarterly';
+  return null;
+}
+
 function relativeTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -95,9 +155,18 @@ const SCOPED_CSS = `
 .notif-row { transition: background .13s; }
 .notif-row:hover { background: #F7F7FD; }
 .notif-clear:hover { color: #4040C8 !important; }
+.notif-action:hover:not(:disabled) { background: #FFF1DF !important; }
+.notif-action:disabled { opacity: .6; cursor: default; }
 `;
 
 const REFRESH_MS = 45000;
+
+// Retry polling. The indexer usually finishes in well under a minute; past the
+// cap we stop watching and let the 45s refresh settle it, rather than spinning
+// forever on a run whose process died (a server restart drops in-flight
+// BackgroundTasks with no record).
+const POLL_MS = 3000;
+const POLL_CAP_MS = 120000;
 
 export function NotificationBell() {
   // Threads are company-scoped. A Spark session that hasn't picked a company
@@ -109,6 +178,7 @@ export function NotificationBell() {
 
   const navigate = useNavigate();
   const [items, setItems] = useState<AppNotification[]>([]);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -119,20 +189,102 @@ export function NotificationBell() {
   // Same guard ComplianceRunsContext already applies to its own
   // company-scoped sweep.
   const enabled = !!user?.company_id;
+  const companyId = user?.company_id;
 
   const unreadCount = items.filter((n) => n.unread).length;
 
+  // Declared before `load` so the builder below can close over it. Kept in a ref
+  // rather than the dependency list so a retry never re-creates the poller.
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+
+  // Watch a queued retry to its end, then refresh. On success the backend clears
+  // the warning, so the row simply disappears; on a repeat failure it replaces
+  // its own row and the timestamp moves.
+  const watchRun = useCallback(async (pollUrl: string | null) => {
+    if (!pollUrl) return;
+    const started = Date.now();
+    while (Date.now() - started < POLL_CAP_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      try {
+        const run = await agentRuns.getByPollUrl(pollUrl);
+        if (run.status === 'completed' || run.status === 'failed') break;
+      } catch {
+        // A transient poll failure is not a retry failure — keep watching.
+      }
+    }
+  }, []);
+
+  const buildReadinessNotifications = useCallback(
+    (rows: SarNotification[]): AppNotification[] =>
+      rows
+        .filter(
+          (r) =>
+            !r.is_read &&
+            r.notification_type === READINESS_TYPE &&
+            r.related_type === READINESS_RELATED_TYPE,
+        )
+        .map((r) => {
+          const kind = reportKind(r.action_url);
+          const reportId = r.related_id ?? '';
+          const id = `notif:${r.id}`;
+          return {
+            id,
+            type: 'report_not_ready' as const,
+            title: r.title,
+            body: r.message,
+            timestamp: r.created_at,
+            unread: true,
+            navigateTo: r.action_url ?? undefined,
+            // No report to act on (an unparseable link) → no button, so the row
+            // is still readable and still deep-links, it just can't self-heal.
+            action:
+              kind && reportId
+                ? {
+                    label: 'Try again',
+                    busyLabel: 'Getting it ready…',
+                    run: async () => {
+                      const res =
+                        kind === 'earnings'
+                          ? await earnings.reindexEarningsReport(reportId)
+                          : await quarterlyReports.reindexReport(companyId ?? '', reportId);
+                      await watchRun(res.poll_url);
+                      await loadRef.current();
+                    },
+                  }
+                : undefined,
+          };
+        }),
+    [companyId, watchRun],
+  );
+
   const load = useCallback(async () => {
     if (!enabled) return;
-    try {
-      const res = await communications.listThreads();
-      setItems(buildThreadNotifications(res.threads));
-    } catch (e) {
-      // 401 → request layer already ran the session-expired flow. Any other
-      // failure just leaves the bell empty rather than surfacing an error.
-      if (e instanceof ApiError && e.status === 401) return;
+    // Two different hosts. Settled, not all — if the SAR backend is down the
+    // thread notifications must still show, and vice versa.
+    const [threads, notifs] = await Promise.allSettled([
+      communications.listThreads(),
+      sarNotifications.list(),
+    ]);
+
+    const next: AppNotification[] = [];
+    if (threads.status === 'fulfilled') {
+      next.push(...buildThreadNotifications(threads.value.threads));
+    } else if (threads.reason instanceof ApiError && threads.reason.status === 401) {
+      // The request layer already ran the session-expired flow.
+      return;
     }
-  }, [enabled]);
+    if (notifs.status === 'fulfilled') {
+      next.push(...buildReadinessNotifications(notifs.value.notifications ?? []));
+    }
+
+    // One list, newest first — the two feeds are each sorted, together they are not.
+    next.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    setItems(next);
+  }, [enabled, buildReadinessNotifications]);
+
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   // Poll in the background so the badge stays roughly live.
   useEffect(() => {
@@ -164,25 +316,42 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const openNotification = (n: AppNotification) => {
-    // Optimistically clear it, tell the backend, then deep-link to the thread.
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
+  const markRead = (n: AppNotification) => {
     if (n.type === 'thread_message') {
-      const threadId = n.id.slice('thread:'.length);
-      communications.markThreadRead(threadId).catch(() => {});
+      communications.markThreadRead(n.id.slice('thread:'.length)).catch(() => {});
+    } else if (n.type === 'report_not_ready') {
+      sarNotifications.markRead(n.id.slice('notif:'.length)).catch(() => {});
     }
+  };
+
+  const openNotification = (n: AppNotification) => {
+    // Optimistically clear it, tell the backend, then deep-link.
+    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
+    markRead(n);
     setOpen(false);
     if (n.navigateTo) navigate(n.navigateTo);
+  };
+
+  const runAction = async (n: AppNotification) => {
+    if (!n.action || busy[n.id]) return;
+    setBusy((prev) => ({ ...prev, [n.id]: true }));
+    try {
+      await n.action.run();
+    } catch {
+      // Leave the row as it is — the warning is still true, and the button can
+      // be pressed again. Retrying is safe to repeat by design.
+    } finally {
+      setBusy((prev) => {
+        const { [n.id]: _drop, ...rest } = prev;
+        return rest;
+      });
+    }
   };
 
   const markAllRead = () => {
     const unread = items.filter((n) => n.unread);
     setItems((prev) => prev.map((x) => ({ ...x, unread: false })));
-    unread.forEach((n) => {
-      if (n.type === 'thread_message') {
-        communications.markThreadRead(n.id.slice('thread:'.length)).catch(() => {});
-      }
-    });
+    unread.forEach(markRead);
   };
 
   // After the hooks, never before them — so the bell simply isn't there for a
@@ -343,13 +512,23 @@ export function NotificationBell() {
             ) : (
               items.map((n) => {
                 const meta = NOTIF_META[n.type];
+                const isBusy = !!busy[n.id];
                 return (
-                  <button
+                  // A div, not a button: a row may contain its own action button,
+                  // and a button inside a button is invalid HTML that browsers
+                  // silently restructure. Keyboard behaviour is kept by hand.
+                  <div
                     key={n.id}
-                    type="button"
                     role="menuitem"
+                    tabIndex={0}
                     className="notif-row"
                     onClick={() => openNotification(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openNotification(n);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'flex-start',
@@ -357,7 +536,6 @@ export function NotificationBell() {
                       width: '100%',
                       textAlign: 'left',
                       padding: '13px 16px',
-                      border: 'none',
                       borderBottom: '1px solid #F4F5FB',
                       background: n.unread ? '#FBFAFF' : '#fff',
                       cursor: 'pointer',
@@ -413,9 +591,16 @@ export function NotificationBell() {
                             fontSize: 12,
                             color: '#5A6080',
                             marginTop: 2,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            // Warnings are a sentence or two of plain English and
+                            // are useless truncated to one line, unlike a message
+                            // preview which is only ever a teaser.
+                            ...(n.type === 'report_not_ready'
+                              ? { lineHeight: 1.45 }
+                              : {
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap' as const,
+                                }),
                           }}
                         >
                           {n.body}
@@ -426,8 +611,35 @@ export function NotificationBell() {
                         <span style={{ width: 3, height: 3, borderRadius: '50%', background: '#CBD0E4' }} />
                         <span style={{ fontSize: 11, color: '#9BA3C4' }}>{relativeTime(n.timestamp)}</span>
                       </div>
+                      {n.action && (
+                        <button
+                          type="button"
+                          className="notif-action"
+                          disabled={isBusy}
+                          // Stop the row's own click — pressing Try again should
+                          // fix the problem in place, not navigate away from it.
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void runAction(n);
+                          }}
+                          style={{
+                            marginTop: 9,
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: `1px solid ${meta.accent}33`,
+                            background: meta.bg,
+                            color: meta.accent,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          {isBusy ? n.action.busyLabel : n.action.label}
+                        </button>
+                      )}
                     </div>
-                  </button>
+                  </div>
                 );
               })
             )}

@@ -635,6 +635,16 @@ export interface QuarterlyQuestionsResponse {
   questions: QuarterlyQuestion[];
 }
 
+// What a "get this report ready for the AI assistant again" call returns. The
+// work itself runs in the background, so this is only a handle on it: poll_url
+// is an agent_runs URL, null when the run row could not be opened (the indexing
+// still happens — the run row is observability, not the job).
+export interface ReindexResponse {
+  report_id: string;
+  run_id: string | null;
+  poll_url: string | null;
+}
+
 // Loose aliases for values sourced from API lookups.
 export type Jurisdiction = string;
 export type AgentClass =
@@ -2142,6 +2152,14 @@ export const quarterlyReports = {
       { method: "POST" },
     ),
 
+  // The quarterly twin of earnings.reindexEarningsReport — see there for why a
+  // retry is safe to press repeatedly.
+  reindexReport: (companyId: string, reportId: string) =>
+    request<ReindexResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/reindex`,
+      { method: "POST" },
+    ),
+
   // Inline-edit a section's content (prose text, or JSON-stringified table content).
   saveSectionContent: (
     companyId: string,
@@ -3312,6 +3330,16 @@ export const earnings = {
   approveEarningsReport: (reportId: string): Promise<unknown> =>
     request<unknown>(
       `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST", body: {} },
+    ),
+
+  // Try getting an approved report ready for the AI assistant again, after the
+  // background attempt that approve kicks off failed. Safe to call repeatedly —
+  // the backend reuses the report's existing generated document and replaces its
+  // text rather than adding a second copy. 409 if the report isn't approved yet.
+  reindexEarningsReport: (reportId: string): Promise<ReindexResponse> =>
+    request<ReindexResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/reindex`,
       { method: "POST", body: {} },
     ),
 
@@ -4777,6 +4805,54 @@ function unwrap<T>(raw: unknown, key: string): T {
   }
   return raw as T;
 }
+
+// ---------------------------------------------------------------------------
+// SAR — Notifications.
+//
+// The `notifications` table is SHARED: both backends write to one Supabase
+// project, and SAR is the only one of the two with a read API for it. Rather
+// than build a duplicate reader in Centriyon, this calls SAR's — the JWT is the
+// same (both sign with the same secret), `notifications.user_id` is the same
+// `usr_…` claim our token already carries, and SAR's CORS already allows this
+// origin plus Authorization and X-Company-Id.
+//
+// Note what SAR's response model does NOT include: `category` and `severity` are
+// Centriyon-only columns and never come back. Anything the UI needs to
+// distinguish must live in notification_type / related_type / related_id.
+// ---------------------------------------------------------------------------
+
+export interface SarNotification {
+  id: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  priority: string;
+  related_type?: string | null;
+  related_id?: string | null;
+  action_url?: string | null;
+  created_at: string;
+  read_at?: string | null;
+}
+
+export interface SarNotificationList {
+  success?: boolean;
+  notifications: SarNotification[];
+  /** SAR sets this to the returned page size, not a true total — use unread_count. */
+  total?: number;
+  unread_count?: number;
+}
+
+export const sarNotifications = {
+  list: (limit = 30): Promise<SarNotificationList> =>
+    sarRequest<SarNotificationList>(`/api/v1/notifications?limit=${limit}`),
+
+  markRead: (notificationId: string): Promise<unknown> =>
+    sarRequest<unknown>(
+      `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: "POST" },
+    ),
+};
 
 // Raw department row as the SAR backend actually returns it. The `*_percentage`
 // / `status` / `user_*` keys are the backend's names; the optional frontend-name
