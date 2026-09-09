@@ -23,10 +23,19 @@ export default function BrandColorPicker({
   palettes,
   value,
   onChange,
+  showPreview = true,
 }: {
   palettes: ColorPalette[];
   value: BrandColors;
   onChange: (next: BrandColors) => void;
+  /**
+   * The swatch preview and the two role notes below the pills. Both answer
+   * "what do these colours actually do?" — worth their space on the onboarding
+   * step, where nothing else does. The Report design card shows a full A4 page
+   * beside the pills, which answers the same question more accurately, so it
+   * turns them off. Default true: BrandStep is untouched.
+   */
+  showPreview?: boolean;
 }) {
   // Custom mode is sticky once entered so the hex fields don't vanish mid-edit
   // when a typed value happens to equal a preset.
@@ -43,10 +52,12 @@ export default function BrandColorPicker({
   return (
     <div>
       {/* Role legend — what each color affects. Swatches are live. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 14 }}>
-        <RoleNote color={value.primary} label="Primary" note={PRIMARY_NOTE} />
-        <RoleNote color={value.secondary} label="Secondary" note={SECONDARY_NOTE} />
-      </div>
+      {showPreview && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 14 }}>
+          <RoleNote color={value.primary} label="Primary" note={PRIMARY_NOTE} />
+          <RoleNote color={value.secondary} label="Secondary" note={SECONDARY_NOTE} />
+        </div>
+      )}
 
       {/* Preset pills + the Custom escape hatch */}
       <div role="group" aria-label="Brand color palette" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
@@ -100,7 +111,7 @@ export default function BrandColorPicker({
         </div>
       )}
 
-      <ReportPreview brand={value} />
+      {showPreview && <ReportPreview brand={value} />}
 
       {isLight(value.primary) && (
         <div style={{ marginTop: 10, fontSize: 12, color: '#B45309', display: 'flex', alignItems: 'center', gap: 8 }}>
