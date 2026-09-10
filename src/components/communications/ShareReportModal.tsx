@@ -33,12 +33,16 @@ function detailMessage(err: unknown, fallback: string): string {
 export function ShareReportModal({
   reportId,
   report,
+  ownerUserId,
   onClose,
   onShared,
 }: {
   reportId: string;
   // The report being shared — drives the "Attached report" block.
   report?: ThreadReport;
+  // The author's usr_ id. They cannot review their own report (the backend
+  // answers 422), so they are dropped from the picker along with you.
+  ownerUserId?: string | null;
   onClose: () => void;
   // Receives the full review-thread payload the share call returned.
   onShared?: (payload: ShareReportResponse) => void;
@@ -51,7 +55,9 @@ export function ShareReportModal({
   const [members, setMembers] = useState<CommunicationMember[]>([]);
   // The backend rejects assigning a review to yourself (422) — drop yourself
   // from the picker up front instead of letting the user hit that error.
-  const assignableMembers = members.filter((m) => m.user_id !== user?.user_id);
+  const assignableMembers = members.filter(
+    (m) => m.user_id !== user?.user_id && m.user_id !== ownerUserId,
+  );
 
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [comment, setComment] = useState('');

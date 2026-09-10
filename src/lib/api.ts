@@ -3924,6 +3924,10 @@ export interface ThreadSummary {
   // Added alongside the review flow; null when the report isn't out for review
   // (always null for ad-hoc threads — review doesn't apply to them).
   assignment: ReviewAssignment | null;
+  // True once the thread has EVER carried a review. Survives a send-back,
+  // which clears `assignment` — that is what keeps the author's route to the
+  // comments they were sent back over.
+  has_review: boolean;
   updated_at: string;
   last_message: ThreadLastMessage | null;
   internal_count: number;
@@ -4030,6 +4034,8 @@ export interface ThreadDetail {
   can_add_members: boolean;
   owner: ThreadOwner | null;
   assignment: ReviewAssignment | null;
+  // See ThreadSummary — true once this thread has ever been a review.
+  has_review: boolean;
   // True only for the assigned reviewer — gates "Open as reviewer". Always
   // false for ad-hoc threads (report === null) — the review endpoints
   // themselves 422 on those, so don't surface any review UI when report is null.
@@ -4286,7 +4292,9 @@ export interface ReviewComment {
 export interface ReviewViewResponse {
   thread_id: string;
   report: ThreadReport;
-  owner: { full_name: string; is_you: boolean } | null;
+  // `user_id` is the usr_ string — used to drop the author from the reassign
+  // picker, which the backend also refuses (422).
+  owner: { user_id: string; full_name: string; is_you: boolean } | null;
   assignment: ReviewAssignment | null;
   // can_act = you are the assigned reviewer. can_approve additionally requires
   // the report to be in review — show Approve disabled, not hidden, when
