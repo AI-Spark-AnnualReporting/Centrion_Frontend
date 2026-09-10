@@ -20,6 +20,7 @@ const getMyCompanyLogo = vi.fn();
 const updateMyCompany = vi.fn();
 const extractBrandLanguage = vi.fn();
 const detectLogoColors = vi.fn();
+const getCoverTemplatesGlobal = vi.fn(async () => ({ cover_templates: [] }));
 const getColorPalettesGlobal = vi.fn();
 
 // The page now disables every field for non-admins (it's reachable by anyone
@@ -42,7 +43,14 @@ vi.mock("@/lib/api", () => ({
     extractBrandLanguage: (f: File) => extractBrandLanguage(f),
     detectLogoColors: (uri: string) => detectLogoColors(uri),
   },
-  quarterlyReports: { getColorPalettesGlobal: () => getColorPalettesGlobal() },
+  quarterlyReports: {
+    getColorPalettesGlobal: () => getColorPalettesGlobal(),
+    // The Report design card reads the cover catalogue. The page calls this
+    // OUTSIDE any try, so an undefined member throws synchronously in the effect
+    // and takes every test in this file down with it, not just the ones that
+    // assert on layouts.
+    getCoverTemplatesGlobal: () => getCoverTemplatesGlobal(),
+  },
   ApiError: class ApiError extends Error {
     status: number;
     body: unknown;

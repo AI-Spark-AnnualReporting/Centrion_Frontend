@@ -37,6 +37,12 @@ const ROWS_COLLAPSED = 8;
 interface Props {
   reportId: string;
   data: ExtractionReviewResponse;
+  /**
+   * Opens the "upload more files" dialog. Optional, and the button is hidden
+   * without it, so this component stays free of any network call — the page owns
+   * the dialog and the refresh. Its test harness renders it with no api mock at all.
+   */
+  onAddFiles?: () => void;
 }
 
 /** "01_Aramco_Q3_2023_Income_Statement.xlsx" — the tail is what identifies it. */
@@ -397,7 +403,7 @@ function HowWeRead({ t, period }: { t: UserExtractionTable; period?: string | nu
   );
 }
 
-export default function UserExtractionReview({ reportId, data }: Props) {
+export default function UserExtractionReview({ reportId, data, onAddFiles }: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -425,9 +431,20 @@ export default function UserExtractionReview({ reportId, data }: Props) {
 
   return (
     <div style={{ padding: '22px 28px', overflowY: 'auto', flex: 1 }}>
-      <h2 style={{ margin: 0, fontSize: 19, fontWeight: 700, color: DARK }}>
-        What we read from your files
-      </h2>
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 16, flexWrap: 'wrap',
+      }}>
+        <h2 style={{ margin: 0, fontSize: 19, fontWeight: 700, color: DARK }}>
+          What we read from your files
+        </h2>
+        {onAddFiles && (
+          <button type="button" className="btn bs" onClick={onAddFiles}
+                  style={{ flexShrink: 0 }}>
+            + Upload more files
+          </button>
+        )}
+      </div>
       <p style={{ margin: '6px 0 0', fontSize: 12.5, color: MUTED, lineHeight: 1.6 }}>
         Each table in your files becomes a section of the report, named after that table.
         Nothing here needs answering — it is what was read, so you can check it before the
@@ -571,7 +588,7 @@ export default function UserExtractionReview({ reportId, data }: Props) {
           </div>
           {skipped.map((t) => (
             <div
-              key={`${t.file}:${t.table}`}
+              key={`${t.run_id ?? ''}:${t.file}:${t.table}`}
               style={{ padding: '8px 0', borderTop: `1px solid ${LINE}` }}
             >
               <HowWeRead t={t} period={data.period} />
