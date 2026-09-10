@@ -26,7 +26,7 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
-import { statusPill, isInReview } from '@/components/dashboard/report-status';
+import { statusPill, isInReview, isClosed } from '@/components/dashboard/report-status';
 import { canOpenReport, hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
@@ -440,8 +440,10 @@ function ThreadRow({
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
         {/* Out for review now, OR sent back and the comments still need
             reading — without the second case the author had no way in from
-            the list. */}
-        {(inReview || thread.has_review) && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
+            the list. Gone once the report is signed off: there is nothing left
+            to do and nothing left to act on. The record stays reachable through
+            the thread's own "View report". */}
+        {(inReview || thread.has_review) && !isClosed(report?.status) && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             className="btn bp"
