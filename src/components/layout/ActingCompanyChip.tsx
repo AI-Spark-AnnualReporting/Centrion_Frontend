@@ -35,7 +35,7 @@ export function ActingCompanyChip() {
         whiteSpace: "nowrap",
       }}
     >
-      Acting as: {actingCompany.name || "Unnamed company"} ▾
+      Acting as: {actingCompany.name || "Unnamed company"}
     </button>
   );
 }
