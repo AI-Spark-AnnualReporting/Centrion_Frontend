@@ -81,7 +81,15 @@ export interface Company {
   // The logo is NOT here: GET /companies/me strips logo_base64 to keep the
   // payload small. Use companies.getMyCompanyLogo() when you need to render it.
   brand_identity?: string | null;
+  // brand_identity distilled into the writing rules the report narrative prompts
+  // actually carry (agents/narrative/brand_voice.py renders it). Written in the
+  // background after a guideline is saved; brand_voice_status tracks that run.
+  brand_voice?: BrandVoice | null;
+  brand_voice_status?: string | null;   // 'processing' | 'done' | 'failed'
   brand_colors?: BrandColors | null;
+  // The company's default cover layout + typography, set on the Brand Identity
+  // page. Same rule as brand_colors: seeds a report, a report's own pick wins.
+  report_design?: CompanyReportDesign | null;
   // Onboarding deep-ingest state — drives the dashboard card (fetch) + the setup screen.
   report_extraction_status?: string | null; // 'processing' | 'done' | 'failed'
   onboarding_progress?: { stage?: string; detail?: string; percent?: number } | null;
@@ -118,8 +126,33 @@ export type CompanyEditableFields = Pick<
 // PATCH accepts it, GET /companies/me strips it (read it back from
 // companies.getMyCompanyLogo()), so putting it on Company would misdescribe
 // every GET response. Passing null for any of the three clears that column.
+// The condensed writing voice, as stored in companies.brand_voice. Fixed keys —
+// the backend drops anything else and caps every list, so a hand-edit here can
+// never grow the block appended to each narrative prompt.
+export type BrandVoice = {
+  register?: string | null;
+  person?: string | null;
+  sentence_style?: string | null;
+  tone_adjectives?: string[];
+  preferred_words?: string[];
+  banned_words?: string[];
+  do?: string[];
+  dont?: string[];
+};
+
 export type CompanyBrandUpdate = {
   brand_identity?: string | null;
+  brand_voice?: BrandVoice | null;
   brand_colors?: BrandColors | null;
   logo_base64?: string | null;
+  // The company's default report look — cover layout + type. Colours are NOT
+  // here; they stay in brand_colors, which already seeds a report's brand.
+  report_design?: CompanyReportDesign | null;
+};
+
+// Mirrors companies.report_design. Both halves nullable: null means "no company
+// default", and a report then falls through to the picked layout's blueprint.
+export type CompanyReportDesign = {
+  cover_template_key?: string | null;
+  typography?: import('@/types/quarterly').Typography | null;
 };

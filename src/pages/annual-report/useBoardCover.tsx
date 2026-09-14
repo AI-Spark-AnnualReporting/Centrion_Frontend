@@ -11,10 +11,12 @@ import { useAuth } from '@/context/AuthContext';
 import { boardReports, quarterlyReports } from '@/lib/api';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
 import type {
+  CompanyDesignDefault,
   BrandColors,
   ColorPalette,
   CoverSelectionPayload,
   CoverTemplate,
+  Typography,
 } from '@/types/quarterly';
 import { errorMessage } from './board-helpers';
 
@@ -29,9 +31,13 @@ export function useBoardCover(
   const [palettes, setPalettes] = useState<ColorPalette[]>([]);
   const [key, setKey] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandColors | null>(null);
+  const [typography, setTypography] = useState<Typography | null>(null);
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the company saved on Brand Identity — seeds the picker when this
+  // report has never been styled, and is what its Reset link goes back to.
+  const [companyDefault, setCompanyDefault] = useState<CompanyDesignDefault | null>(null);
 
   // The saved pick, so the picker opens on it rather than blank.
   useEffect(() => {
@@ -43,6 +49,8 @@ export function useBoardCover(
         if (cancelled) return;
         if (res?.cover_template_key) setKey(res.cover_template_key);
         if (res?.brand) setBrand(res.brand);
+        if (res?.typography) setTypography(res.typography);
+        setCompanyDefault(res?.company_default ?? null);
       })
       .catch(() => {});
     return () => {
@@ -78,6 +86,7 @@ export function useBoardCover(
         // may not echo the selection back, which would reset the cover.
         setKey(res?.cover_template_key ?? payload.cover_template_key);
         setBrand(res?.brand ?? payload.brand);
+        if (payload.typography) setTypography(res?.typography ?? payload.typography);
         setOpen(false);
       } catch (err: unknown) {
         setError(errorMessage(err, 'Could not save the cover selection.'));
@@ -106,6 +115,8 @@ export function useBoardCover(
         palettes={palettes}
         initialTemplateKey={templateKey}
         initialBrand={coverBrand}
+        initialTypography={typography}
+        companyDefault={companyDefault}
         applying={applying}
         error={error}
         onApply={apply}

@@ -295,6 +295,10 @@ export interface PipelineHandle {
   fileCount: number | null;
   isExisting: boolean;
   message?: string;
+  // Set when a re-upload re-opened a locked outline, because the report's figures
+  // changed under it. The user has to walk the outline and lock it again, so the
+  // screen has to say so — otherwise a produced report silently reverts to pending.
+  outlineUnlocked?: boolean;
 }
 
 export type AgentRunStatus =

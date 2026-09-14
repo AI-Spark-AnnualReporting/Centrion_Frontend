@@ -18,6 +18,7 @@ import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportSt
 import { CustomExtractionReview } from '@/components/quarterly/CustomExtractionReview';
 import { SectionPicker, flattenSections } from '@/components/quarterly/SectionPicker';
 import { ExcludedLines } from '@/components/quarterly/ExcludedLines';
+import { AddFinancialFilesDialog } from '@/components/quarterly/AddFinancialFilesDialog';
 import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
 import type {
   ExtractionReviewFigure,
@@ -154,6 +155,10 @@ export default function ExtractionReviewPage() {
   const [retryKey, setRetryKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [matchedOpen, setMatchedOpen] = useState(false);
+  // "Upload more files". The dialog lives here rather than inside the lane component
+  // so that component keeps making no network calls of its own.
+  const [addOpen, setAddOpen] = useState(false);
+  const [unlockedNotice, setUnlockedNotice] = useState(false);
 
   useEffect(() => {
     if (!companyId || !reportId) return;
@@ -368,7 +373,37 @@ export default function ExtractionReviewPage() {
   if (data?.metrics_mode === 'user' && reportId) {
     return (
       <Shell reportId={reportId} metricsMode="user">
-        <UserExtractionReview reportId={reportId} data={data} />
+        {unlockedNotice && (
+          <div style={{
+            margin: '14px 28px 0', padding: '10px 14px', fontSize: 12.5,
+            background: '#FFF8EC', border: '1px solid #F5E3C0',
+            borderRadius: 8, color: '#7C4A03', lineHeight: 1.6,
+          }}>
+            Your outline was unlocked because the figures changed. You'll need to
+            review and lock it again before the report is rebuilt.
+          </div>
+        )}
+        <UserExtractionReview
+          reportId={reportId}
+          data={data}
+          onAddFiles={companyId ? () => setAddOpen(true) : undefined}
+        />
+        {addOpen && companyId && (
+          <AddFinancialFilesDialog
+            companyId={companyId}
+            reportId={reportId}
+            defaultCurrency={data.financial_currency}
+            defaultScale={data.financial_scale}
+            onClose={() => setAddOpen(false)}
+            onDone={({ outlineUnlocked }) => {
+              setAddOpen(false);
+              if (outlineUnlocked) setUnlockedNotice(true);
+              // Reuse the page's one fetch effect rather than a second code path
+              // that could disagree with it about loading and error state.
+              setRetryKey((k) => k + 1);
+            }}
+          />
+        )}
       </Shell>
     );
   }

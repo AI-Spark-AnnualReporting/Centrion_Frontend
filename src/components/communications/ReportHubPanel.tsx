@@ -296,6 +296,7 @@ export function ReportHubPanel({
         <ShareReportModal
           reportId={reportId}
           report={report}
+          ownerUserId={owner?.user_id}
           onClose={() => setShowShare(false)}
           onShared={(payload) => {
             // Share returns the full thread payload — open it straight away.

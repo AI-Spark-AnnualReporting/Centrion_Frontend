@@ -80,6 +80,12 @@ export function canOpenReport(
     screen — the module's preview page is where the work actually shows. ESG
     always goes to its own page: it keeps no sections to render here at all. */
 export function opensModulePage(generation: Generation): boolean {
+  // Annual never leaves. The Hub renders a cycle's sections itself, and
+  // /annual-report is admin + IR only — a department-user reviewer sent there
+  // is bounced to /dashboard, which reads as "I was assigned it but cannot open
+  // it". When an annual report is not readable here at all, hasSomethingToReview
+  // has already made the card inert and no href is asked for.
+  if (generation.target.kind === 'annual_cycle') return false;
   return generation.state !== 'ready' || generation.target.kind === 'esg_page';
 }
 
@@ -93,10 +99,20 @@ export function generationHref(generation: Generation): string | null {
 
 /** Whether this thread's controls should offer the report at all.
 
-    Annual is the exception, and the only lane that reports a section count to
-    recognise: it is written in the reporting-cycles system, and until it has
-    been approved there is nothing here worth opening — a cycle mid-draft is not
-    a report to read, and the review screen would be empty headings.
+    The question is "has anything been written", not "is it approved": `done > 0`.
+    A cycle with nothing written reports 0 and stays inert, which is the case
+    this rule was really guarding.
+
+    It used to be `isClosed(status)`, from when annual reports were never
+    reviewed here. Sharing one for review sets the status to in_review and a
+    send-back sets it back to draft, so that rule hid the report from the
+    reviewer it had just been assigned to, and then hid the reviewer's comments
+    from the author it was sent back to.
+
+    `state === 'ready'` is not usable either: `auto` sections (the cover, the
+    contents page) cannot be locked by design yet still count toward the cycle's
+    total, so a fully written report reads as e.g. 9/11 and only reaches 'ready'
+    by being approved.
 
     Every other type is always offerable: they report no count, and approval is
     their readiness gate, so "not approved" there is the normal state of a
@@ -106,5 +122,5 @@ export function hasSomethingToReview(
   status?: string | null,
 ): boolean {
   if (!generation || generation.done == null) return true;
-  return isClosed(status);
+  return generation.done > 0 || isClosed(status);
 }

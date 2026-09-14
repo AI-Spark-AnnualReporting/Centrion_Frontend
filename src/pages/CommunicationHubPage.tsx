@@ -26,7 +26,7 @@ import {
 import type { Company } from '@/types/company';
 import { NewThreadModal } from '@/components/communications/NewThreadModal';
 import { ThreadViewModal } from '@/components/communications/ThreadViewModal';
-import { statusPill, isInReview } from '@/components/dashboard/report-status';
+import { statusPill, isInReview, isClosed } from '@/components/dashboard/report-status';
 import { canOpenReport, hasSomethingToReview } from '@/lib/reportRoutes';
 import { ReviewerView } from '@/components/communications/ReviewerView';
 import { RecipientChip } from '@/components/communications/RecipientChip';
@@ -438,14 +438,21 @@ function ThreadRow({
           <ChannelBtn icon={ICON_MAIL} label="External" count={null} tone="external" onClick={() => onExternal(thread)} />
         )}
         <ChannelBtn icon={ICON_PUBLISH} label="Publish" count={null} tone="publish" onClick={onPublish} />
-        {inReview && assignment && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
+        {/* Out for review now, OR sent back and the comments still need
+            reading — without the second case the author had no way in from
+            the list. Gone once the report is signed off: there is nothing left
+            to do and nothing left to act on. The record stays reachable through
+            the thread's own "View report". */}
+        {(inReview || thread.has_review) && !isClosed(report?.status) && !removed_at && canOpenReport(user, report?.generation) && hasSomethingToReview(report?.generation, report?.status) && (
           <button
             type="button"
             className="btn bp"
             style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', fontSize: 12 }}
             onClick={() => onReview(thread)}
           >
-            Open review
+            {/* Between rounds there is no review to conduct — the author is
+                here to read what came back, not to act on it. */}
+            {inReview ? 'Open review' : 'View comments'}
             {ICON_OPEN_REVIEW}
           </button>
         )}

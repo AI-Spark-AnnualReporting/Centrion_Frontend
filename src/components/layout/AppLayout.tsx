@@ -7,7 +7,6 @@ import { ComplianceRunsDock } from '../shared/ComplianceRunsDock';
 import { ComplianceRunsProvider } from '@/context/ComplianceRunsContext';
 import { useAuth } from '@/context/AuthContext';
 import { BackToOrigin } from '../shared/BackToOrigin';
-import { useAuth } from '@/context/AuthContext';
 
 const PAGE_NAMES: Record<string, string> = {
   '/companies': 'Companies',
