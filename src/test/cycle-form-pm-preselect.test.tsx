@@ -6,9 +6,13 @@
 // placeholder, so the option has to be there as well as the default. And it
 // must stay a default — the client's own PMs remain selectable, and no other
 // role sees any of this.
+//
+// The card now starts collapsed, and the select lives inside the collapsed
+// body — hence the openCard() before every assertion. That click is the test
+// reaching the form, not part of what is being tested.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const SPARK = {
   user_id: "usr_spark",
@@ -32,6 +36,7 @@ vi.mock("@/lib/api", () => ({
 
 const { default: CycleForm } = await import("@/pages/annual-report/CycleForm");
 
+const openCard = () => fireEvent.click(screen.getByText("Create Reporting Cycle"));
 const pmSelect = () => screen.getByRole("combobox") as HTMLSelectElement;
 const options = () =>
   Array.from(pmSelect().options).map((o) => [o.value, o.text] as const);
@@ -43,6 +48,7 @@ describe("Project Manager preselection", () => {
 
   it("opens on the Spark user, with the client's PMs still listed", async () => {
     render(<CycleForm onCreated={vi.fn()} />);
+    openCard();
     await waitFor(() => expect(options()).toHaveLength(4));
 
     expect(pmSelect().value).toBe("usr_spark");
@@ -58,6 +64,7 @@ describe("Project Manager preselection", () => {
     // The silent half: React shows the placeholder when `value` matches no
     // option, so preselecting without prepending would look like a no-op.
     render(<CycleForm onCreated={vi.fn()} />);
+    openCard();
     const selected = await screen.findByText("Spark Staff (you)");
     expect((selected as HTMLOptionElement).selected).toBe(true);
   });
@@ -65,6 +72,7 @@ describe("Project Manager preselection", () => {
   it("leaves every other role exactly as it was", async () => {
     user = ADMIN;
     render(<CycleForm onCreated={vi.fn()} />);
+    openCard();
     await waitFor(() => expect(options()).toHaveLength(3));
 
     expect(pmSelect().value).toBe("");

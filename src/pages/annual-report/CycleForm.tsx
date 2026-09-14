@@ -35,7 +35,10 @@ function GroupHeading({ children }: { children: React.ReactNode }) {
 // the Reports page. Sits above the cycles list; calls onCreated after a
 // successful create so the parent can refresh the list.
 export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => void }) {
-  const [open, setOpen] = useState(true);
+  // Collapsed on arrival: creating a cycle is the rare action, reading the
+  // list below is the common one, and expanded this card pushes the list off
+  // the first screen.
+  const [open, setOpen] = useState(false);
 
   const [name, setName] = useState('');
   const [fiscalYear, setFiscalYear] = useState('');
@@ -146,6 +149,18 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
           borderBottom: open ? '1px solid #ECEEF8' : 'none',
         }}
         onClick={() => setOpen(!open)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        // Now that the card starts closed this header is the ONLY way into the
+        // form, so it has to work without a mouse. Enter and Space both toggle,
+        // and Space has its page-scroll default suppressed.
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 28, height: 28, borderRadius: '50%', background: PRIMARY, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
