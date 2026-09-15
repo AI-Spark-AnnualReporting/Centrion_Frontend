@@ -1,10 +1,12 @@
 /*
  * TypographyControls.tsx — the "Typography" section of the Report Design
  * modal. Three rows (heading / subheading / body); each row picks family,
- * size and weight; body also picks line-height. The section header shows
- * a "Recommended for {Layout}" hint and, when the current values differ
- * from that layout's defaults, a "Customised" pill + a Reset link that
- * snaps everything back.
+ * size and weight; body also picks line-height. The subheading row carries
+ * a second line of options — numbering, case, spacing and colour — that
+ * style the headings the engine writes INSIDE a section's body (h3/h4),
+ * not the section title. The section header shows a "Recommended for
+ * {Layout}" hint and, when the current values differ from that layout's
+ * defaults, a "Customised" pill + a Reset link that snaps everything back.
  *
  * Every option here is enforced against the same allowlists the backend
  * validates against (report_typography.py) so a valid submission always
@@ -14,13 +16,18 @@
  * user picked Bold and applied without changing anything.
  */
 import { memo, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import type {
+  SubheadingCase,
+  SubheadingColor,
+  SubheadingNumbering,
+  SubheadingSpacing,
   Typography,
   TypographyFamily,
   TypographyRole,
   TypographyWeight,
 } from '@/types/quarterly';
-import { TYPOGRAPHY_ALLOWLISTS } from '@/types/quarterly';
+import { SUBHEADING_DEFAULTS, TYPOGRAPHY_ALLOWLISTS } from '@/types/quarterly';
 
 type RoleKey = 'heading' | 'subheading' | 'body';
 
@@ -30,14 +37,53 @@ const ROLE_LABEL: Record<RoleKey, string> = {
   body: 'Body',
 };
 
-const WEIGHT_OPTIONS: { label: string; value: TypographyWeight }[] = [
+type SegmentOption<T> = { label: string; value: T };
+
+const WEIGHT_OPTIONS: SegmentOption<TypographyWeight>[] = [
   { label: 'Regular', value: 400 },
   { label: 'Bold',    value: 700 },
 ];
 
+// The subheading-only second line — one segmented control per option.
+// Values are what gets stored on the role; labels are what the user reads.
+const NUMBERING_OPTIONS: SegmentOption<SubheadingNumbering>[] = [
+  { label: 'Numbered', value: 'numbered' },
+  { label: 'Plain',    value: 'plain' },
+];
+const CASE_OPTIONS: SegmentOption<SubheadingCase>[] = [
+  { label: 'Normal',    value: 'normal' },
+  { label: 'UPPERCASE', value: 'upper' },
+];
+const SPACING_OPTIONS: SegmentOption<SubheadingSpacing>[] = [
+  { label: 'Tight',  value: 'tight' },
+  { label: 'Normal', value: 'normal' },
+  { label: 'Loose',  value: 'loose' },
+];
+const COLOR_OPTIONS: SegmentOption<SubheadingColor>[] = [
+  { label: 'Body ink', value: 'body' },
+  { label: 'Brand',    value: 'brand' },
+];
+
+type SubheadingKey = keyof typeof SUBHEADING_DEFAULTS;
+type SubheadingOptions = Required<Pick<TypographyRole, SubheadingKey>>;
+
+// Read a subheading option as its default when the role predates it. Every
+// comparison and every control goes through this: a role stored before these
+// keys existed has none of them, while the layout blueprints now spell all
+// four out, so reading a missing key as `undefined` would make an untouched
+// design report itself as "Customised".
+function subOption<K extends SubheadingKey>(role: TypographyRole, key: K): SubheadingOptions[K] {
+  return (role[key] ?? SUBHEADING_DEFAULTS[key]) as SubheadingOptions[K];
+}
+
+const SUBHEADING_KEYS = Object.keys(SUBHEADING_DEFAULTS) as SubheadingKey[];
+
 
 function rolesEqual(a: TypographyRole, b: TypographyRole): boolean {
-  return a.family === b.family && a.size === b.size && a.weight === b.weight;
+  return (
+    a.family === b.family && a.size === b.size && a.weight === b.weight
+    && SUBHEADING_KEYS.every((k) => subOption(a, k) === subOption(b, k))
+  );
 }
 
 export function hasCustomTypography(current: Typography, defaults: Typography): boolean {
@@ -66,7 +112,14 @@ export const TypographyControls = memo(function TypographyControls({
   );
 
   const patchRole = (role: RoleKey, patch: Partial<Typography[RoleKey]>) => {
-    onChange({ ...value, [role]: { ...value[role], ...patch } } as Typography);
+    // The quarterly/earnings PATCH replaces `typography` wholesale — it does
+    // not merge keys server-side — so once the user touches the subheading
+    // row it leaves here with all four options spelled out. A key left
+    // missing would come back as the backend's own default next save.
+    const next = role === 'subheading'
+      ? { ...SUBHEADING_DEFAULTS, ...value[role], ...patch }
+      : { ...value[role], ...patch };
+    onChange({ ...value, [role]: next } as Typography);
   };
 
   return (
@@ -126,11 +179,63 @@ export const TypographyControls = memo(function TypographyControls({
                 fieldId={`typo-size-${role}`}
               />
 
-              <WeightSegment
+              <Segment
                 value={spec.weight}
+                options={WEIGHT_OPTIONS}
                 onChange={(weight) => patchRole(role, { weight })}
+                label="Font weight"
                 fieldId={`typo-weight-${role}`}
               />
+
+              {/* Subheading only: the headings the engine writes inside a
+                * section's body. These live on a full-width second line of
+                * this same card rather than as more grid columns — the four
+                * columns above already need 537px, which is what .rd-controls
+                * is capped to and what the two-pane breakpoint was computed
+                * from. `col-span-4` keeps the grid at four tracks. */}
+              {role === 'subheading' && (
+                <div className="col-span-4 mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-100 pt-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    In-section headings
+                  </span>
+                  <SubOption label="Numbering">
+                    <Segment
+                      value={subOption(spec, 'numbering')}
+                      options={NUMBERING_OPTIONS}
+                      onChange={(numbering) => patchRole(role, { numbering })}
+                      label="Subheading numbering"
+                      fieldId="typo-sub-numbering"
+                    />
+                  </SubOption>
+                  <SubOption label="Case">
+                    <Segment
+                      value={subOption(spec, 'case')}
+                      options={CASE_OPTIONS}
+                      onChange={(c) => patchRole(role, { case: c })}
+                      label="Subheading case"
+                      fieldId="typo-sub-case"
+                    />
+                  </SubOption>
+                  <SubOption label="Spacing">
+                    <Segment
+                      value={subOption(spec, 'spacing')}
+                      options={SPACING_OPTIONS}
+                      onChange={(spacing) => patchRole(role, { spacing })}
+                      label="Subheading spacing"
+                      fieldId="typo-sub-spacing"
+                    />
+                  </SubOption>
+                  <SubOption label="Colour">
+                    <Segment
+                      value={subOption(spec, 'color')}
+                      options={COLOR_OPTIONS}
+                      onChange={(color) => patchRole(role, { color })}
+                      label="Subheading colour"
+                      fieldId="typo-sub-color"
+                    />
+                  </SubOption>
+                </div>
+              )}
             </div>
           );
         })}
@@ -219,21 +324,44 @@ function SizeStepper({
 }
 
 
-function WeightSegment({
-  value, onChange, fieldId,
-}: { value: TypographyWeight; onChange: (v: TypographyWeight) => void; fieldId: string }) {
+// One label + one segmented control, as the subheading sub-row repeats it.
+// The label is a <span>, not a <label>: the control it names is a radio-like
+// button group, which `aria-label` on the group already names.
+function SubOption({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] text-slate-600">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+
+// The segmented control this design UI uses everywhere a boolean or a small
+// enum is picked — there are no switches or radio groups here. Generalised
+// from the font-weight pair it started as: same markup, same active state,
+// any number of options.
+function Segment<T extends string | number>({
+  value, options, onChange, label, fieldId,
+}: {
+  value: T;
+  options: readonly SegmentOption<T>[];
+  onChange: (v: T) => void;
+  label: string;
+  fieldId: string;
+}) {
   return (
     <div
       role="group"
-      aria-label="Font weight"
+      aria-label={label}
       id={fieldId}
       className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white"
     >
-      {WEIGHT_OPTIONS.map((opt) => {
+      {options.map((opt) => {
         const active = opt.value === value;
         return (
           <button
-            key={opt.value}
+            key={String(opt.value)}
             type="button"
             aria-pressed={active}
             onClick={() => onChange(opt.value)}
