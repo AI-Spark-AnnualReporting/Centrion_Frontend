@@ -11,12 +11,16 @@
  *                  + bold_nav.html (Bold running header)
  *                  + report_export.py::_stamp_pdf_header_footer (bars,
  *                    classic/minimal rule, footer text)
+ *   Page h3     →  section.html's in-body headings — the four subheading
+ *                  options (numbering / case / spacing / colour) render
+ *                  here exactly as base.css h3 renders them
  *
  * Pure React/CSS, no server calls. Brand colours + typography drive the
  * output; the modal repaints as the user tweaks the left-pane controls.
  */
 import { useState, useMemo } from 'react';
 import type { Typography, BrandColors } from '@/types/quarterly';
+import { SUBHEADING_DEFAULTS, SUBHEADING_SPACING_PX } from '@/types/quarterly';
 
 export type PreviewVariant = 'classic' | 'bold' | 'minimal';
 type ViewMode = 'cover' | 'page';
@@ -245,6 +249,15 @@ function PageView({
   const subFF     = ff(typography.subheading.family);
   const bodyFF    = ff(typography.body.family);
 
+  // The four subheading options, each read as its default when the saved
+  // role predates it — so an untouched design renders as it always has:
+  // numbered, sentence case, 14/6 margins, body ink.
+  const sub = typography.subheading;
+  const subGap      = SUBHEADING_SPACING_PX[sub.spacing ?? SUBHEADING_DEFAULTS.spacing];
+  const subColor    = (sub.color ?? SUBHEADING_DEFAULTS.color) === 'brand' ? primary : '#1A1A1A';
+  const subUpper    = (sub.case ?? SUBHEADING_DEFAULTS.case) === 'upper';
+  const subNumbered = (sub.numbering ?? SUBHEADING_DEFAULTS.numbering) === 'numbered';
+
   // Content area — starts below the header allowance, ends above the
   // footer allowance. Matches base.css / stamper spacing.
   const contentTop = variant === 'bold' ? 64 : (variant === 'minimal' ? 40 : CONTENT_MARGIN);
@@ -276,9 +289,14 @@ function PageView({
         </h2>
         <h3 style={{
           fontFamily: subFF, fontSize: typography.subheading.size,
-          fontWeight: typography.subheading.weight, margin: '14px 0 6px 0', color: '#1A1A1A',
+          fontWeight: typography.subheading.weight,
+          margin: `${subGap.above}px 0 ${subGap.below}px 0`,
+          color: subColor,
+          textTransform: subUpper ? 'uppercase' : 'none',
         }}>
-          1.1 Highlights
+          {/* The engine numbers in-body headings "section.sub"; "Plain"
+            * drops the prefix rather than restarting the count. */}
+          {subNumbered ? '1.1 Highlights' : 'Highlights'}
         </h3>
         <p style={{
           fontFamily: bodyFF, fontSize: typography.body.size, fontWeight: typography.body.weight,
