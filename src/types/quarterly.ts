@@ -816,11 +816,46 @@ export type TypographyFamily =
 
 export type TypographyWeight = 400 | 700;
 
+// Subheading-only options. These style the headings the engine writes
+// INSIDE a section's body (h3/h4) — not the section title, which is the
+// `heading` role. All four are optional: a role object saved before they
+// existed reads as the defaults below, which reproduce exactly how those
+// headings render today.
+export type SubheadingNumbering = "numbered" | "plain";
+export type SubheadingCase = "normal" | "upper";
+export type SubheadingSpacing = "tight" | "normal" | "loose";
+export type SubheadingColor = "body" | "brand";
+
 export interface TypographyRole {
   family: TypographyFamily;
   size: number;   // px, step 0.5, clamped to the per-role range
   weight: TypographyWeight;
+  // Subheading role only — ignored on heading/body.
+  numbering?: SubheadingNumbering;  // "plain" drops the "N.M " prefix
+  case?: SubheadingCase;            // "upper" → text-transform: uppercase
+  spacing?: SubheadingSpacing;      // margin above/below, see SUBHEADING_SPACING_PX
+  color?: SubheadingColor;          // "brand" → the report's primary
 }
+
+// What a missing subheading option means. Read every one of these four
+// through this map rather than through `undefined` — comparing a stored
+// role against a blueprint that DOES carry them is what decides the
+// modal's "Customised" pill.
+export const SUBHEADING_DEFAULTS = {
+  numbering: "numbered",
+  case: "normal",
+  spacing: "normal",
+  color: "body",
+} as const satisfies Required<Pick<TypographyRole, "numbering" | "case" | "spacing" | "color">>;
+
+// Margin above/below an h3, in px, per spacing option. `normal` is the
+// 14/6 the templates have always used; the other two step either side.
+export const SUBHEADING_SPACING_PX: Record<SubheadingSpacing, { above: number; below: number }> = {
+  tight:  { above: 8,  below: 4 },
+  normal: { above: 14, below: 6 },
+  loose:  { above: 22, below: 10 },
+};
+
 // Body deliberately keeps the same shape as heading/subheading — line
 // height is NOT user-controlled (always renders at 1.5). Any older
 // report payload that includes body.line_height is ignored at render
@@ -852,6 +887,12 @@ export const TYPOGRAPHY_ALLOWLISTS = {
     body:       { min: 10, max: 12, step: 0.5 },
   },
   weights: [400, 700] as const satisfies readonly TypographyWeight[],
+  // Subheading-only option lists — mirror report_typography's
+  // _SUBHEADING_NUMBERING / _CASE / _SPACING / _COLOR.
+  subheadingNumbering: ["numbered", "plain"] as const satisfies readonly SubheadingNumbering[],
+  subheadingCase: ["normal", "upper"] as const satisfies readonly SubheadingCase[],
+  subheadingSpacing: ["tight", "normal", "loose"] as const satisfies readonly SubheadingSpacing[],
+  subheadingColor: ["body", "brand"] as const satisfies readonly SubheadingColor[],
 };
 
 // Per-layout recommended defaults — the modal reads these to seed the
@@ -867,22 +908,34 @@ export const LAYOUT_TYPOGRAPHY_DEFAULTS: Record<string, Typography> = {
   // stay whole numbers so the stepper's default position looks clean.
   classic: {
     heading:    { family: "Libre Baskerville", size: 16, weight: 700 },
-    subheading: { family: "Libre Baskerville", size: 12, weight: 700 },
+    subheading: {
+      family: "Libre Baskerville", size: 12, weight: 700,
+      numbering: "numbered", case: "normal", spacing: "normal", color: "body",
+    },
     body:       { family: "Source Serif 4",    size: 11, weight: 400 },
   },
   minimal: {
     heading:    { family: "Inter", size: 16, weight: 400 },
-    subheading: { family: "Inter", size: 11, weight: 700 },
+    subheading: {
+      family: "Inter", size: 11, weight: 700,
+      numbering: "numbered", case: "normal", spacing: "normal", color: "body",
+    },
     body:       { family: "Lato",  size: 11, weight: 400 },
   },
   bold: {
     heading:    { family: "Inter", size: 18, weight: 700 },
-    subheading: { family: "Inter", size: 12, weight: 700 },
+    subheading: {
+      family: "Inter", size: 12, weight: 700,
+      numbering: "numbered", case: "normal", spacing: "normal", color: "body",
+    },
     body:       { family: "Inter", size: 11, weight: 400 },
   },
   branded: {
     heading:    { family: "Inter", size: 18, weight: 700 },
-    subheading: { family: "Inter", size: 12, weight: 700 },
+    subheading: {
+      family: "Inter", size: 12, weight: 700,
+      numbering: "numbered", case: "normal", spacing: "normal", color: "body",
+    },
     body:       { family: "Inter", size: 11, weight: 400 },
   },
 };
