@@ -1,15 +1,19 @@
-// The banner that tells an admin which departments their own annual report implies but
-// which they haven't set up.
+// The banner that tells an admin which departments their own annual report implies.
 //
 // Why it matters: the suggestion is frozen at the company's FIRST annual report, so a
 // banner that shows at the wrong moment — before anything was analysed, when nothing is
 // missing, or after it was dismissed — is one they can never get rid of. The "renders
 // nothing" cases below are the important ones.
 //
-// It is also advice, never action: picking a name must hand the name back to the caller
-// for the normal Add Department form. Nothing here may create a department.
+// It shows the COMPLETE list the report implied, not just the gaps, because "here is what
+// your reporting involves" is the useful frame; status is carried by styling rather than
+// by printing the same names twice under two headings.
+//
+// And it is advice, never action: picking a name must hand the name back to the caller for
+// the normal Add Department form. Nothing here may create a department.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getDepartmentSuggestions = vi.fn();
@@ -38,46 +42,104 @@ const PAYLOAD = {
   extracted_at: '2026-09-17T12:00:00Z',
 };
 
+// The compact variant links out, so it needs router context.
+const mount = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>);
+
 beforeEach(() => {
   getDepartmentSuggestions.mockReset().mockResolvedValue(PAYLOAD);
   dismissDepartmentSuggestions.mockClear();
 });
 
-describe('full variant', () => {
-  it('shows what the report implied and what is missing', async () => {
-    render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+describe('the complete list', () => {
+  it('names every department the report implied, once each', async () => {
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
 
-    expect(
-      await screen.findByText(/we think you should have these departments/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/currently missing these ones/i)).toBeInTheDocument();
-    // Finance appears once (suggested only); Legal twice (suggested + missing).
+    expect(await screen.findByText(/these departments shape your reporting/i)).toBeInTheDocument();
+    // Each name appears exactly once — the old two-list layout printed the gaps twice.
     expect(screen.getAllByText('Finance Department')).toHaveLength(1);
-    expect(screen.getAllByText(/Legal Department/)).toHaveLength(2);
+    expect(screen.getAllByText('Legal Department')).toHaveLength(1);
+    expect(screen.getAllByText('Sustainability')).toHaveLength(1);
   });
 
+  it('says where the list came from', async () => {
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    expect(await screen.findByText(/from your last annual report/i)).toBeInTheDocument();
+  });
+
+  it('counts the gap in words', async () => {
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    expect(await screen.findByText(/Two of them aren't set up yet/i)).toBeInTheDocument();
+  });
+
+  it('uses the singular when only one is missing', async () => {
+    getDepartmentSuggestions.mockResolvedValue({
+      ...PAYLOAD,
+      missing: [{ name: 'Sustainability', rank: 3 }],
+    });
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    expect(await screen.findByText(/One of them isn't set up yet/i)).toBeInTheDocument();
+  });
+
+  it('only the missing ones are actionable', async () => {
+    const onCreate = vi.fn();
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" onCreate={onCreate} />);
+
+    await screen.findByText(/these departments shape your reporting/i);
+    // A department they already have is not a button.
+    expect(screen.queryByTitle('Add "Finance Department" as a department')).toBeNull();
+    expect(screen.getByTitle('Add "Legal Department" as a department')).toBeInTheDocument();
+  });
+});
+
+describe('full variant', () => {
   it('hands a picked name back instead of creating anything', async () => {
     const onCreate = vi.fn();
-    render(<DepartmentSuggestionsBanner companyId="cmp_1" onCreate={onCreate} />);
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" onCreate={onCreate} />);
 
-    const chip = await screen.findByTitle('Add "Sustainability" as a department');
-    fireEvent.click(chip);
-
+    fireEvent.click(await screen.findByTitle('Add "Sustainability" as a department'));
     expect(onCreate).toHaveBeenCalledWith('Sustainability');
   });
 
   it('dismissing hides it and tells the backend, so it stays gone for everyone', async () => {
-    render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
-    await screen.findByText(/we think you should have these departments/i);
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    await screen.findByText(/these departments shape your reporting/i);
 
     fireEvent.click(screen.getByLabelText('Dismiss'));
 
     await waitFor(() =>
-      expect(
-        screen.queryByText(/we think you should have these departments/i),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByText(/these departments shape your reporting/i)).not.toBeInTheDocument(),
     );
     expect(dismissDepartmentSuggestions).toHaveBeenCalledWith('cmp_1');
+  });
+
+  it('does not link away — they are already on the departments page', async () => {
+    mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    await screen.findByText(/these departments shape your reporting/i);
+    expect(screen.queryByRole('link', { name: /manage departments/i })).toBeNull();
+  });
+});
+
+describe('compact variant', () => {
+  it('links to the departments page and takes its data as a prop', () => {
+    mount(<DepartmentSuggestionsBanner variant="compact" data={PAYLOAD} />);
+
+    expect(getDepartmentSuggestions).not.toHaveBeenCalled();
+    expect(screen.getByText('Finance Department')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /manage departments/i })).toHaveAttribute(
+      'href',
+      '/admin-console/departments',
+    );
+  });
+
+  it('is read-only mid-form: no dismiss, nothing to click', () => {
+    mount(<DepartmentSuggestionsBanner variant="compact" data={PAYLOAD} />);
+    expect(screen.queryByLabelText('Dismiss')).toBeNull();
+    expect(screen.queryByTitle(/as a department$/)).toBeNull();
+  });
+
+  it('renders nothing when the parent has no payload', () => {
+    const { container } = mount(<DepartmentSuggestionsBanner variant="compact" data={null} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });
 
@@ -87,54 +149,35 @@ describe('renders nothing when there is nothing to say', () => {
       suggested: [], missing: [], dismissed: false,
       source_report_id: null, extracted_at: null,
     });
-    const { container } = render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    const { container } = mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
     await waitFor(() => expect(getDepartmentSuggestions).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('they already have everything the report implied', async () => {
     getDepartmentSuggestions.mockResolvedValue({ ...PAYLOAD, missing: [] });
-    const { container } = render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    const { container } = mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
     await waitFor(() => expect(getDepartmentSuggestions).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('already dismissed', async () => {
     getDepartmentSuggestions.mockResolvedValue({ ...PAYLOAD, dismissed: true });
-    const { container } = render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    const { container } = mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
     await waitFor(() => expect(getDepartmentSuggestions).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('the fetch failed — advice is not worth an error state', async () => {
     getDepartmentSuggestions.mockRejectedValue(new Error('boom'));
-    const { container } = render(<DepartmentSuggestionsBanner companyId="cmp_1" />);
+    const { container } = mount(<DepartmentSuggestionsBanner companyId="cmp_1" />);
     await waitFor(() => expect(getDepartmentSuggestions).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('no company id — never calls the endpoint', () => {
-    const { container } = render(<DepartmentSuggestionsBanner companyId={null} />);
+    const { container } = mount(<DepartmentSuggestionsBanner companyId={null} />);
     expect(getDepartmentSuggestions).not.toHaveBeenCalled();
-    expect(container).toBeEmptyDOMElement();
-  });
-});
-
-describe('compact variant', () => {
-  it('is one line, takes its data as a prop, and fetches nothing', () => {
-    render(<DepartmentSuggestionsBanner variant="compact" data={PAYLOAD} />);
-
-    expect(getDepartmentSuggestions).not.toHaveBeenCalled();
-    expect(screen.getByText(/not set up yet/i)).toBeInTheDocument();
-    expect(screen.getByText('Legal Department, Sustainability')).toBeInTheDocument();
-    // No dismiss mid-form: they're setting up a cycle, not managing departments.
-    expect(screen.queryByLabelText('Dismiss')).not.toBeInTheDocument();
-  });
-
-  it('renders nothing when the parent has no payload', () => {
-    const { container } = render(
-      <DepartmentSuggestionsBanner variant="compact" data={null} />,
-    );
     expect(container).toBeEmptyDOMElement();
   });
 });

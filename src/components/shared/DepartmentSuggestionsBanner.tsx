@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { companies } from '@/lib/api';
-import type { DepartmentSuggestionsResponse } from '@/types/company';
+import type { DepartmentSuggestion, DepartmentSuggestionsResponse } from '@/types/company';
 
 /* ══════════════════════════════════════════════════════════════════════
-   "Based on your annual report you should have these departments."
+   "From your last annual report, these departments shape your reporting."
 
-   Advice only. Nothing here creates a department — picking a missing one
-   opens the normal Add Department form with the name filled in, and the
-   user still submits it themselves.
+   Advice only. Nothing here creates a department — picking one opens the
+   normal Add Department form with the name filled in, and the user still
+   submits it themselves.
+
+   The list is the whole picture, not just the gaps: every department the
+   report implied, where the STATUS IS THE STYLING. Ones they already have
+   sit quiet in grey with a check; ones they don't are indigo and active.
+   That way the row reads as "here's what your reporting involves, and
+   here's what's missing from it" in one pass, instead of printing the
+   same names twice under two headings.
 
    Two shapes:
-     full    — the departments page. Both lists + a dismiss button.
-     compact — the annual-cycle department picker. One line, no dismiss;
-               the user is mid-task setting up a cycle and shouldn't be
-               pulled away.
+     full    — the departments page. Picking a name starts creating it,
+               and it can be dismissed for good.
+     compact — the annual-cycle department picker. Read-only, with a link
+               out; they're mid-task setting up a cycle.
 
    Renders NOTHING when there is nothing worth saying: no annual report
    analysed yet, nothing missing, dismissed, or the fetch failed. Silent
@@ -26,6 +34,10 @@ const TINT_BG = 'rgba(64,64,200,.06)';
 const TINT_BORDER = '1px solid rgba(64,64,200,.18)';
 const INK = '#1A1D2E';
 const BODY = '#3A3F5C';
+const MUTED = '#5A6080';
+const FAINT = '#9BA3C4';
+
+const DEPARTMENTS_ROUTE = '/admin-console/departments';
 
 export interface DepartmentSuggestionsBannerProps {
   /** Fetches for this company when `data` is not supplied. */
@@ -39,27 +51,55 @@ export interface DepartmentSuggestionsBannerProps {
   refreshKey?: number;
 }
 
-function Chip({ label, onClick }: { label: string; onClick?: () => void }) {
-  const base: React.CSSProperties = {
-    display: 'inline-block',
+const COUNT_WORDS = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+
+function countWord(n: number): string {
+  return COUNT_WORDS[n] ?? String(n);
+}
+
+/** A department the report named. `present` is the whole visual difference. */
+function Chip({
+  label,
+  present,
+  onClick,
+}: {
+  label: string;
+  present: boolean;
+  onClick?: () => void;
+}) {
+  const style: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
     padding: '3px 9px',
     borderRadius: 999,
     fontSize: 11,
-    fontWeight: 700,
+    fontWeight: present ? 500 : 700,
     lineHeight: 1.6,
-    border: '1px solid rgba(64,64,200,.25)',
-    background: '#FFF',
-    color: PRIMARY,
+    border: `1px solid ${present ? '#EDEFF7' : 'rgba(64,64,200,.32)'}`,
+    background: present ? 'transparent' : '#FFF',
+    color: present ? '#8A92B2' : PRIMARY,
+    cursor: onClick ? 'pointer' : 'default',
   };
-  if (!onClick) return <span style={base}>{label}</span>;
+
+  const mark = (
+    <span aria-hidden style={{ fontSize: present ? 9 : 11, color: present ? '#C3C9DE' : PRIMARY }}>
+      {present ? '✓' : '+'}
+    </span>
+  );
+
+  if (!onClick) {
+    return (
+      <span style={style}>
+        {mark}
+        {label}
+      </span>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={`Add "${label}" as a department`}
-      style={{ ...base, cursor: 'pointer' }}
-    >
-      {label} +
+    <button type="button" onClick={onClick} title={`Add "${label}" as a department`} style={style}>
+      {mark}
+      {label}
     </button>
   );
 }
@@ -95,6 +135,16 @@ export function DepartmentSuggestionsBanner({
 
   const payload = provided ? data : fetched;
 
+  const rows = useMemo(() => {
+    const suggested = payload?.suggested ?? [];
+    const missing = new Set((payload?.missing ?? []).map((m) => m.name));
+    // Missing first: those are the ones worth acting on, and the report's own
+    // importance ranking is preserved inside each group.
+    return [...suggested]
+      .map((s: DepartmentSuggestion) => ({ ...s, present: !missing.has(s.name) }))
+      .sort((a, b) => Number(a.present) - Number(b.present));
+  }, [payload]);
+
   const dismiss = useCallback(() => {
     setHidden(true); // optimistic — the banner is advisory, a failed write costs nothing
     if (companyId) companies.dismissDepartmentSuggestions(companyId).catch(() => {});
@@ -102,38 +152,16 @@ export function DepartmentSuggestionsBanner({
 
   if (hidden || !payload || payload.dismissed) return null;
 
-  const suggested = payload.suggested ?? [];
-  const missing = payload.missing ?? [];
+  const missingCount = payload.missing?.length ?? 0;
   // Nothing missing means they already have everything the report implied — saying so
   // would be noise on a page they visit for other reasons.
-  if (!suggested.length || !missing.length) return null;
+  if (!rows.length || !missingCount) return null;
 
-  if (variant === 'compact') {
-    return (
-      <div
-        role="status"
-        style={{
-          display: 'flex',
-          gap: 8,
-          padding: '10px 12px',
-          borderRadius: 10,
-          background: TINT_BG,
-          border: TINT_BORDER,
-          fontSize: 11.5,
-          color: BODY,
-          lineHeight: 1.5,
-          marginBottom: 14,
-        }}
-      >
-        <span aria-hidden style={{ color: PRIMARY, fontWeight: 800 }}>i</span>
-        <span>
-          Your annual report also points to{' '}
-          <strong style={{ color: INK }}>{missing.map((m) => m.name).join(', ')}</strong>
-          {missing.length === 1 ? ' — not set up yet.' : ' — not set up yet.'}
-        </span>
-      </div>
-    );
-  }
+  const lead = 'From your last annual report, we learnt that these departments shape your reporting.';
+  const gapLine =
+    missingCount === 1
+      ? "One of them isn't set up yet."
+      : `${countWord(missingCount)} of them aren't set up yet.`;
 
   return (
     <div
@@ -141,66 +169,80 @@ export function DepartmentSuggestionsBanner({
       style={{
         position: 'relative',
         padding: '12px 14px',
-        paddingRight: 44,
+        paddingRight: variant === 'full' ? 44 : 14,
         borderRadius: 10,
         background: TINT_BG,
         border: TINT_BORDER,
         marginBottom: 14,
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 700, color: INK, marginBottom: 8 }}>
-        Based on your previous reports, we think you should have these departments
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-        {suggested.map((s) => (
-          <Chip key={s.name} label={s.name} />
-        ))}
-      </div>
-
-      <div style={{ fontSize: 11, fontWeight: 700, color: BODY, marginBottom: 6 }}>
-        You're currently missing these ones
-      </div>
+      <div style={{ fontSize: 11.5, color: BODY, lineHeight: 1.5, marginBottom: 9 }}>{lead}</div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {missing.map((m) => (
+        {rows.map((r) => (
           <Chip
-            key={m.name}
-            label={m.name}
-            onClick={onCreate ? () => onCreate(m.name) : undefined}
+            key={r.name}
+            label={r.name}
+            present={r.present}
+            onClick={!r.present && onCreate ? () => onCreate(r.name) : undefined}
           />
         ))}
       </div>
 
-      {onCreate && (
-        <div style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 8 }}>
-          Pick one to add it — you'll review the details before it's created.
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="Dismiss"
+      <div
         style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          width: 26,
-          height: 26,
-          display: 'grid',
-          placeItems: 'center',
-          borderRadius: 999,
-          border: 'none',
-          background: 'transparent',
-          color: '#9BA3C4',
-          cursor: 'pointer',
-          fontSize: 14,
-          lineHeight: 1,
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginTop: 10,
+          fontSize: 11,
+          color: MUTED,
         }}
       >
-        ×
-      </button>
+        <span>
+          {gapLine}
+          {variant === 'full' && onCreate ? (
+            <span style={{ color: FAINT }}> Pick one to add it.</span>
+          ) : null}
+        </span>
+
+        {variant === 'compact' && (
+          <Link
+            to={DEPARTMENTS_ROUTE}
+            style={{ fontSize: 11, fontWeight: 700, color: PRIMARY, textDecoration: 'none' }}
+          >
+            Manage departments
+          </Link>
+        )}
+      </div>
+
+      {variant === 'full' && (
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            width: 26,
+            height: 26,
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 999,
+            border: 'none',
+            background: 'transparent',
+            color: FAINT,
+            cursor: 'pointer',
+            fontSize: 14,
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }
