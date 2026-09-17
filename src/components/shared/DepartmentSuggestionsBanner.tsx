@@ -211,9 +211,31 @@ export function DepartmentSuggestionsBanner({
         {variant === 'compact' && (
           <Link
             to={DEPARTMENTS_ROUTE}
-            style={{ fontSize: 11, fontWeight: 700, color: PRIMARY, textDecoration: 'none' }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              fontWeight: 700,
+              color: PRIMARY,
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+            }}
           >
-            Manage departments
+            {/* Underline sits on the words only — running it under the arrow reads as a
+                stray rule rather than a link. */}
+            <span style={{ textDecoration: 'underline', textUnderlineOffset: 2 }}>
+              Manage departments
+            </span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+              <path
+                d="M2 5h6M5.6 2.4 8.2 5 5.6 7.6"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </Link>
         )}
       </div>
