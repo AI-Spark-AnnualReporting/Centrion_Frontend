@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
-import { communications, ApiError, type ThreadSummary } from '@/lib/api';
+import {
+  communications,
+  notifications as notificationsApi,
+  ApiError,
+  type ThreadSummary,
+  type AppNotificationRow,
+} from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -18,7 +24,7 @@ import { useAuth } from '@/context/AuthContext';
    Everything below (list, badge, empty state, click-through) is generic.
 ═══════════════════════════════════════════════════════════════════════ */
 
-export type NotificationType = 'thread_message'; // | 'report_published' | 'mention' | …
+export type NotificationType = 'thread_message' | 'system'; // | 'mention' | …
 
 export interface AppNotification {
   id: string;
@@ -59,6 +65,23 @@ const NOTIF_META: Record<NotificationType, NotifMeta> = {
       </svg>
     ),
   },
+  // Anything the backend raises into the `notifications` table: today the
+  // department suggestions that follow an annual-report upload.
+  system: {
+    label: 'From your reports',
+    accent: '#4040C8',
+    bg: '#ECECFB',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M8 1.8 9.7 5.4l3.9.5-2.8 2.8.7 3.9L8 10.8l-3.5 1.8.7-3.9L2.4 5.9l3.9-.5L8 1.8z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
 };
 
 // Turn the Communication Hub feed into notifications: one per thread with
@@ -81,6 +104,23 @@ function buildThreadNotifications(threads: ThreadSummary[]): AppNotification[] {
         navigateTo: `/communications/threads/${t.thread_id}`,
       };
     });
+}
+
+// Rows from the `notifications` table. These were written for months and read by
+// nothing — no route, no client — so every one of them was invisible until now.
+function buildSystemNotifications(rows: AppNotificationRow[]): AppNotification[] {
+  return rows
+    .filter((r) => !r.is_read)
+    .map((r) => ({
+      id: `notif:${r.id}`,
+      type: 'system' as const,
+      title: r.title,
+      body: r.message ?? undefined,
+      meta: r.category ?? undefined,
+      timestamp: r.created_at,
+      unread: true,
+      navigateTo: r.action_url ?? undefined,
+    }));
 }
 
 function relativeTime(iso: string): string {
@@ -125,8 +165,21 @@ export function NotificationBell() {
   const load = useCallback(async () => {
     if (!enabled) return;
     try {
-      const res = await communications.listThreads();
-      setItems(buildThreadNotifications(res.threads));
+      // Both sources are independent — one failing must not blank the other, so they
+      // settle separately and whatever arrived is merged newest-first.
+      const [threads, rows] = await Promise.allSettled([
+        communications.listThreads(),
+        notificationsApi.list(),
+      ]);
+      const merged = [
+        ...(threads.status === 'fulfilled'
+          ? buildThreadNotifications(threads.value.threads)
+          : []),
+        ...(rows.status === 'fulfilled'
+          ? buildSystemNotifications(rows.value.notifications)
+          : []),
+      ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      setItems(merged);
     } catch (e) {
       // 401 → request layer already ran the session-expired flow. Any other
       // failure just leaves the bell empty rather than surfacing an error.
@@ -170,6 +223,8 @@ export function NotificationBell() {
     if (n.type === 'thread_message') {
       const threadId = n.id.slice('thread:'.length);
       communications.markThreadRead(threadId).catch(() => {});
+    } else if (n.type === 'system') {
+      notificationsApi.markRead(n.id.slice('notif:'.length)).catch(() => {});
     }
     setOpen(false);
     if (n.navigateTo) navigate(n.navigateTo);

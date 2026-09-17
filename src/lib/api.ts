@@ -24,6 +24,7 @@ import type {
   CompanyBrandUpdate,
   CreateCompanyRequest,
   CreateCompanyResponse,
+  DepartmentSuggestionsResponse,
   Sector,
   SectorsResponse,
 } from "@/types/company";
@@ -924,6 +925,55 @@ export const companies = {
       method: "POST",
       body: force ? { items, force: true } : { items },
     }),
+
+  // Departments the company's own annual report implies, and which of those they have
+  // not set up. Advice only — nothing here creates a department. `missing` is recomputed
+  // server-side on every read, so a department added after the extraction drops out.
+  getDepartmentSuggestions: (companyId: string): Promise<DepartmentSuggestionsResponse> =>
+    request(`/api/v1/companies/${encodeURIComponent(companyId)}/department-suggestions`),
+
+  // Hide the suggestions banner for this company permanently. Stored server-side rather
+  // than in localStorage: the suggestion is frozen at the first annual report, so a
+  // per-browser dismiss would let it nag every other admin forever.
+  dismissDepartmentSuggestions: (companyId: string): Promise<{ success: boolean }> =>
+    request(
+      `/api/v1/companies/${encodeURIComponent(companyId)}/department-suggestions/dismiss`,
+      { method: "PATCH" },
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+// A row from the `notifications` table. Several backend flows write these; until the
+// matching read route existed, none of them were ever shown to anyone.
+export interface AppNotificationRow {
+  id: string;
+  notification_type: string | null;
+  category: string | null;
+  severity: string | null;
+  priority: string | null;
+  title: string;
+  message: string | null;
+  action_url: string | null;
+  related_type: string | null;
+  related_id: string | null;
+  report_type: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export const notifications = {
+  // The caller's own rows, newest first. User-scoped, not company-scoped: a Spark user
+  // onboarding a client company receives that company's notifications under their own id.
+  list: (
+    limit = 20,
+  ): Promise<{ notifications: AppNotificationRow[]; unread_count: number }> =>
+    request(`/api/v1/notifications`, { query: { limit } }),
+
+  markRead: (id: string): Promise<{ success: boolean }> =>
+    request(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH" }),
 };
 
 // ---------------------------------------------------------------------------

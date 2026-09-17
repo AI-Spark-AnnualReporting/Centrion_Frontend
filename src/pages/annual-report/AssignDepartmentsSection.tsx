@@ -1,3 +1,5 @@
+import { DepartmentSuggestionsBanner } from '@/components/shared/DepartmentSuggestionsBanner';
+import type { DepartmentSuggestionsResponse } from '@/types/company';
 import { useMemo, useState } from 'react';
 import type { Department } from '@/types/admin';
 
@@ -32,12 +34,16 @@ export default function AssignDepartmentsSection({
   onAdd,
   onRemove,
   selfLeadName,
+  departmentSuggestions,
 }: {
   allDepartments: Department[];
   assigned: DepartmentAssignment[];
   onAdd: (dept: Department) => void;
   onRemove: (departmentId: string) => void;
   selfLeadName?: string | null;
+  // Passed in rather than fetched: this component is presentational, the same reason
+  // `allDepartments` arrives as a prop. Undefined simply renders nothing.
+  departmentSuggestions?: DepartmentSuggestionsResponse | null;
 }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
@@ -112,6 +118,10 @@ export default function AssignDepartmentsSection({
             reviews them and assigns a team member to answer.
           </span>
         </div>
+
+        {/* Departments the company's annual report implies but which don't exist yet.
+            One line only — they're mid-task setting up a cycle. */}
+        <DepartmentSuggestionsBanner variant="compact" data={departmentSuggestions} />
 
         {/* Search + add — inline results (in normal flow so the card's
             overflow:hidden can't clip them). */}

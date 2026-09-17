@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
-import { sarCycles, sarUsers, adminConsole, ApiError } from '@/lib/api';
+import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
   CreateCyclePayload,
@@ -13,6 +13,7 @@ import type {
 } from '@/types/cycles';
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
+import type { DepartmentSuggestionsResponse } from '@/types/company';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import { everyDepartmentHasLead } from './departmentLead';
 import ReportTeamCard from './ReportTeamCard';
@@ -187,6 +188,8 @@ export default function CycleDetailPage() {
 
   // Draft-state department assignment.
   const [allDepartments, setAllDepartments] = useState<Department[]>([]);
+  const [departmentSuggestions, setDepartmentSuggestions] =
+    useState<DepartmentSuggestionsResponse | null>(null);
   const [assigned, setAssigned] = useState<DepartmentAssignment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
@@ -277,6 +280,16 @@ export default function CycleDetailPage() {
         setAllDepartments(list.filter((d) => d.is_active !== false));
       })
       .catch(() => setAllDepartments([]));
+
+    // Same guard, same silent-failure rule: a suggestion is advisory, so a failure here
+    // must not surface an error on a page about something else.
+    const companyId = user?.company_id;
+    if (companyId) {
+      companies
+        .getDepartmentSuggestions(companyId)
+        .then(setDepartmentSuggestions)
+        .catch(() => setDepartmentSuggestions(null));
+    }
 
     // Hydrate from any existing assignments on the cycle (usually empty for a
     // fresh draft). The dept's HR Lead comes from allDepartments, not the assignment.
@@ -453,6 +466,7 @@ export default function CycleDetailPage() {
             onAdd={addDepartment}
             onRemove={removeDepartment}
             selfLeadName={selfLeadName}
+            departmentSuggestions={departmentSuggestions}
           />
         </div>
       )}

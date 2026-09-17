@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { DepartmentSuggestionsBanner } from '@/components/shared/DepartmentSuggestionsBanner';
 import { Spinner } from '@/components/shared/Spinner';
 import { adminConsole } from '@/lib/api';
 import type { Department } from '@/types/admin';
@@ -14,14 +16,18 @@ function DepartmentModal({
   initial,
   onClose,
   onSaved,
+  prefillName,
 }: {
   initial: Department | null;
   onClose: () => void;
   onSaved: () => void;
+  /** Seeds the name when the user picked a suggestion from the banner. The code and
+      description are left blank on purpose — we suggest, they decide. */
+  prefillName?: string;
 }) {
   const editing = !!initial;
   const [code, setCode] = useState(initial?.department_code ?? '');
-  const [name, setName] = useState(initial?.department_name ?? '');
+  const [name, setName] = useState(initial?.department_name ?? prefillName ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -326,11 +332,17 @@ function ConfirmDelete({
 }
 
 export default function AdminDepartmentsPage() {
+  // For a Spark session this is already the acting company's id (AuthContext's
+  // effectiveUser rewrites it), so it is the right id in every session type.
+  const { user } = useAuth();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Department | null>(null);
-  const [creating, setCreating] = useState(false);
+  // Holds the department name to prefill when the user picked a banner suggestion;
+  // '' means the plain "+ New Department" path. null means the modal is closed.
+  const [creatingName, setCreatingName] = useState<string | null>(null);
+  const [suggestionsKey, setSuggestionsKey] = useState(0);
   const [deleting, setDeleting] = useState<Department | null>(null);
 
   const fetchDepartments = () => {
@@ -382,10 +394,16 @@ export default function AdminDepartmentsPage() {
             Organise your company into departments.
           </p>
         </div>
-        <button className="btn bp" type="button" onClick={() => setCreating(true)}>
+        <button className="btn bp" type="button" onClick={() => setCreatingName('')}>
           + New Department
         </button>
       </div>
+
+      <DepartmentSuggestionsBanner
+        companyId={user?.company_id}
+        refreshKey={suggestionsKey}
+        onCreate={(name) => setCreatingName(name)}
+      />
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
@@ -473,17 +491,20 @@ export default function AdminDepartmentsPage() {
         )}
       </div>
 
-      {(creating || editing) && (
+      {(creatingName !== null || editing) && (
         <DepartmentModal
           initial={editing}
+          prefillName={creatingName || undefined}
           onClose={() => {
-            setCreating(false);
+            setCreatingName(null);
             setEditing(null);
           }}
           onSaved={() => {
-            setCreating(false);
+            setCreatingName(null);
             setEditing(null);
             fetchDepartments();
+            // A department they just created should drop out of the banner.
+            setSuggestionsKey((k) => k + 1);
           }}
         />
       )}

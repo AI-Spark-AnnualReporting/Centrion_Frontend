@@ -156,3 +156,24 @@ export type CompanyReportDesign = {
   cover_template_key?: string | null;
   typography?: import('@/types/quarterly').Typography | null;
 };
+
+// One department the LLM says must have contributed to the company's annual report.
+// `rank` is the model's own importance ordering (1 = biggest contributor).
+export type DepartmentSuggestion = {
+  name: string;
+  rank: number | null;
+  reason?: string | null;
+  evidence?: string | null;
+};
+
+// GET /companies/{id}/department-suggestions.
+// `suggested` is everything the report implied; `missing` is the subset the company has
+// not set up, recomputed on every read (never stored) so a department created after the
+// extraction stops being suggested. Empty `suggested` = no annual report analysed yet.
+export type DepartmentSuggestionsResponse = {
+  suggested: DepartmentSuggestion[];
+  missing: DepartmentSuggestion[];
+  dismissed: boolean;
+  source_report_id: string | null;
+  extracted_at: string | null;
+};
