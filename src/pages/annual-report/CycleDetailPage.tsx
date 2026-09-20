@@ -418,44 +418,17 @@ export default function CycleDetailPage() {
             </div>
           </div>
         </div>
+        {/* Submit is NOT here — it lives at the foot of the page, after the content
+            it acts on. Edit stays, because it opens a modal rather than committing
+            the page's state. */}
         {canManage && (
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button className="btn bs" type="button" onClick={() => setEditing(true)}>
               ✎ Edit
             </button>
-            {cycle.status === 'draft' && (
-              <button
-                className="btn bp"
-                type="button"
-                onClick={handleSubmitCycle}
-                disabled={!canSubmit || submitting}
-                title={!canSubmit ? 'Add at least one department, and each must have a department lead assigned' : undefined}
-              >
-                {submitting ? 'Submitting…' : '✓ Submit'}
-              </button>
-            )}
           </div>
         )}
       </div>
-
-      {/* Submit feedback (draft) */}
-      {cycle.status === 'draft' && (submitMsg || submitErr) && (
-        <div
-          role={submitErr ? 'alert' : 'status'}
-          style={{
-            marginBottom: 14,
-            padding: '10px 14px',
-            borderRadius: 10,
-            fontSize: 12,
-            fontWeight: 600,
-            background: submitErr ? 'rgba(229,72,77,.08)' : 'rgba(34,197,94,.1)',
-            border: `1px solid ${submitErr ? 'rgba(229,72,77,.25)' : 'rgba(34,197,94,.25)'}`,
-            color: submitErr ? '#B33A3E' : '#16A34A',
-          }}
-        >
-          {submitErr || submitMsg}
-        </div>
-      )}
 
       {/* Draft → assign departments sits right under the header, above the stats */}
       {cycle.status === 'draft' && canManage && (
@@ -616,6 +589,57 @@ export default function CycleDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Submit — the last thing on the page, because it commits the departments
+          chosen above it. The feedback message moved down with it: an alert at the
+          top of the page while the button that caused it sits at the bottom is a
+          message nobody sees. The reason the button is disabled is now stated in
+          the open rather than hidden in a title tooltip. */}
+      {cycle.status === 'draft' && canManage && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            flexWrap: 'wrap',
+            gap: 12,
+            marginTop: 24,
+            paddingTop: 18,
+            borderTop: '1px solid #ECEEF8',
+          }}
+        >
+          {(submitMsg || submitErr) && (
+            <div
+              role={submitErr ? 'alert' : 'status'}
+              style={{
+                flex: '1 1 260px',
+                padding: '10px 14px',
+                borderRadius: 10,
+                fontSize: 12,
+                fontWeight: 600,
+                background: submitErr ? 'rgba(229,72,77,.08)' : 'rgba(34,197,94,.1)',
+                border: `1px solid ${submitErr ? 'rgba(229,72,77,.25)' : 'rgba(34,197,94,.25)'}`,
+                color: submitErr ? '#B33A3E' : '#16A34A',
+              }}
+            >
+              {submitErr || submitMsg}
+            </div>
+          )}
+          {!canSubmit && !submitMsg && (
+            <div style={{ fontSize: 12, color: '#9BA3C4', marginRight: 'auto' }}>
+              Add at least one department, each with a department lead, to submit.
+            </div>
+          )}
+          <button
+            className="btn bp"
+            type="button"
+            onClick={handleSubmitCycle}
+            disabled={!canSubmit || submitting}
+          >
+            {submitting ? 'Submitting…' : '✓ Submit'}
+          </button>
+        </div>
+      )}
 
       {editing && (
         <EditCycleModal
