@@ -26,6 +26,7 @@ vi.mock('@/lib/api', () => ({
 const { DepartmentSuggestionsBanner } = await import(
   '@/components/shared/DepartmentSuggestionsBanner'
 );
+const { refreshDepartmentSuggestions } = await import('@/lib/department-suggestions');
 
 const PAYLOAD = {
   suggested: [
@@ -48,6 +49,10 @@ const mount = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRoute
 beforeEach(() => {
   getDepartmentSuggestions.mockReset().mockResolvedValue(PAYLOAD);
   dismissDepartmentSuggestions.mockClear();
+  // The loader caches one promise per company so the banner and the top-bar button
+  // share a single request. That cache is module-level, so it outlives a test —
+  // clear it, or every case after the first sees the first case's payload.
+  refreshDepartmentSuggestions();
 });
 
 describe('the complete list', () => {

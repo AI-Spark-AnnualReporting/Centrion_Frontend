@@ -3,6 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { NotificationBell } from './NotificationBell';
 import { AppSwitcher } from './AppSwitcher';
 import { ActingCompanyChip } from './ActingCompanyChip';
+import { SuggestedDeptButton } from './SuggestedDeptButton';
 
 interface TopbarProps {
   pageName: string;
@@ -42,6 +43,7 @@ export function Topbar({ pageName }: TopbarProps) {
       <div className="tb-actions">
         <ActingCompanyChip />
         <AppSwitcher />
+        <SuggestedDeptButton />
         <NotificationBell />
         <div className="tb-av">{initials}</div>
         <div>

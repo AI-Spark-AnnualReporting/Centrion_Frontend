@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { DepartmentSuggestionsBanner } from '@/components/shared/DepartmentSuggestionsBanner';
 import { codeFromName } from './departmentCode';
+import { refreshDepartmentSuggestions } from '@/lib/department-suggestions';
 import { Spinner } from '@/components/shared/Spinner';
 import { adminConsole } from '@/lib/api';
 import type { Department } from '@/types/admin';
@@ -345,7 +346,6 @@ export default function AdminDepartmentsPage() {
   // Holds the department name to prefill when the user picked a banner suggestion;
   // '' means the plain "+ New Department" path. null means the modal is closed.
   const [creatingName, setCreatingName] = useState<string | null>(null);
-  const [suggestionsKey, setSuggestionsKey] = useState(0);
   const [deleting, setDeleting] = useState<Department | null>(null);
 
   const fetchDepartments = () => {
@@ -404,7 +404,6 @@ export default function AdminDepartmentsPage() {
 
       <DepartmentSuggestionsBanner
         companyId={user?.company_id}
-        refreshKey={suggestionsKey}
         onCreate={(name) => setCreatingName(name)}
       />
 
@@ -506,8 +505,9 @@ export default function AdminDepartmentsPage() {
             setCreatingName(null);
             setEditing(null);
             fetchDepartments();
-            // A department they just created should drop out of the banner.
-            setSuggestionsKey((k) => k + 1);
+            // A department they just created should drop out of the banner — and out
+            // of the top bar's button, which reads the same cached answer.
+            refreshDepartmentSuggestions(user?.company_id ?? undefined);
           }}
         />
       )}

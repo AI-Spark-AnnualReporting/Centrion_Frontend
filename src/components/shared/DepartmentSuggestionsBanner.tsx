@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { companies } from '@/lib/api';
+import {
+  refreshDepartmentSuggestions,
+  useDepartmentSuggestions,
+} from '@/lib/department-suggestions';
 import type { DepartmentSuggestion, DepartmentSuggestionsResponse } from '@/types/company';
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -47,8 +51,6 @@ export interface DepartmentSuggestionsBannerProps {
   variant?: 'full' | 'compact';
   /** Full variant: user picked a missing department to create. */
   onCreate?: (name: string) => void;
-  /** Change this to refetch — e.g. after a department is created. */
-  refreshKey?: number;
 }
 
 const COUNT_WORDS = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
@@ -109,30 +111,14 @@ export function DepartmentSuggestionsBanner({
   data,
   variant = 'full',
   onCreate,
-  refreshKey = 0,
 }: DepartmentSuggestionsBannerProps) {
-  const [fetched, setFetched] = useState<DepartmentSuggestionsResponse | null>(null);
   const [hidden, setHidden] = useState(false);
 
   const provided = data !== undefined;
 
-  useEffect(() => {
-    if (provided || !companyId) return;
-    let cancelled = false;
-    companies
-      .getDepartmentSuggestions(companyId)
-      .then((res) => {
-        if (!cancelled) setFetched(res);
-      })
-      // Advice is not worth an error state — if it fails, show nothing at all.
-      .catch(() => {
-        if (!cancelled) setFetched(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, provided, refreshKey]);
-
+  // Shared with the top bar's button, so one request answers both and a dismiss
+  // here reaches there. A parent that already has the payload passes it in.
+  const fetched = useDepartmentSuggestions(provided ? undefined : companyId);
   const payload = provided ? data : fetched;
 
   const rows = useMemo(() => {
@@ -147,7 +133,13 @@ export function DepartmentSuggestionsBanner({
 
   const dismiss = useCallback(() => {
     setHidden(true); // optimistic — the banner is advisory, a failed write costs nothing
-    if (companyId) companies.dismissDepartmentSuggestions(companyId).catch(() => {});
+    if (!companyId) return;
+    companies
+      .dismissDepartmentSuggestions(companyId)
+      // Re-read so the top bar's button goes with it, rather than lingering
+      // until the next reload.
+      .then(() => refreshDepartmentSuggestions(companyId))
+      .catch(() => {});
   }, [companyId]);
 
   if (hidden || !payload || payload.dismissed) return null;
