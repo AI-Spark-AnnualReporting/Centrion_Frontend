@@ -38,7 +38,7 @@ const WITH_GAPS = {
   extracted_at: '2026-09-17T12:00:00Z',
 };
 
-const LABEL = 'Suggested dept';
+const LABEL = 'Suggested Departments';
 
 beforeEach(() => {
   getDepartmentSuggestions.mockReset().mockResolvedValue(WITH_GAPS);

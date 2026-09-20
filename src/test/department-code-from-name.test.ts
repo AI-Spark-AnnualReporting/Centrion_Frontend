@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { codeFromName } from '@/pages/admin/departmentCode';
+import { codeCandidates, codeFromName } from '@/lib/departmentCode';
 
 describe('codeFromName', () => {
   it('takes the first three letters and uppercases them', () => {
@@ -42,5 +42,40 @@ describe('codeFromName', () => {
 
   it('handles a name that is already a code', () => {
     expect(codeFromName('FIN')).toBe('FIN');
+  });
+});
+
+// The fallbacks "Add all" walks when a code is refused. It cannot ask the user, so it has
+// to have somewhere to go: a soft-deleted department keeps its code, is filtered out of
+// GET /admin/departments, and still collides on insert.
+describe('codeCandidates', () => {
+  it('offers what the form would have prefilled first', () => {
+    expect(codeCandidates('Legal Department')[0]).toBe('LEG');
+    expect(codeCandidates('Investor Relations')[0]).toBe('INV');
+  });
+
+  it('offers initials, which is what a person would have typed', () => {
+    // Minor words dropped: not HSSAE.
+    expect(codeCandidates('Health, Safety, Security and Environment')).toContain('HSSE');
+    expect(codeCandidates('Technology Development')).toContain('TD');
+  });
+
+  it('never repeats itself and never exceeds the 10-character column', () => {
+    const codes = codeCandidates('Health, Safety, Security and Environment');
+    expect(new Set(codes).size).toBe(codes.length);
+    expect(codes.every((c) => c.length > 0 && c.length <= 10)).toBe(true);
+  });
+
+  it('always has somewhere left to go', () => {
+    // Two names that collide on every natural code still end up different, because the
+    // counter variants are there underneath.
+    expect(codeCandidates('Finance').length).toBeGreaterThan(4);
+    expect(codeCandidates('Finance')).toContain('FIN2');
+  });
+
+  it('still produces a usable code for a letterless name', () => {
+    const codes = codeCandidates('—');
+    expect(codes[0]).toBe('DEPT');
+    expect(codes.every((c) => c.length > 0)).toBe(true);
   });
 });

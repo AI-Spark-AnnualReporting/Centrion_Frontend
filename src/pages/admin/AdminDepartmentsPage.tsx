@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { DepartmentSuggestionsBanner } from '@/components/shared/DepartmentSuggestionsBanner';
-import { codeFromName } from './departmentCode';
+import { codeFromName } from '@/lib/departmentCode';
 import { refreshDepartmentSuggestions } from '@/lib/department-suggestions';
 import { Spinner } from '@/components/shared/Spinner';
 import { adminConsole } from '@/lib/api';
@@ -19,6 +19,7 @@ function DepartmentModal({
   onClose,
   onSaved,
   prefillName,
+  prefillDescription,
 }: {
   initial: Department | null;
   onClose: () => void;
@@ -26,13 +27,18 @@ function DepartmentModal({
   /** Seeds the name and code when the user picked a suggestion from the banner. Both are
       a starting point they can edit before submitting — we suggest, they decide. */
   prefillName?: string;
+  /** The report's own sentence about that department. "Add all" writes the same thing, so
+      a department added either way carries the same description. */
+  prefillDescription?: string;
 }) {
   const editing = !!initial;
   const [code, setCode] = useState(
     initial?.department_code ?? (prefillName ? codeFromName(prefillName) : ''),
   );
   const [name, setName] = useState(initial?.department_name ?? prefillName ?? '');
-  const [description, setDescription] = useState(initial?.description ?? '');
+  const [description, setDescription] = useState(
+    initial?.description ?? prefillDescription ?? '',
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -346,6 +352,8 @@ export default function AdminDepartmentsPage() {
   // Holds the department name to prefill when the user picked a banner suggestion;
   // '' means the plain "+ New Department" path. null means the modal is closed.
   const [creatingName, setCreatingName] = useState<string | null>(null);
+  // Comes with the name when the pick came from the suggestions banner.
+  const [creatingDesc, setCreatingDesc] = useState<string | undefined>(undefined);
   const [deleting, setDeleting] = useState<Department | null>(null);
 
   const fetchDepartments = () => {
@@ -397,14 +405,26 @@ export default function AdminDepartmentsPage() {
             Organise your company into departments.
           </p>
         </div>
-        <button className="btn bp" type="button" onClick={() => setCreatingName('')}>
+        <button
+          className="btn bp"
+          type="button"
+          onClick={() => {
+            setCreatingName('');
+            setCreatingDesc(undefined);
+          }}
+        >
           + New Department
         </button>
       </div>
 
       <DepartmentSuggestionsBanner
         companyId={user?.company_id}
-        onCreate={(name) => setCreatingName(name)}
+        onCreate={(name, description) => {
+          setCreatingName(name);
+          setCreatingDesc(description);
+        }}
+        // "Add all" created them straight from the banner — show them in the table.
+        onAdded={fetchDepartments}
       />
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -497,12 +517,15 @@ export default function AdminDepartmentsPage() {
         <DepartmentModal
           initial={editing}
           prefillName={creatingName || undefined}
+          prefillDescription={creatingDesc}
           onClose={() => {
             setCreatingName(null);
+            setCreatingDesc(undefined);
             setEditing(null);
           }}
           onSaved={() => {
             setCreatingName(null);
+            setCreatingDesc(undefined);
             setEditing(null);
             fetchDepartments();
             // A department they just created should drop out of the banner — and out

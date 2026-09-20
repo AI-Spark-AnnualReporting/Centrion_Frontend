@@ -65,7 +65,7 @@ export function SuggestedDeptButton() {
         whiteSpace: 'nowrap',
       }}
     >
-      Suggested dept
+      Suggested Departments
     </button>
   );
 }
