@@ -13,7 +13,8 @@ import type {
 } from '@/types/cycles';
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
-import type { DepartmentSuggestionsResponse } from '@/types/company';
+import type { Company, DepartmentSuggestionsResponse } from '@/types/company';
+import { PreviousOutline } from './PreviousOutline';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import { everyDepartmentHasLead } from './departmentLead';
 import ReportTeamCard from './ReportTeamCard';
@@ -155,6 +156,14 @@ function StatTile({ label, value, accent, bar }: { label: string; value: React.R
   );
 }
 
+// The two things the Outline card can show. Previous is first and is the default: how
+// the client already structures their report is the more useful thing to see before
+// looking at what we intend to produce for them.
+const OUTLINE_VIEWS: { key: 'previous' | 'system'; label: string }[] = [
+  { key: 'previous', label: 'Previous' },
+  { key: 'system', label: 'System' },
+];
+
 const MODE_FILTERS: { key: SectionMode | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'generate', label: 'Generate' },
@@ -181,6 +190,16 @@ export default function CycleDetailPage() {
   const [sectionsMsg, setSectionsMsg] = useState('');
   const [sectionsErr, setSectionsErr] = useState('');
   const [deptBusy, setDeptBusy] = useState(false);
+
+  // The Outline card shows two things: the structure of the report this company
+  // published last year (default), and the section list this cycle will produce.
+  const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
+  // Last year's outline lives on the COMPANY, not the cycle — the cycle comes from
+  // SAR, the company profile from Centriton, so it needs its own fetch.
+  const [company, setCompany] = useState<Company | null>(null);
+  const [companyLoading, setCompanyLoading] = useState(true);
+  const [companyErr, setCompanyErr] = useState('');
+  const [companyReload, setCompanyReload] = useState(0);
 
   // PMs — used only to resolve the assigned PM's name for the header (the
   // overview payload carries project_manager_id but not always the name).
@@ -262,6 +281,30 @@ export default function CycleDetailPage() {
     sarUsers.listProjectManagers().then(setPms).catch(() => setPms([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleId]);
+
+  // Last year's outline. Keyed on company_id as well as the reload counter: AuthContext
+  // masks company_id to whichever company a Spark user is acting as, so switching
+  // company with this page open has to refetch or the card shows the wrong one.
+  // Failing here must never take the System view down with it — hence its own error.
+  useEffect(() => {
+    let cancelled = false;
+    setCompanyLoading(true);
+    setCompanyErr('');
+    companies
+      .getMyCompany()
+      .then((c) => {
+        if (!cancelled) setCompany(c);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyErr("Couldn't load this company's previous outline.");
+      })
+      .finally(() => {
+        if (!cancelled) setCompanyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.company_id, companyReload]);
 
   const isDraft = overview?.cycle.status === 'draft';
 
@@ -530,9 +573,11 @@ export default function CycleDetailPage() {
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Report Sections</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Outline</div>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
-              The sections this cycle’s annual report will contain.
+              {outlineView === 'previous'
+                ? 'The structure of the report this company published last year.'
+                : 'The sections this cycle’s annual report will contain.'}
             </div>
             {sectionsMsg && (
               <div style={{ fontSize: 11, color: '#16A34A', marginTop: 6, fontWeight: 600 }}>{sectionsMsg}</div>
@@ -541,13 +586,71 @@ export default function CycleDetailPage() {
               <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontWeight: 600 }}>{sectionsErr}</div>
             )}
           </div>
-          {canManage && (
+          {/* Re-resolve rebuilds the SYSTEM list from the company profile — it has
+              nothing to act on while last year's outline is showing. */}
+          {canManage && outlineView === 'system' && (
             <button className="btn bs bsm" type="button" disabled={sectionsBusy} onClick={() => resolveSections()}>
               {sectionsBusy ? 'Resolving…' : '⟳ Re-resolve from current profile'}
             </button>
           )}
         </div>
 
+        {/* Underlined tabs rather than the app's .tabs pill: these are two views of one
+            outline, and the flatter treatment reads as "same thing, different source"
+            where a filled pill reads as a filter. The 2px rule overlaps the strip's own
+            hairline via marginBottom:-1. No .btn class — its hover lifts by 1px, which
+            would pull a tab off the rail it sits on. */}
+        <div
+          role="tablist"
+          aria-label="Outline source"
+          style={{ display: 'flex', gap: 20, padding: '0 16px', borderBottom: '1px solid #ECEEF8' }}
+        >
+          {OUTLINE_VIEWS.map((v) => {
+            const active = outlineView === v.key;
+            return (
+              <button
+                key={v.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setOutlineView(v.key)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: `2px solid ${active ? '#4040C8' : 'transparent'}`,
+                  marginBottom: -1,
+                  padding: '10px 2px',
+                  fontSize: 12,
+                  fontWeight: active ? 700 : 600,
+                  // Inactive sits at the secondary tier, not the #9BA3C4 muted one —
+                  // muted is this page's placeholder grey, and a tab wearing it reads
+                  // as un-clickable.
+                  color: active ? '#1A1D2E' : '#5A6080',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  transition: '.15s',
+                }}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {outlineView === 'previous' && (
+          <div role="tabpanel">
+            <PreviousOutline
+              detail={company?.report_outline_detail}
+              loading={companyLoading}
+              error={companyErr}
+              onRetry={() => setCompanyReload((n) => n + 1)}
+              onShowSystem={() => setOutlineView('system')}
+            />
+          </div>
+        )}
+
+        {outlineView === 'system' && (
+        <div role="tabpanel">
         <div style={{ padding: '10px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid #F4F5FB' }}>
           {MODE_FILTERS.map((f) => (
             <button
@@ -587,6 +690,8 @@ export default function CycleDetailPage() {
               ))}
             </tbody>
           </table>
+        )}
+        </div>
         )}
       </div>
 

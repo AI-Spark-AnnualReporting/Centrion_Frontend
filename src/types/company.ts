@@ -36,6 +36,33 @@ export interface CreateCompanyResponse {
   company: CompanyRecord;
 }
 
+// One line of the company's own report contents page. `title` is English;
+// `title_verbatim` is the title exactly as printed, in the document's own language —
+// the two differ on an Arabic report. `page` is routinely null: many contents pages
+// print numbers only against sub-entries, and some print none at all.
+export interface ReportOutlineEntry {
+  title: string;
+  title_verbatim?: string;
+  page?: number | null;
+  level?: number;
+}
+
+// Provenance alongside the outline, written by report_outline_extractor.py. The column
+// being absent means extraction never ran; `found: false` means it ran and there was
+// nothing readable. Different things to tell a user, so keep them distinguishable.
+export interface ReportOutlineDetail {
+  found?: boolean;
+  source?: 'bookmarks' | 'vision' | 'none';
+  confidence?: 'high' | 'medium' | 'low' | null;
+  reason?: string | null;
+  failed_checks?: string[];
+  pages?: number[];
+  page_count?: number;
+  bookmarks_level1?: string[];
+  extracted_at?: string;
+  entries?: ReportOutlineEntry[];
+}
+
 // Full company profile shown/edited on the Profile page (GET/PATCH
 // /api/v1/companies/me). Superset of CompanyRecord; most fields are nullable.
 export interface Company {
@@ -65,13 +92,16 @@ export interface Company {
   profile_extraction_status?: string | null;
   // Report style extracted (background) from the docs uploaded at onboarding.
   // report_tone = the prose style "directive"; report_tone_profile = the
-  // structured dimensions + verbatim exemplar sentences; theme = prose;
-  // outline = merged table-of-contents.
+  // structured dimensions + verbatim exemplar sentences; theme = prose.
   report_tone?: string | null;
   report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
   // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
   report_theme?: { name: string; explanation?: string }[] | null;
+  // The company's OWN report structure, read from the contents page of the annual
+  // report they uploaded at onboarding. report_outline stays the flat list of level-1
+  // titles; report_outline_detail carries the nested tree + provenance.
   report_outline?: string[] | null;
+  report_outline_detail?: ReportOutlineDetail | null;
   // AI-extracted key highlights from the uploaded reports ({category, text}); shown on the workspace dashboard.
   report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
