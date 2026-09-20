@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { DepartmentSuggestionsBanner } from '@/components/shared/DepartmentSuggestionsBanner';
+import { codeFromName } from './departmentCode';
 import { Spinner } from '@/components/shared/Spinner';
 import { adminConsole } from '@/lib/api';
 import type { Department } from '@/types/admin';
@@ -21,12 +22,14 @@ function DepartmentModal({
   initial: Department | null;
   onClose: () => void;
   onSaved: () => void;
-  /** Seeds the name when the user picked a suggestion from the banner. The code and
-      description are left blank on purpose — we suggest, they decide. */
+  /** Seeds the name and code when the user picked a suggestion from the banner. Both are
+      a starting point they can edit before submitting — we suggest, they decide. */
   prefillName?: string;
 }) {
   const editing = !!initial;
-  const [code, setCode] = useState(initial?.department_code ?? '');
+  const [code, setCode] = useState(
+    initial?.department_code ?? (prefillName ? codeFromName(prefillName) : ''),
+  );
   const [name, setName] = useState(initial?.department_name ?? prefillName ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [busy, setBusy] = useState(false);
