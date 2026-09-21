@@ -166,6 +166,7 @@ import type {
   CreateCyclePayload,
   CycleOverview,
   CycleSection,
+  OutlineSourceResponse,
   ResolveSectionsResponse,
   SARUser,
   SessionStatus,
@@ -4988,12 +4989,19 @@ export const sarCycles = {
       { method: "POST" },
     ),
 
-  // Which outline this cycle's department questions are shaped by. 'system' is the
-  // default and leaves the existing question pipeline untouched; 'previous' feeds each
-  // department the company's own report sections it is responsible for. Switching
-  // clears the cached section-to-department map on the backend.
-  setOutlineSource: (id: string, source: "previous" | "system"): Promise<unknown> =>
-    sarRequest(
+  // Which section list this cycle is built from. 'previous' is the company's own
+  // sections, read off the annual report they uploaded; 'system' is the shared
+  // catalogue. The choice drives both the sections that resolve onto the cycle and
+  // whether each department is told which of them it feeds.
+  //
+  // Switching REBUILDS the section list rather than adding to it, so this returns the
+  // new list — and it REJECTS the switch (409) if any section it would clear already
+  // has content, an attachment, assigned departments or a status past 'pending'.
+  setOutlineSource: (
+    id: string,
+    source: "previous" | "system",
+  ): Promise<OutlineSourceResponse> =>
+    sarRequest<OutlineSourceResponse>(
       `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-source`,
       { method: "PUT", body: JSON.stringify({ outline_source: source }) },
     ),

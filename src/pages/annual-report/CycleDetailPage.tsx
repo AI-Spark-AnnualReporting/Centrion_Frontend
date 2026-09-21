@@ -194,17 +194,39 @@ export default function CycleDetailPage() {
   // The Outline card shows two things: the structure of the report this company
   // published last year (default), and the section list this cycle will produce.
   const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
-  // Picking a tab is a real choice, not just a view: it decides whether this cycle's
-  // department questions are shaped by the company's own report sections. Saved so the
-  // backend can read it at kickoff. A failed save leaves the tab where the user put it
-  // — reverting under them would be worse than a choice that did not stick.
+  // Picking a tab is a real choice, not just a view: it decides which sections this
+  // cycle is built from, and whether each department is told which of them it feeds.
   // Set once the saved choice has been applied, so later refetches leave the tab alone.
   const seededRef = useRef(false);
 
   const persistOutlineView = (v: 'previous' | 'system') => {
+    const previous = outlineView;
     setOutlineView(v);
-    if (!canManage) return;
-    sarCycles.setOutlineSource(cycleId, v).catch(() => undefined);
+    setSectionsErr('');
+    setSectionsMsg('');
+    if (!canManage || v === previous) return;
+    // The switch REBUILDS the section list, and the backend refuses it outright if any
+    // section it would clear already has work on it. So a failure has to move the tab
+    // back: leaving it where the user put it would show them a list the cycle is not
+    // actually being built from.
+    setSectionsBusy(true);
+    sarCycles
+      .setOutlineSource(cycleId, v)
+      .then((res) => {
+        setSections(res.sections ?? []);
+        setSectionsMsg(
+          v === 'previous'
+            ? `Using this company's own sections — ${res.sections?.length ?? 0} in the report.`
+            : `Using the standard sections — ${res.sections?.length ?? 0} in the report.`,
+        );
+      })
+      .catch((e) => {
+        setOutlineView(previous);
+        setSectionsErr(
+          e instanceof Error ? e.message : 'Could not switch the outline.',
+        );
+      })
+      .finally(() => setSectionsBusy(false));
   };
   // Last year's outline hangs off the REPORT it was read from, not off the cycle —
   // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
