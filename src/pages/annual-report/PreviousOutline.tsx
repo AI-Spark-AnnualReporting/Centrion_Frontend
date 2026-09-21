@@ -156,6 +156,12 @@ export function PreviousOutline({
     );
   }
 
+  // A company's stored sections are all one level with no chapters above them. Indenting
+  // and muting them then leaves a ladder shoved 20px right under nothing, reading weaker
+  // than the System tab beside it — so when no level-1 row is present, drop the indent
+  // and render at full strength.
+  const flat = !rows.some((r) => r.isCategory);
+
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
       <tbody>
@@ -190,9 +196,10 @@ export function PreviousOutline({
                 title={!r.verbatim && sourceTitle && sourceTitle !== r.text ? sourceTitle : undefined}
                 style={{
                   ...td,
-                  paddingInlineStart: r.isCategory ? 16 : 16 + (r.level - 1) * INDENT_STEP,
-                  fontWeight: r.isCategory ? 700 : 500,
-                  color: r.isCategory ? INK : MUTED,
+                  paddingInlineStart:
+                    r.isCategory || flat ? 16 : 16 + (r.level - 1) * INDENT_STEP,
+                  fontWeight: r.isCategory ? 700 : flat ? 600 : 500,
+                  color: r.isCategory || flat ? INK : MUTED,
                 }}
               >
                 {r.text}
