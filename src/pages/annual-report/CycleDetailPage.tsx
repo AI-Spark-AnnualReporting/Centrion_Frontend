@@ -13,7 +13,7 @@ import type {
 } from '@/types/cycles';
 import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
-import type { Company, DepartmentSuggestionsResponse } from '@/types/company';
+import type { DepartmentSuggestionsResponse, ReportOutlineDetail } from '@/types/company';
 import { PreviousOutline } from './PreviousOutline';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
 import { everyDepartmentHasLead } from './departmentLead';
@@ -194,12 +194,12 @@ export default function CycleDetailPage() {
   // The Outline card shows two things: the structure of the report this company
   // published last year (default), and the section list this cycle will produce.
   const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
-  // Last year's outline lives on the COMPANY, not the cycle — the cycle comes from
-  // SAR, the company profile from Centriton, so it needs its own fetch.
-  const [company, setCompany] = useState<Company | null>(null);
-  const [companyLoading, setCompanyLoading] = useState(true);
-  const [companyErr, setCompanyErr] = useState('');
-  const [companyReload, setCompanyReload] = useState(0);
+  // Last year's outline hangs off the REPORT it was read from, not off the cycle —
+  // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
+  const [prevOutline, setPrevOutline] = useState<ReportOutlineDetail | null>(null);
+  const [outlineLoading, setOutlineLoading] = useState(true);
+  const [outlineErr, setOutlineErr] = useState('');
+  const [outlineReload, setOutlineReload] = useState(0);
 
   // PMs — used only to resolve the assigned PM's name for the header (the
   // overview payload carries project_manager_id but not always the name).
@@ -287,24 +287,26 @@ export default function CycleDetailPage() {
   // company with this page open has to refetch or the card shows the wrong one.
   // Failing here must never take the System view down with it — hence its own error.
   useEffect(() => {
+    const companyId = user?.company_id;
+    if (!companyId) return;
     let cancelled = false;
-    setCompanyLoading(true);
-    setCompanyErr('');
+    setOutlineLoading(true);
+    setOutlineErr('');
     companies
-      .getMyCompany()
-      .then((c) => {
-        if (!cancelled) setCompany(c);
+      .getLatestOutline(companyId)
+      .then((res) => {
+        if (!cancelled) setPrevOutline(res.outline ?? null);
       })
       .catch(() => {
-        if (!cancelled) setCompanyErr("Couldn't load this company's previous outline.");
+        if (!cancelled) setOutlineErr("Couldn't load this company's previous outline.");
       })
       .finally(() => {
-        if (!cancelled) setCompanyLoading(false);
+        if (!cancelled) setOutlineLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [user?.company_id, companyReload]);
+  }, [user?.company_id, outlineReload]);
 
   const isDraft = overview?.cycle.status === 'draft';
 
@@ -640,10 +642,10 @@ export default function CycleDetailPage() {
         {outlineView === 'previous' && (
           <div role="tabpanel">
             <PreviousOutline
-              detail={company?.report_outline_detail}
-              loading={companyLoading}
-              error={companyErr}
-              onRetry={() => setCompanyReload((n) => n + 1)}
+              detail={prevOutline}
+              loading={outlineLoading}
+              error={outlineErr}
+              onRetry={() => setOutlineReload((n) => n + 1)}
               onShowSystem={() => setOutlineView('system')}
             />
           </div>

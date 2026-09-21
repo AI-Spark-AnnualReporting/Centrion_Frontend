@@ -25,6 +25,7 @@ import type {
   CreateCompanyRequest,
   CreateCompanyResponse,
   DepartmentSuggestionsResponse,
+  LatestOutlineResponse,
   Sector,
   SectorsResponse,
 } from "@/types/company";
@@ -831,6 +832,14 @@ export const companies = {
   // The caller's own company (resolved from the JWT) — backs the Profile page
   // Company Details card. PATCH accepts a partial of the editable fields.
   getMyCompany: () => request<Company>("/api/v1/companies/me"),
+
+  // The table of contents of the most recent report this company UPLOADED, read off
+  // its contents page at onboarding. It lives on the report, not the company — a
+  // company has many reports over the years — so it has its own endpoint rather than
+  // riding along on getMyCompany(). `outline` is null when there is none yet, which is
+  // the common case: it is only written for an annual PDF the customer gave us.
+  getLatestOutline: (companyId: string) =>
+    request<LatestOutlineResponse>(`/api/v1/companies/${companyId}/latest-outline`),
 
   // The logo lives behind its own endpoint because it's ~1.4 MB of inline
   // base64 and getMyCompany() runs on nearly every page — fetch it only where

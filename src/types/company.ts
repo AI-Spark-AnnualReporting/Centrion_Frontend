@@ -47,9 +47,10 @@ export interface ReportOutlineEntry {
   level?: number;
 }
 
-// Provenance alongside the outline, written by report_outline_extractor.py. The column
-// being absent means extraction never ran; `found: false` means it ran and there was
-// nothing readable. Different things to tell a user, so keep them distinguishable.
+// Provenance alongside the outline, written by report_outline_extractor.py and stored
+// on reports.source_outline. A null outline means none was ever read for that report;
+// `found: false` means we read the report and there was no contents page in it.
+// Different things to tell a user, so keep them distinguishable.
 export interface ReportOutlineDetail {
   found?: boolean;
   source?: 'bookmarks' | 'vision' | 'none';
@@ -97,11 +98,12 @@ export interface Company {
   report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
   // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
   report_theme?: { name: string; explanation?: string }[] | null;
-  // The company's OWN report structure, read from the contents page of the annual
-  // report they uploaded at onboarding. report_outline stays the flat list of level-1
-  // titles; report_outline_detail carries the nested tree + provenance.
+  // The COMPLETE table of contents — every title at every level, flattened in document
+  // order — of the annual report uploaded at ONBOARDING. Written once and never
+  // overwritten: a record of where this company started, not a mirror of their latest
+  // report. The per-report outline, with its nesting, is reports.source_outline —
+  // fetch it with companies.getLatestOutline().
   report_outline?: string[] | null;
-  report_outline_detail?: ReportOutlineDetail | null;
   // AI-extracted key highlights from the uploaded reports ({category, text}); shown on the workspace dashboard.
   report_highlights?: { category: string; text: string }[] | null;
   // Reporting/regulatory frameworks referenced by the uploaded ESG report (names).
@@ -207,3 +209,15 @@ export type DepartmentSuggestionsResponse = {
   source_report_id: string | null;
   extracted_at: string | null;
 };
+
+
+// GET /api/v1/companies/{id}/latest-outline — the contents page of the most recent
+// report this company uploaded. `outline` is null when there is none, in which case
+// the report fields are absent too.
+export interface LatestOutlineResponse {
+  report_id?: string;
+  report_type?: string | null;
+  period?: string | null;
+  created_at?: string | null;
+  outline: ReportOutlineDetail | null;
+}
