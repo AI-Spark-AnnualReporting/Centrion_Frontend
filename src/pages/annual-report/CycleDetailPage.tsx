@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
@@ -194,6 +194,18 @@ export default function CycleDetailPage() {
   // The Outline card shows two things: the structure of the report this company
   // published last year (default), and the section list this cycle will produce.
   const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
+  // Picking a tab is a real choice, not just a view: it decides whether this cycle's
+  // department questions are shaped by the company's own report sections. Saved so the
+  // backend can read it at kickoff. A failed save leaves the tab where the user put it
+  // — reverting under them would be worse than a choice that did not stick.
+  // Set once the saved choice has been applied, so later refetches leave the tab alone.
+  const seededRef = useRef(false);
+
+  const persistOutlineView = (v: 'previous' | 'system') => {
+    setOutlineView(v);
+    if (!canManage) return;
+    sarCycles.setOutlineSource(cycleId, v).catch(() => undefined);
+  };
   // Last year's outline hangs off the REPORT it was read from, not off the cycle —
   // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
   const [prevOutline, setPrevOutline] = useState<ReportOutlineDetail | null>(null);
@@ -218,7 +230,17 @@ export default function CycleDetailPage() {
     setDeptBusy(true);
     return sarCycles
       .overview(cycleId)
-      .then(setOverview)
+      .then((res) => {
+        setOverview(res);
+        // Seed the tab from what was saved, so the choice survives a reload. Only on
+        // load — a later fetchOverview (after assigning departments, say) must not
+        // yank the tab out from under someone mid-edit.
+        const saved = res?.cycle?.outline_source;
+        if (saved === 'previous' || saved === 'system') {
+          setOutlineView((cur) => (seededRef.current ? cur : saved));
+          seededRef.current = true;
+        }
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load cycle.'))
       .finally(() => setDeptBusy(false));
   };
@@ -615,7 +637,7 @@ export default function CycleDetailPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setOutlineView(v.key)}
+                onClick={() => persistOutlineView(v.key)}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -646,7 +668,7 @@ export default function CycleDetailPage() {
               loading={outlineLoading}
               error={outlineErr}
               onRetry={() => setOutlineReload((n) => n + 1)}
-              onShowSystem={() => setOutlineView('system')}
+              onShowSystem={() => persistOutlineView('system')}
             />
           </div>
         )}

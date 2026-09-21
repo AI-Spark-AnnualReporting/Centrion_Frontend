@@ -14,6 +14,9 @@ export type CycleStatus =
 export interface Cycle {
   id: string;
   company_id: string;
+  // Which outline this cycle's department questions are shaped by. 'system' is the
+  // default and leaves the existing question pipeline untouched.
+  outline_source?: 'previous' | 'system';
   // Renamed fields carry both names — the SAR request contract uses
   // cycle_name/start_date/end_date/sector/is_shariah; older shapes used
   // name/cycle_*_date/sector_id/is_shariah_compliant. Read defensively.

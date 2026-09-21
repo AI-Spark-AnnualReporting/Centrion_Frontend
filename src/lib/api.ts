@@ -4988,6 +4988,16 @@ export const sarCycles = {
       { method: "POST" },
     ),
 
+  // Which outline this cycle's department questions are shaped by. 'system' is the
+  // default and leaves the existing question pipeline untouched; 'previous' feeds each
+  // department the company's own report sections it is responsible for. Switching
+  // clears the cached section-to-department map on the backend.
+  setOutlineSource: (id: string, source: "previous" | "system"): Promise<unknown> =>
+    sarRequest(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-source`,
+      { method: "PUT", body: JSON.stringify({ outline_source: source }) },
+    ),
+
   // Bulk-assign departments + responsible users to a draft cycle.
   assignDepartments: (
     id: string,
