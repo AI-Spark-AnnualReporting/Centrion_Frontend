@@ -118,13 +118,152 @@ export interface BoardSlotDocument {
   uploaded_at: string;
 }
 
+/**
+ * How a slot is filled. `documents` is the uploaded-file row; `meetings` is
+ * filled by ticking meetings already on the platform, so it never has documents.
+ * Absent on older payloads — read it through `slotKind()`, which defaults to
+ * `documents`.
+ */
+export type BoardSlotKind = "documents" | "meetings" | "profiles" | (string & {});
+
 export interface BoardSourceSlot {
   slot: string;
+  kind?: BoardSlotKind;
+  /** Meetings slots only — the section the picker reads and writes (BR35/BR36). */
+  section_code?: string;
   /** At least one mandatory section depends on this slot. */
   required: boolean;
+  /** `received` on a meetings slot means at least one meeting is ticked. */
   status: "received" | "pending" | (string & {});
   feeds: BoardSlotFeed[];
+  /** Always present — empty on a meetings slot. */
   documents: BoardSlotDocument[];
+  /** Meetings slots only. */
+  selected_ids?: string[];
+  selected_count?: number;
+  /** Meetings/profiles slots — how many the platform holds, for "2 of 4". */
+  member_count?: number;
+  /**
+   * Profiles slot — how many people were read out of an uploaded CV file. The
+   * row shows the count only; the table itself is edited in BR32's card on the
+   * Review screen, so there is one editable copy in one place.
+   */
+  profile_count?: number;
+  /**
+   * What the slot is actually feeding its sections from. A selection wins over
+   * an attached file, and on the profiles slot uploaded people win over ticked
+   * team members — the author is offered one path or the other.
+   */
+  fed_by?: "meetings" | "documents" | "profiles" | "team" | null;
+  /** Meetings slots — the saved period the selection was resolved from. */
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+// ─── meeting picker (BR35 / BR36) ─────────────────────────────────────────────
+
+export interface BoardMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  meeting_time?: string | null;
+  meeting_type: string;
+  status?: string;
+  participant_count: number;
+  /** False → the meeting contributes one line to the register and nothing else. */
+  has_minutes: boolean;
+  attendance_recorded: boolean;
+  minutes_attachment_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardMeetingFilters {
+  meeting_type?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+export interface BoardMeetingsResponse {
+  /** What the server actually filtered on — seed the controls from this. */
+  filters: BoardMeetingFilters;
+  /** The type dropdown's options. Never hardcode the enum; `all` is also valid. */
+  meeting_types: string[];
+  selected_ids: string[];
+  meetings: BoardMeeting[];
+  /** How many of `meetings` would actually print — the rest have no minutes. */
+  with_minutes_count?: number;
+  /** The period already saved for this section, if any. Seeds the date inputs. */
+  saved_period?: { date_from: string; date_to: string } | null;
+}
+
+// ─── director picker (BR32) ───────────────────────────────────────────────────
+
+export interface BoardDirector {
+  id: string;
+  full_name: string;
+  title?: string | null;
+  position_type?: string | null;
+  /** False → the person still gets a table row, just an empty CV cell. */
+  has_cv: boolean;
+  has_photo: boolean;
+  cv_file_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardDirectorsResponse {
+  selected_ids: string[];
+  directors: BoardDirector[];
+}
+
+// ─── profiles read out of an uploaded CV (BR32) ────────────────────────────────
+//
+// The other way to fill BR32, for an issuer whose directors are not platform
+// users. The upload pipeline reads the people out of the file; these are what
+// the author then corrects, in a table inside BR32's card on the Review screen.
+
+export interface BoardProfileJob {
+  job_title: string;
+  company: string;
+  /** "YYYY-MM", a bare "YYYY", or null when the CV gave no date. */
+  from_month: string | null;
+  /**
+   * Same, plus the literal "present" for a job still held. null is NOT that —
+   * it means the document never said where the job ended, which prints as
+   * "from 1986" rather than "1986 – present".
+   */
+  to_month: string | null;
+  responsibility: string;
+  sort_order?: number;
+}
+
+export interface BoardProfile {
+  /** Minted server-side. Absent on a row the operator has just added. */
+  id?: string;
+  full_name: string;
+  /** The role on the BOARD, not the current job — that is an experience entry. */
+  title: string;
+  has_photo?: boolean;
+  /** The headshot inline: the storage bucket is private, so there is no URL. */
+  photo_data_uri?: string | null;
+  source_document_id?: string | null;
+  /** The file this person was read out of. Null for one typed in by hand. */
+  source_filename?: string | null;
+  experience: BoardProfileJob[];
+  /**
+   * Write-only. A full `data:image/…;base64,…` URI replaces the headshot, null
+   * clears it, and omitting the key keeps what is there — three distinct
+   * meanings, so never send it as an empty string.
+   */
+  photo_base64?: string | null;
+}
+
+export interface BoardProfilesResponse {
+  report_id: string;
+  section_code: string;
+  profiles: BoardProfile[];
+  count: number;
+  /** The CV files filed under the slot, for a "read from …" line. */
+  documents: { id: string; filename: string }[];
 }
 
 export interface BoardSourcesResponse {
@@ -209,6 +348,12 @@ export interface BoardCitation {
 export type BoardCitations = Record<string, unknown> | BoardCitation[] | null;
 
 export interface BoardSectionFeeder {
+  /**
+   * `platform_data` — the section was built from data already on the platform
+   * (team profiles, selected meetings) rather than an uploaded document, so it
+   * carries no citations.
+   */
+  source?: string | null;
   /** Set when the content was reused from a prior year, e.g. "FY-2024". */
   carried_forward_from?: string | null;
   /** Says exactly what is missing (needs_input) or why it is empty. */
@@ -227,6 +372,13 @@ export interface BoardSectionFeeder {
   refined?: boolean;
 }
 
+/**
+ * How a section prints. `table` (or absent) is the generic table renderer; the
+ * `cards_*` values are the profile-card layouts BR32 offers. Saved on the
+ * section so the exported PDF matches the screen.
+ */
+export type BoardSectionLayout = "table" | "cards_grid" | "cards_band" | "cards_row";
+
 export interface BoardSection {
   section_code: string;
   title: string;
@@ -240,6 +392,8 @@ export interface BoardSection {
   /** Prose sections hold text; the rest hold JSON as a string. */
   content: string | null;
   feeder?: BoardSectionFeeder | null;
+  /** Absent/null on a server without the layout choice — read it as `table`. */
+  layout?: BoardSectionLayout | null;
 }
 
 export interface BoardSectionsResponse {

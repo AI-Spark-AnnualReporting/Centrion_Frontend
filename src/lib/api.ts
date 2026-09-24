@@ -101,9 +101,15 @@ import type {
 import type {
   BoardAssembleResponse,
   BoardCompletion,
+  BoardDirectorsResponse,
+  BoardProfile,
+  BoardProfilesResponse,
+  BoardSectionLayout,
   BoardExportFormat,
   BoardIndexFailure,
   BoardIssuerProfile,
+  BoardMeetingFilters,
+  BoardMeetingsResponse,
   BoardOutlineResponse,
   BoardOutlineSavePayload,
   BoardProduceSectionResponse,
@@ -3678,6 +3684,80 @@ export const boardReports = {
     request<unknown>(
       boardPath(reportId, `/sources/${encodeURIComponent(documentId)}`),
       { method: "DELETE" },
+    ),
+
+  // The board members a BR32 row is built from. Not deployed everywhere yet —
+  // a 404 here means "no picker on this server", not "wrong report".
+  getSectionDirectors: (reportId: string, sectionCode: string, signal?: AbortSignal) =>
+    request<BoardDirectorsResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/directors`),
+      { signal },
+    ),
+
+  // Replaces the whole selection, exactly as the meetings PUT does.
+  setSectionDirectors: (reportId: string, sectionCode: string, directorIds: string[]) =>
+    request<{ selected_ids: string[]; count: number }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/directors`),
+      { method: "PUT", body: { director_ids: directorIds } },
+    ),
+
+  // The people read out of a CV file uploaded under the profiles slot — the
+  // other way to fill BR32, for an issuer whose directors are not platform
+  // users. Extraction happens inside the upload run, so these are already there
+  // by the time it reports done.
+  getSectionProfiles: (reportId: string, sectionCode: string, signal?: AbortSignal) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { signal },
+    ),
+
+  // One call covers edit, add, remove and headshots: the array IS the table.
+  // Leave a person out to delete them, omit `id` to add one, send a row back
+  // changed to edit it. The response is the saved table, so no refetch is
+  // needed — but BR32 still has to be re-produced for the printed grid to catch
+  // up, which is the caller's next step.
+  setSectionProfiles: (reportId: string, sectionCode: string, profiles: BoardProfile[]) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { method: "PUT", body: { profiles } },
+    ),
+
+  // The meetings a BR35/BR36 row can be filled from. All three filters are
+  // optional — omit them and the server answers board meetings over the report's
+  // fiscal year, and echoes what it filtered on in `filters`.
+  getSectionMeetings: (
+    reportId: string,
+    sectionCode: string,
+    filters?: BoardMeetingFilters,
+    signal?: AbortSignal,
+  ) =>
+    request<BoardMeetingsResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { query: filters, signal },
+    ),
+
+  // The layout a section prints in — BR32 offers the table and three card
+  // layouts. Saved on the report so the exporter renders what the screen shows.
+  // 400 unknown layout · 404 no such report/section · 409 the report is approved.
+  setSectionLayout: (reportId: string, sectionCode: string, layout: BoardSectionLayout) =>
+    request<{ section_code: string; layout: BoardSectionLayout }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/layout`),
+      { method: "PUT", body: { layout } },
+    ),
+
+  // Replaces the whole selection with a date window: the server resolves it and
+  // drops the meetings with no minutes, so `count` back is what will print, not
+  // how many fall in the window. `{ meeting_ids: [] }` still clears a selection.
+  // Refetch /sources afterwards, as after an upload.
+  // 400 wrong section code or bad window · 404 no such report · 409 locked.
+  setSectionMeetings: (
+    reportId: string,
+    sectionCode: string,
+    body: { date_from: string; date_to: string } | { meeting_ids: string[] },
+  ) =>
+    request<{ selected_ids: string[]; count: number }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { method: "PUT", body },
     ),
 
   // Returns all 46 sections including the non-applicable ones, so the UI can

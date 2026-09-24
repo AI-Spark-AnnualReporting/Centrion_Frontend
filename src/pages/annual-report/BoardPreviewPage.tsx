@@ -16,9 +16,14 @@ import { usePipelinePoll } from '@/hooks/use-pipeline-poll';
 import { Spinner } from '@/components/shared/Spinner';
 import { EditableSectionContent } from '@/components/quarterly/EditableSectionContent';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
-import type { BoardOutlineSection, BoardSection } from '@/types/board';
+import type { BoardOutlineSection, BoardSection, BoardSectionLayout } from '@/types/board';
 import {
   BOARD_COMPANY_VOICE,
+  BOARD_PLATFORM_SECTIONS,
+  BOARD_PROFILE_SECTIONS,
+  boardCardVariant,
+  boardUploadAccept,
+  boardUsesProfileEditor,
   canRefineSection,
   errorMessage,
   isBoardCoverSection,
@@ -26,12 +31,16 @@ import {
   readExistingRunId,
   REQ_TEXT,
   toBoardProduced,
+  withPhotoPlaceholders,
 } from './board-helpers';
 import { BoardStepShell, StepActions } from './board-shell';
 import { useBoardReport } from './useBoardReport';
 import { useBoardCover } from './useBoardCover';
 import { useFitFrame } from './useFitFrame';
 import { BoardRefinePanel } from './BoardRefinePanel';
+import BoardLayoutPicker from './BoardLayoutPicker';
+import BoardProfileCards from './BoardProfileCards';
+import BoardProfileTable from './BoardProfileTable';
 import {
   ACCENT,
   AMBER,
@@ -94,6 +103,10 @@ export default function BoardPreviewPage() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState<null | 'refine' | 'confirm'>(null);
   const [sectionError, setSectionError] = useState<string | null>(null);
+  // Which section's layout dialog is open, and how that save is going.
+  const [layoutFor, setLayoutFor] = useState<string | null>(null);
+  const [layoutSaving, setLayoutSaving] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
   // What has been asked of each section, so the panel can list it back. The
   // backend is stateless per call, so this is the only record.
   const [history, setHistory] = useState<Record<string, string[]>>({});
@@ -274,6 +287,34 @@ export default function BoardPreviewPage() {
       });
   }, [uploadPoll.state.phase, upload, reportId, load, uploadPoll.state.run?.error_message]);
 
+  // The profile table saved. Its rows are what BR32 is BUILT from, not the
+  // section's content, so the printed grid is now behind — re-produce it before
+  // reloading, or the reviewer sees their edit vanish.
+  //
+  // regenerate: the fingerprint would catch the change on its own, but waiting
+  // for that means one more click before the card matches what was just typed.
+  const handleProfilesSaved = useCallback(
+    async (code: string) => {
+      setSaving(true);
+      setSectionError(null);
+      try {
+        await boardReports.produceSection(reportId, code, true);
+        setEditing(false);
+        setSaved(true);
+      } catch (err: unknown) {
+        // The profiles ARE saved — only the rebuild failed, so say so rather
+        // than implying the edit was lost.
+        setSectionError(
+          errorMessage(err, 'Your changes are saved, but rebuilding the section failed. Produce it again.'),
+        );
+      } finally {
+        await load().catch(() => {});
+        setSaving(false);
+      }
+    },
+    [reportId, load],
+  );
+
   const handleConfirm = useCallback(
     async (code: string) => {
       setBusy('confirm');
@@ -288,6 +329,28 @@ export default function BoardPreviewPage() {
       }
     },
     [reportId, load],
+  );
+
+  // The layout a section prints in. Optimistic: the choice is a display change
+  // the reviewer is looking straight at, so it lands first and snaps back if the
+  // server refuses — the screen must never claim a layout the export won't use.
+  const handleLayout = useCallback(
+    async (code: string, layout: BoardSectionLayout) => {
+      const prev = sections.find((x) => x.section_code === code)?.layout ?? 'table';
+      setLayoutSaving(true);
+      setLayoutError(null);
+      patch(code, { layout });
+      try {
+        await boardReports.setSectionLayout(reportId, code, layout);
+        setLayoutFor(null);
+      } catch (err: unknown) {
+        patch(code, { layout: prev });
+        setLayoutError(errorMessage(err, 'Could not change the layout. Please try again.'));
+      } finally {
+        setLayoutSaving(false);
+      }
+    },
+    [reportId, patch, sections],
   );
 
   const visible = useMemo(
@@ -418,11 +481,17 @@ export default function BoardPreviewPage() {
                 busy={busy}
                 error={sectionError}
                 history={history[active.section_code] ?? []}
+                reportId={reportId}
                 onEdit={setEditing}
                 onSave={handleSave}
+                onProfilesSaved={handleProfilesSaved}
                 onRefine={handleRefine}
                 onConfirm={handleConfirm}
                 onUploadFile={handleUploadFile}
+                onChooseLayout={() => {
+                  setLayoutError(null);
+                  setLayoutFor(active.section_code);
+                }}
                 working={
                   upload?.code === active.section_code
                     ? `Reading ${upload.fileName}`
@@ -437,6 +506,16 @@ export default function BoardPreviewPage() {
       )}
 
       {cover.picker}
+
+      {layoutFor && (
+        <BoardLayoutPicker
+          current={sections.find((x) => x.section_code === layoutFor)?.layout ?? 'table'}
+          saving={layoutSaving}
+          error={layoutError}
+          onApply={(l) => void handleLayout(layoutFor, l)}
+          onClose={() => setLayoutFor(null)}
+        />
+      )}
 
       {/* Sits below the frame, so it never scrolls away. */}
       <div
@@ -803,6 +882,7 @@ function SectionPanel({
   index,
   meta,
   locked,
+  reportId,
   editing,
   saving,
   saved,
@@ -811,15 +891,19 @@ function SectionPanel({
   history,
   onEdit,
   onSave,
+  onProfilesSaved,
   onRefine,
   onConfirm,
   onUploadFile,
+  onChooseLayout,
   working,
 }: {
   section: BoardSection;
   index: number;
   meta?: BoardOutlineSection;
   locked: boolean;
+  /** Only the profile table needs it — it fetches and saves its own rows. */
+  reportId: string;
   editing: boolean;
   saving: boolean;
   saved: boolean;
@@ -828,9 +912,13 @@ function SectionPanel({
   history: string[];
   onEdit: (v: boolean) => void;
   onSave: (code: string, content: string) => void;
+  /** The profile table saved — re-produce the section so the grid matches. */
+  onProfilesSaved: (code: string) => void;
   onRefine: (code: string, instruction: string) => void;
   onConfirm: (code: string) => void;
   onUploadFile: (code: string, slot: string, file: File) => void;
+  /** Open the layout dialog — only the profile section offers one. */
+  onChooseLayout: () => void;
   /** What is happening to this section right now — reading, or writing. */
   working: string | null;
 }) {
@@ -841,6 +929,11 @@ function SectionPanel({
   const readOnly = locked || s.status === 'locked';
   const companyVoice = BOARD_COMPANY_VOICE.includes(s.section_code);
   const refinable = !readOnly && canRefineSection(s);
+  const cardVariant = boardCardVariant(s);
+  // BR32 built from an uploaded CV edits the PEOPLE, not the rendered grid —
+  // see boardUsesProfileEditor. A BR32 built from ticked team members keeps the
+  // ordinary editor: those people are edited on the Team screen.
+  const profileEditor = boardUsesProfileEditor(s);
   const statusMeta = STATUS_META[s.status] ?? { label: s.status, color: FAINT, bg: '#F2F3FA' };
   const refining = busy === 'refine';
   // The source slot this section is fed by — where an uploaded file gets filed.
@@ -892,6 +985,19 @@ function SectionPanel({
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color }} />
           {statusMeta.label}
         </span>
+        {/* Only this section has more than one way to print. The choice is saved
+            on the report, so the export matches what is on screen. */}
+        {BOARD_PROFILE_SECTIONS.includes(s.section_code) && produced && !editing && !readOnly && (
+          <button
+            className="btn bs bsm"
+            type="button"
+            disabled={!!busy}
+            onClick={onChooseLayout}
+            style={{ flexShrink: 0 }}
+          >
+            Choose layout
+          </button>
+        )}
         {!readOnly && produced && !editing && (
           <button
             type="button"
@@ -925,6 +1031,17 @@ function SectionPanel({
           </button>
         )}
       </div>
+
+      {/* These people were read out of a CV by a model and are going into a
+          regulatory disclosure. The pencil is the standard affordance, but on
+          this one section it is worth saying what it opens — nobody expects the
+          edit button to lead to a photo upload. */}
+      {profileEditor && !editing && (
+        <div style={{ fontSize: 11.5, color: FAINT, marginBottom: 12 }}>
+          Read from the uploaded CV — open the editor to correct a name, add someone the file
+          missed, or add a photograph.
+        </div>
+      )}
 
       {/* The chairman's statement is the chairman's, not the model's. */}
       {companyVoice && (
@@ -975,7 +1092,7 @@ function SectionPanel({
           {/* The editor works on raw Markdown, not the rendered preview — a
               small trigger rather than a permanent banner, so it doesn't
               compete with the content on every section that's ever edited. */}
-          {editing && (
+          {editing && !profileEditor && (
             <button
               type="button"
               // The editor saves-or-cancels on blur (see ProseEditor), so a
@@ -1008,14 +1125,31 @@ function SectionPanel({
             </button>
           )}
           <div style={{ opacity: refining ? 0.5 : 1, pointerEvents: refining ? 'none' : undefined }}>
-            <EditableSectionContent
-              section={toBoardProduced(s)}
-              editing={editing}
-              saving={saving}
-              error={editing ? error : null}
-              onSave={(content) => onSave(s.section_code, content)}
-              onCancel={() => onEdit(false)}
-            />
+            {/* Cards are a way of reading the section, not of editing it — the
+                pencil always opens the same table of rows. */}
+            {editing && profileEditor ? (
+              <BoardProfileTable
+                reportId={reportId}
+                sectionCode={s.section_code}
+                disabled={readOnly || saving}
+                onSaved={() => onProfilesSaved(s.section_code)}
+                onCancel={() => onEdit(false)}
+              />
+            ) : !editing && cardVariant ? (
+              <BoardProfileCards section={toBoardProduced(s)} variant={cardVariant} />
+            ) : (
+              <EditableSectionContent
+                // Placeholders while reading, never while editing: the cell
+                // editor would otherwise let someone save a silhouette into the
+                // section's own content.
+                section={editing ? toBoardProduced(s) : withPhotoPlaceholders(toBoardProduced(s))}
+                editing={editing}
+                saving={saving}
+                error={editing ? error : null}
+                onSave={(content) => onSave(s.section_code, content)}
+                onCancel={() => onEdit(false)}
+              />
+            )}
           </div>
           {refining && (
             <div
@@ -1287,6 +1421,7 @@ function AttachDocument({
     >
       <input
         type="file"
+        accept={boardUploadAccept([code])}
         disabled={!usable}
         style={{ display: 'none' }}
         onChange={(e) => {
@@ -1331,9 +1466,39 @@ function NeedsInput({
   // Local to the panel, which is remounted per section — no draft can leak from
   // one section to the next.
   const [draft, setDraft] = useState('');
+  const { reportId = '' } = useParams<{ reportId: string }>();
+  const navigate = useNavigate();
   const need = s.feeder?.message?.trim() || 'the content for this section';
 
   if (working) return <WorkingLine text={working} />;
+
+  // Built from meetings, not from a file: the normal starting state, answered
+  // on the Sources step. Neither the textarea nor the upload below would help —
+  // typing the attendance matrix by hand is not the ask.
+  if (BOARD_PLATFORM_SECTIONS.includes(s.section_code)) {
+    return (
+      <div
+        style={{
+          background: 'rgba(64,64,200,.05)',
+          border: '1px solid rgba(64,64,200,.2)',
+          borderRadius: 10,
+          padding: '14px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 14,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 13, color: INK }}>{need}</span>
+        {!readOnly && (
+          <button className="btn bs bsm" onClick={() => navigate(`/board-report/${reportId}/sources`)}>
+            {BOARD_PROFILE_SECTIONS.includes(s.section_code) ? 'Select board members' : 'Select meetings'}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>

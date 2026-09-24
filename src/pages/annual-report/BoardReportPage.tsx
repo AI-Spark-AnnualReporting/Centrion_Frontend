@@ -26,6 +26,7 @@ import type {
   BoardSection,
 } from '@/types/board';
 import {
+  boardCardVariant,
   errorMessage,
   isBoardCoverSection,
   isBoardExcluded,
@@ -33,6 +34,7 @@ import {
   readCompletionFromError,
   toBoardProduced,
 } from './board-helpers';
+import BoardProfileCards from './BoardProfileCards';
 import { BoardStepShell } from './board-shell';
 import { useBoardReport } from './useBoardReport';
 import { useBoardCover } from './useBoardCover';
@@ -725,6 +727,8 @@ function ReportSection({
 }) {
   const feeder = s.feeder ?? null;
   const produced = s.status === 'produced' || s.status === 'locked';
+  // Chosen on the Review step; this screen only prints what was chosen.
+  const cardVariant = boardCardVariant(s);
   const statusMeta = STATUS_LABEL[s.status] ?? { label: s.status, color: FAINT };
 
   return (
@@ -810,16 +814,20 @@ function ReportSection({
       {produced ? (
         // Numbered for reading, raw for editing — the numbers are display-only
         // and must never reach `PATCH .../content`.
-        <EditableSectionContent
-          section={toBoardProduced(
-            editing ? s : { ...s, content: numberBoardHeadings(s.content, number) },
-          )}
-          editing={editing}
-          saving={saving}
-          error={error}
-          onSave={onSave}
-          onCancel={onCancel}
-        />
+        !editing && cardVariant ? (
+          <BoardProfileCards section={toBoardProduced(s)} variant={cardVariant} />
+        ) : (
+          <EditableSectionContent
+            section={toBoardProduced(
+              editing ? s : { ...s, content: numberBoardHeadings(s.content, number) },
+            )}
+            editing={editing}
+            saving={saving}
+            error={error}
+            onSave={onSave}
+            onCancel={onCancel}
+          />
+        )
       ) : s.status === 'empty' ? (
         <p style={{ margin: 0, fontSize: 13, color: MUTED, fontStyle: 'italic' }}>
           Nothing to report this year.

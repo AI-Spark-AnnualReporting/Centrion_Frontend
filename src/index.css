@@ -720,6 +720,16 @@ body {
   min-height: 78px;
   padding: 12px 14px; text-align: left; border-radius: 12px;
 }
+/* One director in BR32's profile editor. The hover is deliberately faint — the
+   row is a form, not a list to pick from, so it should acknowledge the pointer
+   without competing with the fields inside it. */
+.bpt-person:hover { background: #FCFCFE; }
+.bpt-person button:focus-visible,
+.bpt-person input:focus-visible,
+.bpt-person textarea:focus-visible {
+  outline: 2px solid #4040C8; outline-offset: 1px;
+}
+
 .ob-drop-prompt { font-size: 13px; font-weight: 700; color: #3A3F5C; }
 .ob-drop-hint { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; min-height: 15px; }
 .ob-browse-inline { margin-top: 0; flex-shrink: 0; }

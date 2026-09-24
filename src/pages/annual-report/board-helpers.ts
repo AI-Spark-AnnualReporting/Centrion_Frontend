@@ -22,6 +22,7 @@ import type {
   BoardReportSummary,
   BoardRequirement,
   BoardSection,
+  BoardSourceSlot,
   BoardSourcesResponse,
 } from '@/types/board';
 import type { ProducedSection } from '@/types/quarterly';
@@ -89,6 +90,15 @@ export function profileFromCompany(
  * dump the operator back on Profile — pick the furthest step its server state
  * justifies.
  */
+/**
+ * Whether a slot's requirement is met. A meetings slot is met by its saved
+ * selection: the server sets `status: received` for that too, but the row shows
+ * the count, and a row reading "11 selected" over a counter reading 0/12 is the
+ * screen contradicting itself.
+ */
+export const slotReceived = (s: Pick<BoardSourceSlot, 'status' | 'selected_count' | 'selected_ids'>) =>
+  s.status === 'received' || (s.selected_count ?? s.selected_ids?.length ?? 0) > 0;
+
 export function initialStep(
   report: Pick<BoardReportSummary, 'status'> | null,
   sources: Pick<BoardSourcesResponse, 'slots'> | null,
@@ -97,7 +107,7 @@ export function initialStep(
   if (report && report.status !== 'draft') return 4;
   if (outline?.some((s) => s.status === 'produced' || s.status === 'locked')) return 4;
   const required = sources?.slots.filter((s) => s.required) ?? [];
-  if (required.length > 0 && required.every((s) => s.status === 'received')) return 3;
+  if (required.length > 0 && required.every(slotReceived)) return 3;
   return 1;
 }
 
@@ -171,6 +181,66 @@ export function toBoardProduced(
 }
 
 /**
+ * A muted silhouette, as a data URI so the generic table renderer draws it with
+ * no change: `isDataImage` already routes a `data:image/…` cell to an <img>.
+ */
+const AVATAR_PLACEHOLDER =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">' +
+      '<rect width="44" height="44" rx="6" fill="#FAFBFE" stroke="#E8EAF3"/>' +
+      '<circle cx="22" cy="17" r="6" fill="none" stroke="#C7CBF0" stroke-width="2"/>' +
+      '<path d="M10 35c0-6 5.5-9.5 12-9.5S34 29 34 35" fill="none" stroke="#C7CBF0" ' +
+      'stroke-width="2" stroke-linecap="round"/>' +
+      '</svg>',
+  );
+
+/**
+ * BR32's produced table with an avatar in every director's Photo cell.
+ *
+ * ON SCREEN ONLY. The server drops a Photo column nobody filled, which is right
+ * for the download — a signed-off report should not print a column of grey
+ * silhouettes — but wrong for the review screen, where a missing photograph is
+ * the thing the author still has to act on and an absent column says nothing.
+ *
+ * Only rows read out of an uploaded CV get one: those are the people the profile
+ * editor owns, so the placeholder points at a fix the author can actually make.
+ * A director ticked off the team page gets their photo from the team page.
+ *
+ * Returns the section untouched on anything unexpected — this is decoration, and
+ * it must never be the reason a section fails to render.
+ */
+export function withPhotoPlaceholders(section: ProducedSection): ProducedSection {
+  if (section.section_code !== 'BR32' || typeof section.content !== 'string') return section;
+
+  try {
+    const payload = JSON.parse(section.content) as Record<string, unknown>;
+    const rows = payload.rows;
+    const columns = payload.columns;
+    if (!Array.isArray(rows) || !Array.isArray(columns)) return section;
+
+    // The row that OPENS a person carries `jobs`; the rest are that person's
+    // remaining jobs and share their photo cell, which stays empty.
+    const opensAPerson = (r: Record<string, unknown>) =>
+      Array.isArray(r.jobs) && r.source === 'upload';
+    if (!rows.some((r) => opensAPerson(r as Record<string, unknown>))) return section;
+
+    const nextRows = rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      if (!opensAPerson(row) || typeof row.Photo === 'string' && row.Photo.startsWith('data:')) {
+        return row;
+      }
+      return { ...row, Photo: AVATAR_PLACEHOLDER };
+    });
+
+    const nextColumns = columns.includes('Photo') ? columns : ['Photo', ...columns];
+    return { ...section, content: JSON.stringify({ ...payload, columns: nextColumns, rows: nextRows }) };
+  } catch {
+    return section;
+  }
+}
+
+/**
  * How to render a section's content. `content_type` is authoritative — narrative
  * and generated sections hold a plain string; everything else holds JSON as a
  * string. Falls back to sniffing the payload when the field is absent.
@@ -201,6 +271,111 @@ export function boardContentMode(contentType?: string | null, content?: string |
  * server resolves them uploaded document → last year's report → needs_input.
  */
 export const BOARD_COMPANY_VOICE = ['BR02', 'BR03', 'BR04'];
+
+/**
+ * The sections built from meetings ticked on the Sources step rather than from
+ * an uploaded document — BR35 board & committee, BR36 general assembly. They
+ * are `needs_input` until a meeting is selected, and no upload will fix that.
+ */
+export const BOARD_MEETING_SECTIONS = ['BR35', 'BR36'];
+
+/**
+ * The sections built from the director profiles already on the platform — CVs
+ * and headshots come from the team records, not from a document.
+ */
+export const BOARD_PROFILE_SECTIONS = ['BR32'];
+
+/** Every type the platform ingests. Mirrors config.ALLOWED_EXTENSIONS. */
+export const BOARD_UPLOAD_ACCEPT = '.pdf,.docx,.xlsx,.csv,.txt';
+
+/**
+ * The same, without the spreadsheet the CV slot refuses. Mirrors
+ * _DIRECTOR_SLOT_REJECTS in routes/board.py — that check is the one that
+ * enforces it, because `accept` is a hint a user can step past in the OS
+ * dialog. This only stops them picking the wrong file by accident.
+ */
+export const BOARD_CV_UPLOAD_ACCEPT = '.pdf,.docx,.csv,.txt';
+
+/**
+ * What a slot's file picker should offer, given the sections it feeds.
+ *
+ * Keyed on section CODES, not the slot's name: the name is display text and
+ * gets reworded, the codes are the registry's. Same reasoning as
+ * slotSystemKind.
+ */
+export function boardUploadAccept(sectionCodes: readonly (string | null | undefined)[]): string {
+  return sectionCodes.some((code) => code && BOARD_PROFILE_SECTIONS.includes(code))
+    ? BOARD_CV_UPLOAD_ACCEPT
+    : BOARD_UPLOAD_ACCEPT;
+}
+
+/**
+ * Whether BR32's card should open the profile TABLE rather than the generic
+ * cell editor.
+ *
+ * True when the section was built from people read out of an uploaded CV: the
+ * server stamps `source: "upload"` on every such row (`"team"` on a ticked board
+ * member), which is not in `columns` and so never prints.
+ *
+ * Why the distinction matters. `PATCH .../sections/{code}/content` edits the
+ * RENDERED grid, which the next produce rebuilds from scratch — an edit made
+ * there would not survive, could not add or delete a person, and has nowhere to
+ * put a headshot. The profile table edits the people the grid is built FROM.
+ * A ticked board member is edited on the Team screen, not here, so that case
+ * keeps the ordinary editor.
+ *
+ * Read off the content rather than fetching: the answer is already on screen,
+ * and a wrong guess here only picks the wrong editor, never throws.
+ */
+export function boardUsesProfileEditor(s: Pick<BoardSection, 'section_code' | 'content'>): boolean {
+  if (!BOARD_PROFILE_SECTIONS.includes(s.section_code) || !s.content) return false;
+  try {
+    const parsed = JSON.parse(s.content) as { rows?: unknown };
+    return (
+      Array.isArray(parsed?.rows) &&
+      parsed.rows.some((r) => isRec(r) && r.source === 'upload')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** The three profile-card layouts BR32 can print in. */
+export type BoardCardVariant = 'grid' | 'band' | 'row';
+
+/**
+ * The card layout this section prints in, or null for the table.
+ *
+ * Section code as well as layout: only the profile sections have cards to
+ * render, so a stray `cards_*` on any other section stays a table rather than
+ * being fed to a renderer that expects director rows.
+ */
+export function boardCardVariant(s: Pick<BoardSection, 'section_code' | 'layout'>): BoardCardVariant | null {
+  if (!BOARD_PROFILE_SECTIONS.includes(s.section_code)) return null;
+  const v = s.layout?.startsWith('cards_') ? s.layout.slice(6) : null;
+  return v === 'grid' || v === 'band' || v === 'row' ? v : null;
+}
+
+/**
+ * Sections filled by a picker on the Sources step rather than by an upload.
+ * Each is `needs_input` until a selection is saved, and no document will fix it.
+ */
+export const BOARD_PLATFORM_SECTIONS = [...BOARD_MEETING_SECTIONS, ...BOARD_PROFILE_SECTIONS];
+
+/** Which platform data a slot can be filled from instead of a file, if any. */
+export type SlotSystemKind = 'meetings' | 'profiles' | null;
+
+/**
+ * Whether this slot offers a "From system" alternative to uploading.
+ *
+ * Read off the feeds' section codes rather than the slot's name: the name is
+ * display text and gets reworded, the codes are the registry's.
+ */
+export function slotSystemKind(slot: BoardSourceSlot): SlotSystemKind {
+  if (slot.kind === 'meetings') return 'meetings';
+  if (slot.feeds.some((f) => BOARD_PROFILE_SECTIONS.includes(f.section_code))) return 'profiles';
+  return null;
+}
 
 /**
  * Whether the Refine control applies. Narrative content is now lifted verbatim
