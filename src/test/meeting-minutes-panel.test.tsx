@@ -10,12 +10,17 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const getMinutes = vi.fn();
 const saveMinutes = vi.fn();
+const listTeam = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   meetings: { minutes: { get: (id: string) => getMinutes(id), save: (id: string, body: unknown) => saveMinutes(id, body) } },
+  team: { list: (companyId: string) => listTeam(companyId) },
   ApiError: class ApiError extends Error {
     constructor(public status: number) { super(String(status)); }
   },
+}));
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ user: { user_id: 'u1', role: 'admin', company_id: 'cmp_1' } }),
 }));
 
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
@@ -42,6 +47,7 @@ describe('MeetingMinutesPanel', () => {
     getMinutes.mockReset();
     saveMinutes.mockReset();
     saveMinutes.mockResolvedValue({ minutes: null });
+    listTeam.mockReset().mockResolvedValue([]);
   });
 
   it('treats participants with no recorded answer as attended', async () => {
