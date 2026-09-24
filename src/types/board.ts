@@ -46,6 +46,30 @@ export interface BoardProfileResponse {
 /** `draft` is editable; approved/locked/published 409 every mutating endpoint. */
 export type BoardReportStatus = "draft" | "approved" | "locked" | "published" | (string & {});
 
+/**
+ * One row of `GET /board/index-failures` — an approved board report whose
+ * background embedding job failed and can be retried.
+ *
+ * There is no notifications row behind this: the backend reports the NEWEST
+ * indexing run per report, and only when it failed. That is what makes the
+ * notification self-clearing — a successful retry simply stops the report being
+ * returned, and a repeat failure brings it back.
+ */
+export interface BoardIndexFailure {
+  report_id: string;
+  period: string | null; // "FY-2025"
+  /** The `notifications` row behind this, when there is one. */
+  notification_id: string | null;
+  /** Wording comes from the backend so this bell and the shared one can't drift. */
+  title: string;
+  message: string;
+  /** "FY 2026 board report" — the report's human name, for the success toast. */
+  label: string;
+  failed_at: string | null;
+  /** The job died without warning anyone, rather than reporting a failure. */
+  stale: boolean;
+}
+
 export interface BoardReportSummary {
   report_id: string;
   period: string; // "FY-2025"

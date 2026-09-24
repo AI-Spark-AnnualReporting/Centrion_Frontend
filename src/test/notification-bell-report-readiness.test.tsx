@@ -13,6 +13,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 const listThreads = vi.fn();
 const listNotifications = vi.fn();
 const listSystemNotifications = vi.fn();
+const listIndexFailures = vi.fn();
 const markRead = vi.fn();
 const reindexEarnings = vi.fn();
 const reindexQuarterly = vi.fn();
@@ -34,6 +35,9 @@ vi.mock("@/lib/api", () => ({
   agentRuns: { getByPollUrl: (u: string) => getByPollUrl(u) },
   earnings: { reindexEarningsReport: (id: string) => reindexEarnings(id) },
   quarterlyReports: { reindexReport: (c: string, r: string) => reindexQuarterly(c, r) },
+  // Board-report index failures are a separate feed; mocked empty so it
+  // doesn't interfere with the readiness feed under test here.
+  boardReports: { listIndexFailures: () => listIndexFailures(), retryIndex: vi.fn() },
   ApiError: class extends Error {},
 }));
 vi.mock("@/context/AuthContext", () => ({ useAuth: () => auth }));
@@ -71,6 +75,7 @@ describe("report-readiness notifications", () => {
     listThreads.mockReset().mockResolvedValue({ threads: [] });
     listNotifications.mockReset().mockResolvedValue({ notifications: [readinessRow()] });
     listSystemNotifications.mockReset().mockResolvedValue({ notifications: [] });
+    listIndexFailures.mockReset().mockResolvedValue({ failures: [] });
     markRead.mockReset();
     reindexEarnings.mockReset().mockResolvedValue({ report_id: "rep-1", run_id: null, poll_url: null });
     reindexQuarterly.mockReset().mockResolvedValue({ report_id: "rep-1", run_id: null, poll_url: null });
