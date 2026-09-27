@@ -199,16 +199,14 @@ export default function CycleDetailPage() {
   // Set once the saved choice has been applied, so later refetches leave the tab alone.
   const seededRef = useRef(false);
 
-  const persistOutlineView = (v: 'previous' | 'system') => {
-    const previous = outlineView;
-    setOutlineView(v);
+  // `revertTo` is the tab to fall back to when the switch fails; a rebuild of the
+  // current choice has nowhere to fall back to, so it passes null.
+  const applyOutlineSource = (
+    v: 'previous' | 'system',
+    revertTo: 'previous' | 'system' | null,
+  ) => {
     setSectionsErr('');
     setSectionsMsg('');
-    if (!canManage || v === previous) return;
-    // The switch REBUILDS the section list, and the backend refuses it outright if any
-    // section it would clear already has work on it. So a failure has to move the tab
-    // back: leaving it where the user put it would show them a list the cycle is not
-    // actually being built from.
     setSectionsBusy(true);
     sarCycles
       .setOutlineSource(cycleId, v)
@@ -221,13 +219,33 @@ export default function CycleDetailPage() {
         );
       })
       .catch((e) => {
-        setOutlineView(previous);
+        if (revertTo) setOutlineView(revertTo);
         setSectionsErr(
           e instanceof Error ? e.message : 'Could not switch the outline.',
         );
       })
       .finally(() => setSectionsBusy(false));
   };
+
+  const persistOutlineView = (v: 'previous' | 'system') => {
+    const previous = outlineView;
+    setOutlineView(v);
+    setSectionsErr('');
+    setSectionsMsg('');
+    if (!canManage || v === previous) return;
+    // The switch REBUILDS the section list, and the backend refuses it outright if any
+    // section it would clear already has work on it. So a failure has to move the tab
+    // back: leaving it where the user put it would show them a list the cycle is not
+    // actually being built from.
+    applyOutlineSource(v, previous);
+  };
+
+  // Re-asserting the tab the cycle is already on. Not the no-op it looks like: a cycle
+  // can be built from the OTHER list — sections resolve once and are only ever added
+  // to — so the choice and the sections drift apart, and this is the way back. Kept as
+  // a labelled button rather than folded into the tab, because a tab that quietly
+  // rebuilds the report when you re-click it is not what anyone expects.
+  const rebuildOutline = () => applyOutlineSource(outlineView, null);
   // Last year's outline hangs off the REPORT it was read from, not off the cycle —
   // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
   const [prevOutline, setPrevOutline] = useState<ReportOutlineDetail | null>(null);
@@ -681,6 +699,29 @@ export default function CycleDetailPage() {
               </button>
             );
           })}
+          {canManage && (
+            <button
+              type="button"
+              onClick={rebuildOutline}
+              disabled={sectionsBusy}
+              title="Rebuild this cycle's sections from the list selected above. Any departments already assigned to a section are cleared."
+              style={{
+                marginLeft: 'auto',
+                alignSelf: 'center',
+                background: 'transparent',
+                border: 'none',
+                padding: '10px 2px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: sectionsBusy ? '#9BA3C4' : '#5A6080',
+                cursor: sectionsBusy ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+                textDecoration: 'underline',
+              }}
+            >
+              Rebuild from this list
+            </button>
+          )}
         </div>
 
         {outlineView === 'previous' && (
