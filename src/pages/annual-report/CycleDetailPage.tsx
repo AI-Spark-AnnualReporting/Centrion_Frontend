@@ -490,10 +490,12 @@ export default function CycleDetailPage() {
       )}
 
       {/* Spark staff run this cycle for a client, so they get a way straight into
-          each role's workspace. Every cycle status — unlike Assign Departments
-          (drafts only) and Department Sessions (non-drafts only), which are
-          exact complements and so leave one of the two views without it. */}
-      {user?.role === 'spark_internal' && (
+          each role's workspace — but only once departments are actually assigned
+          to it. Gated on that, not on cycle.status: activation is a separate flow
+          the PM runs later, and shouldn't hold this card back. Until departments
+          exist this would just be an empty "no departments" card sitting above
+          Assign Departments, which already owns that job on this screen. */}
+      {user?.role === 'spark_internal' && departments.length > 0 && (
         <ReportTeamCard cycle={cycle} departments={departments} pmName={pmName} />
       )}
 
