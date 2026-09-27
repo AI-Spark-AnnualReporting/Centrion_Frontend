@@ -5003,7 +5003,7 @@ export const sarCycles = {
   ): Promise<OutlineSourceResponse> =>
     sarRequest<OutlineSourceResponse>(
       `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-source`,
-      { method: "PUT", body: JSON.stringify({ outline_source: source }) },
+      { method: "PUT", body: { outline_source: source } },
     ),
 
   // Bulk-assign departments + responsible users to a draft cycle.
