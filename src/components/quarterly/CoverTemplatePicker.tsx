@@ -12,6 +12,16 @@
  * for parents that haven't been updated yet). The Branded template stays
  * hidden — three visible cards.
  *
+ * DELIBERATE DIVERGENCE from its sibling components/brand/BrandColorPicker.tsx
+ * (that file's header explains the hand-synced relationship): the COMPANY brand
+ * palette there now has five roles — primary, secondary, accent, text, light.
+ * This modal stays at two on purpose. It edits a per-REPORT brand override, and
+ * the cover layouts plus the live preview on the right consume primary and
+ * secondary only, so three more pickers here would be controls with no visible
+ * effect. BrandColors carries accent/text/light as OPTIONAL, so nothing breaks:
+ * a report override written here is simply a 2-colour object. If a cover starts
+ * rendering the other roles, add the fields and drop this note from both files.
+ *
  * Styling: Tailwind for the new panes (matches the rest of the app);
  * inline styles kept only for dynamic values (brand colour swatches,
  * variant thumbnails). This is a new pattern for THIS file — the previous

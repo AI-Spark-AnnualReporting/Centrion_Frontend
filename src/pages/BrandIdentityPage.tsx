@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
+import BrandColorPicker from '@/components/brand/BrandColorPicker';
 import BrandUploadBox from '@/components/brand/BrandUploadBox';
 import BrandVoiceCard from '@/components/brand/BrandVoiceCard';
 import { LogoColorNote, useLogoBrandColors } from '@/components/brand/LogoBrandColors';
-import { ReportDesignCard } from '@/components/brand/ReportDesignCard';
-import type { ReportDesign } from '@/components/brand/ReportDesignCard';
 import { Spinner } from '@/components/shared/Spinner';
 import { useAuth } from '@/context/AuthContext';
 import { ApiError, auth, companies, quarterlyReports } from '@/lib/api';
 import type { BrandColors, ColorPalette } from '@/types/brand';
-import type { CoverTemplate } from '@/types/quarterly';
 import {
   DOC_ACCEPT,
   DOC_EXTS,
@@ -45,15 +43,18 @@ type LogoState = { dataUri: string; name: string | null; size: number } | null;
 
 // The saved server state, for the dirty check. brand_colors is compared as the
 // whole object because that's how it's stored and how it's written.
+//
+// No `design` here on purpose: report_design is still a real, live column that
+// earnings / board / quarterly read at produce time, but it is no longer edited
+// on this page (the report look is now owned by the annual "Create Design"
+// flow). This page never reads it and never PATCHes it, so a company's saved
+// design is left exactly as it is.
 type Baseline = {
   identity: string;
   colors: BrandColors;
   logoDataUri: string | null;
-  design: ReportDesign;
   voice: BrandVoice | null;
 };
-
-const EMPTY_DESIGN: ReportDesign = { cover_template_key: null, typography: null };
 
 const FALLBACK_BRAND: BrandColors = {
   primary: FALLBACK_COLOR_PALETTES[0].primary,
@@ -70,12 +71,10 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
   const [identity, setIdentity] = useState('');
   const [colors, setColors] = useState<BrandColors>(FALLBACK_BRAND);
   const [logo, setLogo] = useState<LogoState>(null);
-  const [design, setDesign] = useState<ReportDesign>(EMPTY_DESIGN);
   const [voice, setVoice] = useState<BrandVoice | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
 
   const [palettes, setPalettes] = useState<ColorPalette[]>(FALLBACK_COLOR_PALETTES);
-  const [templates, setTemplates] = useState<CoverTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,32 +94,27 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
         const savedIdentity = company.brand_identity ?? '';
         // Hydrated the same way onboarding does, so a company that picked a
         // custom hex sees "Custom" selected rather than a stray preset.
+        // Spread the stored object so accent/text/light survive the round trip.
+        // They are optional: a company saved before the palette widened has
+        // primary/secondary alone and must hydrate exactly as it always did.
         const savedColors: BrandColors =
           company.brand_colors?.primary && company.brand_colors?.secondary
             ? {
+                ...company.brand_colors,
                 primary: company.brand_colors.primary,
                 secondary: company.brand_colors.secondary,
                 palette_key: company.brand_colors.palette_key || 'custom',
               }
             : FALLBACK_BRAND;
         const savedLogo = logoRes.logo_base64 ?? null;
-        // Unlike colours, an unset design is left EMPTY rather than seeded with a
-        // fallback: a seeded value would make the page mount dirty, and "no
-        // company default" is a real, meaningful state here.
-        const savedDesign: ReportDesign = {
-          cover_template_key: company.report_design?.cover_template_key ?? null,
-          typography: company.report_design?.typography ?? null,
-        };
-
         const savedVoice = company.brand_voice ?? null;
 
         setIdentity(savedIdentity);
         setColors(savedColors);
-        setDesign(savedDesign);
         setVoice(savedVoice);
         setVoiceStatus(company.brand_voice_status ?? null);
         setLogo(savedLogo ? { dataUri: savedLogo, name: null, size: dataUriBytes(savedLogo) } : null);
-        setBaseline({ identity: savedIdentity, colors: savedColors, logoDataUri: savedLogo, design: savedDesign, voice: savedVoice });
+        setBaseline({ identity: savedIdentity, colors: savedColors, logoDataUri: savedLogo, voice: savedVoice });
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load brand identity');
@@ -141,20 +135,6 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
         if (!cancelled && res.color_palettes?.length) setPalettes(res.color_palettes);
       })
       .catch(() => { /* keep FALLBACK_COLOR_PALETTES */ });
-    return () => { cancelled = true; };
-  }, []);
-
-  // The same catalogue the report design modal reads. Non-blocking like the
-  // palettes above: if it fails the card simply offers no layouts rather than
-  // taking the whole page down with it.
-  useEffect(() => {
-    let cancelled = false;
-    quarterlyReports
-      .getCoverTemplatesGlobal()
-      .then((res) => {
-        if (!cancelled && res.cover_templates?.length) setTemplates(res.cover_templates);
-      })
-      .catch(() => { /* card renders without layouts */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -235,7 +215,6 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
     baseline !== null &&
     (trimmedIdentity !== baseline.identity ||
       JSON.stringify(colors) !== JSON.stringify(baseline.colors) ||
-      JSON.stringify(design) !== JSON.stringify(baseline.design) ||
       JSON.stringify(voice) !== JSON.stringify(baseline.voice) ||
       (logo?.dataUri ?? null) !== baseline.logoDataUri);
 
@@ -252,11 +231,9 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
       // company value if primary is missing.
       payload.brand_colors = { ...colors };
     }
-    if (JSON.stringify(design) !== JSON.stringify(baseline.design)) {
-      // Whole object, same reason as brand_colors: the PATCH overwrites the
-      // report_design jsonb without merging.
-      payload.report_design = { ...design };
-    }
+    // report_design is deliberately NEVER in this payload. The PATCH overwrites
+    // that jsonb without merging, so sending an emptied object here would wipe a
+    // company's saved report design; omitting the key leaves it untouched.
     // Sent only when the user actually edited the rules. That distinction is
     // load-bearing on the server: a brand_voice in the same PATCH marks the voice
     // as hand-corrected and SKIPS the re-extraction a new guideline would trigger,
@@ -280,7 +257,7 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
       await companies.updateMyCompany(payload);
       // Re-baseline from the local values, not the response: PATCH returns the
       // full row including logo_base64, which GET deliberately strips.
-      setBaseline({ identity: trimmedIdentity, colors: { ...colors }, logoDataUri: nextLogo, design: { ...design }, voice });
+      setBaseline({ identity: trimmedIdentity, colors: { ...colors }, logoDataUri: nextLogo, voice });
       setIdentity(trimmedIdentity);
       // A new guideline kicks off background extraction; show the reading state
       // immediately so the card below doesn't sit on the previous voice as if
@@ -425,25 +402,48 @@ export default function BrandIdentityPage({ hideHeading }: { hideHeading?: boole
             onChange={setVoice}
           />
 
-          {/* ── Report design ─────────────────────────────────────
-              Two panes — the settings, and one live page of the result. The
-              card itself is deliberately uncapped: it sits under two
-              full-width siblings, and capping only this one is what left a
-              band of empty page down its right. The measures that the old cap
-              was really protecting now sit on the controls inside it. */}
-          <ReportDesignCard
-            templates={templates}
-            palettes={palettes}
-            colors={colors}
-            design={design}
-            logoUrl={logo?.dataUri ?? null}
-            canEdit={canEdit}
-            // forget() first — a colour picked by hand must not be relabelled
-            // as "set from your logo", nor overwritten by a detection still in
-            // flight.
-            onColorsChange={(next) => { logoColors.forget(); setColors(next); }}
-            onDesignChange={setDesign}
-          />
+          {/* ── Brand colors ──────────────────────────────────────
+              Colours ONLY. The cover-template picker, the typography controls
+              and the A4 sample preview that used to live here (in
+              ReportDesignCard) are gone: designing a report is now the annual
+              "Create Design" flow's job, and this page was a stale second
+              answer to the same question. The report_design column, its API
+              field and everything that reads it are untouched — this page just
+              no longer edits it. */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="ch">
+              <div>
+                <div className="ct">Brand colors</div>
+                <div style={{ fontSize: 10, color: '#9BA3C4', marginTop: 2 }}>
+                  Used for headings, table headers and accents across your reports
+                </div>
+              </div>
+              {/* Only the roles this company has actually set — an older
+                  2-colour company still shows two chips, not three blanks. */}
+              <span aria-hidden style={{ display: 'inline-flex', borderRadius: 999, overflow: 'hidden', border: '1px solid rgba(0,0,0,.1)' }}>
+                {[colors.primary, colors.secondary, colors.accent, colors.text, colors.light]
+                  .filter(Boolean)
+                  .map((c, i) => (
+                    <span key={i} style={{ width: 18, height: 14, background: c }} />
+                  ))}
+              </span>
+            </div>
+            <div className="cb">
+              <fieldset disabled={!canEdit} style={{ border: 0, margin: 0, padding: 0 }}>
+                <BrandColorPicker
+                  palettes={palettes}
+                  value={colors}
+                  // The sample cover names this company. Onboarding has no name
+                  // yet and falls back to "Your Company" — never to a real one.
+                  companyName={user?.company_name ?? undefined}
+                  // forget() first — a colour picked by hand must not be
+                  // relabelled as "set from your logo", nor overwritten by a
+                  // detection still in flight.
+                  onChange={(next) => { logoColors.forget(); setColors(next); }}
+                />
+              </fieldset>
+            </div>
+          </div>
 
           {error && <Banner tone="error" spaced>{error}</Banner>}
           {success && <Banner tone="success" spaced>{success}</Banner>}

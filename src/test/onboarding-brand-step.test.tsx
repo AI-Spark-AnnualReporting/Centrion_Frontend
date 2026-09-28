@@ -310,11 +310,71 @@ describe("brand colors", () => {
     );
   });
 
-  it("warns when the primary is too pale to read as an accent", async () => {
+  // The company palette is five roles. Only primary/secondary are guaranteed:
+  // every company created before it widened has just those two, and so does
+  // every preset the server serves — hence the three optional roles.
+  it("offers all five role fields in custom mode", async () => {
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+    for (const role of ["primary", "secondary", "accent", "text", "light"]) {
+      expect(await screen.findByLabelText(new RegExp(`${role} hex value`, "i")))
+        .toBeInTheDocument();
+    }
+  });
+
+  it("leaves the three new roles EMPTY for a 2-colour company", async () => {
+    await setup({ brandColors: DEFAULT_BRAND });   // primary + secondary only
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+
+    expect((await screen.findByLabelText(/primary hex value/i) as HTMLInputElement).value)
+      .toBe("#3C0866");
+    for (const role of ["accent", "text", "light"]) {
+      const field = screen.getByLabelText(new RegExp(`${role} hex value`, "i")) as HTMLInputElement;
+      expect(field.value).toBe("");
+    }
+  });
+
+  it("setting a new role keeps the two the company already had", async () => {
+    const props = await setup({ brandColors: DEFAULT_BRAND });
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+    fireEvent.change(await screen.findByLabelText(/accent hex value/i), {
+      target: { value: "#8B5CF6" },
+    });
+    expect(props.onBrandColorsChange).toHaveBeenCalledWith({
+      primary: "#3C0866",
+      secondary: "#5BC9E2",
+      accent: "#8b5cf6",   // normalizeHex lowercases what the user typed
+      palette_key: "custom",
+    });
+  });
+
+  it("picking a preset does not clear the roles the preset omits", async () => {
+    // Server presets name primary/secondary only. Choosing one must not throw
+    // away an accent the user picked by hand.
+    const props = await setup({
+      brandColors: { ...DEFAULT_BRAND, accent: "#8B5CF6", palette_key: "custom" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /navy & gold/i }));
+    expect(props.onBrandColorsChange).toHaveBeenCalledWith({
+      primary: "#0A1F44",
+      secondary: "#C9A227",
+      accent: "#8B5CF6",
+      palette_key: "navy_gold",
+    });
+  });
+
+  it("warns when the primary is too pale to read, and names the role", async () => {
     await setup({ brandColors: { primary: "#FAFAFA", secondary: "#C9A227", palette_key: "custom" } });
     await waitFor(() =>
-      expect(screen.getByText(/hard to read as an accent/i)).toBeInTheDocument(),
+      // Gold secondary is 2.4:1 on white too, so the warning names both roles.
+      expect(screen.getByText(/Primary and Secondary are pale against white/i)).toBeInTheDocument(),
     );
+  });
+
+  it("does not warn on a palette that reads fine on white", async () => {
+    await setup({ brandColors: { primary: "#0B5D3B", secondary: "#334155", palette_key: "custom" } });
+    await waitFor(() => expect(screen.getByText(/Financial highlights/i)).toBeInTheDocument());
+    expect(screen.queryByText(/pale against white/i)).not.toBeInTheDocument();
   });
 
   it("tells the user where these colors get used", async () => {
