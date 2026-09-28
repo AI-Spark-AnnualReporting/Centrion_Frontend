@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
@@ -194,6 +194,58 @@ export default function CycleDetailPage() {
   // The Outline card shows two things: the structure of the report this company
   // published last year (default), and the section list this cycle will produce.
   const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
+  // Picking a tab is a real choice, not just a view: it decides which sections this
+  // cycle is built from, and whether each department is told which of them it feeds.
+  // Set once the saved choice has been applied, so later refetches leave the tab alone.
+  const seededRef = useRef(false);
+
+  // `revertTo` is the tab to fall back to when the switch fails; a rebuild of the
+  // current choice has nowhere to fall back to, so it passes null.
+  const applyOutlineSource = (
+    v: 'previous' | 'system',
+    revertTo: 'previous' | 'system' | null,
+  ) => {
+    setSectionsErr('');
+    setSectionsMsg('');
+    setSectionsBusy(true);
+    sarCycles
+      .setOutlineSource(cycleId, v)
+      .then((res) => {
+        setSections(res.sections ?? []);
+        setSectionsMsg(
+          v === 'previous'
+            ? `Using this company's own sections — ${res.sections?.length ?? 0} in the report.`
+            : `Using the standard sections — ${res.sections?.length ?? 0} in the report.`,
+        );
+      })
+      .catch((e) => {
+        if (revertTo) setOutlineView(revertTo);
+        setSectionsErr(
+          e instanceof Error ? e.message : 'Could not switch the outline.',
+        );
+      })
+      .finally(() => setSectionsBusy(false));
+  };
+
+  const persistOutlineView = (v: 'previous' | 'system') => {
+    const previous = outlineView;
+    setOutlineView(v);
+    setSectionsErr('');
+    setSectionsMsg('');
+    if (!canManage || v === previous) return;
+    // The switch REBUILDS the section list, and the backend refuses it outright if any
+    // section it would clear already has work on it. So a failure has to move the tab
+    // back: leaving it where the user put it would show them a list the cycle is not
+    // actually being built from.
+    applyOutlineSource(v, previous);
+  };
+
+  // Re-asserting the tab the cycle is already on. Not the no-op it looks like: a cycle
+  // can be built from the OTHER list — sections resolve once and are only ever added
+  // to — so the choice and the sections drift apart, and this is the way back. Kept as
+  // a labelled button rather than folded into the tab, because a tab that quietly
+  // rebuilds the report when you re-click it is not what anyone expects.
+  const rebuildOutline = () => applyOutlineSource(outlineView, null);
   // Last year's outline hangs off the REPORT it was read from, not off the cycle —
   // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
   const [prevOutline, setPrevOutline] = useState<ReportOutlineDetail | null>(null);
@@ -218,7 +270,17 @@ export default function CycleDetailPage() {
     setDeptBusy(true);
     return sarCycles
       .overview(cycleId)
-      .then(setOverview)
+      .then((res) => {
+        setOverview(res);
+        // Seed the tab from what was saved, so the choice survives a reload. Only on
+        // load — a later fetchOverview (after assigning departments, say) must not
+        // yank the tab out from under someone mid-edit.
+        const saved = res?.cycle?.outline_source;
+        if (saved === 'previous' || saved === 'system') {
+          setOutlineView((cur) => (seededRef.current ? cur : saved));
+          seededRef.current = true;
+        }
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load cycle.'))
       .finally(() => setDeptBusy(false));
   };
@@ -617,7 +679,7 @@ export default function CycleDetailPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setOutlineView(v.key)}
+                onClick={() => persistOutlineView(v.key)}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -639,6 +701,29 @@ export default function CycleDetailPage() {
               </button>
             );
           })}
+          {canManage && (
+            <button
+              type="button"
+              onClick={rebuildOutline}
+              disabled={sectionsBusy}
+              title="Rebuild this cycle's sections from the list selected above. Any departments already assigned to a section are cleared."
+              style={{
+                marginLeft: 'auto',
+                alignSelf: 'center',
+                background: 'transparent',
+                border: 'none',
+                padding: '10px 2px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: sectionsBusy ? '#9BA3C4' : '#5A6080',
+                cursor: sectionsBusy ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+                textDecoration: 'underline',
+              }}
+            >
+              Rebuild from this list
+            </button>
+          )}
         </div>
 
         {outlineView === 'previous' && (
@@ -648,7 +733,7 @@ export default function CycleDetailPage() {
               loading={outlineLoading}
               error={outlineErr}
               onRetry={() => setOutlineReload((n) => n + 1)}
-              onShowSystem={() => setOutlineView('system')}
+              onShowSystem={() => persistOutlineView('system')}
             />
           </div>
         )}

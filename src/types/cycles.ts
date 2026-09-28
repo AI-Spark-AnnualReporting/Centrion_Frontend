@@ -14,6 +14,9 @@ export type CycleStatus =
 export interface Cycle {
   id: string;
   company_id: string;
+  // Which outline this cycle's department questions are shaped by. 'system' is the
+  // default and leaves the existing question pipeline untouched.
+  outline_source?: 'previous' | 'system';
   // Renamed fields carry both names — the SAR request contract uses
   // cycle_name/start_date/end_date/sector/is_shariah; older shapes used
   // name/cycle_*_date/sector_id/is_shariah_compliant. Read defensively.
@@ -123,6 +126,10 @@ export interface CycleSection {
   content_source?: string | null;
   ai_allowed?: boolean;
   mode: SectionMode;
+  // false = nobody has chosen this section's mode yet; `mode` is a placeholder and the
+  // PM's plan screen blocks Continue until they pick. Sections the extraction-time
+  // classifier was at least 95% sure about arrive true.
+  mode_confirmed?: boolean;
   status: SectionStatus;
   display_order?: number;
   verified?: boolean;
@@ -130,6 +137,16 @@ export interface CycleSection {
   attachment?: unknown;
   content?: unknown;
   feeders?: unknown[];
+}
+
+// PUT /api/v1/admin/cycles/{id}/outline-source response. Switching REBUILDS the cycle's
+// section list rather than adding to it, so it answers with the new list — and it is
+// refused outright (409) if any section it would clear already has work on it.
+export interface OutlineSourceResponse {
+  cycle_id: string;
+  outline_source: "previous" | "system";
+  sections_created: number;
+  sections: CycleSection[];
 }
 
 // POST /api/v1/admin/cycles/{id}/resolve-sections response.
