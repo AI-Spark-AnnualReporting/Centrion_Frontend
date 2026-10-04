@@ -45,10 +45,9 @@ vi.mock("@/lib/api", () => ({
   },
   quarterlyReports: {
     getColorPalettesGlobal: () => getColorPalettesGlobal(),
-    // The Report design card reads the cover catalogue. The page calls this
-    // OUTSIDE any try, so an undefined member throws synchronously in the effect
-    // and takes every test in this file down with it, not just the ones that
-    // assert on layouts.
+    // The page no longer reads the cover catalogue (the report-design UI moved
+    // to the annual "Create Design" flow). Kept in the mock only so this file
+    // stays a faithful stand-in for the module if the page ever calls it again.
     getCoverTemplatesGlobal: () => getCoverTemplatesGlobal(),
   },
   ApiError: class ApiError extends Error {
@@ -138,6 +137,17 @@ describe("Brand Identity page — what it shows", () => {
     expect(saveButton()).toBeDisabled();
   });
 
+  it("offers colors only — no cover picker, typography or sample page", async () => {
+    // Designing a report belongs to the annual "Create Design" flow; this page
+    // holds the brand values, so the stale report-design UI is gone.
+    await setup();
+    expect(screen.queryByText(/cover design/i)).toBeNull();
+    expect(screen.queryByText(/^report design$/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^cover$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^page$/i })).toBeNull();
+    expect(screen.getByText(/^brand colors$/i)).toBeTruthy();
+  });
+
   it("shows the guideline character count against the cap", async () => {
     await setup();
     // Queried by class because `{n} / {max}` renders as separate text nodes.
@@ -177,6 +187,101 @@ describe("Brand Identity page — the save payload", () => {
     expect(updateMyCompany).toHaveBeenCalledWith({
       brand_colors: { primary: "#3C0866", secondary: "#5BC9E2", palette_key: "violet_cyan" },
     });
+  });
+
+  // ── the five-role palette ──────────────────────────────────────────────
+  // primary/secondary are the only guaranteed roles: accent/text/light arrived
+  // later, so a company saved before then has neither the keys nor a default.
+
+  it("renders the three new roles EMPTY for a 2-colour company", async () => {
+    await setup();   // SAVED_COLORS is primary + secondary only
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+
+    expect((screen.getByLabelText(/primary hex value/i) as HTMLInputElement).value)
+      .toBe("#0A1F44");
+    for (const role of ["accent", "text", "light"]) {
+      const field = screen.getByLabelText(new RegExp(`${role} hex value`, "i")) as HTMLInputElement;
+      expect(field.value).toBe("");
+    }
+    // Nothing was touched, so there is still nothing to save.
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it("a 2-colour company saves unchanged — no empty new keys sneak in", async () => {
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+    fireEvent.change(textarea(), { target: { value: "Voice: warm." } });
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    // Merely LOOKING at the five fields must not dirty the colours, and must
+    // not write accent/text/light as empty strings into the jsonb.
+    expect(updateMyCompany).toHaveBeenCalledWith({ brand_identity: "Voice: warm." });
+  });
+
+  it("sends all five roles as ONE complete object", async () => {
+    await setup();
+    fireEvent.click(screen.getByRole("button", { name: /^custom$/i }));
+    for (const [role, hex] of [
+      ["accent", "#8B5CF6"], ["text", "#1A1D2E"], ["light", "#EDE9F5"],
+    ] as const) {
+      fireEvent.change(screen.getByLabelText(new RegExp(`${role} hex value`, "i")), {
+        target: { value: hex },
+      });
+    }
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    // Complete, primary included: PATCH overwrites the whole jsonb with no
+    // merge, and the backend drops the value entirely without primary.
+    expect(updateMyCompany).toHaveBeenCalledWith({
+      brand_colors: {
+        primary: "#0A1F44",
+        secondary: "#C9A227",
+        accent: "#8b5cf6",
+        text: "#1a1d2e",
+        light: "#ede9f5",
+        palette_key: "custom",
+      },
+    });
+  });
+
+  it("logo detection fills primary/secondary only, keeping the other roles", async () => {
+    // Auto-deriving accent/text/light from a logo was explicitly deferred, so
+    // a logo upload must not blank the three the user chose by hand.
+    await setup({
+      brand_colors: { ...SAVED_COLORS, accent: "#8b5cf6", light: "#ede9f5" },
+    });
+    fireEvent.change(fileInputs()[0], { target: { files: [pngFile("new-mark.png")] } });
+    await screen.findByRole("button", { name: /undo/i });
+
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    expect(updateMyCompany).toHaveBeenCalledWith(expect.objectContaining({
+      brand_colors: {
+        primary: "#0A5F55", secondary: "#E4A11B", palette_key: "custom",
+        accent: "#8b5cf6", light: "#ede9f5",
+      },
+    }));
+  });
+
+  it("NEVER sends report_design, even for a company that has one saved", async () => {
+    // The report look is designed in the annual "Create Design" flow now, not
+    // here. report_design is still a live column that earnings, board and
+    // quarterly read at produce time, and PATCH overwrites that jsonb with no
+    // merge — so a stray (or emptied) key in this payload would silently wipe
+    // a company's saved design.
+    await setup({
+      report_design: {
+        cover_template_key: "bold",
+        typography: { heading_font: "Inter", body_font: "Inter" },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /violet & cyan/i }));
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMyCompany).toHaveBeenCalled());
+    expect(updateMyCompany.mock.calls[0][0]).not.toHaveProperty("report_design");
   });
 
   it("sends null — not an empty string — when the guideline is cleared", async () => {

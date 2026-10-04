@@ -709,6 +709,18 @@ body {
 }
 .ob-logo-remove:hover { border-color: #F4B5B7; background: #FEF2F2; color: #DC2626; }
 .brand-pill:hover { border-color: #C7CBF0; }
+
+/* The colour-role legend. Buttons, so they need a focus ring that a keyboard
+   user can actually see — these five are the only way in to "show me where
+   this colour lands" without a mouse. */
+.brand-role-note:hover { background: #F1F2FA; }
+.brand-role-note:focus-visible {
+  outline: 2px solid #4040C8;
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-role-note, .brand-role-note * { transition: none !important; }
+}
 /* Compact variant of .ob-drop — same height as .ob-logo-preview so the field
    doesn't change size when a file is picked. The full-size .ob-drop is left
    alone: CompanyIntelStep (step 1) still uses it. */
