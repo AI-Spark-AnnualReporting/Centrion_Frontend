@@ -16,6 +16,7 @@ import {
 import type { EarningsProducedSection } from '@/types/earnings';
 import type { AssembledSection, BrandColors } from '@/types/quarterly';
 import type { BoardAssembledSection } from '@/types/board';
+import { ValidationPanel } from './ValidationPanel';
 import { isBoardCoverSection, numberBoardHeadings } from '@/pages/annual-report/board-helpers';
 import { SectionRenderer } from '@/components/earnings/SectionRenderer';
 import { SectionContent } from '@/components/quarterly/SectionContent';
@@ -262,6 +263,9 @@ export function ReviewerView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ReviewViewResponse | null>(null);
+  // Which pane the reviewer is on. Local to the modal - it is an overlay,
+  // not a route, so there is no URL to keep in step.
+  const [tab, setTab] = useState<'report' | 'validation'>('report');
 
   // Which section's composer is open. `null` = the report-level composer.
   const [composerFor, setComposerFor] = useState<string | null | undefined>(undefined);
@@ -634,6 +638,10 @@ export function ReviewerView({
       })
     : allSections;
 
+  // Null for a quarterly or earnings review, a report never validated, and
+  // a validation the server judged stale.
+  const hasValidation = !!data?.validation;
+
   return (
     <div
       className="modal-overlay"
@@ -756,6 +764,36 @@ export function ReviewerView({
           >
             {/* Report + sections */}
             <div style={{ overflowY: 'auto', padding: '18px 24px 24px', background: '#F4F5FA', minWidth: 0 }}>
+              {/* Tabs only when there is a second thing to show. Only annual
+                  reports are validated, so most reviews keep one pane. */}
+              {hasValidation && (
+                <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+                  {(['report', 'validation'] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setTab(key)}
+                      style={{
+                        border: 'none',
+                        cursor: 'pointer',
+                        borderRadius: 9,
+                        padding: '7px 14px',
+                        fontSize: 13,
+                        fontWeight: 800,
+                        letterSpacing: '-.1px',
+                        background: tab === key ? '#fff' : 'transparent',
+                        color: tab === key ? '#1A1D2E' : '#8890AE',
+                        boxShadow: tab === key ? '0 1px 2px rgba(26,29,46,.08)' : 'none',
+                      }}
+                    >
+                      {key === 'report' ? 'Report' : 'Validation'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {tab === 'report' && (
+              <>
               {/* Reviewing instructions, so only where a review is happening.
                   The exception is the removal notice: someone reading a thread
                   they were taken out of needs to know why it is read-only. */}
@@ -1043,6 +1081,14 @@ export function ReviewerView({
                   </div>
                 )}
               </div>
+              )}
+              </>
+              )}
+
+              {tab === 'validation' && data?.validation && (
+                <div style={{ maxWidth: 940, margin: '0 auto' }}>
+                  <ValidationPanel validation={data.validation} />
+                </div>
               )}
             </div>
 
