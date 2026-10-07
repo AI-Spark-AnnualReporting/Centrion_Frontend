@@ -29,6 +29,19 @@ export function redirectToApp(app: AppKey): boolean {
   return true;
 }
 
+// A token-handoff link to one page of the spark_studio app, e.g. the Annual
+// Report Validator. `back` is this page, so that app's back button returns
+// here. No `company`: callers that need one build their own (see
+// ReportTeamCard.workspaceUrl). Returns null when there is no token to hand
+// over, so the caller can do nothing rather than open a login page.
+export function sparkStudioUrl(path: string): string | null {
+  const url = APP_URLS.spark_studio;
+  const token = getToken();
+  if (!url || !token) return null;
+  const qs = new URLSearchParams({ token, next: path, back: window.location.href });
+  return `${url}/auth/token?${qs.toString()}`;
+}
+
 // Whether this user's default_app keeps them in Centriton. Defaults to
 // staying in-app when default_app is missing (e.g. a pre-migration cached
 // session) rather than bouncing them out.

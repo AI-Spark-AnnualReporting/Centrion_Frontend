@@ -37,6 +37,13 @@ vi.mock("@/lib/features", () => ({
   isFeatureVisible: () => true,
 }));
 
+// The handoff link is built from the stored token and the app URL; here it only
+// has to say which page it was asked for.
+const sparkStudioUrl = vi.fn((path: string) => `http://sar.test/auth/token?next=${path}`);
+vi.mock("@/lib/appRouting", () => ({
+  sparkStudioUrl: (path: string) => sparkStudioUrl(path),
+}));
+
 const { Sidebar } = await import("@/components/layout/Sidebar");
 
 const SPARK = { user_id: "usr_s", full_name: "Spark", email: "spark@wearespark.me", role: "spark_internal" };
@@ -202,5 +209,44 @@ describe("sidebar for everyone else", () => {
     fireEvent.click(screen.getByText("Admin Console"));
     expect(screen.getByText("Users & Roles")).toBeInTheDocument();
     expect(screen.getByText("Departments")).toBeInTheDocument();
+  });
+
+  it("does not give an admin the Annual Report Validator", () => {
+    renderSidebar();
+    expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+  });
+});
+
+// It checks an EXTERNAL report, which belongs to no client - so unlike every
+// other Spark link it is offered before a client is picked too.
+describe("Annual Report Validator link for spark_internal", () => {
+  it.each([
+    ["with a client picked", { id: "cmp_1", name: "Acme" }],
+    ["on the Companies page, before a client is picked", null],
+  ])("shows %s", (_label, actingCompany) => {
+    mockAuth = { user: SPARK, logout: vi.fn(), leaveCompany, actingCompany };
+    renderSidebar();
+    expect(screen.getByText("Annual Report Validator")).toBeInTheDocument();
+  });
+
+  it("opens the validator page in the annual reporting app", () => {
+    mockAuth = { user: SPARK, logout: vi.fn(), leaveCompany, actingCompany: null };
+    const original = window.location;
+    const visited: string[] = [];
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...original, set href(value: string) { visited.push(value); } },
+    });
+    try {
+      renderSidebar();
+      fireEvent.click(screen.getByText("Annual Report Validator"));
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: original });
+    }
+
+    expect(sparkStudioUrl).toHaveBeenCalledWith("/pm/annual-report-validator");
+    expect(visited).toEqual(["http://sar.test/auth/token?next=/pm/annual-report-validator"]);
+    // Leaving for the other app must not drop the client Spark was working in.
+    expect(leaveCompany).not.toHaveBeenCalled();
   });
 });

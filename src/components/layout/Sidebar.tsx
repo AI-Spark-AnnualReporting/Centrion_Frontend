@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
 import { isAdminLevel, type BackendRole } from '@/constants/roles';
+import { sparkStudioUrl } from '@/lib/appRouting';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. (ESG Validator lives under
@@ -245,6 +246,20 @@ export function Sidebar() {
               </svg>
             </span>
             Companies
+          </button>
+          {/* The Annual Report Validator checks an EXTERNAL report against the
+              brief, concept messages and tone uploaded with it - it belongs to
+              no client, so it is offered with or without one picked, and the
+              link carries no company. It lives in the spark_studio app. */}
+          <button
+            className="sb-item"
+            onClick={() => {
+              const url = sparkStudioUrl('/pm/annual-report-validator');
+              if (url) window.location.href = url;
+            }}
+          >
+            {icons.doc}
+            Annual Report Validator
           </button>
           <div className="sb-div" />
         </div>
