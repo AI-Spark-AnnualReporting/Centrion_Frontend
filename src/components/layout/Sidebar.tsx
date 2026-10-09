@@ -36,14 +36,23 @@ const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: F
   { key: 'board', label: 'Board Report', path: '/board-report', featureKey: 'board_report' },
 ];
 
-// Sub-sections shown when the "Reports Validator" item is expanded — the two
-// validation/compliance-checking tools, kept separate from the report
+// Sub-sections shown when the "Reports Validator" item is expanded — the
+// three validation/compliance-checking tools, kept separate from the report
 // generation flows above so "Reports" isn't overloaded with unrelated tools.
-const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean }[] = [
+// featureKey is optional: Annual Report Validator is gated by role instead
+// (adminOnly), not a visible_features flag — it has no backend feature-key
+// plumbing yet, so a featureKey here would fail closed for everyone (see the
+// board_report warning in constants/features.ts).
+const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; featureKey?: FeatureKey; adminOnly?: boolean; end?: boolean }[] = [
   // `end` → highlight only on an exact /reports match, so this isn't also
   // "active" on /reports/quarterly (which startsWith('/reports')).
   { key: 'esg', label: 'ESG Validator', path: '/reports', featureKey: 'esg_validator', end: true },
   { key: 'compliance', label: 'Compliance Validation', path: '/compliance', featureKey: 'compliance_validation' },
+  // Native to Centriyon (unlike Spark's own button under Companies, which
+  // hands off to the SAR app — it has no company context to reach this from).
+  // This is the admin-side entry point, reached once an admin is already
+  // inside their own company.
+  { key: 'annual-report-validator', label: 'Annual Report Validator', path: '/annual-report-validator', adminOnly: true },
 ];
 
 // Sub-sections shown when the "Profile" item is expanded — User Profile
@@ -183,8 +192,10 @@ export function Sidebar() {
       isVisible(child.featureKey) &&
       (!child.allowedRoles || (user && child.allowedRoles.includes(user.role as 'admin' | 'ir'))),
   );
-  const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter((child) =>
-    isVisible(child.featureKey),
+  const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter(
+    (child) =>
+      (!child.featureKey || isVisible(child.featureKey)) &&
+      (!child.adminOnly || isAdminLevel(user?.role)),
   );
   const visibleAdminChildren = ADMIN_CHILDREN.filter(
     (child) => !child.allowedRoles || (!!user && child.allowedRoles.includes(user.role)),

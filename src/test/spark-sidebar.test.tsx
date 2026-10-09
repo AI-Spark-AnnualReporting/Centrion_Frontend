@@ -211,9 +211,23 @@ describe("sidebar for everyone else", () => {
     expect(screen.getByText("Departments")).toBeInTheDocument();
   });
 
-  it("does not give an admin the Annual Report Validator", () => {
+  it("gives an admin the Annual Report Validator, under Reports Validator", () => {
     renderSidebar();
+    // Collapsed behind the accordion by default, same as ESG Validator and
+    // Compliance Validation sitting next to it.
     expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    expect(screen.getByText("Annual Report Validator")).toBeInTheDocument();
+  });
+
+  it("opens the validator page in-app for an admin, not a hand-off", () => {
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    fireEvent.click(screen.getByText("Annual Report Validator"));
+
+    // Unlike Spark's link, this one stays inside Centriyon.
+    expect(sparkStudioUrl).not.toHaveBeenCalled();
+    expect(screen.getByTestId("path")).toHaveTextContent("/annual-report-validator");
   });
 });
 
