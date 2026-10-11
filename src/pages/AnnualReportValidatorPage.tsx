@@ -56,8 +56,10 @@ type RunState =
   // server actually handing back a new job id - the loader shows right away
   // (see RunningView), it just has nothing to poll yet.
   | { stage: "running"; jobId: string | null }
-  | { stage: "results"; jobId: string; validation: ReportValidation }
-  | { stage: "failed"; jobId: string; message: string };
+  // retryable: whether "Validate again" can work - a run that failed while
+  // reading its concepts or tone saved nothing to re-run with.
+  | { stage: "results"; jobId: string; validation: ReportValidation; retryable: boolean }
+  | { stage: "failed"; jobId: string; message: string; retryable: boolean };
 
 export default function AnnualReportValidatorPage() {
   const [run, setRun] = useState<RunState>({ stage: "form" });
@@ -114,9 +116,17 @@ export default function AnnualReportValidatorPage() {
           title="Annual Report Validator"
           description={`${run.validation.filename ?? "External report"} — checked ${checkedAt(run.validation.validated_at)}`}
           action={
-            <Button variant="outline" onClick={() => retry(run.jobId)}>
-              Validate again
-            </Button>
+            run.retryable ? (
+              <Button variant="outline" onClick={() => retry(run.jobId)}>
+                Validate again
+              </Button>
+            ) : (run.validation.skipped ?? []).length > 0 ? (
+              // A check was skipped for an input with nothing usable in it -
+              // re-running the same input would only skip it again.
+              <Button variant="outline" onClick={goBack}>
+                Start a new validation
+              </Button>
+            ) : undefined
           }
         />
         <AnnualReportValidationPanel validation={run.validation} />
@@ -137,9 +147,13 @@ export default function AnnualReportValidatorPage() {
             <p className="mt-0.5 text-sm text-rose-800">{run.message}</p>
           </div>
         </div>
-        <Button onClick={() => retry(run.jobId)}>
-          Validate again
-        </Button>
+        {/* "Validate again" only when the run saved what a retry needs;
+            otherwise it only led to "This run didn't save enough to retry". */}
+        {run.retryable ? (
+          <Button onClick={() => retry(run.jobId)}>Validate again</Button>
+        ) : (
+          <Button onClick={goBack}>Start a new validation</Button>
+        )}
       </div>
     );
   }
@@ -155,21 +169,32 @@ export default function AnnualReportValidatorPage() {
       return;
     }
     if (job.status === "failed") {
-      setRun({ stage: "failed", jobId: job.job_id, message: job.error || "Validation failed. Please try again." });
+      setRun({
+        stage: "failed",
+        jobId: job.job_id,
+        message: job.error || "Validation failed. Please try again.",
+        retryable: job.retryable === true,
+      });
       return;
     }
     try {
       const full = await sarValidator.poll(job.job_id);
       if (full.status === "completed" && full.validation) {
-        setRun({ stage: "results", jobId: job.job_id, validation: full.validation });
+        setRun({ stage: "results", jobId: job.job_id, validation: full.validation, retryable: full.retryable !== false });
       } else {
-        setRun({ stage: "failed", jobId: job.job_id, message: full.error || "Validation failed. Please try again." });
+        setRun({
+          stage: "failed",
+          jobId: job.job_id,
+          message: full.error || "Validation failed. Please try again.",
+          retryable: full.retryable === true,
+        });
       }
     } catch (err) {
       setRun({
         stage: "failed",
         jobId: job.job_id,
         message: err instanceof ApiError ? err.message : "Couldn't open this validation.",
+        retryable: false,
       });
     }
   }
@@ -215,18 +240,23 @@ function RunningView({
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof ApiError ? err.message : "Validation failed. Please try again.";
-          setTerminal({ stage: "failed", jobId, message });
+          setTerminal({ stage: "failed", jobId, message, retryable: false });
         }
         return;
       }
       if (cancelled) return;
 
       if (job.status === "completed" && job.validation) {
-        setTerminal({ stage: "results", jobId, validation: job.validation });
+        setTerminal({ stage: "results", jobId, validation: job.validation, retryable: job.retryable !== false });
         return;
       }
       if (job.status === "failed") {
-        setTerminal({ stage: "failed", jobId, message: job.error || "Validation failed. Please try again." });
+        setTerminal({
+          stage: "failed",
+          jobId,
+          message: job.error || "Validation failed. Please try again.",
+          retryable: job.retryable === true,
+        });
         return;
       }
 

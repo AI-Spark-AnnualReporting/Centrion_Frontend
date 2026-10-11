@@ -73,6 +73,9 @@ export interface ReportValidation {
   // false on an external report (Annual Report Validator), which has no
   // sources to trace figures to. Absent on older results, which all traced.
   figure_tracing?: boolean
+  // Checks that didn't run because their input held nothing usable (e.g. a
+  // concepts file with no messages), with the reason.
+  skipped?: { check: string; file: string | null; reason: string }[]
   // The uploaded file's name, on an external report only.
   filename?: string
 }
@@ -117,6 +120,9 @@ export interface ValidationJob {
   stage: string | null
   validation: ReportValidation | null
   error: string | null
+  // Whether "Validate again" can re-run it without a new upload. False for a
+  // run that failed while reading its inputs (nothing was saved to reuse).
+  retryable?: boolean
 }
 
 // One row of GET /pm/validation-jobs (list) - lightweight, so the gallery
@@ -131,4 +137,6 @@ export interface ValidationJobSummary {
   created_at: string
   score: number | null
   error: string | null
+  // Same meaning as ValidationJob.retryable.
+  retryable?: boolean
 }

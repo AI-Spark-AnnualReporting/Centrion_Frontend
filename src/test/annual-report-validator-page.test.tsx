@@ -154,7 +154,7 @@ describe("Annual Report Validator page", () => {
 
   it("shows the job's own error and lets the admin go back", async () => {
     start.mockResolvedValue({ job_id: "job_1" });
-    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read." });
+    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read.", retryable: true });
 
     await renderPage();
     fillMinimalForm();
@@ -232,6 +232,25 @@ describe("Annual Report Validator page", () => {
     expect(poll).not.toHaveBeenCalled();
   });
 
+  // A run that failed while reading its inputs saved nothing to re-run with:
+  // offering "Validate again" only led to "This run didn't save enough to retry".
+  it.each([
+    [false, "Start a new validation", "Validate again"],
+    [true, "Validate again", "Start a new validation"],
+  ])("a failed card with retryable=%s offers %s", async (retryable, shown, hidden) => {
+    list.mockResolvedValue([
+      { job_id: "job_failed", filename: "stc.docx", status: "failed", created_at: "2026-10-01T00:00:00Z",
+        score: null, error: "No concept messages could be found in this file. Type them instead.", retryable },
+    ]);
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByText("stc.docx")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("stc.docx"));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: shown })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: hidden })).not.toBeInTheDocument();
+  });
+
   it("opens a running card back into the polling screen", async () => {
     list.mockResolvedValue([
       { job_id: "job_running", filename: "still-going.pdf", status: "running", created_at: "2026-10-01T00:00:00Z", score: null, error: null },
@@ -277,7 +296,7 @@ describe("Annual Report Validator page", () => {
 
   it("retries a failed run the same way, from the failure screen", async () => {
     start.mockResolvedValue({ job_id: "job_1" });
-    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read." });
+    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read.", retryable: true });
     retry.mockResolvedValue({ job_id: "job_2" });
 
     await renderPage();
@@ -296,7 +315,7 @@ describe("Annual Report Validator page", () => {
 
   it("reports a failed retry as a toast and leaves the failure screen as it was", async () => {
     start.mockResolvedValue({ job_id: "job_1" });
-    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read." });
+    poll.mockResolvedValue({ job_id: "job_1", status: "failed", stage: null, validation: null, error: "The report could not be read.", retryable: true });
     retry.mockRejectedValue(
       new MockApiError(422, "Unprocessable Content", { detail: "This run didn't save enough to retry." }, "/validation-jobs/job_1/retry"),
     );
@@ -342,3 +361,78 @@ function fillMinimalForm() {
     target: { value: "We say we, never leverage." },
   });
 }
+
+describe("Annual Report Validator page - a check that didn't run", () => {
+  it("shows why, in a notice, the Overall table and the card", async () => {
+    const reason =
+      "No concept messages were found in 'Concept_Messages_General_Template.docx'. It may explain what concept messages are without containing any.";
+    list.mockResolvedValue([
+      { job_id: "job_skip", filename: "stc.docx", status: "completed", created_at: "2026-10-01T00:00:00Z",
+        score: 70, error: null, retryable: false },
+    ]);
+    poll.mockResolvedValue({
+      job_id: "job_skip",
+      status: "completed",
+      stage: null,
+      retryable: false,
+      error: null,
+      validation: {
+        figures_total: 0, figures_traced: 0, untraced: [], instruction_text: [], voice: [],
+        preferred_words: {}, conflicts: [], redundancy: [], brief_gaps: [], emphasis: null,
+        sections_unchecked: [], sections: {}, validated_at: "2026-10-01T00:00:00Z",
+        figure_tracing: false, filename: "stc.docx",
+        coverage: {
+          sections_checked: 4, primary: null, secondary: [], secondary_any: { sections: 0, percent: 0 },
+          tone: { sections: 3, percent: 75 }, excluded: [],
+        },
+        skipped: [{ check: "concepts", file: "Concept_Messages_General_Template.docx", reason }],
+      },
+    });
+
+    render(<AnnualReportValidatorPage />);
+    await waitFor(() => expect(screen.getByText("stc.docx")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("stc.docx"));
+
+    await waitFor(() => expect(screen.getByText("1 check was not run")).toBeInTheDocument());
+    expect(screen.getByText("Concept messages — not checked")).toBeInTheDocument();
+    // The reason, both in the notice and on the greyed card.
+    expect(screen.getAllByText(reason)).toHaveLength(2);
+    expect(screen.getByText("Not checked")).toBeInTheDocument();
+    // The Overall table keeps the row, marked not checked.
+    expect(screen.getByText("Concept messages carried")).toBeInTheDocument();
+    // Re-running the same empty file would only skip again.
+    expect(screen.getByRole("button", { name: "Start a new validation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Validate again" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Annual Report Validator page - many sections could not be checked", () => {
+  it("shows the first five names, then all of them on Show all", async () => {
+    const unchecked = Array.from({ length: 12 }, (_, i) => `section_${i + 1}`);
+    list.mockResolvedValue([
+      { job_id: "job_many", filename: "big.docx", status: "completed", created_at: "2026-10-01T00:00:00Z",
+        score: 60, error: null, retryable: true },
+    ]);
+    poll.mockResolvedValue({
+      job_id: "job_many", status: "completed", stage: null, retryable: true, error: null,
+      validation: {
+        figures_total: 0, figures_traced: 0, untraced: [], instruction_text: [], voice: [],
+        preferred_words: {}, conflicts: [], redundancy: [], brief_gaps: [], emphasis: null,
+        sections_unchecked: unchecked, sections: {}, validated_at: "2026-10-01T00:00:00Z",
+        figure_tracing: false, filename: "big.docx",
+      },
+    });
+
+    render(<AnnualReportValidatorPage />);
+    await waitFor(() => expect(screen.getByText("big.docx")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("big.docx"));
+
+    await waitFor(() => expect(screen.getByText("12 sections could not be checked")).toBeInTheDocument());
+    expect(screen.getByText(/Section 5/)).toBeInTheDocument();
+    expect(screen.queryByText(/Section 6/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all (12)" }));
+    expect(screen.getByText(/Section 12/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show fewer" })).toBeInTheDocument();
+  });
+});
