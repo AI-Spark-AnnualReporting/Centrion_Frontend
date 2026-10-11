@@ -464,8 +464,9 @@ function Coverage({
         footer={<ToneRulesCard rules={validation.tone_rules} />}
       />
       <p className="px-1 text-xs text-slate-400">
-        Judged by the model across {checked} section{checked === 1 ? "" : "s"}, and
-        printed in the report under &ldquo;Assessed&rdquo;.
+        {/* Only external reports reach this panel, and those are never
+            printed by us - so no "printed in the report" line here. */}
+        Judged by the model across {checked} section{checked === 1 ? "" : "s"}.
       </p>
     </div>
   )

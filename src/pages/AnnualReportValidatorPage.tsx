@@ -23,8 +23,19 @@ import type { ReportValidation, ValidationJob, ValidationJobSummary } from "@/ty
 import { DARK, MONO, MUTED, PRIMARY } from "./compliance/compliance-ui";
 
 const ACCEPT = ".pdf,.docx";
+// The report itself is DOCX only: its Word headings become the sections the
+// findings point at. The backend refuses a PDF report too.
+const REPORT_ACCEPT = ".docx";
 const MAX_CONCEPTS = 5;
 const POLL_MS = 3000;
+
+/** "Oct 11, 2026, 12:31 PM" for the results header; empty if unknown. */
+function checkedAt(validatedAt: string | undefined): string {
+  if (!validatedAt) return "";
+  const date = new Date(validatedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
 
 // No fixed steps here (see RunningView) - these rotate under the loader
 // instead, same spot Compliance Validation uses for its own tips.
@@ -101,7 +112,7 @@ export default function AnnualReportValidatorPage() {
         </Button>
         <PageHeader
           title="Annual Report Validator"
-          description={`${run.validation.filename ?? "External report"} — checked`}
+          description={`${run.validation.filename ?? "External report"} — checked ${checkedAt(run.validation.validated_at)}`}
           action={
             <Button variant="outline" onClick={() => retry(run.jobId)}>
               Validate again
@@ -329,11 +340,11 @@ function ValidatorForm({
         onToggleExpanded={() => setSetupExpanded((e) => !e)}
         caption="Report, brief, concept messages and tone - all in one place."
       >
-        <Section step={1} title="Annual report" caption="PDF or DOCX. Findings point to page ranges.">
+        <Section step={1} title="Annual report" caption="DOCX only. Findings point to the report's own headings.">
           <FileDropzone
             file={report}
-            accept={ACCEPT}
-            hint="to validate · PDF or DOCX"
+            accept={REPORT_ACCEPT}
+            hint="to validate · DOCX"
             onPick={setReport}
           />
         </Section>

@@ -43,8 +43,11 @@ vi.mock("@/hooks/use-toast", () => ({
 
 const { default: AnnualReportValidatorPage } = await import("@/pages/AnnualReportValidatorPage");
 
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
 function uploadFile(input: HTMLElement, name: string) {
-  const file = new File(["content"], name, { type: "application/pdf" });
+  const type = name.endsWith(".docx") ? DOCX_TYPE : "application/pdf";
+  const file = new File(["content"], name, { type });
   fireEvent.change(input, { target: { files: [file] } });
 }
 
@@ -61,13 +64,20 @@ describe("Annual Report Validator page", () => {
     list.mockResolvedValue([]);
   });
 
+  it("only offers DOCX for the report", async () => {
+    await renderPage();
+    // The report field is the first file input on the page.
+    const report = document.querySelectorAll('input[type="file"]')[0];
+    expect(report.getAttribute("accept")).toBe(".docx");
+  });
+
   it("keeps Validate report disabled until the report, brief, concepts and a tone guide are all given", async () => {
     await renderPage();
     const button = screen.getByRole("button", { name: /validate report/i });
     expect(button).toBeDisabled();
 
     // The report field is the first file input on the page.
-    uploadFile(document.querySelectorAll('input[type="file"]')[0], "report.pdf");
+    uploadFile(document.querySelectorAll('input[type="file"]')[0], "report.docx");
     expect(button).toBeDisabled();
 
     fireEvent.change(screen.getByPlaceholderText("Paste the strategic brief…"), {
@@ -205,6 +215,8 @@ describe("Annual Report Validator page", () => {
     await waitFor(() => expect(screen.getByText("Nothing to fix")).toBeInTheDocument());
     expect(poll).toHaveBeenCalledWith("job_done");
     expect(start).not.toHaveBeenCalled();
+    // The header says when it was checked, not just "— checked".
+    expect(screen.getByText(/aramco-fy25\.pdf — checked .*2026/)).toBeInTheDocument();
   });
 
   it("opens a failed card to its stored error, with no extra fetch", async () => {
@@ -319,7 +331,7 @@ async function renderPage() {
 }
 
 function fillMinimalForm() {
-  uploadFile(document.querySelectorAll('input[type="file"]')[0], "report.pdf");
+  uploadFile(document.querySelectorAll('input[type="file"]')[0], "report.docx");
   fireEvent.change(screen.getByPlaceholderText("Paste the strategic brief…"), {
     target: { value: "Grow responsibly." },
   });
