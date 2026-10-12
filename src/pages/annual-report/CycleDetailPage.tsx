@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
@@ -15,8 +15,10 @@ import { COMPANY_PROFILE_OPTIONS, CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import type { AdminUserRow, Department } from '@/types/admin';
 import type { DepartmentSuggestionsResponse, ReportOutlineDetail } from '@/types/company';
 import { PreviousOutline } from './PreviousOutline';
+import SelectOutlineModal, { type OutlineSource } from './SelectOutlineModal';
 import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
-import { everyDepartmentHasLead } from './departmentLead';
+import { departmentsWithoutLead, everyDepartmentHasLead } from './departmentLead';
+import CycleSetupPanel, { type SetupTarget } from './CycleSetupPanel';
 import ReportTeamCard from './ReportTeamCard';
 import { isAdminLevel } from '@/constants/roles';
 import {
@@ -156,13 +158,17 @@ function StatTile({ label, value, accent, bar }: { label: string; value: React.R
   );
 }
 
-// The two things the Outline card can show. Previous is first and is the default: how
-// the client already structures their report is the more useful thing to see before
-// looking at what we intend to produce for them.
-const OUTLINE_VIEWS: { key: 'previous' | 'system'; label: string }[] = [
-  { key: 'previous', label: 'Previous' },
-  { key: 'system', label: 'System' },
-];
+// What the "Selected outline" strip says about each source.
+const OUTLINE_LABELS: Record<OutlineSource, { name: string; description: string }> = {
+  previous: {
+    name: 'Previous',
+    description: 'Your own report structure, read from the contents page of the annual report you uploaded.',
+  },
+  system: {
+    name: 'System',
+    description: 'Standard sections for your sector and company profile, including CMA requirements.',
+  },
+};
 
 const MODE_FILTERS: { key: SectionMode | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -173,6 +179,118 @@ const MODE_FILTERS: { key: SectionMode | 'all'; label: string }[] = [
   { key: 'extract', label: 'Extract' },
   { key: 'analyze', label: 'Analyze' },
 ];
+
+// ── Outline card: nothing picked yet ───────────────────────────────────────
+function NoOutlineSelected({
+  canManage,
+  busyText,
+  onSelect,
+}: {
+  canManage: boolean;
+  /** What the button says while it can't be used; null when it can. */
+  busyText: string | null;
+  onSelect: () => void;
+}) {
+  return (
+    <div style={{ padding: '44px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center' }}>
+      <div
+        aria-hidden="true"
+        style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: '#EEEEFC', color: PRIMARY, fontSize: 20 }}
+      >
+        ☰
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: '#1A1D2E', marginTop: 4 }}>No outline selected yet</div>
+      <div style={{ fontSize: 12, color: '#9BA3C4', maxWidth: 420, lineHeight: 1.5 }}>
+        {canManage
+          ? "Pick where this report's sections come from: your previous report's structure, or the system's standard sections."
+          : 'An admin picks where this report’s sections come from.'}
+      </div>
+      {canManage && (
+        <button className="btn bp" type="button" style={{ marginTop: 8 }} disabled={busyText !== null} onClick={onSelect}>
+          {busyText ?? 'Select outline'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A small drawn padlock, sized to the label text (an emoji renders differently per OS). */
+function LockIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+// ── Outline card: which outline is in use, and a way to change it ─────────────
+function SelectedOutlineStrip({
+  source,
+  count,
+  canManage,
+  locked,
+  busyText,
+  onChange,
+}: {
+  source: OutlineSource;
+  count: number;
+  canManage: boolean;
+  /** The cycle has started: the outline can no longer be changed. */
+  locked: boolean;
+  /** What the button says while it can't be used; null when it can. */
+  busyText: string | null;
+  onChange: () => void;
+}) {
+  const label = OUTLINE_LABELS[source];
+  return (
+    <div
+      style={{
+        margin: '14px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap',
+        border: `1.5px solid ${PRIMARY}`,
+        background: '#EEEEFC',
+        borderRadius: 12,
+        padding: '10px 12px',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '.08em',
+            textTransform: 'uppercase',
+            color: PRIMARY,
+          }}
+        >
+          Selected outline
+          {locked && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#5A6080' }}>
+              · <LockIcon /> Locked because the cycle has started
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: 13.5, fontWeight: 800, color: '#1A1D2E' }}>
+          {label.name} · {count} {count === 1 ? 'section' : 'sections'}
+        </span>
+        <span style={{ fontSize: 11.5, color: '#5A6080' }}>{label.description}</span>
+      </div>
+      {canManage && !locked && (
+        <button className="btn bs bsm" type="button" disabled={busyText !== null} onClick={onChange}>
+          {busyText ?? '⇅ Change outline'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function CycleDetailPage() {
   const { cycleId = '' } = useParams();
@@ -191,26 +309,27 @@ export default function CycleDetailPage() {
   const [sectionsErr, setSectionsErr] = useState('');
   const [deptBusy, setDeptBusy] = useState(false);
 
-  // The Outline card shows two things: the structure of the report this company
-  // published last year (default), and the section list this cycle will produce.
-  const [outlineView, setOutlineView] = useState<'previous' | 'system'>('previous');
-  // Picking a tab is a real choice, not just a view: it decides which sections this
-  // cycle is built from, and whether each department is told which of them it feeds.
-  // Set once the saved choice has been applied, so later refetches leave the tab alone.
-  const seededRef = useRef(false);
+  // Which section list this cycle is built from, as saved on the cycle. null = nobody
+  // has picked yet: the Outline card then shows only "Select outline". It changes only
+  // after the backend has accepted a pick, so the page never shows a list the cycle is
+  // not actually built from.
+  const [chosenSource, setChosenSource] = useState<OutlineSource | null>(null);
+  const [selectingOutline, setSelectingOutline] = useState(false);
 
-  // `revertTo` is the tab to fall back to when the switch fails; a rebuild of the
-  // current choice has nowhere to fall back to, so it passes null.
-  const applyOutlineSource = (
-    v: 'previous' | 'system',
-    revertTo: 'previous' | 'system' | null,
-  ) => {
+  // Use the source picked in the popup. This REBUILDS the cycle's section list, and
+  // the backend refuses it outright (409) if any section it would clear already has
+  // work on it. Picking the source already in use rebuilds it: a cycle's sections can
+  // drift from its choice, since resolving only ever adds, and this is the way back.
+  const applyOutlineSource = (v: OutlineSource) => {
+    setSelectingOutline(false);
     setSectionsErr('');
     setSectionsMsg('');
     setSectionsBusy(true);
     sarCycles
       .setOutlineSource(cycleId, v)
       .then((res) => {
+        setChosenSource(v);
+        setModeFilter('all');
         setSections(res.sections ?? []);
         setSectionsMsg(
           v === 'previous'
@@ -219,33 +338,12 @@ export default function CycleDetailPage() {
         );
       })
       .catch((e) => {
-        if (revertTo) setOutlineView(revertTo);
         setSectionsErr(
           e instanceof Error ? e.message : 'Could not switch the outline.',
         );
       })
       .finally(() => setSectionsBusy(false));
   };
-
-  const persistOutlineView = (v: 'previous' | 'system') => {
-    const previous = outlineView;
-    setOutlineView(v);
-    setSectionsErr('');
-    setSectionsMsg('');
-    if (!canManage || v === previous) return;
-    // The switch REBUILDS the section list, and the backend refuses it outright if any
-    // section it would clear already has work on it. So a failure has to move the tab
-    // back: leaving it where the user put it would show them a list the cycle is not
-    // actually being built from.
-    applyOutlineSource(v, previous);
-  };
-
-  // Re-asserting the tab the cycle is already on. Not the no-op it looks like: a cycle
-  // can be built from the OTHER list — sections resolve once and are only ever added
-  // to — so the choice and the sections drift apart, and this is the way back. Kept as
-  // a labelled button rather than folded into the tab, because a tab that quietly
-  // rebuilds the report when you re-click it is not what anyone expects.
-  const rebuildOutline = () => applyOutlineSource(outlineView, null);
   // Last year's outline hangs off the REPORT it was read from, not off the cycle —
   // the cycle comes from SAR, the report from Centriton — so it needs its own fetch.
   const [prevOutline, setPrevOutline] = useState<ReportOutlineDetail | null>(null);
@@ -272,27 +370,26 @@ export default function CycleDetailPage() {
       .overview(cycleId)
       .then((res) => {
         setOverview(res);
-        // Seed the tab from what was saved, so the choice survives a reload. Only on
-        // load — a later fetchOverview (after assigning departments, say) must not
-        // yank the tab out from under someone mid-edit.
         const saved = res?.cycle?.outline_source;
-        if (saved === 'previous' || saved === 'system') {
-          setOutlineView((cur) => (seededRef.current ? cur : saved));
-          seededRef.current = true;
-        }
+        setChosenSource(saved === 'previous' || saved === 'system' ? saved : null);
+        return res;
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load cycle.'))
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : 'Failed to load cycle.');
+        return null;
+      })
       .finally(() => setDeptBusy(false));
   };
 
-  // Initial load: GET the resolved sections. If none exist yet (a freshly
-  // created cycle whose sections haven't been resolved), resolve them now so the
-  // view shows a populated list without a manual "Re-resolve" click.
-  const fetchSections = async () => {
+  // Initial load: GET the resolved sections. If none exist yet on a cycle whose outline
+  // has been picked, resolve them now so the view shows a populated list without a
+  // manual "Re-resolve" click. With no outline picked, nothing is built: the card
+  // shows "Select outline" and the popup builds the list.
+  const fetchSections = async (source: OutlineSource | null) => {
     setSectionsBusy(true);
     try {
       const list = await sarCycles.sections(cycleId);
-      if (list.length > 0 || !canManage) {
+      if (list.length > 0 || !canManage || source === null) {
         setSections(list);
         return;
       }
@@ -339,7 +436,13 @@ export default function CycleDetailPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchOverview(), fetchSections()]).finally(() => setLoading(false));
+    // Sections wait for the overview: whether to build them depends on the saved choice.
+    fetchOverview()
+      .then((res) => {
+        const saved = res?.cycle?.outline_source;
+        return fetchSections(saved === 'previous' || saved === 'system' ? saved : null);
+      })
+      .finally(() => setLoading(false));
     sarUsers.listProjectManagers().then(setPms).catch(() => setPms([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cycleId]);
@@ -433,8 +536,23 @@ export default function CycleDetailPage() {
 
   // Every added department must have an HR Lead before the cycle can be submitted.
   // Shared with the section so the gate and the warning badge can't disagree.
+  // And an outline must be picked: a cycle can't start without knowing its sections.
   const canSubmit =
-    assigned.length > 0 && everyDepartmentHasLead(assigned, allDepartments, selfLeadName);
+    chosenSource !== null &&
+    assigned.length > 0 &&
+    everyDepartmentHasLead(assigned, allDepartments, selfLeadName);
+
+  // The Cycle setup panel's steps scroll to the card where each one is done, and
+  // flash it briefly so the eye lands on it.
+  const jumpToSetupStep = (target: SetupTarget) => {
+    const card = document.getElementById(`cycle-setup-${target}`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.classList.remove('cycle-setup-flash');
+    // Reading a layout value restarts the animation when the same card is picked twice.
+    void card.offsetWidth;
+    card.classList.add('cycle-setup-flash');
+  };
 
   // Submit = assign departments (bulk). The cycle stays in draft; it only goes
   // active when the PM submits the kickoff brief and generates questions.
@@ -444,10 +562,18 @@ export default function CycleDetailPage() {
     setSubmitMsg('');
     setSubmitting(true);
     try {
-      await sarCycles.assignDepartments(cycleId, {
+      // The page holds the cycle's whole department list (loaded from the cycle, then
+      // edited), so it asks the backend to remove any department taken off it.
+      const res = await sarCycles.assignDepartments(cycleId, {
         assignments: assigned.map((a) => ({ department_id: a.department_id })),
+        replace: true,
       });
-      setSubmitMsg('Departments assigned. The project manager can now kick off the cycle.');
+      const removed = res?.assignments_removed ?? 0;
+      setSubmitMsg(
+        removed > 0
+          ? `Departments saved: ${removed} removed. The project manager can now kick off the cycle.`
+          : 'Departments assigned. The project manager can now kick off the cycle.',
+      );
       await fetchOverview();
     } catch (e) {
       // ApiError.message already carries the backend's `detail` (or a
@@ -472,6 +598,13 @@ export default function CycleDetailPage() {
     [sections, modeFilter],
   );
 
+  // Why the outline buttons are waiting, if they are. Rebuilding the section list is
+  // the slow one; the contents page only has to load before the popup can say
+  // whether Previous exists.
+  let outlineBusyText: string | null = null;
+  if (sectionsBusy) outlineBusyText = 'Building sections…';
+  else if (outlineLoading) outlineBusyText = 'Loading…';
+
   if (loading) {
     return <Spinner pad={80} />;
   }
@@ -489,6 +622,11 @@ export default function CycleDetailPage() {
   }
 
   const { cycle, stats, departments } = overview;
+  // Only an admin on a draft cycle can submit it, so only they get the setup panel.
+  const showSetup = cycle.status === 'draft' && canManage;
+  // After kickoff the departments' questions are written for this outline, so it is
+  // locked: no Change outline, no Re-resolve. The backend refuses both too (409).
+  const outlineLocked = cycle.status !== 'draft';
   // Overview gives project_manager_id but not always the name — resolve from the
   // PM list, falling back to any name the payload did include.
   const pmName =
@@ -537,9 +675,15 @@ export default function CycleDetailPage() {
         )}
       </div>
 
+      {/* On a draft cycle an admin gets the Cycle setup panel beside the page. The
+          layout class puts it on the right on wide screens, above the content on
+          narrow ones. */}
+      <div className={showSetup ? 'cycle-setup-layout' : undefined}>
+      <div style={{ minWidth: 0 }}>
+
       {/* Draft → assign departments sits right under the header, above the stats */}
       {cycle.status === 'draft' && canManage && (
-        <div style={{ marginBottom: 16 }}>
+        <div id="cycle-setup-departments" style={{ marginBottom: 16 }}>
           <AssignDepartmentsSection
             allDepartments={allDepartments}
             assigned={assigned}
@@ -636,14 +780,12 @@ export default function CycleDetailPage() {
       )}
 
       {/* Report Sections */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div id="cycle-setup-outline" className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #ECEEF8', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>Outline</div>
             <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
-              {outlineView === 'previous'
-                ? 'The structure of the report this company published last year.'
-                : 'The sections this cycle’s annual report will contain.'}
+              The sections this cycle’s annual report will contain.
             </div>
             {sectionsMsg && (
               <div style={{ fontSize: 11, color: '#16A34A', marginTop: 6, fontWeight: 600 }}>{sectionsMsg}</div>
@@ -653,187 +795,111 @@ export default function CycleDetailPage() {
             )}
           </div>
           {/* Re-resolve rebuilds the SYSTEM list from the company profile — it has
-              nothing to act on while last year's outline is showing. */}
-          {canManage && outlineView === 'system' && (
+              nothing to act on for a company's own (Previous) sections. */}
+          {canManage && !outlineLocked && chosenSource === 'system' && (
             <button className="btn bs bsm" type="button" disabled={sectionsBusy} onClick={() => resolveSections()}>
               {sectionsBusy ? 'Resolving…' : '⟳ Re-resolve from current profile'}
             </button>
           )}
         </div>
 
-        {/* Underlined tabs rather than the app's .tabs pill: these are two views of one
-            outline, and the flatter treatment reads as "same thing, different source"
-            where a filled pill reads as a filter. The 2px rule overlaps the strip's own
-            hairline via marginBottom:-1. No .btn class — its hover lifts by 1px, which
-            would pull a tab off the rail it sits on. */}
-        <div
-          role="tablist"
-          aria-label="Outline source"
-          style={{ display: 'flex', gap: 20, padding: '0 16px', borderBottom: '1px solid #ECEEF8' }}
-        >
-          {OUTLINE_VIEWS.map((v) => {
-            const active = outlineView === v.key;
-            return (
-              <button
-                key={v.key}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => persistOutlineView(v.key)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  borderBottom: `2px solid ${active ? '#4040C8' : 'transparent'}`,
-                  marginBottom: -1,
-                  padding: '10px 2px',
-                  fontSize: 12,
-                  fontWeight: active ? 700 : 600,
-                  // Inactive sits at the secondary tier, not the #9BA3C4 muted one —
-                  // muted is this page's placeholder grey, and a tab wearing it reads
-                  // as un-clickable.
-                  color: active ? '#1A1D2E' : '#5A6080',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  transition: '.15s',
-                }}
-              >
-                {v.label}
-              </button>
-            );
-          })}
-          {canManage && (
-            <button
-              type="button"
-              onClick={rebuildOutline}
-              disabled={sectionsBusy}
-              title="Rebuild this cycle's sections from the list selected above. Any departments already assigned to a section are cleared."
-              style={{
-                marginLeft: 'auto',
-                alignSelf: 'center',
-                background: 'transparent',
-                border: 'none',
-                padding: '10px 2px',
-                fontSize: 12,
-                fontWeight: 600,
-                color: sectionsBusy ? '#9BA3C4' : '#5A6080',
-                cursor: sectionsBusy ? 'default' : 'pointer',
-                fontFamily: 'inherit',
-                textDecoration: 'underline',
-              }}
-            >
-              Rebuild from this list
-            </button>
-          )}
-        </div>
-
-        {outlineView === 'previous' && (
-          <div role="tabpanel">
-            <PreviousOutline
-              detail={prevOutline}
-              loading={outlineLoading}
-              error={outlineErr}
-              onRetry={() => setOutlineReload((n) => n + 1)}
-              onShowSystem={() => persistOutlineView('system')}
-            />
-          </div>
-        )}
-
-        {outlineView === 'system' && (
-        <div role="tabpanel">
-        <div style={{ padding: '10px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid #F4F5FB' }}>
-          {MODE_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setModeFilter(f.key)}
-              className={`fw-chip ${modeFilter === f.key ? 'sel' : ''}`}
-              style={{ padding: '4px 11px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {filteredSections.length === 0 ? (
-          <div style={{ padding: 28, textAlign: 'center', fontSize: 12, color: '#9BA3C4' }}>No sections.</div>
+        {chosenSource === null ? (
+          <NoOutlineSelected
+            canManage={canManage && !outlineLocked}
+            busyText={outlineBusyText}
+            onSelect={() => setSelectingOutline(true)}
+          />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#FAFBFE' }}>
-                <th style={{ ...th, width: 44 }}>#</th>
-                <th style={th}>Section</th>
-                <th style={th}>Layer</th>
-                <th style={th}>Mode</th>
-                <th style={th}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSections.map((s, i) => (
-                <tr key={s.section_code || i} style={{ borderTop: '1px solid #F4F5FB' }}>
-                  <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{i + 1}</td>
-                  <td style={{ ...td, fontWeight: 600 }}>{s.title}</td>
-                  <td style={td}><SectionLayerBadge layer={s.layer} /></td>
-                  <td style={td}><SectionModeBadge mode={s.mode} /></td>
-                  <td style={td}><SectionStatusBadge status={s.status} /></td>
-                </tr>
+          <>
+            <SelectedOutlineStrip
+              source={chosenSource}
+              count={sections.length}
+              canManage={canManage}
+              locked={outlineLocked}
+              busyText={outlineBusyText}
+              onChange={() => setSelectingOutline(true)}
+            />
+
+            <div style={{ padding: '10px 16px', display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid #F4F5FB' }}>
+              {MODE_FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setModeFilter(f.key)}
+                  className={`fw-chip ${modeFilter === f.key ? 'sel' : ''}`}
+                  style={{ padding: '4px 11px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  {f.label}
+                </button>
               ))}
-            </tbody>
-          </table>
-        )}
-        </div>
+            </div>
+
+            {chosenSource === 'previous' ? (
+              <PreviousOutline
+                sections={filteredSections}
+                detail={prevOutline}
+                loading={outlineLoading}
+                error={outlineErr}
+                onRetry={() => setOutlineReload((n) => n + 1)}
+              />
+            ) : filteredSections.length === 0 ? (
+              <div style={{ padding: 28, textAlign: 'center', fontSize: 12, color: '#9BA3C4' }}>No sections.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#FAFBFE' }}>
+                    <th style={{ ...th, width: 44 }}>#</th>
+                    <th style={th}>Section</th>
+                    <th style={th}>Layer</th>
+                    <th style={th}>Mode</th>
+                    <th style={th}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSections.map((s, i) => (
+                    <tr key={s.section_code || i} style={{ borderTop: '1px solid #F4F5FB' }}>
+                      <td style={{ ...td, color: '#9BA3C4', fontFamily: "'DM Mono', monospace" }}>{i + 1}</td>
+                      <td style={{ ...td, fontWeight: 600 }}>{s.title}</td>
+                      <td style={td}><SectionLayerBadge layer={s.layer} /></td>
+                      <td style={td}><SectionModeBadge mode={s.mode} /></td>
+                      <td style={td}><SectionStatusBadge status={s.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
         )}
       </div>
 
-      {/* Submit — the last thing on the page, because it commits the departments
-          chosen above it. The feedback message moved down with it: an alert at the
-          top of the page while the button that caused it sits at the bottom is a
-          message nobody sees. The reason the button is disabled is now stated in
-          the open rather than hidden in a title tooltip. */}
-      {cycle.status === 'draft' && canManage && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            flexWrap: 'wrap',
-            gap: 12,
-            marginTop: 24,
-            paddingTop: 18,
-            borderTop: '1px solid #ECEEF8',
-          }}
-        >
-          {(submitMsg || submitErr) && (
-            <div
-              role={submitErr ? 'alert' : 'status'}
-              style={{
-                flex: '1 1 260px',
-                padding: '10px 14px',
-                borderRadius: 10,
-                fontSize: 12,
-                fontWeight: 600,
-                background: submitErr ? 'rgba(229,72,77,.08)' : 'rgba(34,197,94,.1)',
-                border: `1px solid ${submitErr ? 'rgba(229,72,77,.25)' : 'rgba(34,197,94,.25)'}`,
-                color: submitErr ? '#B33A3E' : '#16A34A',
-              }}
-            >
-              {submitErr || submitMsg}
-            </div>
-          )}
-          {!canSubmit && !submitMsg && (
-            <div style={{ fontSize: 12, color: '#9BA3C4', marginRight: 'auto' }}>
-              Add at least one department, each with a department lead, to submit.
-            </div>
-          )}
-          <button
-            className="btn bp"
-            type="button"
-            onClick={handleSubmitCycle}
-            disabled={!canSubmit || submitting}
-          >
-            {submitting ? 'Submitting…' : '✓ Submit'}
-          </button>
-        </div>
+      {selectingOutline && (
+        <SelectOutlineModal
+          cycleId={cycleId}
+          current={chosenSource}
+          currentCount={sections.length}
+          previousDetail={prevOutline}
+          onClose={() => setSelectingOutline(false)}
+          onUse={applyOutlineSource}
+        />
       )}
+
+      </div>
+
+      {showSetup && (
+        <CycleSetupPanel
+          outlineChosen={chosenSource !== null}
+          departmentCount={assigned.length}
+          withoutLead={departmentsWithoutLead(assigned, allDepartments, selfLeadName)}
+          canSubmit={canSubmit}
+          submitting={submitting}
+          building={sectionsBusy}
+          message={submitMsg}
+          error={submitErr}
+          onSubmit={handleSubmitCycle}
+          onJump={jumpToSetupStep}
+        />
+      )}
+      </div>
 
       {editing && (
         <EditCycleModal

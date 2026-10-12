@@ -175,6 +175,7 @@ import type {
   CreateCyclePayload,
   CycleOverview,
   CycleSection,
+  OutlinePreviewResponse,
   OutlineSourceResponse,
   ResolveSectionsResponse,
   SARUser,
@@ -5458,6 +5459,16 @@ export const sarCycles = {
     sarRequest<ResolveSectionsResponse>(
       `/api/v1/admin/cycles/${encodeURIComponent(id)}/resolve-sections`,
       { method: "POST" },
+    ),
+
+  // The sections an outline source WOULD give this cycle, without saving anything.
+  // Feeds the Select-outline popup. 422 if the cycle's profile/sector aren't set.
+  outlinePreview: (
+    id: string,
+    source: "previous" | "system",
+  ): Promise<OutlinePreviewResponse> =>
+    sarRequest<OutlinePreviewResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-preview?source=${source}`,
     ),
 
   // Which section list this cycle is built from. 'previous' is the company's own
