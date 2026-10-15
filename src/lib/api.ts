@@ -175,11 +175,13 @@ import type {
   CreateCyclePayload,
   CycleOverview,
   CycleSection,
+  OutlinePreviewResponse,
   OutlineSourceResponse,
   ResolveSectionsResponse,
   SARUser,
   SessionStatus,
 } from "@/types/cycles";
+import type { ValidationJob, ValidationJobSummary } from "@/types/annual-report-validator";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -5459,6 +5461,16 @@ export const sarCycles = {
       { method: "POST" },
     ),
 
+  // The sections an outline source WOULD give this cycle, without saving anything.
+  // Feeds the Select-outline popup. 422 if the cycle's profile/sector aren't set.
+  outlinePreview: (
+    id: string,
+    source: "previous" | "system",
+  ): Promise<OutlinePreviewResponse> =>
+    sarRequest<OutlinePreviewResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-preview?source=${source}`,
+    ),
+
   // Which section list this cycle is built from. 'previous' is the company's own
   // sections, read off the annual report they uploaded; 'system' is the shared
   // catalogue. The choice drives both the sections that resolve onto the cycle and
@@ -5503,6 +5515,38 @@ export const sarUsers = {
     const list = unwrap<SARUser[]>(raw, "users");
     return Array.isArray(list) ? list : [];
   },
+};
+
+// Annual Report Validator (external reports). Admin's own entry point, native
+// to Centriyon (unlike Spark's, which hands off to the SAR app itself) — same
+// two endpoints, same JWT, reused via sarRequest.
+export const sarValidator = {
+  start: (form: FormData): Promise<{ job_id: string }> =>
+    sarRequest<{ job_id: string }>("/api/v1/pm/validate-upload", {
+      method: "POST",
+      form,
+    }),
+
+  poll: (jobId: string): Promise<ValidationJob> =>
+    sarRequest<ValidationJob>(
+      `/api/v1/pm/validation-jobs/${encodeURIComponent(jobId)}`,
+    ),
+
+  // This admin's own past external-report runs, newest first.
+  list: async (): Promise<ValidationJobSummary[]> => {
+    const raw = await sarRequest<{ jobs: ValidationJobSummary[] }>(
+      "/api/v1/pm/validation-jobs",
+    );
+    return raw.jobs ?? [];
+  },
+
+  // Re-run a job with the report, brief, concepts and tone it already saved
+  // - no re-upload.
+  retry: (jobId: string): Promise<{ job_id: string }> =>
+    sarRequest<{ job_id: string }>(
+      `/api/v1/pm/validation-jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST" },
+    ),
 };
 
 // ---------------------------------------------------------------------------

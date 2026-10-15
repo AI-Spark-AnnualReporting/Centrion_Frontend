@@ -19,9 +19,25 @@ export function everyDepartmentHasLead(
   allDepartments: Department[],
   selfLeadName?: string | null,
 ): boolean {
-  if (selfLeadName) return true;
-  return assigned.every((a) => {
+  return departmentsWithoutLead(assigned, allDepartments, selfLeadName) === 0;
+}
+
+/**
+ * How many of the assigned departments still have no lead. 0 when the caller leads
+ * them all (`selfLeadName`, the Spark case). Feeds the Cycle setup panel's
+ * "N without a lead"; everyDepartmentHasLead is this count being 0.
+ */
+export function departmentsWithoutLead(
+  assigned: DepartmentAssignment[],
+  allDepartments: Department[],
+  selfLeadName?: string | null,
+): number {
+  if (selfLeadName) return 0;
+  let missing = 0;
+  for (const a of assigned) {
     const d = allDepartments.find((x) => x.id === a.department_id);
-    return d?.has_hod ?? !!d?.hod_user_id;
-  });
+    const hasLead = d?.has_hod ?? !!d?.hod_user_id;
+    if (!hasLead) missing += 1;
+  }
+  return missing;
 }

@@ -109,6 +109,13 @@ const VerifyCertificatePage = lazy(
   () => import("./pages/VerifyCertificatePage"),
 );
 
+// Annual Report Validator (external reports), Admin's own entry point under
+// Reports Validator — native to Centriyon, unlike Spark's sidebar link, which
+// hands off to the SAR app itself.
+const AnnualReportValidatorPage = lazy(
+  () => import("./pages/AnnualReportValidatorPage"),
+);
+
 // Suspense for the code-split routes that render outside AppLayout.
 const PublicSuspense = () => (
   <Suspense fallback={<Spinner pad={120} />}>
@@ -225,6 +232,13 @@ const App = () => (
               path="/compliance/runs/:runId/certificate"
               element={<CertificatePage />}
             />
+          </Route>
+          {/* Role-gated, not feature-gated: no visible_features plumbing exists
+              for this yet (see the board_report warning on FeatureKey), so a
+              featureKey here would fail closed for everyone. Spark reaches the
+              same validator through its own hand-off link under Companies. */}
+          <Route element={<ProtectedRoute requiredRole="admin" />}>
+            <Route path="/annual-report-validator" element={<AnnualReportValidatorPage />} />
           </Route>
           <Route element={<ProtectedRoute requiredFeature="ai_copilot" />}>
             <Route path="/ai" element={<AIPage />} />

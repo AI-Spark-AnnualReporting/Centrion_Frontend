@@ -27,6 +27,8 @@ const PAGE_NAMES: Record<string, string> = {
   '/admin-console/users': 'Users & Roles',
   '/admin-console/departments': 'Departments',
   '/annual-report': 'Annual Report',
+  // Exact entry: the '/annual-report' prefix below would otherwise claim it.
+  '/annual-report-validator': 'Annual Report Validator',
   '/board-report': 'Board Report',
   '/annual-report/cycles/new': 'New Cycle',
   '/earnings/setup': 'Earnings Report',
