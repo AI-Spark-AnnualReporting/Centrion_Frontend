@@ -36,6 +36,20 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
 ];
 
+// Pins are a per-user view preference, so they live in this browser, keyed by
+// user — not on the server. They follow the company id, so renames are safe.
+const pinsKey = (userId: string | undefined) => `centriyon:pinned-companies:${userId ?? "anon"}`;
+
+function loadPins(userId: string | undefined): string[] {
+  try {
+    const raw = localStorage.getItem(pinsKey(userId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 const th: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
@@ -194,7 +208,9 @@ function AddCompanyModal({
 
 export default function SparkCompaniesPage() {
   const navigate = useNavigate();
-  const { switchCompany, leaveCompany, actingCompany } = useAuth();
+  const { user, switchCompany, leaveCompany, actingCompany } = useAuth();
+  const userId = user?.user_id;
+  const [pinned, setPinned] = useState<string[]>(() => loadPins(userId));
   const [companies, setCompanies] = useState<SparkCompanyRow[]>([]);
   const [stats, setStats] = useState<SparkDirectoryStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -241,12 +257,33 @@ export default function SparkCompaniesPage() {
     };
   }, [filter]);
 
-  // Search only — the tab is applied server-side.
+  useEffect(() => {
+    setPinned(loadPins(userId));
+  }, [userId]);
+
+  const togglePin = (id: string) => {
+    setPinned((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem(pinsKey(userId), JSON.stringify(next));
+      } catch {
+        // Storage blocked — the pin still holds for this visit.
+      }
+      return next;
+    });
+  };
+
+  // Search only — the tab is applied server-side. Pinned companies float to the
+  // top; the sort is stable, so each group keeps the server's order.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return companies;
-    return companies.filter((c) => (c.name ?? "").toLowerCase().includes(q));
-  }, [companies, search]);
+    const matched = q
+      ? companies.filter((c) => (c.name ?? "").toLowerCase().includes(q))
+      : companies;
+    return [...matched].sort(
+      (a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id)),
+    );
+  }, [companies, search, pinned]);
 
   // Enter a company and go where its work actually is — its annual report,
   // not the Command Center.
@@ -419,7 +456,7 @@ export default function SparkCompaniesPage() {
               <tr>
                 <th style={th}>Company</th>
                 <th style={th}>Reporting cycles</th>
-                <th style={{ ...th, width: 60 }} />
+                <th style={{ ...th, width: 90 }} />
               </tr>
             </thead>
             <tbody>
@@ -427,7 +464,10 @@ export default function SparkCompaniesPage() {
                 <tr
                   key={c.id}
                   className="urow"
-                  style={{ cursor: "pointer" }}
+                  style={{
+                    cursor: "pointer",
+                    ...(pinned.includes(c.id) ? { background: "#F7F7FF" } : {}),
+                  }}
                   onClick={() => open(c)}
                 >
                   <td style={td}>
@@ -466,7 +506,39 @@ export default function SparkCompaniesPage() {
                       <span style={{ fontSize: 11, color: "#C4C9DD" }}>Not started</span>
                     )}
                   </td>
-                  <td style={{ ...td, textAlign: "right" }}>
+                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      type="button"
+                      aria-label={pinned.includes(c.id) ? "Unpin company" : "Pin company"}
+                      title={pinned.includes(c.id) ? "Unpin" : "Pin to top"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        togglePin(c.id);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 4,
+                        marginRight: 8,
+                        verticalAlign: "middle",
+                        color: pinned.includes(c.id) ? PRIMARY : "#C4C9DD",
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="14"
+                        height="14"
+                        fill={pinned.includes(c.id) ? "currentColor" : "none"}
+                      >
+                        <path
+                          d="M10 1.5l4.5 4.5-2 .8-2.4 2.4.3 3.3-1 1-2.7-2.7L3 14.5l-.5-.5 2.7-2.7L2.5 8.6l1-1 3.3.3 2.4-2.4z"
+                          stroke="currentColor"
+                          strokeWidth="1.2"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
                     <span className="uchev">
                       <svg viewBox="0 0 12 12" width="11" height="11" fill="none">
                         <path
