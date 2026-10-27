@@ -26,6 +26,7 @@ jobs:
           # Build-time override of .env.production so only the Azure build
           # points at the new SAR app; Vercel keeps using the file's value.
           VITE_SAR_APP_URL: https://yellow-stone-0efe4c803.3.azurestaticapps.net
+          VITE_API_URL: https://centriyon-backend-prod-gmhvawd8fvgseehn.southeastasia-01.azurewebsites.net
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_STONE_00848EA03 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
