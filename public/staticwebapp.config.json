@@ -1,0 +1,9 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/fonts/*", "/*.{svg,png,jpg,jpeg,gif,ico,webp,css,js,map,txt,woff,woff2}"]
+  },
+  "routes": [
+    { "route": "/sar/*", "redirect": "https://ai-annual-reporting-frontend.vercel.app/", "statusCode": 302 }
+  ]
+}
