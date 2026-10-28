@@ -92,7 +92,7 @@ describe('MeetingMinutesPanel', () => {
   it('still reads records saved with the old boolean shape', async () => {
     getMinutes.mockResolvedValue({
       minutes: {
-        meeting_id: 'm1', notes: '', decision_taken: '', decision_under_review: '',
+        meeting_id: 'm1', notes: 'Saved earlier.', decision_taken: '', decision_under_review: '',
         decision_abandoned: '', attendance: { 'ali@x.com': true, 'sara@x.com': false },
       },
     });

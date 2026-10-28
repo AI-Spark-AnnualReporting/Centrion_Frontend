@@ -51,6 +51,10 @@ function uploadFile(input: HTMLElement, name: string) {
   fireEvent.change(input, { target: { files: [file] } });
 }
 
+// The loader's ~1s finishing animation is real time; a loaded full-suite run can
+// stretch past vitest's 5s default.
+vi.setConfig({ testTimeout: 15000 });
+
 describe("Annual Report Validator page", () => {
   beforeEach(() => {
     start.mockReset();
@@ -143,7 +147,7 @@ describe("Annual Report Validator page", () => {
     // hands back to the page - longer than waitFor's default timeout.
     await waitFor(
       () => expect(screen.getByText(/external-report\.pdf/)).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 8000 },
     );
     expect(screen.getByText("Nothing to fix")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^back$/i }));
@@ -162,7 +166,7 @@ describe("Annual Report Validator page", () => {
 
     await waitFor(
       () => expect(screen.getByText("The report could not be read.")).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 8000 },
     );
     fireEvent.click(screen.getByRole("button", { name: /^back$/i }));
     // Back returns to the Validator's own form, not out of the app.
@@ -284,7 +288,7 @@ describe("Annual Report Validator page", () => {
     fireEvent.click(screen.getByRole("button", { name: /validate report/i }));
     await waitFor(
       () => expect(screen.getByRole("button", { name: /validate again/i })).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 8000 },
     );
 
     fireEvent.click(screen.getByRole("button", { name: /validate again/i }));
@@ -304,7 +308,7 @@ describe("Annual Report Validator page", () => {
     fireEvent.click(screen.getByRole("button", { name: /validate report/i }));
     await waitFor(
       () => expect(screen.getByRole("button", { name: /validate again/i })).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 8000 },
     );
 
     fireEvent.click(screen.getByRole("button", { name: /validate again/i }));
@@ -325,7 +329,7 @@ describe("Annual Report Validator page", () => {
     fireEvent.click(screen.getByRole("button", { name: /validate report/i }));
     await waitFor(
       () => expect(screen.getByRole("button", { name: /validate again/i })).toBeInTheDocument(),
-      { timeout: 3000 },
+      { timeout: 8000 },
     );
 
     fireEvent.click(screen.getByRole("button", { name: /validate again/i }));

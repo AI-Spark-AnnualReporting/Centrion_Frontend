@@ -76,13 +76,19 @@ describe("System metrics hover list", () => {
     expect(typeof reports.getQuarterlySystemMetrics).toBe("function");
   });
 
-  it("shows the metric count pill once the catalogue loads", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("shows the metric count pill once the catalogue loads", async () => {
     renderForm();
     expect(await screen.findByText("5 metrics")).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalled();
   });
 
-  it("opens the scrollable list on hover and keeps it open over the panel", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("opens the scrollable list on hover and keeps it open over the panel", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderForm();
 
@@ -118,7 +124,10 @@ describe("System metrics hover list", () => {
     vi.useRealTimers();
   });
 
-  it("swaps the hint line when Custom metrics is picked", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("swaps the hint line when Custom metrics is picked", async () => {
     renderForm();
     await screen.findByText("5 metrics");
 
@@ -137,7 +146,10 @@ describe("System metrics hover list", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the catalogue pill in Custom mode and brings it back on System", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("hides the catalogue pill in Custom mode and brings it back on System", async () => {
     renderForm();
     await screen.findByText("5 metrics");
 
@@ -150,7 +162,10 @@ describe("System metrics hover list", () => {
     expect(screen.getByText("5 metrics")).toBeInTheDocument();
   });
 
-  it("does not reopen a pinned list after a round trip through Custom", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("does not reopen a pinned list after a round trip through Custom", async () => {
     renderForm();
 
     // Pin it open, then switch away — the pill unmounts with the panel.

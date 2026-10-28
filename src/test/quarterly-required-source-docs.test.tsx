@@ -104,7 +104,10 @@ describe("source documents are required", () => {
     await waitFor(() => expect(screen.getByText("mdna.pdf")).toBeInTheDocument());
   });
 
-  it("drops a staged spreadsheet when Custom metrics is picked, and hides the field", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("drops a staged spreadsheet when Custom metrics is picked, and hides the field", async () => {
     const { container } = renderForm();
     const { financial } = fileInputs(container);
 
@@ -124,7 +127,10 @@ describe("source documents are required", () => {
     expect(screen.queryByText("statements.xlsx")).toBeNull();
   });
 
-  it("lets a Custom report generate on source documents alone", async () => {
+  // Skipped: the form offers only 'Sections from my files' (918e990), so the System /
+  // Custom radios these drive aren't rendered. Un-skip when a mode is restored to the
+  // list in QuarterlyReportForm.
+  it.skip("lets a Custom report generate on source documents alone", async () => {
     const { container } = renderForm();
     await pickPeriod(container);
     const { narrative } = fileInputs(container);

@@ -491,7 +491,7 @@ describe('EarningsSetupPage', () => {
                   owning_report_id: 'rep-upload',
                 },
               ]),
-            10,
+            150,
           );
         }),
     );

@@ -33,7 +33,7 @@ const CYCLES = [
     cycle_name: "FY-2027",
     fiscal_year: 2027,
     status: "active",
-    submission_deadline: "2020-01-01", // safely in the past → overdue
+    submission_deadline: "2020-06-15", // safely in the past → overdue; mid-year so no timezone shifts the year
     project_manager_name: "Aizaz Ahmed",
     progress: 62,
     submitted: 3,
