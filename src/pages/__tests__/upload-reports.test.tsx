@@ -45,6 +45,46 @@ describe('UploadReportsStep — slot filtering', () => {
   });
 });
 
+describe('UploadReportsStep — file size', () => {
+  beforeEach(() => {
+    h.validateReport.mockReset();
+  });
+
+  // A File whose size reads as `mb` megabytes without allocating that much memory.
+  const fileOfSize = (mb: number) => {
+    const f = new File(['%PDF'], 'big-report.pdf', { type: 'application/pdf' });
+    Object.defineProperty(f, 'size', { value: mb * 1024 * 1024 });
+    return f;
+  };
+
+  const pickAnnual = (file: File) => {
+    const inputs = document.querySelectorAll('input[type="file"]');
+    fireEvent.change(inputs[0], { target: { files: [file] } });
+  };
+
+  it('refuses a file over 50 MB with its size and never uploads it', () => {
+    render(<UploadReportsStep onProcess={vi.fn()} />);
+    pickAnnual(fileOfSize(57.2));
+    expect(screen.getByText(/This file is 57\.2 MB\. The limit is 50 MB\./)).toBeInTheDocument();
+    expect(h.validateReport).not.toHaveBeenCalled();
+  });
+
+  it("shows the backend's own words when it answers 413", async () => {
+    const err = Object.assign(new Error('This file is 50.5 MB. The limit is 50 MB.'), { status: 413 });
+    h.validateReport.mockRejectedValue(err);
+    render(<UploadReportsStep onProcess={vi.fn()} />);
+    pickAnnual(fileOfSize(10));
+    expect(await screen.findByText(/The limit is 50 MB\./)).toBeInTheDocument();
+  });
+
+  it('keeps the generic message for any other failure', async () => {
+    h.validateReport.mockRejectedValue(Object.assign(new Error('boom'), { status: 500 }));
+    render(<UploadReportsStep onProcess={vi.fn()} />);
+    pickAnnual(fileOfSize(10));
+    expect(await screen.findByText('Upload failed — please try again.')).toBeInTheDocument();
+  });
+});
+
 describe('UploadedReportsList', () => {
   beforeEach(() => {
     h.listDocuments.mockReset();

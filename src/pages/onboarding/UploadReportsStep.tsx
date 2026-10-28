@@ -16,6 +16,24 @@ export interface UploadedReportFile {
   period: string | null;
 }
 
+// Same limit as the backend (config.MAX_FILE_SIZE_MB) and Supabase Storage.
+const MAX_UPLOAD_MB = 50;
+
+/** The message for a file over the upload limit, or null when it fits. */
+function fileTooLargeMessage(file: File): string | null {
+  const sizeMb = file.size / (1024 * 1024);
+  if (sizeMb <= MAX_UPLOAD_MB) return null;
+  return `This file is ${sizeMb.toFixed(1)} MB. The limit is ${MAX_UPLOAD_MB} MB. `
+    + 'Please upload a smaller file (in Acrobat: File → Reduce File Size).';
+}
+
+/** What to show when the upload call fails. The backend words a 413 for the user. */
+function uploadErrorMessage(err: unknown): string {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 413 && err instanceof Error && err.message) return err.message;
+  return 'Upload failed — please try again.';
+}
+
 interface RowDef {
   icon: string;
   title: string;
@@ -180,6 +198,13 @@ export default function UploadReportsStep({
     // A new file gets a fresh verdict — never inherit the last file's override.
     setOverridden((prev) => ({ ...prev, [row.title]: false }));
     if (!f || !companyId) return;
+    // Refuse it here: uploading 50+ MB only for Storage to reject it is slow and
+    // used to end in a vague "Upload failed".
+    const tooLarge = fileTooLargeMessage(f);
+    if (tooLarge) {
+      setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: tooLarge } }));
+      return;
+    }
     companies
       .validateReport(companyId, f, row.docType)
       .then((res) => {
@@ -193,7 +218,7 @@ export default function UploadReportsStep({
                 : { status: 'error', message: 'Upload failed — please try again.' },
         }));
       })
-      .catch(() => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: 'Upload failed — please try again.' } })));
+      .catch((err: unknown) => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: uploadErrorMessage(err) } })));
   };
 
   const anyValidating = Object.values(states).some((s) => s?.status === 'validating');
