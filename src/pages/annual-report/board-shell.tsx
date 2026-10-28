@@ -13,7 +13,8 @@ import { ACCENT, ACCENT_TINT, BORDER, FAINT, INK, MONO, MUTED } from './board-ui
 type StepState = 'done' | 'active' | 'upcoming';
 
 /**
- * The 3-step progress bar shown at the top of every build step. Done and active
+ * The progress bar shown at the top of every build step, one circle per
+ * BOARD_STEPS entry. Done and active
  * steps are clickable; an upcoming step is disabled — the only way forward is
  * the step's own primary action, not a jump. Once the report is approved, every
  * step but the current one is disabled: an approved report is final.
