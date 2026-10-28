@@ -229,12 +229,10 @@ function InviteModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal-content"
-        style={{ width: 440 }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // No onClick on the background on purpose: a click outside must not throw away a
+    // half-filled form. The popup closes only with ✕, Cancel, or a successful invite.
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ width: 440 }}>
         <div
           style={{
             padding: '20px 24px 14px',

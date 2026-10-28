@@ -45,6 +45,9 @@ export interface ReportOutlineEntry {
   title_verbatim?: string;
   page?: number | null;
   level?: number;
+  // Set on a section (level 2) from GET /companies/{id}/latest-outline: the code it
+  // was stored as, so the Outline card can put the cycle's section under its chapter.
+  section_code?: string;
 }
 
 // Provenance alongside the outline, written by report_outline_extractor.py and stored

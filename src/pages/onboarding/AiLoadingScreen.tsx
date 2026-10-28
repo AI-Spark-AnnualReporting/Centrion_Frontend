@@ -291,15 +291,21 @@ export default function AiLoadingScreen({
 
         {headerExtra && <div style={{ marginBottom: 22 }}>{headerExtra}</div>}
 
-        <div style={{ background: '#FAFBFE', border: '1px solid #ECEEF8', borderRadius: 14, padding: '10px 20px', textAlign: 'left' }}>
-          {milestones.map((label, i) => (
-            <MilestoneRow
-              key={label}
-              label={label}
-              status={allDone || i < activeIdx ? 'complete' : i === activeIdx ? 'active' : 'pending'}
-            />
-          ))}
-        </div>
+        {/* Callers with no fixed steps to show (e.g. a live server message
+            instead) pass an empty list — skip the box rather than draw it
+            empty. Every existing caller always has steps, so this changes
+            nothing for them. */}
+        {milestones.length > 0 && (
+          <div style={{ background: '#FAFBFE', border: '1px solid #ECEEF8', borderRadius: 14, padding: '10px 20px', textAlign: 'left' }}>
+            {milestones.map((label, i) => (
+              <MilestoneRow
+                key={label}
+                label={label}
+                status={allDone || i < activeIdx ? 'complete' : i === activeIdx ? 'active' : 'pending'}
+              />
+            ))}
+          </div>
+        )}
 
         <div style={{ position: 'relative', height: 9, background: '#E8EAF5', borderRadius: 9, overflow: 'hidden', margin: '22px 0 8px' }}>
           <div
