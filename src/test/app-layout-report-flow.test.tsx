@@ -93,3 +93,15 @@ describe("AppLayout — floating launcher across the report flow", () => {
     expect(content.classList.contains("content--flush")).toBe(false);
   });
 });
+
+describe("AppLayout — top bar page name", () => {
+  it("names the validator page itself, not the Annual Report it starts with", () => {
+    renderAt("/annual-report-validator");
+    expect(screen.getByRole("banner")).toHaveTextContent("Annual Report Validator");
+  });
+
+  it("still names the annual report and its cycles Annual Report", () => {
+    renderAt("/annual-report/cycles/c1");
+    expect(screen.getByRole("banner")).toHaveTextContent(/^Annual Report$/);
+  });
+});

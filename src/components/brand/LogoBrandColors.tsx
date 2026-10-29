@@ -8,6 +8,11 @@ import type { BrandColors } from '@/types/brand';
 // The hexes come from the logo's real pixels server-side (see
 // Centriton/logo_colors.py) — the model only decides which sampled color is the
 // primary and which is the secondary.
+//
+// The company palette has five roles (primary, secondary, accent, text, light),
+// but detection deliberately still fills only the first two: auto-deriving the
+// other three was explicitly deferred. Everything here passes the other roles
+// through untouched.
 
 /** Drives detection for one screen. Never throws and never blocks: this is a
  * convenience on top of a picker that already works by hand.
@@ -41,7 +46,11 @@ export function useLogoBrandColors(onChange: (next: BrandColors) => void) {
         // which is different from having failed.
         if (!res.primary || !res.secondary) return;
         setPrevious(current);
+        // Spread `current` first: detection fills primary/secondary ONLY (the
+        // endpoint returns nothing else), so an accent/text/light the user has
+        // already chosen must survive a logo upload rather than be blanked.
         onChangeRef.current({
+          ...current,
           primary: res.primary,
           secondary: res.secondary,
           palette_key: res.palette_key || 'custom',

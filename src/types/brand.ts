@@ -8,17 +8,28 @@
 // and reports.generation_config.brand (a per-report override). The report's
 // value wins when set — see _resolve_brand in Centriton/routes/report_routes.py.
 
+// Five roles, in render order. Only primary/secondary are guaranteed: they are
+// the two the platform shipped with, so every company created before the palette
+// widened — and every API response written by the old code — carries just those.
+// accent/text/light are therefore OPTIONAL everywhere, and nothing may assume
+// they exist. A 2-colour company must render and save unchanged.
 export interface ColorPalette {
   key: string;
   name: string;
   primary: string;
   secondary: string;
+  accent?: string;
+  text?: string;
+  light?: string;
 }
 
-// palette_key is 'custom' (or '') when the primary/secondary are custom hex values.
+// palette_key is 'custom' (or '') when the colours are custom hex values.
 export interface BrandColors {
   primary: string;
   secondary: string;
+  accent?: string;
+  text?: string;
+  light?: string;
   palette_key: string;
 }
 
@@ -60,10 +71,30 @@ export interface DetectedBrandColors {
 // Mirrors PRESET_COLOR_PALETTES in Centriton/brand_constants.py. Only used as a
 // fallback when GET /reports/quarterly/color-palettes can't be reached, so the
 // Brand step never blocks onboarding on a network hiccup.
+//
+// Every hex here must match brand_constants.PRESET_COLOR_PALETTES exactly. The
+// two lists are the same palette described twice, and a client must not see a
+// different accent depending on whether one network call succeeded.
+//
+// applyPalette below still KEEPS, rather than clears, any role a preset omits:
+// the presets carry all five today, but a hand-picked accent must survive a
+// palette that ever ships without one.
 export const FALLBACK_COLOR_PALETTES: ColorPalette[] = [
-  { key: "violet_cyan", name: "Violet & Cyan", primary: "#3C0866", secondary: "#5BC9E2" },
-  { key: "navy_gold", name: "Navy & Gold", primary: "#0A1F44", secondary: "#C9A227" },
-  { key: "green_slate", name: "Green & Slate", primary: "#0B5D3B", secondary: "#64748B" },
+  {
+    key: "violet_cyan", name: "Violet & Cyan",
+    primary: "#3C0866", secondary: "#5BC9E2",
+    accent: "#E2725B", text: "#1E1B2E", light: "#F1ECF7",
+  },
+  {
+    key: "navy_gold", name: "Navy & Gold",
+    primary: "#0A1F44", secondary: "#C9A227",
+    accent: "#B4541F", text: "#11182B", light: "#F3EFE4",
+  },
+  {
+    key: "green_slate", name: "Green & Slate",
+    primary: "#0B5D3B", secondary: "#64748B",
+    accent: "#C2703D", text: "#14211C", light: "#EDF2EE",
+  },
 ];
 
 // What each role actually affects in a generated report — shown next to the
@@ -72,6 +103,27 @@ export const PRIMARY_NOTE =
   "Used for main headings, section titles, cover page, and table headers.";
 export const SECONDARY_NOTE =
   "Used for highlights, KPI numbers, dividers, and accent borders.";
+export const ACCENT_NOTE =
+  "A third colour for emphasis marks and small display details.";
+export const TEXT_NOTE =
+  "Body ink — a dark, readable colour for running text.";
+export const LIGHT_NOTE =
+  "A pale tone for rules, dividers and tinted panels.";
+
+// The five roles in the order they are always shown, so the picker, the legend
+// and anything else that enumerates them can never drift out of order.
+// The five ink roles, in the order they are shown. Typed as its own union
+// rather than `keyof BrandColors`, which would also admit `palette_key` — not a
+// colour, and not something anything should try to render.
+export type BrandRoleKey = 'primary' | 'secondary' | 'accent' | 'text' | 'light';
+
+export const BRAND_COLOR_ROLES: { key: BrandRoleKey; label: string; note: string }[] = [
+  { key: "primary", label: "Primary", note: PRIMARY_NOTE },
+  { key: "secondary", label: "Secondary", note: SECONDARY_NOTE },
+  { key: "accent", label: "Accent", note: ACCENT_NOTE },
+  { key: "text", label: "Text", note: TEXT_NOTE },
+  { key: "light", label: "Light", note: LIGHT_NOTE },
+];
 
 // ─── upload limits, shared by the onboarding Brand step and the Brand Identity
 // page. Both screens accept the same files and must reject them identically, so
@@ -169,8 +221,31 @@ export function luminance(hex: string): number {
     const c = parseInt(h.slice(i, i + 2), 16) / 255;
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   });
-  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.4152 * ch[2];
+  // WCAG relative luminance. The blue coefficient is 0.0722, and the three
+  // must sum to 1 — this read 0.4152 (summing to 1.343), which judged every
+  // blue-ish colour far lighter than it is. Note components/quarterly/
+  // CoverTemplatePicker.tsx and quarterly/ReportPreview.tsx each carry their
+  // own copy of the same wrong number; they are live on another team's
+  // screens, so they are left alone rather than changed blind.
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
 
 /** Too pale to read as an accent on white — the export darkens these for text. */
 export const isLight = (hex: string) => luminance(hex) > 0.7;
+
+/** WCAG contrast ratio between two hex colours, 1 (identical) to 21 (black/white). */
+export function contrastRatio(a: string, b: string): number {
+  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (l1 + 0.05) / (l2 + 0.05);
+}
+
+/**
+ * Ink to put ON a filled block — whichever of white/near-black is actually more
+ * readable, not whichever side of a lightness threshold the fill falls on. A
+ * mid-tone gold sits below `isLight`, so a threshold hands it white text at
+ * about 2.4:1; measuring picks the dark ink at about 7:1.
+ */
+export function onColor(hex: string): string {
+  const dark = '#1A1D2E';
+  return contrastRatio(hex, dark) >= contrastRatio(hex, '#FFFFFF') ? dark : '#FFFFFF';
+}

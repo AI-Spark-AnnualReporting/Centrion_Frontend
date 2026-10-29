@@ -14,6 +14,9 @@ export type CycleStatus =
 export interface Cycle {
   id: string;
   company_id: string;
+  // Which section list this cycle is built from. null = nobody has picked one yet
+  // (new cycles start this way); the Outline card then shows "Select outline".
+  outline_source?: 'previous' | 'system' | null;
   // Renamed fields carry both names — the SAR request contract uses
   // cycle_name/start_date/end_date/sector/is_shariah; older shapes used
   // name/cycle_*_date/sector_id/is_shariah_compliant. Read defensively.
@@ -123,6 +126,10 @@ export interface CycleSection {
   content_source?: string | null;
   ai_allowed?: boolean;
   mode: SectionMode;
+  // false = nobody has chosen this section's mode yet; `mode` is a placeholder and the
+  // PM's plan screen blocks Continue until they pick. Sections the extraction-time
+  // classifier was at least 95% sure about arrive true.
+  mode_confirmed?: boolean;
   status: SectionStatus;
   display_order?: number;
   verified?: boolean;
@@ -130,6 +137,34 @@ export interface CycleSection {
   attachment?: unknown;
   content?: unknown;
   feeders?: unknown[];
+}
+
+// PUT /api/v1/admin/cycles/{id}/outline-source response. Switching REBUILDS the cycle's
+// section list rather than adding to it, so it answers with the new list — and it is
+// refused outright (409) if any section it would clear already has work on it.
+export interface OutlineSourceResponse {
+  cycle_id: string;
+  outline_source: "previous" | "system";
+  sections_created: number;
+  sections: CycleSection[];
+}
+
+// GET /api/v1/admin/cycles/{id}/outline-preview?source=… — the sections a source WOULD
+// give this cycle. Nothing is saved. effective_source is 'system' when 'previous' was
+// asked for but the company has no sections of its own.
+export interface OutlinePreviewSection {
+  section_code: string;
+  title: string;
+  // Empty for a company's own sections, which have no layer.
+  layer: SectionLayer | "";
+  mode: SectionMode;
+}
+
+export interface OutlinePreviewResponse {
+  cycle_id: string;
+  source: "previous" | "system";
+  effective_source: "previous" | "system";
+  sections: OutlinePreviewSection[];
 }
 
 // POST /api/v1/admin/cycles/{id}/resolve-sections response.
@@ -144,12 +179,17 @@ export interface ResolveSectionsResponse {
 export interface AssignDepartmentsPayload {
   // HR Lead flow: department-only. The dept's HR Lead is resolved server-side; user_id is ignored.
   assignments: { department_id: string; user_id?: string }[];
+  // true = `assignments` is the cycle's FULL list: departments left off it are removed
+  // (only while they have no work; otherwise 409 and nothing changes).
+  replace?: boolean;
 }
 
 export interface AssignDepartmentsResponse {
   success: boolean;
   message: string;
   assignments_created: number;
+  // Departments removed because they were left off a replace=true list.
+  assignments_removed?: number;
   assignments: Array<{
     id: string;
     cycle_id: string;

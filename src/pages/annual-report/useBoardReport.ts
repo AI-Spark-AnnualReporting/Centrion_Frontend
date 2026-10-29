@@ -9,6 +9,7 @@ import { errorMessage, isBoardLocked } from './board-helpers';
 export const BOARD_STEPS: { label: string; path: (reportId: string) => string }[] = [
   { label: 'Sources', path: (id) => `/board-report/${id}/sources` },
   { label: 'Sections', path: (id) => `/board-report/${id}/sections` },
+  { label: 'Outline', path: (id) => `/board-report/${id}/outline` },
   { label: 'Review', path: (id) => `/board-report/${id}/preview` },
   { label: 'Report', path: (id) => `/board-report/${id}/report` },
 ];

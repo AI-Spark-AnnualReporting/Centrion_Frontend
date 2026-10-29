@@ -827,6 +827,7 @@ export function ThreadViewModal({
                       only invites the wrong one. A general thread keeps it. */}
                   <AttachedReportCard
                     report={report}
+                    hasValidation={!!thread?.has_validation}
                     // The thread's own URL, so "back" from the report returns
                     // to this conversation instead of a list.
                     backTo={`/communications/threads/${threadId}`}

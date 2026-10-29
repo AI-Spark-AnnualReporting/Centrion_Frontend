@@ -64,11 +64,11 @@ describe('Board & Meetings — merged calendar', () => {
     // Disclosure layer, derived — never stored anywhere
     expect(await screen.findByText('Next Annual report due')).toBeTruthy();
 
-    // One rail, not two
+    // One rail, not two. The count moved onto the tab when the card grew a
+    // second rail for meetings still needing minutes.
     expect(screen.queryByText('Upcoming Meetings')).toBeNull();
-    expect(screen.getByText('Upcoming')).toBeTruthy();
     // Filed items are excluded from the count: 1 meeting + 1 due = 2
-    expect(screen.getByText('2 upcoming')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Upcoming 2' })).toBeTruthy();
   });
 
   it('shows both layers on the selected-day panel, and only meetings are clickable', async () => {

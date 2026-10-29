@@ -122,11 +122,14 @@ describe('opensModulePage', () => {
 describe('hasSomethingToReview', () => {
   const target = { kind: 'annual_cycle' as const, company_id: 'cmp_1', cycle_id: 'cyc_1' };
 
-  it('offers nothing for an annual report until it is approved', () => {
+  it('offers nothing for an annual report until something is written', () => {
     expect(hasSomethingToReview({ state: 'not_ready', target, done: 0 }, 'draft')).toBe(false);
-    expect(hasSomethingToReview({ state: 'in_progress', target, done: 11 }, 'in_review')).toBe(false);
-    // Written through, still not signed off.
-    expect(hasSomethingToReview({ state: 'ready', target, done: 13 }, 'draft')).toBe(false);
+    expect(hasSomethingToReview({ state: 'not_ready', target, done: 0 }, 'in_review')).toBe(false);
+  });
+
+  it('offers a partly written annual report, so a reviewer can read and comment', () => {
+    expect(hasSomethingToReview({ state: 'in_progress', target, done: 11 }, 'in_review')).toBe(true);
+    expect(hasSomethingToReview({ state: 'ready', target, done: 13 }, 'draft')).toBe(true);
   });
 
   it('offers it once the report is approved', () => {

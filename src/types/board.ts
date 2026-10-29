@@ -46,6 +46,30 @@ export interface BoardProfileResponse {
 /** `draft` is editable; approved/locked/published 409 every mutating endpoint. */
 export type BoardReportStatus = "draft" | "approved" | "locked" | "published" | (string & {});
 
+/**
+ * One row of `GET /board/index-failures` — an approved board report whose
+ * background embedding job failed and can be retried.
+ *
+ * There is no notifications row behind this: the backend reports the NEWEST
+ * indexing run per report, and only when it failed. That is what makes the
+ * notification self-clearing — a successful retry simply stops the report being
+ * returned, and a repeat failure brings it back.
+ */
+export interface BoardIndexFailure {
+  report_id: string;
+  period: string | null; // "FY-2025"
+  /** The `notifications` row behind this, when there is one. */
+  notification_id: string | null;
+  /** Wording comes from the backend so this bell and the shared one can't drift. */
+  title: string;
+  message: string;
+  /** "FY 2026 board report" — the report's human name, for the success toast. */
+  label: string;
+  failed_at: string | null;
+  /** The job died without warning anyone, rather than reporting a failure. */
+  stale: boolean;
+}
+
 export interface BoardReportSummary {
   report_id: string;
   period: string; // "FY-2025"
@@ -94,13 +118,152 @@ export interface BoardSlotDocument {
   uploaded_at: string;
 }
 
+/**
+ * How a slot is filled. `documents` is the uploaded-file row; `meetings` is
+ * filled by ticking meetings already on the platform, so it never has documents.
+ * Absent on older payloads — read it through `slotKind()`, which defaults to
+ * `documents`.
+ */
+export type BoardSlotKind = "documents" | "meetings" | "profiles" | (string & {});
+
 export interface BoardSourceSlot {
   slot: string;
+  kind?: BoardSlotKind;
+  /** Meetings slots only — the section the picker reads and writes (BR35/BR36). */
+  section_code?: string;
   /** At least one mandatory section depends on this slot. */
   required: boolean;
+  /** `received` on a meetings slot means at least one meeting is ticked. */
   status: "received" | "pending" | (string & {});
   feeds: BoardSlotFeed[];
+  /** Always present — empty on a meetings slot. */
   documents: BoardSlotDocument[];
+  /** Meetings slots only. */
+  selected_ids?: string[];
+  selected_count?: number;
+  /** Meetings/profiles slots — how many the platform holds, for "2 of 4". */
+  member_count?: number;
+  /**
+   * Profiles slot — how many people were read out of an uploaded CV file. The
+   * row shows the count only; the table itself is edited in BR32's card on the
+   * Review screen, so there is one editable copy in one place.
+   */
+  profile_count?: number;
+  /**
+   * What the slot is actually feeding its sections from. A selection wins over
+   * an attached file, and on the profiles slot uploaded people win over ticked
+   * team members — the author is offered one path or the other.
+   */
+  fed_by?: "meetings" | "documents" | "profiles" | "team" | null;
+  /** Meetings slots — the saved period the selection was resolved from. */
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+// ─── meeting picker (BR35 / BR36) ─────────────────────────────────────────────
+
+export interface BoardMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  meeting_time?: string | null;
+  meeting_type: string;
+  status?: string;
+  participant_count: number;
+  /** False → the meeting contributes one line to the register and nothing else. */
+  has_minutes: boolean;
+  attendance_recorded: boolean;
+  minutes_attachment_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardMeetingFilters {
+  meeting_type?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}
+
+export interface BoardMeetingsResponse {
+  /** What the server actually filtered on — seed the controls from this. */
+  filters: BoardMeetingFilters;
+  /** The type dropdown's options. Never hardcode the enum; `all` is also valid. */
+  meeting_types: string[];
+  selected_ids: string[];
+  meetings: BoardMeeting[];
+  /** How many of `meetings` would actually print — the rest have no minutes. */
+  with_minutes_count?: number;
+  /** The period already saved for this section, if any. Seeds the date inputs. */
+  saved_period?: { date_from: string; date_to: string } | null;
+}
+
+// ─── director picker (BR32) ───────────────────────────────────────────────────
+
+export interface BoardDirector {
+  id: string;
+  full_name: string;
+  title?: string | null;
+  position_type?: string | null;
+  /** False → the person still gets a table row, just an empty CV cell. */
+  has_cv: boolean;
+  has_photo: boolean;
+  cv_file_name?: string | null;
+  selected: boolean;
+}
+
+export interface BoardDirectorsResponse {
+  selected_ids: string[];
+  directors: BoardDirector[];
+}
+
+// ─── profiles read out of an uploaded CV (BR32) ────────────────────────────────
+//
+// The other way to fill BR32, for an issuer whose directors are not platform
+// users. The upload pipeline reads the people out of the file; these are what
+// the author then corrects, in a table inside BR32's card on the Review screen.
+
+export interface BoardProfileJob {
+  job_title: string;
+  company: string;
+  /** "YYYY-MM", a bare "YYYY", or null when the CV gave no date. */
+  from_month: string | null;
+  /**
+   * Same, plus the literal "present" for a job still held. null is NOT that —
+   * it means the document never said where the job ended, which prints as
+   * "from 1986" rather than "1986 – present".
+   */
+  to_month: string | null;
+  responsibility: string;
+  sort_order?: number;
+}
+
+export interface BoardProfile {
+  /** Minted server-side. Absent on a row the operator has just added. */
+  id?: string;
+  full_name: string;
+  /** The role on the BOARD, not the current job — that is an experience entry. */
+  title: string;
+  has_photo?: boolean;
+  /** The headshot inline: the storage bucket is private, so there is no URL. */
+  photo_data_uri?: string | null;
+  source_document_id?: string | null;
+  /** The file this person was read out of. Null for one typed in by hand. */
+  source_filename?: string | null;
+  experience: BoardProfileJob[];
+  /**
+   * Write-only. A full `data:image/…;base64,…` URI replaces the headshot, null
+   * clears it, and omitting the key keeps what is there — three distinct
+   * meanings, so never send it as an empty string.
+   */
+  photo_base64?: string | null;
+}
+
+export interface BoardProfilesResponse {
+  report_id: string;
+  section_code: string;
+  profiles: BoardProfile[];
+  count: number;
+  /** The CV files filed under the slot, for a "read from …" line. */
+  documents: { id: string; filename: string }[];
 }
 
 export interface BoardSourcesResponse {
@@ -166,6 +329,67 @@ export interface BoardOutlineSavePayload {
   sections: { section_code: string; included: boolean }[];
 }
 
+// ─── subheadings ──────────────────────────────────────────────────────────────
+// The structure step. The server reads the paragraphs matched to each prose
+// section and proposes the subheadings it will be broken into; the reviewer
+// renames, deletes and reorders them, and what they approve is what prints.
+//
+// Three rules are enforced server-side and shape the whole screen: headings
+// cannot be ADDED (a heading with an unrecognised id is a 422), the proposal is
+// made ONCE per report (there is no regenerate), and approval freezes the lot
+// (every PUT is then a 409).
+
+/** Why a section takes no subheadings. Null on an editable row. */
+export type BoardSubheadingReason =
+  | "not_applicable"
+  | "excluded"
+  | "generated"
+  | "no_producer"
+  | "statement_table"
+  | "governance_table"
+  | "metric_table";
+
+export interface BoardSubheading {
+  /**
+   * Server-assigned, and the only thing that distinguishes a rename from an
+   * addition — text alone cannot. Send it back on save; drop it and every
+   * rename comes back 422 "subheadings cannot be added".
+   */
+  id: number;
+  heading: string;
+}
+
+export interface BoardSubheadingSection {
+  section_code: string;
+  title: string;
+  category: string;
+  display_order: number;
+  /** Only the narrative sections take subheadings. */
+  editable: boolean;
+  reason_code: BoardSubheadingReason | null;
+  /** Written for display — print as-is. Null when `editable`. */
+  reason: string | null;
+  subheadings: BoardSubheading[];
+  /** 0 on an editable row means nothing has been matched to it yet. */
+  source_paragraph_count: number;
+}
+
+export interface BoardSubheadingsResponse {
+  report_id: string;
+  period: string;
+  /** False once the report is approved — the whole screen goes read-only. */
+  editable: boolean;
+  /** Documents changed since the proposal. Informational: there is no re-propose. */
+  stale: boolean;
+  counts: { editable: number; read_only: number };
+  sections: BoardSubheadingSection[];
+}
+
+/** Only the sections that changed — the endpoint replaces just those. */
+export interface BoardSubheadingsSavePayload {
+  sections: { section_code: string; subheadings: BoardSubheading[] }[];
+}
+
 // ─── produced sections ────────────────────────────────────────────────────────
 
 /** Which document a section's content was read from. */
@@ -185,6 +409,12 @@ export interface BoardCitation {
 export type BoardCitations = Record<string, unknown> | BoardCitation[] | null;
 
 export interface BoardSectionFeeder {
+  /**
+   * `platform_data` — the section was built from data already on the platform
+   * (team profiles, selected meetings) rather than an uploaded document, so it
+   * carries no citations.
+   */
+  source?: string | null;
   /** Set when the content was reused from a prior year, e.g. "FY-2024". */
   carried_forward_from?: string | null;
   /** Says exactly what is missing (needs_input) or why it is empty. */
@@ -201,7 +431,20 @@ export interface BoardSectionFeeder {
   edited?: boolean;
   /** A reviewer had the model rewrite it. */
   refined?: boolean;
+  /**
+   * Approved subheadings the section's own text did not cover. The reviewer
+   * chose them, so they are told nothing was found rather than having the
+   * heading vanish from the report unexplained.
+   */
+  unfilled_headings?: string[] | null;
 }
+
+/**
+ * How a section prints. `table` (or absent) is the generic table renderer; the
+ * `cards_*` values are the profile-card layouts BR32 offers. Saved on the
+ * section so the exported PDF matches the screen.
+ */
+export type BoardSectionLayout = "table" | "cards_grid" | "cards_band" | "cards_row";
 
 export interface BoardSection {
   section_code: string;
@@ -216,6 +459,8 @@ export interface BoardSection {
   /** Prose sections hold text; the rest hold JSON as a string. */
   content: string | null;
   feeder?: BoardSectionFeeder | null;
+  /** Absent/null on a server without the layout choice — read it as `table`. */
+  layout?: BoardSectionLayout | null;
 }
 
 export interface BoardSectionsResponse {

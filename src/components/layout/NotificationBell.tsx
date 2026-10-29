@@ -2,29 +2,49 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import {
+  agentRuns,
+  boardReports,
   communications,
+  earnings,
   notifications as notificationsApi,
+  quarterlyReports,
+  sarNotifications,
   ApiError,
-  type ThreadSummary,
   type AppNotificationRow,
+  type SarNotification,
+  type ThreadSummary,
 } from '@/lib/api';
+import type { BoardIndexFailure } from '@/types/board';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 /* ══════════════════════════════════════════════════════════════════════
    Notification bell + dropdown.
 
-   Today it surfaces one kind of notification — an unread thread message —
-   built from the live Communication Hub feed. The model is deliberately
-   type-driven so future kinds slot in without touching the UI:
+   Two kinds today, from two different feeds:
+
+     thread_message    an unread Communication Hub thread, from this backend.
+     report_not_ready  a finalised report that could not be prepared for the AI
+                       assistant, from the SHARED notifications table (read via
+                       the SAR backend — see sarNotifications in lib/api).
+
+   The model is deliberately type-driven so future kinds slot in without
+   touching the UI:
 
      1. add a code to NotificationType
      2. add an entry to NOTIF_META (icon + accent)
      3. add a builder that returns AppNotification[]
 
-   Everything below (list, badge, empty state, click-through) is generic.
+   Everything below (list, badge, empty state, click-through) is generic. A row
+   may also carry an `action`, which renders as a button inside the row and does
+   NOT open the notification — report_not_ready uses it for "Try again".
 ═══════════════════════════════════════════════════════════════════════ */
 
-export type NotificationType = 'thread_message' | 'system'; // | 'mention' | …
+export type NotificationType =
+  | 'thread_message'
+  | 'system'
+  | 'report_not_ready'
+  | 'board_index_failed'; // | 'mention' | …
 
 export interface AppNotification {
   id: string;
@@ -40,6 +60,12 @@ export interface AppNotification {
   unread: boolean;
   /** Route opened when the row is clicked. */
   navigateTo?: string;
+  /**
+   * In-row button. Its click never opens the notification. Awaited by the
+   * generic handler below; a fire-and-forget retry (board_index_failed)
+   * resolves immediately and tracks its own pending state separately.
+   */
+  action?: { label: string; busyLabel: string; run: () => Promise<void> };
 }
 
 interface NotifMeta {
@@ -82,7 +108,85 @@ const NOTIF_META: Record<NotificationType, NotifMeta> = {
       </svg>
     ),
   },
+  report_not_ready: {
+    label: 'Needs attention',
+    // #B45309 is the app-wide warning ink (SheetReadingDialog, EditableProse…).
+    accent: '#B45309',
+    bg: '#FFF7ED',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M8 2.6 14.4 13H1.6L8 2.6z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+        <path d="M8 6.6v2.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11.2" r=".75" fill="currentColor" />
+      </svg>
+    ),
+  },
+  board_index_failed: {
+    label: 'Indexing failed',
+    accent: '#D9480F',
+    bg: '#FFF0E6',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path
+          d="M8 2.6 14.4 13.4H1.6L8 2.6z"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinejoin="round"
+        />
+        <path d="M8 6.6v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <circle cx="8" cy="11.6" r=".8" fill="currentColor" />
+      </svg>
+    ),
+  },
 };
+
+// What identifies OUR rows in the shared notifications table.
+//
+// Not `category`, even though the backend writes one: SAR's NotificationResponse
+// does not return that column at all, so a reader never sees it. This pair does
+// come back, and nothing else in the table uses either half.
+//
+// The filter is not optional. Centriyon also writes Communication Hub rows into
+// this same table, and those already reach the bell through the thread feed
+// below — without it, every @mention would be listed twice.
+//
+// Keep in step with TYPE_REPORT_AI_READINESS / RELATED_TYPE_REPORT in the
+// backend's notifications.py.
+const READINESS_TYPE = 'alert';
+const READINESS_RELATED_TYPE = 'report';
+
+// Approved board reports the AI assistant can't read yet, because the
+// background indexing never finished. `onRetry` re-runs it; the row clears on
+// the next poll once the backend marks the warning read.
+//
+// Title and body come from the backend verbatim — the same text is written to
+// the shared `notifications` table that SAR's bell renders, and two copies of
+// the same sentence drift.
+function buildIndexFailureNotifications(
+  failures: BoardIndexFailure[],
+  onRetry: (reportId: string) => void,
+): AppNotification[] {
+  return failures.map((f) => ({
+    id: `board-index:${f.report_id}`,
+    type: 'board_index_failed' as const,
+    title: f.title,
+    body: f.message,
+    meta: 'Needs attention',
+    timestamp: f.failed_at ?? new Date().toISOString(),
+    unread: true,
+    navigateTo: `/board-report/${f.report_id}/report`,
+    action: {
+      label: 'Try again',
+      busyLabel: 'Getting it ready…',
+      run: async () => onRetry(f.report_id),
+    },
+  }));
+}
 
 // Turn the Communication Hub feed into notifications: one per thread with
 // unread messages, newest first (the feed is already sorted updated_at desc).
@@ -123,6 +227,14 @@ function buildSystemNotifications(rows: AppNotificationRow[]): AppNotification[]
     }));
 }
 
+/** Which report a readiness notification is about, read off its deep link. */
+function reportKind(actionUrl: string | null | undefined): 'earnings' | 'quarterly' | null {
+  if (!actionUrl) return null;
+  if (actionUrl.startsWith('/earnings/')) return 'earnings';
+  if (actionUrl.startsWith('/quarterly-report/')) return 'quarterly';
+  return null;
+}
+
 function relativeTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
@@ -135,9 +247,19 @@ const SCOPED_CSS = `
 .notif-row { transition: background .13s; }
 .notif-row:hover { background: #F7F7FD; }
 .notif-clear:hover { color: #4040C8 !important; }
+.notif-row:focus-visible { outline: 2px solid #4040C8; outline-offset: -2px; }
+.notif-action:hover:not(:disabled) { background: #FFF1DF !important; }
+.notif-action:disabled { opacity: .6; cursor: default; }
 `;
 
 const REFRESH_MS = 45000;
+
+// Retry polling. The indexer usually finishes in well under a minute; past the
+// cap we stop watching and let the 45s refresh settle it, rather than spinning
+// forever on a run whose process died (a server restart drops in-flight
+// BackgroundTasks with no record).
+const POLL_MS = 3000;
+const POLL_CAP_MS = 120000;
 
 export function NotificationBell() {
   // Threads are company-scoped. A Spark session that hasn't picked a company
@@ -148,7 +270,14 @@ export function NotificationBell() {
   const hideForCompanylessSpark = user?.role === 'spark_internal' && !actingCompany;
 
   const navigate = useNavigate();
+  const { toast } = useToast();
+  // The success toast outlives the render that built it, and by the time it
+  // fires the failure row carrying the report's name is already gone — so the
+  // name is kept here rather than read back off a row that no longer exists.
+  const labelsRef = useRef<Map<string, string>>(new Map());
+
   const [items, setItems] = useState<AppNotification[]>([]);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -159,33 +288,201 @@ export function NotificationBell() {
   // Same guard ComplianceRunsContext already applies to its own
   // company-scoped sweep.
   const enabled = !!user?.company_id;
+  const companyId = user?.company_id;
 
   const unreadCount = items.filter((n) => n.unread).length;
 
+  // Declared before `load` so the builder below can close over it. Kept in a ref
+  // rather than the dependency list so a retry never re-creates the poller.
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+
+  // Retrying a board-report index is optimistic on the label only: the row
+  // stays until the backend stops reporting it, so a retry that fails again
+  // never looks like a success.
+  //
+  // Mirrored in a ref so `load` can read it without a setState updater. Firing
+  // the toast inside an updater would be an impure one, and React is free to
+  // run those twice — which is a double "it's ready" for one retry.
+  const [retrying, setRetrying] = useState<Set<string>>(new Set());
+  const retryingRef = useRef<Set<string>>(new Set());
+
+  const setRetryingBoth = useCallback((next: Set<string>) => {
+    retryingRef.current = next;
+    setRetrying(next);
+  }, []);
+
+  // Only ever fired for a report the user pressed Try again on. When the
+  // approve-time index just works — which is nearly always — nothing is said:
+  // the user never knew there was a problem, and congratulating them on a fix
+  // they did not ask for is noise.
+  //
+  // A toast rather than a bell row, because the bell is a list of things that
+  // still need doing. A success row there would force the reader to open rows
+  // to find out which ones are chores. This one clears itself.
+  const announceIndexed = useCallback(
+    (reportId: string) => {
+      const label = labelsRef.current.get(reportId) ?? 'Your board report';
+      toast({
+        variant: 'success',
+        title: 'The assistant can read this report now',
+        description: `${label} is ready — you can ask the assistant about it.`,
+      });
+      labelsRef.current.delete(reportId);
+    },
+    [toast],
+  );
+
+  const retryIndex = useCallback(
+    (reportId: string) => {
+      setRetryingBoth(new Set(retryingRef.current).add(reportId));
+      void boardReports
+        .retryIndex(reportId)
+        .catch(() => {})
+        .finally(() => loadRef.current());
+    },
+    [setRetryingBoth],
+  );
+
+  // Watch a queued retry to its end. On success the backend clears the warning,
+  // so the row simply disappears; on a repeat failure it replaces its own row and
+  // the timestamp moves. Returns how it ended, or null if we stopped watching —
+  // which is NOT a failure, so the caller must not claim one.
+  const watchRun = useCallback(async (pollUrl: string | null): Promise<string | null> => {
+    if (!pollUrl) return null;
+    const started = Date.now();
+    while (Date.now() - started < POLL_CAP_MS) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      try {
+        const run = await agentRuns.getByPollUrl(pollUrl);
+        if (run.status === 'completed' || run.status === 'failed') return run.status;
+      } catch {
+        // A transient poll failure is not a retry failure — keep watching.
+      }
+    }
+    return null;
+  }, []);
+
+  const buildReadinessNotifications = useCallback(
+    (rows: SarNotification[]): AppNotification[] =>
+      rows
+        .filter(
+          (r) =>
+            !r.is_read &&
+            r.notification_type === READINESS_TYPE &&
+            r.related_type === READINESS_RELATED_TYPE,
+        )
+        .map((r) => {
+          const kind = reportKind(r.action_url);
+          const reportId = r.related_id ?? '';
+          const id = `notif:${r.id}`;
+          return {
+            id,
+            type: 'report_not_ready' as const,
+            title: r.title,
+            body: r.message,
+            timestamp: r.created_at,
+            unread: true,
+            navigateTo: r.action_url ?? undefined,
+            // No report to act on (an unparseable link) → no button, so the row
+            // is still readable and still deep-links, it just can't self-heal.
+            action:
+              kind && reportId
+                ? {
+                    label: 'Try again',
+                    busyLabel: 'Getting it ready…',
+                    run: async () => {
+                      const res =
+                        kind === 'earnings'
+                          ? await earnings.reindexEarningsReport(reportId)
+                          : await quarterlyReports.reindexReport(companyId ?? '', reportId);
+                      const outcome = await watchRun(res.poll_url);
+                      await loadRef.current();
+                      // Only on a confirmed success. The warning vanishing is
+                      // quiet enough to miss right after pressing a button, and
+                      // null means we stopped watching, not that it worked.
+                      if (outcome === 'completed') {
+                        toast({
+                          variant: 'success',
+                          title: '✓ The assistant can read this report now',
+                          description:
+                            `${res.report_label || 'Your report'} is ready — ` +
+                            'you can ask the assistant about it.',
+                        });
+                      }
+                    },
+                  }
+                : undefined,
+          };
+        }),
+    [companyId, watchRun, toast],
+  );
+
   const load = useCallback(async () => {
     if (!enabled) return;
-    try {
-      // Both sources are independent — one failing must not blank the other, so they
-      // settle separately and whatever arrived is merged newest-first.
-      const [threads, rows] = await Promise.allSettled([
-        communications.listThreads(),
-        notificationsApi.list(),
-      ]);
-      const merged = [
-        ...(threads.status === 'fulfilled'
-          ? buildThreadNotifications(threads.value.threads)
-          : []),
-        ...(rows.status === 'fulfilled'
-          ? buildSystemNotifications(rows.value.notifications)
-          : []),
-      ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      setItems(merged);
-    } catch (e) {
-      // 401 → request layer already ran the session-expired flow. Any other
-      // failure just leaves the bell empty rather than surfacing an error.
-      if (e instanceof ApiError && e.status === 401) return;
+    // Four independent hosts. Settled, not all — one failing must not blank
+    // the others, so they resolve separately and whatever arrived is merged.
+    const [threads, rows, notifs, failures] = await Promise.allSettled([
+      communications.listThreads(),
+      notificationsApi.list(),
+      sarNotifications.list(),
+      boardReports.listIndexFailures(),
+    ]);
+
+    // 401 → the request layer already ran the session-expired flow. Any other
+    // failure just leaves that feed's rows out rather than surfacing an error.
+    const isExpired = (r: PromiseSettledResult<unknown>) =>
+      r.status === 'rejected' && r.reason instanceof ApiError && r.reason.status === 401;
+    if (isExpired(threads) || isExpired(rows) || isExpired(notifs) || isExpired(failures)) {
+      return;
     }
-  }, [enabled]);
+
+    if (failures.status === 'fulfilled') {
+      failures.value.failures.forEach((f) => labelsRef.current.set(f.report_id, f.label));
+    }
+    const failureRows =
+      failures.status === 'fulfilled'
+        ? buildIndexFailureNotifications(failures.value.failures, retryIndex)
+        : [];
+
+    // A report that WAS being retried and is no longer reported has succeeded:
+    // the backend marks the warning read only when the index lands. That
+    // transition is the only moment success is knowable, so it is where the
+    // confirmation is announced.
+    //
+    // Guarded on `fulfilled` on purpose. A failed request returns no failures,
+    // which would otherwise read as "every retry worked" and announce a success
+    // for a job that may well have failed.
+    if (failures.status === 'fulfilled') {
+      const stillFailing = new Set(failures.value.failures.map((f) => f.report_id));
+      const done = [...retryingRef.current].filter((id) => !stillFailing.has(id));
+      if (done.length) {
+        done.forEach(announceIndexed);
+        setRetryingBoth(
+          new Set([...retryingRef.current].filter((id) => stillFailing.has(id))),
+        );
+      }
+    }
+
+    const rest: AppNotification[] = [];
+    if (threads.status === 'fulfilled') {
+      rest.push(...buildThreadNotifications(threads.value.threads));
+    }
+    if (rows.status === 'fulfilled') {
+      rest.push(...buildSystemNotifications(rows.value.notifications));
+    }
+    if (notifs.status === 'fulfilled') {
+      rest.push(...buildReadinessNotifications(notifs.value.notifications ?? []));
+    }
+    // The rest, newest first — the feeds are each sorted, together they are not.
+    rest.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+    // Something that needs doing outranks something to read.
+    setItems([...failureRows, ...rest]);
+  }, [enabled, buildReadinessNotifications, retryIndex, announceIndexed, setRetryingBoth]);
+
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   // Poll in the background so the badge stays roughly live.
   useEffect(() => {
@@ -217,27 +514,51 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const openNotification = (n: AppNotification) => {
-    // Optimistically clear it, tell the backend, then deep-link to the thread.
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
+  const markRead = (n: AppNotification) => {
     if (n.type === 'thread_message') {
-      const threadId = n.id.slice('thread:'.length);
-      communications.markThreadRead(threadId).catch(() => {});
+      communications.markThreadRead(n.id.slice('thread:'.length)).catch(() => {});
     } else if (n.type === 'system') {
       notificationsApi.markRead(n.id.slice('notif:'.length)).catch(() => {});
+    } else if (n.type === 'report_not_ready') {
+      sarNotifications.markRead(n.id.slice('notif:'.length)).catch(() => {});
+    }
+  };
+
+  const openNotification = (n: AppNotification) => {
+    // Optimistically clear it, tell the backend, then deep-link.
+    // An index failure has no read state — it clears when the retry succeeds.
+    if (n.type !== 'board_index_failed') {
+      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, unread: false } : x)));
+      markRead(n);
     }
     setOpen(false);
     if (n.navigateTo) navigate(n.navigateTo);
   };
 
+  const runAction = async (n: AppNotification) => {
+    if (!n.action || busy[n.id]) return;
+    setBusy((prev) => ({ ...prev, [n.id]: true }));
+    try {
+      await n.action.run();
+    } catch {
+      // Leave the row as it is — the warning is still true, and the button can
+      // be pressed again. Retrying is safe to repeat by design.
+    } finally {
+      setBusy((prev) => {
+        const { [n.id]: _drop, ...rest } = prev;
+        return rest;
+      });
+    }
+  };
+
   const markAllRead = () => {
-    const unread = items.filter((n) => n.unread);
-    setItems((prev) => prev.map((x) => ({ ...x, unread: false })));
-    unread.forEach((n) => {
-      if (n.type === 'thread_message') {
-        communications.markThreadRead(n.id.slice('thread:'.length)).catch(() => {});
-      }
-    });
+    // Index failures are deliberately left alone: there is nothing to mark read
+    // on the server, and the failure is still real until someone retries it.
+    const unread = items.filter((n) => n.unread && n.type !== 'board_index_failed');
+    setItems((prev) =>
+      prev.map((x) => (x.type !== 'board_index_failed' ? { ...x, unread: false } : x)),
+    );
+    unread.forEach(markRead);
   };
 
   // After the hooks, never before them — so the bell simply isn't there for a
@@ -398,13 +719,31 @@ export function NotificationBell() {
             ) : (
               items.map((n) => {
                 const meta = NOTIF_META[n.type];
+                // Board-index failures track their pending state in `retrying`
+                // (persists across polls, cleared only when the row itself
+                // clears); every other action-bearing row uses the generic
+                // per-click `busy` map from runAction.
+                const isBusy =
+                  n.type === 'board_index_failed'
+                    ? retrying.has(n.id.slice('board-index:'.length))
+                    : !!busy[n.id];
+                const wraps = n.type === 'board_index_failed' || n.type === 'report_not_ready';
                 return (
-                  <button
+                  // A div, not a button: a row can carry its own action button
+                  // (Retry), and a button may not be nested inside a button.
+                  // tabIndex + onKeyDown keep it operable from the keyboard.
+                  <div
                     key={n.id}
-                    type="button"
                     role="menuitem"
+                    tabIndex={0}
                     className="notif-row"
                     onClick={() => openNotification(n)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openNotification(n);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'flex-start',
@@ -412,7 +751,6 @@ export function NotificationBell() {
                       width: '100%',
                       textAlign: 'left',
                       padding: '13px 16px',
-                      border: 'none',
                       borderBottom: '1px solid #F4F5FB',
                       background: n.unread ? '#FBFAFF' : '#fff',
                       cursor: 'pointer',
@@ -444,8 +782,12 @@ export function NotificationBell() {
                             fontWeight: 700,
                             color: '#1A1D2E',
                             overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            // A one-line preview is right for a message, but an
+                            // alert's whole point is its sentence — ellipsing it
+                            // hides what is wrong.
+                            ...(wraps
+                              ? {}
+                              : { textOverflow: 'ellipsis', whiteSpace: 'nowrap' }),
                           }}
                         >
                           {n.title}
@@ -468,9 +810,18 @@ export function NotificationBell() {
                             fontSize: 12,
                             color: '#5A6080',
                             marginTop: 2,
+                            // Warnings are a sentence or two of plain English and
+                            // are useless truncated to one line, unlike a message
+                            // preview which is only ever a teaser.
                             overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            ...(wraps
+                              ? {
+                                  display: '-webkit-box',
+                                  WebkitBoxOrient: 'vertical' as const,
+                                  WebkitLineClamp: 4,
+                                  lineHeight: 1.45,
+                                }
+                              : { textOverflow: 'ellipsis', whiteSpace: 'nowrap' }),
                           }}
                         >
                           {n.body}
@@ -480,9 +831,36 @@ export function NotificationBell() {
                         <span style={{ fontSize: 11, fontWeight: 700, color: meta.accent }}>{n.meta ?? meta.label}</span>
                         <span style={{ width: 3, height: 3, borderRadius: '50%', background: '#CBD0E4' }} />
                         <span style={{ fontSize: 11, color: '#9BA3C4' }}>{relativeTime(n.timestamp)}</span>
+                        {n.action && (
+                          <button
+                            type="button"
+                            className="notif-action"
+                            disabled={isBusy}
+                            // Acting on the row must not also open it.
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void runAction(n);
+                            }}
+                            style={{
+                              marginLeft: 'auto',
+                              padding: '3px 10px',
+                              borderRadius: 7,
+                              border: `1px solid ${meta.accent}`,
+                              background: '#fff',
+                              color: meta.accent,
+                              fontSize: 11,
+                              fontWeight: 800,
+                              fontFamily: 'inherit',
+                              cursor: isBusy ? 'default' : 'pointer',
+                              opacity: isBusy ? 0.55 : 1,
+                            }}
+                          >
+                            {isBusy ? n.action.busyLabel : n.action.label}
+                          </button>
+                        )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })
             )}

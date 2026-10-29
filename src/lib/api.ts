@@ -25,6 +25,7 @@ import type {
   CreateCompanyRequest,
   CreateCompanyResponse,
   DepartmentSuggestionsResponse,
+  LatestOutlineResponse,
   Sector,
   SectorsResponse,
 } from "@/types/company";
@@ -100,8 +101,15 @@ import type {
 import type {
   BoardAssembleResponse,
   BoardCompletion,
+  BoardDirectorsResponse,
+  BoardProfile,
+  BoardProfilesResponse,
+  BoardSectionLayout,
   BoardExportFormat,
+  BoardIndexFailure,
   BoardIssuerProfile,
+  BoardMeetingFilters,
+  BoardMeetingsResponse,
   BoardOutlineResponse,
   BoardOutlineSavePayload,
   BoardProduceSectionResponse,
@@ -113,12 +121,16 @@ import type {
   BoardSection,
   BoardSectionsResponse,
   BoardSourcesResponse,
+  BoardSubheadingsResponse,
+  BoardSubheadingsSavePayload,
   CreateBoardReportPayload,
 } from "@/types/board";
 import type {
   CreateMeetingBody,
   MeetingListResponse,
+  MeetingMinutesResponse,
   MeetingResponse,
+  SaveMeetingMinutesBody,
   UpdateMeetingBody,
 } from "@/types/meeting";
 import type {
@@ -165,10 +177,13 @@ import type {
   CreateCyclePayload,
   CycleOverview,
   CycleSection,
+  OutlinePreviewResponse,
+  OutlineSourceResponse,
   ResolveSectionsResponse,
   SARUser,
   SessionStatus,
 } from "@/types/cycles";
+import type { ValidationJob, ValidationJobSummary } from "@/types/annual-report-validator";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
@@ -636,6 +651,18 @@ export interface QuarterlyQuestionsResponse {
   questions: QuarterlyQuestion[];
 }
 
+// What a "get this report ready for the AI assistant again" call returns. The
+// work itself runs in the background, so this is only a handle on it: poll_url
+// is an agent_runs URL, null when the run row could not be opened (the indexing
+// still happens — the run row is observability, not the job).
+export interface ReindexResponse {
+  report_id: string;
+  run_id: string | null;
+  poll_url: string | null;
+  /** "Q3 2025 earnings report" — how a person refers to it, for the success toast. */
+  report_label?: string | null;
+}
+
 // Loose aliases for values sourced from API lookups.
 export type Jurisdiction = string;
 export type AgentClass =
@@ -831,6 +858,14 @@ export const companies = {
   // The caller's own company (resolved from the JWT) — backs the Profile page
   // Company Details card. PATCH accepts a partial of the editable fields.
   getMyCompany: () => request<Company>("/api/v1/companies/me"),
+
+  // The table of contents of the most recent report this company UPLOADED, read off
+  // its contents page at onboarding. It lives on the report, not the company — a
+  // company has many reports over the years — so it has its own endpoint rather than
+  // riding along on getMyCompany(). `outline` is null when there is none yet, which is
+  // the common case: it is only written for an annual PDF the customer gave us.
+  getLatestOutline: (companyId: string) =>
+    request<LatestOutlineResponse>(`/api/v1/companies/${companyId}/latest-outline`),
 
   // The logo lives behind its own endpoint because it's ~1.4 MB of inline
   // base64 and getMyCompany() runs on nearly every page — fetch it only where
@@ -1030,6 +1065,9 @@ export const documents = {
 
 export interface TeamMember {
   id: string;
+  // The usr_… address. Every /team/{user_id} sub-resource keys off this, NOT
+  // off `id` — they are different values and swapping them 404s.
+  user_id?: string | null;
   email: string;
   full_name: string;
   title?: string | null;
@@ -1040,6 +1078,11 @@ export interface TeamMember {
   department?: string | null;
   status?: string | null;
   created_at?: string | null;
+  // Only present when the list was asked for ?include=experience.
+  experience?: TeamExperience[] | null;
+  // Only present with ?include=photo. Signed and short-lived; null when the
+  // member has no headshot.
+  photo_url?: string | null;
 }
 
 export interface CreateTeamMemberBody {
@@ -1072,6 +1115,11 @@ export interface ListTeamQuery {
   position_type?: string;
   role?: string;
   include_inactive?: boolean;
+  // Nests each member's history and/or a signed headshot URL in the same
+  // response. Without it the Leadership page would need one request per card;
+  // the URLs are all signed in a single round-trip server-side, so asking for
+  // photo costs almost nothing. CV is never included.
+  include?: "experience" | "photo" | "experience,photo";
 }
 
 // POST response. `member` is the long-standing key; the rest arrived with
@@ -1098,6 +1146,79 @@ function unwrapTeamList(raw: unknown): TeamMember[] {
     }
   }
   return [];
+}
+
+export interface TeamExperience {
+  id: string;
+  job_title: string;
+  company: string;
+  /** "YYYY-MM". Not a date: it comes from <input type="month">, and giving it
+   *  a day-of-month is what reintroduces the timezone off-by-one. */
+  from_month: string;
+  /** "YYYY-MM", or null meaning Present. Never "" — the API rejects that. */
+  to_month: string | null;
+  /** Markdown. No length cap server-side. */
+  responsibility: string;
+  sort_order: number;
+}
+
+export interface CreateTeamExperienceBody {
+  job_title: string;
+  company: string;
+  from_month: string;
+  to_month?: string | null;
+  responsibility?: string;
+  sort_order?: number;
+}
+
+/** PATCH is a true partial: an absent key is left alone, an explicit null on
+ *  to_month means Present. Only send keys the user actually changed — unknown
+ *  keys are a 422, so never spread a whole row back in. */
+export type UpdateTeamExperienceBody = Partial<CreateTeamExperienceBody>;
+
+/** GET /team/{uid}/photo. Unlike the CV, "no photo" is a 200 with a null
+ *  photo_url rather than a 404 — so a null here is the placeholder case, not
+ *  a failure. The URL is signed and expires in an hour: never persist it, and
+ *  re-fetch rather than reusing one from an earlier page load. */
+export interface TeamMemberPhoto {
+  photo_url: string | null;
+  content_type: string | null;
+  uploaded_at: string | null;
+  expires_at: string | null;
+}
+
+export interface TeamMemberCv {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  uploaded_at: string;
+  /** Signed and short-lived — re-fetch rather than storing or sharing it. */
+  download_url: string;
+  download_expires_at: string;
+}
+
+function teamMemberPath(companyId: string, userId: string): string {
+  return `/api/v1/companies/${encodeURIComponent(companyId)}/team/${encodeURIComponent(userId)}`;
+}
+
+// DELETE/PUT here answer 204, and `request` would still try to parse a body.
+// The error path does parse, though: these endpoints reject with a plain
+// {detail: "..."} sentence, and ApiError only lifts it into .message when the
+// body arrives as JSON rather than as raw text.
+async function noContent(path: string, method: "DELETE" | "PUT", body?: unknown) {
+  const res = await fetchWithAuth(path, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
+  if (res.ok) return;
+  const ct = res.headers.get("content-type") ?? "";
+  const parsed: unknown = ct.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => "");
+  throw new ApiError(res.status, res.statusText, parsed, path);
 }
 
 export const team = {
@@ -1140,6 +1261,76 @@ export const team = {
       const text = await res.text().catch(() => "");
       throw new ApiError(res.status, res.statusText, text, path);
     }
+  },
+
+  // ── Experience ───────────────────────────────────────────────────────────
+  // Every write is gated server-side on self OR leadership:create.
+  experience: {
+    list: (companyId: string, userId: string) =>
+      request<TeamExperience[]>(`${teamMemberPath(companyId, userId)}/experience`),
+
+    create: (companyId: string, userId: string, body: CreateTeamExperienceBody) =>
+      request<TeamExperience>(`${teamMemberPath(companyId, userId)}/experience`, {
+        method: "POST",
+        body,
+      }),
+
+    update: (
+      companyId: string,
+      userId: string,
+      experienceId: string,
+      body: UpdateTeamExperienceBody,
+    ) =>
+      request<TeamExperience>(
+        `${teamMemberPath(companyId, userId)}/experience/${encodeURIComponent(experienceId)}`,
+        { method: "PATCH", body },
+      ),
+
+    remove: (companyId: string, userId: string, experienceId: string) =>
+      noContent(
+        `${teamMemberPath(companyId, userId)}/experience/${encodeURIComponent(experienceId)}`,
+        "DELETE",
+      ),
+  },
+
+  // ── Profile photo ────────────────────────────────────────────────────────
+  // Asymmetric on purpose: the read is a signed URL, the write is still the
+  // inline data URI our canvas pipeline produces.
+  photo: {
+    // The roster gets its headshots from ?include=photo. This is for a single
+    // member opened later, whose list URL may have aged past its hour.
+    get: (companyId: string, userId: string) =>
+      request<TeamMemberPhoto>(`${teamMemberPath(companyId, userId)}/photo`),
+
+    /** `photoBase64` must be the full data URI, prefix included. 1 MB decoded. */
+    put: (companyId: string, userId: string, photoBase64: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/photo`, "PUT", {
+        photo_base64: photoBase64,
+      }),
+
+    remove: (companyId: string, userId: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/photo`, "DELETE"),
+  },
+
+  // ── CV ───────────────────────────────────────────────────────────────────
+  cv: {
+    /** 404 when none is uploaded — that is the empty state, not a failure. */
+    get: (companyId: string, userId: string) =>
+      request<TeamMemberCv>(`${teamMemberPath(companyId, userId)}/cv`),
+
+    // Re-uploading replaces whatever is there; no DELETE needed first.
+    upload: (companyId: string, userId: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      // No Content-Type header — the browser must set the multipart boundary.
+      return request<TeamMemberCv>(`${teamMemberPath(companyId, userId)}/cv`, {
+        method: "POST",
+        form,
+      });
+    },
+
+    remove: (companyId: string, userId: string) =>
+      noContent(`${teamMemberPath(companyId, userId)}/cv`, "DELETE"),
   },
 };
 
@@ -2189,6 +2380,14 @@ export const quarterlyReports = {
   approveReport: (companyId: string, reportId: string) =>
     request<ApproveReportResponse>(
       `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/approve`,
+      { method: "POST" },
+    ),
+
+  // The quarterly twin of earnings.reindexEarningsReport — see there for why a
+  // retry is safe to press repeatedly.
+  reindexReport: (companyId: string, reportId: string) =>
+    request<ReindexResponse>(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/reindex`,
       { method: "POST" },
     ),
 
@@ -3365,6 +3564,16 @@ export const earnings = {
       { method: "POST", body: {} },
     ),
 
+  // Try getting an approved report ready for the AI assistant again, after the
+  // background attempt that approve kicks off failed. Safe to call repeatedly —
+  // the backend reuses the report's existing generated document and replaces its
+  // text rather than adding a second copy. 409 if the report isn't approved yet.
+  reindexEarningsReport: (reportId: string): Promise<ReindexResponse> =>
+    request<ReindexResponse>(
+      `/api/v1/earnings/reports/${encodeURIComponent(reportId)}/reindex`,
+      { method: "POST", body: {} },
+    ),
+
   // Export DOCX/PDF. Binary response → bypass request<T>() (which parses JSON) and
   // use fetchWithAuth + blob, mirroring quarterlyReports.downloadExport. Prefers the
   // server Content-Disposition filename when present.
@@ -3482,6 +3691,80 @@ export const boardReports = {
       { method: "DELETE" },
     ),
 
+  // The board members a BR32 row is built from. Not deployed everywhere yet —
+  // a 404 here means "no picker on this server", not "wrong report".
+  getSectionDirectors: (reportId: string, sectionCode: string, signal?: AbortSignal) =>
+    request<BoardDirectorsResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/directors`),
+      { signal },
+    ),
+
+  // Replaces the whole selection, exactly as the meetings PUT does.
+  setSectionDirectors: (reportId: string, sectionCode: string, directorIds: string[]) =>
+    request<{ selected_ids: string[]; count: number }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/directors`),
+      { method: "PUT", body: { director_ids: directorIds } },
+    ),
+
+  // The people read out of a CV file uploaded under the profiles slot — the
+  // other way to fill BR32, for an issuer whose directors are not platform
+  // users. Extraction happens inside the upload run, so these are already there
+  // by the time it reports done.
+  getSectionProfiles: (reportId: string, sectionCode: string, signal?: AbortSignal) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { signal },
+    ),
+
+  // One call covers edit, add, remove and headshots: the array IS the table.
+  // Leave a person out to delete them, omit `id` to add one, send a row back
+  // changed to edit it. The response is the saved table, so no refetch is
+  // needed — but BR32 still has to be re-produced for the printed grid to catch
+  // up, which is the caller's next step.
+  setSectionProfiles: (reportId: string, sectionCode: string, profiles: BoardProfile[]) =>
+    request<BoardProfilesResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/profiles`),
+      { method: "PUT", body: { profiles } },
+    ),
+
+  // The meetings a BR35/BR36 row can be filled from. All three filters are
+  // optional — omit them and the server answers board meetings over the report's
+  // fiscal year, and echoes what it filtered on in `filters`.
+  getSectionMeetings: (
+    reportId: string,
+    sectionCode: string,
+    filters?: BoardMeetingFilters,
+    signal?: AbortSignal,
+  ) =>
+    request<BoardMeetingsResponse>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { query: filters, signal },
+    ),
+
+  // The layout a section prints in — BR32 offers the table and three card
+  // layouts. Saved on the report so the exporter renders what the screen shows.
+  // 400 unknown layout · 404 no such report/section · 409 the report is approved.
+  setSectionLayout: (reportId: string, sectionCode: string, layout: BoardSectionLayout) =>
+    request<{ section_code: string; layout: BoardSectionLayout }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/layout`),
+      { method: "PUT", body: { layout } },
+    ),
+
+  // Replaces the whole selection with a date window: the server resolves it and
+  // drops the meetings with no minutes, so `count` back is what will print, not
+  // how many fall in the window. `{ meeting_ids: [] }` still clears a selection.
+  // Refetch /sources afterwards, as after an upload.
+  // 400 wrong section code or bad window · 404 no such report · 409 locked.
+  setSectionMeetings: (
+    reportId: string,
+    sectionCode: string,
+    body: { date_from: string; date_to: string } | { meeting_ids: string[] },
+  ) =>
+    request<{ selected_ids: string[]; count: number }>(
+      boardPath(reportId, `/sections/${encodeURIComponent(sectionCode)}/meetings`),
+      { method: "PUT", body },
+    ),
+
   // Returns all 46 sections including the non-applicable ones, so the UI can
   // grey them rather than have them vanish. Built and saved lazily on first call.
   getOutline: (reportId: string, signal?: AbortSignal) =>
@@ -3491,6 +3774,30 @@ export const boardReports = {
   // silently; including a dropped/na section is a 422 and nothing is saved.
   saveOutline: (reportId: string, body: BoardOutlineSavePayload) =>
     request<BoardOutlineResponse>(boardPath(reportId, "/outline"), { method: "PUT", body }),
+
+  // All 46 sections with their eligibility, plus the subheadings the prose ones
+  // will be broken into.
+  //
+  // THE FIRST CALL IS SLOW — 15-30s. It runs the paragraph→section routing that
+  // produce would otherwise run (cached, so the wait moves earlier rather than
+  // happening twice) plus one proposal call. Later calls are a plain read, so
+  // the loader belongs on the first fetch only.
+  //
+  // There is no `regenerate` parameter, by design: the server proposes once per
+  // report and the reviewer shapes what it proposed.
+  getSubheadings: (reportId: string, signal?: AbortSignal) =>
+    request<BoardSubheadingsResponse>(boardPath(reportId, "/subheadings"), { signal }),
+
+  // Rename, delete, reorder — array order IS the new order, and omitting a saved
+  // id deletes that heading. Send back the `id` you were given: a heading whose
+  // id the server did not propose is a 422 ("subheadings cannot be added"), which
+  // is what a dropped id turns every rename into. 409 once the report is
+  // approved, or if nothing has been proposed yet.
+  saveSubheadings: (reportId: string, body: BoardSubheadingsSavePayload) =>
+    request<BoardSubheadingsResponse>(boardPath(reportId, "/subheadings"), {
+      method: "PUT",
+      body,
+    }),
 
   // Synchronous, and cached — `cached: true` means nothing it depends on changed
   // and no LLM call was made. 422 when the section has no producer yet.
@@ -3543,6 +3850,21 @@ export const boardReports = {
   // completion payload, so the caller can list exactly what is missing.
   approve: (reportId: string) =>
     request<unknown>(boardPath(reportId, "/approve"), { method: "POST" }),
+
+  // Approved board reports whose background embedding job failed, for the
+  // notification bell. Only the newest run per report is reported, and only
+  // when it failed — so a successful retry makes the row disappear on its own
+  // and a repeat failure brings it back. No notifications row is involved.
+  listIndexFailures: (signal?: AbortSignal) =>
+    request<{ failures: BoardIndexFailure[] }>("/api/v1/board/index-failures", { signal }),
+
+  // Re-run a failed embedding job. 202 — the work happens in the background.
+  // Safe to call repeatedly: the indexer reuses the stored PDF and replaces the
+  // report's chunks rather than duplicating them. 409 if not approved yet.
+  retryIndex: (reportId: string) =>
+    request<{ run_id: string | null; status: string }>(
+      boardPath(reportId, "/index/retry"), { method: "POST" },
+    ),
 
   // The cover design + colours already saved on this report, so the picker
   // opens on the current choice rather than blank.
@@ -3788,6 +4110,31 @@ export const meetings = {
       `/api/v1/meetings/${encodeURIComponent(meetingId)}`,
       { method: "PATCH", body },
     ),
+
+  // Minutes of meeting. One record per meeting, upserted by PUT. Multipart
+  // rather than JSON because the notes can carry a file attachment, and a
+  // single round-trip keeps the text and the file from drifting apart.
+  minutes: {
+    get: (meetingId: string) =>
+      request<MeetingMinutesResponse>(
+        `/api/v1/meetings/${encodeURIComponent(meetingId)}/minutes`,
+      ),
+
+    save: (meetingId: string, body: SaveMeetingMinutesBody) => {
+      const fd = new FormData();
+      fd.append("notes", body.notes);
+      fd.append("decision_taken", body.decision_taken);
+      fd.append("decision_under_review", body.decision_under_review);
+      fd.append("decision_abandoned", body.decision_abandoned);
+      fd.append("attendance", JSON.stringify(body.attendance));
+      if (body.attachment) fd.append("attachment", body.attachment);
+      if (body.remove_attachment) fd.append("remove_attachment", "true");
+      return request<MeetingMinutesResponse>(
+        `/api/v1/meetings/${encodeURIComponent(meetingId)}/minutes`,
+        { method: "PUT", form: fd },
+      );
+    },
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -4086,6 +4433,9 @@ export interface ThreadDetail {
   assignment: ReviewAssignment | null;
   // See ThreadSummary — true once this thread has ever been a review.
   has_review: boolean;
+  // A validation is on file for this report. The boolean only - the findings
+  // live on the reviewer screen, which is where they can be read.
+  has_validation?: boolean;
   // True only for the assigned reviewer — gates "Open as reviewer". Always
   // false for ad-hoc threads (report === null) — the review endpoints
   // themselves 422 on those, so don't surface any review UI when report is null.
@@ -4339,7 +4689,117 @@ export interface ReviewComment {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// What a Validate-report run found on an annual report.
+//
+// Copied from the AI Annual Reporting app (lib/api/pm.ts), which is where the
+// validation is produced. The reviewer screen exists in both apps, so the shape
+// it reads has to exist in both. Keep them in step: a field added there and
+// missed here shows as a silently empty card, never as an error.
+//
+// NOT named ReportValidation - that name is taken in this app by the
+// onboarding document-type check, which is an unrelated thing.
+// ---------------------------------------------------------------------------
+
+export interface CoverageStat {
+  title: string
+  sections: number
+  percent: number
+}
+
+export interface AnnualReportValidation {
+  figures_total: number
+  figures_traced: number
+  // Which of the two recorded sources each figure matched. Absent on a
+  // validation stored before documents were checked, which is why the panel
+  // and the statement both fall back to the plain ratio without it.
+  figures_by_source?: {
+    submission: number
+    document: number
+    neither: number
+  } | null
+  // context is the sentence the figure sits in. Optional: validations stored
+  // before it was captured have the bare value only.
+  untraced: { section_code: string; title: string; value: string; context?: string }[]
+  instruction_text: { section_code: string; title: string; line: string; marker: string }[]
+  voice: { section_code: string; title: string; phrase: string }[]
+  preferred_words: Record<string, number>
+  // The house style this run was judged against, kept with the verdict rather
+  // than read back from the company later - brand_voice is edited over time,
+  // and a finding made under one rule set must not be explained by another.
+  // Null when the company stores no style at all.
+  tone_rules?: {
+    person: string
+    register: string
+    sentence_style: string
+    tone_adjectives: string[]
+    banned_words: string[]
+    preferred_words: string[]
+    do: string[]
+    dont: string[]
+  } | null
+  conflicts: { measure: string; detail: string }[]
+  redundancy: { sections: string[]; detail: string }[]
+  brief_gaps: { ask: string; detail: string }[]
+  // How many explicit asks the brief made in all, so the gaps can be read as a
+  // share. Null when the judgement gave no usable count, and on any validation
+  // stored before it was asked for.
+  brief_asks_total?: number | null
+  // Every ask the brief made, covered or not, and which section covers it.
+  // Empty on a validation stored before the covered ones were named - at full
+  // coverage there are no gaps, and without this a card reading "7 of 7"
+  // cannot say seven of what.
+  brief_asks?: { ask: string; covered?: boolean; where?: string; detail?: string }[]
+  emphasis: { primary_leads?: boolean; detail?: string; missing?: string[] } | null
+  // How much of the report carries each concept message, and the house style.
+  // Counted over the sections that were read, never the whole report. Null on a
+  // validation stored before coverage was measured.
+  coverage?: {
+    sections_checked: number
+    // Per metric, because they are not scored over the same sections: an
+    // auditor's report carries neither the brand theme nor the house style, and
+    // a risk disclosure is governed by the house style but is no place for a
+    // theme. Absent on a validation stored before that was asked.
+    concept_sections?: number
+    tone_sections?: number
+    // What was left out of those bases, and what the section is for.
+    excluded?: {
+      section_code: string
+      title: string
+      purpose: string
+      concept: boolean
+      tone: boolean
+    }[]
+    // Null when no message is marked primary, which one live cycle is.
+    primary: CoverageStat | null
+    secondary: CoverageStat[]
+    secondary_any: { sections: number; percent: number }
+    // Null when the company stored no house style. It must not score: with no
+    // rules nothing can be flagged, so every such company would read 100%.
+    tone: { sections: number; percent: number } | null
+  } | null
+  // Sections the model never returned a verdict for. NOT the same as clean —
+  // nobody looked at these.
+  sections_unchecked: string[]
+  sections: Record<string, {
+    title?: string
+    covers?: string
+    concept?: string
+    // Which concept messages this section carries, by title. The evidence
+    // behind the coverage percentages.
+    concepts?: string[]
+    unsupported?: { label: string; detail: string }[]
+    // Every figure the section states, named by the measure it belongs to.
+    // Counting the distinct measures is what gives the conflict check a base.
+    figures?: { label?: string; value?: string; measure?: string }[]
+  }>
+  validated_at: string
+}
+
 export interface ReviewViewResponse {
+  // Null for a report never validated, for quarterly and earnings reviews, and
+  // for a validation the server judged stale - re-assembling clears it.
+  validation?: AnnualReportValidation | null;
   thread_id: string;
   report: ThreadReport;
   // `user_id` is the usr_ string — used to drop the author from the reassign
@@ -4836,6 +5296,54 @@ function unwrap<T>(raw: unknown, key: string): T {
   return raw as T;
 }
 
+// ---------------------------------------------------------------------------
+// SAR — Notifications.
+//
+// The `notifications` table is SHARED: both backends write to one Supabase
+// project, and SAR is the only one of the two with a read API for it. Rather
+// than build a duplicate reader in Centriyon, this calls SAR's — the JWT is the
+// same (both sign with the same secret), `notifications.user_id` is the same
+// `usr_…` claim our token already carries, and SAR's CORS already allows this
+// origin plus Authorization and X-Company-Id.
+//
+// Note what SAR's response model does NOT include: `category` and `severity` are
+// Centriyon-only columns and never come back. Anything the UI needs to
+// distinguish must live in notification_type / related_type / related_id.
+// ---------------------------------------------------------------------------
+
+export interface SarNotification {
+  id: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  priority: string;
+  related_type?: string | null;
+  related_id?: string | null;
+  action_url?: string | null;
+  created_at: string;
+  read_at?: string | null;
+}
+
+export interface SarNotificationList {
+  success?: boolean;
+  notifications: SarNotification[];
+  /** SAR sets this to the returned page size, not a true total — use unread_count. */
+  total?: number;
+  unread_count?: number;
+}
+
+export const sarNotifications = {
+  list: (limit = 30): Promise<SarNotificationList> =>
+    sarRequest<SarNotificationList>(`/api/v1/notifications?limit=${limit}`),
+
+  markRead: (notificationId: string): Promise<unknown> =>
+    sarRequest<unknown>(
+      `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: "POST" },
+    ),
+};
+
 // Raw department row as the SAR backend actually returns it. The `*_percentage`
 // / `status` / `user_*` keys are the backend's names; the optional frontend-name
 // fields let `overview()` normalise either shape (see below).
@@ -4979,6 +5487,33 @@ export const sarCycles = {
       { method: "POST" },
     ),
 
+  // The sections an outline source WOULD give this cycle, without saving anything.
+  // Feeds the Select-outline popup. 422 if the cycle's profile/sector aren't set.
+  outlinePreview: (
+    id: string,
+    source: "previous" | "system",
+  ): Promise<OutlinePreviewResponse> =>
+    sarRequest<OutlinePreviewResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-preview?source=${source}`,
+    ),
+
+  // Which section list this cycle is built from. 'previous' is the company's own
+  // sections, read off the annual report they uploaded; 'system' is the shared
+  // catalogue. The choice drives both the sections that resolve onto the cycle and
+  // whether each department is told which of them it feeds.
+  //
+  // Switching REBUILDS the section list rather than adding to it, so this returns the
+  // new list — and it REJECTS the switch (409) if any section it would clear already
+  // has content, an attachment, assigned departments or a status past 'pending'.
+  setOutlineSource: (
+    id: string,
+    source: "previous" | "system",
+  ): Promise<OutlineSourceResponse> =>
+    sarRequest<OutlineSourceResponse>(
+      `/api/v1/admin/cycles/${encodeURIComponent(id)}/outline-source`,
+      { method: "PUT", body: { outline_source: source } },
+    ),
+
   // Bulk-assign departments + responsible users to a draft cycle.
   assignDepartments: (
     id: string,
@@ -5006,6 +5541,38 @@ export const sarUsers = {
     const list = unwrap<SARUser[]>(raw, "users");
     return Array.isArray(list) ? list : [];
   },
+};
+
+// Annual Report Validator (external reports). Admin's own entry point, native
+// to Centriyon (unlike Spark's, which hands off to the SAR app itself) — same
+// two endpoints, same JWT, reused via sarRequest.
+export const sarValidator = {
+  start: (form: FormData): Promise<{ job_id: string }> =>
+    sarRequest<{ job_id: string }>("/api/v1/pm/validate-upload", {
+      method: "POST",
+      form,
+    }),
+
+  poll: (jobId: string): Promise<ValidationJob> =>
+    sarRequest<ValidationJob>(
+      `/api/v1/pm/validation-jobs/${encodeURIComponent(jobId)}`,
+    ),
+
+  // This admin's own past external-report runs, newest first.
+  list: async (): Promise<ValidationJobSummary[]> => {
+    const raw = await sarRequest<{ jobs: ValidationJobSummary[] }>(
+      "/api/v1/pm/validation-jobs",
+    );
+    return raw.jobs ?? [];
+  },
+
+  // Re-run a job with the report, brief, concepts and tone it already saved
+  // - no re-upload.
+  retry: (jobId: string): Promise<{ job_id: string }> =>
+    sarRequest<{ job_id: string }>(
+      `/api/v1/pm/validation-jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST" },
+    ),
 };
 
 // ---------------------------------------------------------------------------

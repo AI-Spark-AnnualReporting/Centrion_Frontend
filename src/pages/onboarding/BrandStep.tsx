@@ -200,8 +200,12 @@ export default function BrandStep({
         <div className="ob-brand-head">
           <span className="ob-brand-title">Brand colors</span>
           <span aria-hidden style={{ display: 'inline-flex', borderRadius: 999, overflow: 'hidden', border: '1px solid rgba(0,0,0,.1)' }}>
-            <span style={{ width: 22, height: 14, background: brandColors.primary }} />
-            <span style={{ width: 22, height: 14, background: brandColors.secondary }} />
+            {/* Only the roles actually set — accent/text/light are optional. */}
+            {[brandColors.primary, brandColors.secondary, brandColors.accent, brandColors.text, brandColors.light]
+              .filter(Boolean)
+              .map((c, i) => (
+                <span key={i} style={{ width: 18, height: 14, background: c }} />
+              ))}
           </span>
         </div>
         <p className="ob-brand-hint">

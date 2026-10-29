@@ -668,6 +668,25 @@ body {
   .rd-preview { position: sticky; top: 16px; align-self: start; }
 }
 
+/* Cycle page: the "Cycle setup" panel beside the content on a draft cycle. On a
+   narrow screen it sits above the content; from 1100px it is a 280px column on the
+   right that stays in view while the page scrolls. */
+.cycle-setup-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.cycle-setup-panel { order: -1; }
+@media (min-width: 1100px) {
+  .cycle-setup-layout { grid-template-columns: minmax(0, 1fr) 280px; }
+  /* A grid item stretched to the row height cannot stick. */
+  .cycle-setup-panel { order: 0; position: sticky; top: 16px; align-self: start; }
+}
+/* Brief highlight on the card a setup step jumps to. */
+@keyframes cycle-setup-flash {
+  0% { box-shadow: 0 0 0 0 rgba(64,64,200,.45); }
+  30% { box-shadow: 0 0 0 5px rgba(64,64,200,.18); }
+  100% { box-shadow: 0 0 0 0 rgba(64,64,200,0); }
+}
+.cycle-setup-flash { animation: cycle-setup-flash 1.1s ease; border-radius: 14px; }
+@media (prefers-reduced-motion: reduce) { .cycle-setup-flash { animation: none; } }
+
 /* The page sits on its own ground, centred, with the panel running to the
    card's edge. On a wide monitor the leftover width becomes backdrop around
    the page rather than a gap beside it — the same way a document viewer
@@ -709,6 +728,18 @@ body {
 }
 .ob-logo-remove:hover { border-color: #F4B5B7; background: #FEF2F2; color: #DC2626; }
 .brand-pill:hover { border-color: #C7CBF0; }
+
+/* The colour-role legend. Buttons, so they need a focus ring that a keyboard
+   user can actually see — these five are the only way in to "show me where
+   this colour lands" without a mouse. */
+.brand-role-note:hover { background: #F1F2FA; }
+.brand-role-note:focus-visible {
+  outline: 2px solid #4040C8;
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand-role-note, .brand-role-note * { transition: none !important; }
+}
 /* Compact variant of .ob-drop — same height as .ob-logo-preview so the field
    doesn't change size when a file is picked. The full-size .ob-drop is left
    alone: CompanyIntelStep (step 1) still uses it. */
@@ -720,6 +751,16 @@ body {
   min-height: 78px;
   padding: 12px 14px; text-align: left; border-radius: 12px;
 }
+/* One director in BR32's profile editor. The hover is deliberately faint — the
+   row is a form, not a list to pick from, so it should acknowledge the pointer
+   without competing with the fields inside it. */
+.bpt-person:hover { background: #FCFCFE; }
+.bpt-person button:focus-visible,
+.bpt-person input:focus-visible,
+.bpt-person textarea:focus-visible {
+  outline: 2px solid #4040C8; outline-offset: 1px;
+}
+
 .ob-drop-prompt { font-size: 13px; font-weight: 700; color: #3A3F5C; }
 .ob-drop-hint { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; min-height: 15px; }
 .ob-browse-inline { margin-top: 0; flex-shrink: 0; }
@@ -1362,6 +1403,23 @@ section:hover .fig-remove,
 }
 .md-prose tbody td { padding: 8px 10px; border-bottom: 1px solid #F1F2F8; vertical-align: top; }
 .md-prose tbody tr:last-child td { border-bottom: none; }
+
+/* Compact .md-prose, for the board-member experience rows. Same markup and the
+   same rules, but it renders inside a table cell under a one-line facts row, so
+   the type size and vertical rhythm come down to match .urow. */
+.md-tight { font-size: 11.5px; line-height: 1.55; color: #5A6080; }
+.md-tight p, .md-tight ul, .md-tight ol { margin: 0 0 6px; }
+.md-tight ul, .md-tight ol { padding-left: 18px; }
+.md-tight li { margin-bottom: 2px; }
+.md-tight h1, .md-tight h2, .md-tight h3, .md-tight h4 {
+  margin: 9px 0 4px; font-size: 12px; color: #1A1D2E;
+}
+.md-tight > :last-child { margin-bottom: 0; }
+/* A lone newline inside a paragraph stays a line break. Markdown would fold it
+   away, but people paste plain multi-line text into this field as often as they
+   paste markdown, and losing their line breaks is what made the raw text
+   unreadable in the first place. */
+.md-tight p { white-space: pre-wrap; }
 
 /* Disabled buttons must look disabled — `.btn` had no :disabled rule, so a
    locked report's controls stayed indistinguishable from live ones. */

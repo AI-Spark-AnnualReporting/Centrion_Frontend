@@ -36,6 +36,37 @@ export interface CreateCompanyResponse {
   company: CompanyRecord;
 }
 
+// One line of the company's own report contents page. `title` is English;
+// `title_verbatim` is the title exactly as printed, in the document's own language —
+// the two differ on an Arabic report. `page` is routinely null: many contents pages
+// print numbers only against sub-entries, and some print none at all.
+export interface ReportOutlineEntry {
+  title: string;
+  title_verbatim?: string;
+  page?: number | null;
+  level?: number;
+  // Set on a section (level 2) from GET /companies/{id}/latest-outline: the code it
+  // was stored as, so the Outline card can put the cycle's section under its chapter.
+  section_code?: string;
+}
+
+// Provenance alongside the outline, written by report_outline_extractor.py and stored
+// on reports.source_outline. A null outline means none was ever read for that report;
+// `found: false` means we read the report and there was no contents page in it.
+// Different things to tell a user, so keep them distinguishable.
+export interface ReportOutlineDetail {
+  found?: boolean;
+  source?: 'bookmarks' | 'vision' | 'none';
+  confidence?: 'high' | 'medium' | 'low' | null;
+  reason?: string | null;
+  failed_checks?: string[];
+  pages?: number[];
+  page_count?: number;
+  bookmarks_level1?: string[];
+  extracted_at?: string;
+  entries?: ReportOutlineEntry[];
+}
+
 // Full company profile shown/edited on the Profile page (GET/PATCH
 // /api/v1/companies/me). Superset of CompanyRecord; most fields are nullable.
 export interface Company {
@@ -65,12 +96,16 @@ export interface Company {
   profile_extraction_status?: string | null;
   // Report style extracted (background) from the docs uploaded at onboarding.
   // report_tone = the prose style "directive"; report_tone_profile = the
-  // structured dimensions + verbatim exemplar sentences; theme = prose;
-  // outline = merged table-of-contents.
+  // structured dimensions + verbatim exemplar sentences; theme = prose.
   report_tone?: string | null;
   report_tone_profile?: { dimensions?: Record<string, string>; exemplars?: string[] } | null;
   // Key themes: name (shown on the dashboard) + a 2-3 sentence explanation (kept for later use).
   report_theme?: { name: string; explanation?: string }[] | null;
+  // The COMPLETE table of contents — every title at every level, flattened in document
+  // order — of the annual report uploaded at ONBOARDING. Written once and never
+  // overwritten: a record of where this company started, not a mirror of their latest
+  // report. The per-report outline, with its nesting, is reports.source_outline —
+  // fetch it with companies.getLatestOutline().
   report_outline?: string[] | null;
   // AI-extracted key highlights from the uploaded reports ({category, text}); shown on the workspace dashboard.
   report_highlights?: { category: string; text: string }[] | null;
@@ -177,3 +212,15 @@ export type DepartmentSuggestionsResponse = {
   source_report_id: string | null;
   extracted_at: string | null;
 };
+
+
+// GET /api/v1/companies/{id}/latest-outline — the contents page of the most recent
+// report this company uploaded. `outline` is null when there is none, in which case
+// the report fields are absent too.
+export interface LatestOutlineResponse {
+  report_id?: string;
+  report_type?: string | null;
+  period?: string | null;
+  created_at?: string | null;
+  outline: ReportOutlineDetail | null;
+}

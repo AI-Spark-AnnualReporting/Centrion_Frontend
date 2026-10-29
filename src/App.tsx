@@ -63,6 +63,7 @@ const CycleDetailPage = lazy(() => import("./pages/annual-report/CycleDetailPage
 const BoardSetupPage = lazy(() => import("./pages/annual-report/BoardSetupPage"));
 const BoardSourcesPage = lazy(() => import("./pages/annual-report/BoardSourcesPage"));
 const BoardSectionsPage = lazy(() => import("./pages/annual-report/BoardSectionsPage"));
+const BoardOutlinePage = lazy(() => import("./pages/annual-report/BoardOutlinePage"));
 const BoardPreviewPage = lazy(() => import("./pages/annual-report/BoardPreviewPage"));
 const BoardReportPage = lazy(() => import("./pages/annual-report/BoardReportPage"));
 
@@ -107,6 +108,13 @@ const CertificatePage = lazy(
 // check it with no account and no session.
 const VerifyCertificatePage = lazy(
   () => import("./pages/VerifyCertificatePage"),
+);
+
+// Annual Report Validator (external reports), Admin's own entry point under
+// Reports Validator — native to Centriyon, unlike Spark's sidebar link, which
+// hands off to the SAR app itself.
+const AnnualReportValidatorPage = lazy(
+  () => import("./pages/AnnualReportValidatorPage"),
 );
 
 // Suspense for the code-split routes that render outside AppLayout.
@@ -226,6 +234,13 @@ const App = () => (
               element={<CertificatePage />}
             />
           </Route>
+          {/* Role-gated, not feature-gated: no visible_features plumbing exists
+              for this yet (see the board_report warning on FeatureKey), so a
+              featureKey here would fail closed for everyone. Spark reaches the
+              same validator through its own hand-off link under Companies. */}
+          <Route element={<ProtectedRoute requiredRole="admin" />}>
+            <Route path="/annual-report-validator" element={<AnnualReportValidatorPage />} />
+          </Route>
           <Route element={<ProtectedRoute requiredFeature="ai_copilot" />}>
             <Route path="/ai" element={<AIPage />} />
           </Route>
@@ -310,6 +325,16 @@ const App = () => (
               element={
                 <PerReport>
                   <BoardSectionsPage />
+                </PerReport>
+              }
+            />
+            {/* How each section will be structured — the subheadings proposed
+                from the user's own documents, and where Generate now lives. */}
+            <Route
+              path="/board-report/:reportId/outline"
+              element={
+                <PerReport>
+                  <BoardOutlinePage />
                 </PerReport>
               }
             />

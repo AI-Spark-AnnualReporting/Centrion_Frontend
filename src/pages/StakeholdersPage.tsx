@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
-import { team, type TeamMember } from '@/lib/api';
+import MemberProfileModal from '@/components/MemberProfileModal';
+import { team, type TeamExperience, type TeamMember } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { canCreateFeature } from '@/lib/features';
 
@@ -83,6 +84,9 @@ const TAB_DEFAULT_POSITION: Record<TabKey, PositionType> = {
 
 interface Person {
   id: string;
+  // The usr_… address. Every /team/{user_id} sub-resource keys off this, not
+  // off `id` — they are different values and swapping them 404s.
+  userId: string | null;
   firstName: string;
   lastName: string;
   role: string;
@@ -90,6 +94,10 @@ interface Person {
   positionType: PositionType;
   bio: string;
   status: 'active' | 'inactive' | 'pending';
+  // Both arrive with the roster via ?include=experience,photo, so painting the
+  // grid needs no per-card request. photoUrl is signed and expires in an hour.
+  experiences: TeamExperience[];
+  photoUrl: string | null;
 }
 
 const AVATAR_GRADIENTS = [
@@ -149,12 +157,15 @@ function teamMemberToPerson(m: TeamMember): Person {
   const { firstName, lastName } = splitFullName(m.full_name);
   return {
     id: m.id,
+    userId: m.user_id ?? null,
     firstName,
     lastName,
     role: m.title ?? '',
     email: m.email ?? '',
     positionType: toPositionType(m.position_type),
     bio: m.bio ?? '',
+    experiences: m.experience ?? [],
+    photoUrl: m.photo_url ?? null,
     status:
       m.status === 'inactive'
         ? 'inactive'
@@ -221,12 +232,37 @@ export default function StakeholdersPage() {
   // the banner.
   const [createdCredential, setCreatedCredential] =
     useState<CreatedCredential | null>(null);
+  // Board-member profile popup. Photo / CV / experience are frontend-only for
+  // now, so they live here keyed by person id: closing the popup or switching
+  // tabs keeps them, a refresh doesn't. Wire to the API when it exists.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Overrides for the roster's photo URLs: the popup re-reads a fresh signed
+  // URL on open, and replaces it outright after an upload. Absent here means
+  // "use whatever the roster gave us".
+  const [photos, setPhotos] = useState<Record<string, string | null>>({});
+  const photoOf = (p: Person): string | null =>
+    p.id in photos ? photos[p.id] : p.photoUrl;
+
+  const selected = people.find((p) => p.id === selectedId) ?? null;
+
+  // leadership emits read and create only — there is no `update` action, so
+  // create is what gates editing someone else's profile.
+  const canEditOthers = canCreatePerson;
+  const canEditPerson = (p: Person) =>
+    (!!p.userId && p.userId === user?.user_id) || canEditOthers;
+
+  const setExperiences = (personId: string, next: TeamExperience[]) =>
+    setPeople((list) =>
+      list.map((p) => (p.id === personId ? { ...p, experiences: next } : p)),
+    );
 
   const fetchPeople = async (id: string) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await team.list(id);
+      // One request paints the whole page — history and headshots. Without
+      // the param this would be a call per card for each.
+      const data = await team.list(id, { include: 'experience,photo' });
       setPeople(data.map(teamMemberToPerson));
     } catch (err) {
       setLoadError(
@@ -409,15 +445,34 @@ export default function StakeholdersPage() {
             marginBottom: 18,
           }}
         >
-          {visiblePeople.map((p) => (
+          {visiblePeople.map((p) => {
+            // Only board members have a profile popup — the other tabs' cards
+            // stay inert, so override .person-card's blanket cursor: pointer.
+            const clickable = p.positionType === 'board_member';
+            const photoUri = photoOf(p);
+            return (
             <div
               key={p.id}
               className="person-card"
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => setSelectedId(p.id) : undefined}
+              onKeyDown={
+                clickable
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedId(p.id);
+                      }
+                    }
+                  : undefined
+              }
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 14,
                 padding: 18,
+                cursor: clickable ? 'pointer' : 'default',
               }}
             >
               <div
@@ -441,7 +496,9 @@ export default function StakeholdersPage() {
                       width: 44,
                       height: 44,
                       borderRadius: 10,
-                      background: gradientFor(p.id),
+                      background: photoUri ? '#fff' : gradientFor(p.id),
+                      border: photoUri ? '1px solid #E2E4F0' : 'none',
+                      overflow: 'hidden',
                       color: '#fff',
                       fontWeight: 800,
                       fontSize: 13,
@@ -451,7 +508,15 @@ export default function StakeholdersPage() {
                       flexShrink: 0,
                     }}
                   >
-                    {initialsOf(p)}
+                    {photoUri ? (
+                      <img
+                        src={photoUri}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      initialsOf(p)
+                    )}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div
@@ -542,7 +607,8 @@ export default function StakeholdersPage() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {canCreatePerson && (
           <button
@@ -604,6 +670,24 @@ export default function StakeholdersPage() {
           onChange={updateForm}
           onCancel={closeModal}
           onSubmit={() => void handleSubmit()}
+        />
+      )}
+
+      {selected && companyId && (
+        <MemberProfileModal
+          companyId={companyId}
+          person={selected}
+          companyName={companyName}
+          positionLabel={POSITION_LABELS[selected.positionType]}
+          positionBadgeClass={POSITION_BADGE_CLASS[selected.positionType]}
+          canEdit={canEditPerson(selected)}
+          experiences={selected.experiences}
+          onExperiencesChange={(next) => setExperiences(selected.id, next)}
+          photoUri={photoOf(selected)}
+          onPhotoChange={(next) =>
+            setPhotos((m) => ({ ...m, [selected.id]: next }))
+          }
+          onClose={() => setSelectedId(null)}
         />
       )}
     </div>
