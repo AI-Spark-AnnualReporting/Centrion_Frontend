@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { auth } from '@/lib/api';
 import { ApiError } from '@/lib/api';
+import { IS_ON_PREM } from '@/lib/deployment';
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -186,6 +187,12 @@ export function ForgotPasswordPage() {
               <button className="btn-auth" onClick={() => void handleSubmit()} disabled={submitting}>
                 {submitting ? 'Sending…' : 'Send reset link'}
               </button>
+              {/* On-premises servers may have no email server: offer the Spark code instead. */}
+              {IS_ON_PREM && (
+                <div className="auth-sw">
+                  No email? <a onClick={() => navigate('/reset-with-code')}>Use a reset code from Spark</a>
+                </div>
+              )}
               <div className="auth-sw">
                 Remembered it? <a onClick={() => navigate('/login')}>Sign in</a>
               </div>

@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import AiLoadingScreen from "@/pages/onboarding/AiLoadingScreen";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError, sarValidator } from "@/lib/api";
+import { useLicenseRoom } from "@/components/license/useLicenseRoom";
+import { LimitHint } from "@/components/license/LimitHint";
 import { AnnualReportValidationPanel } from "@/components/validator/AnnualReportValidationPanel";
 import { PreviousValidationsGallery } from "@/components/validator/PreviousValidationsGallery";
 import type { ReportValidation, ValidationJob, ValidationJobSummary } from "@/types/annual-report-validator";
@@ -62,6 +64,8 @@ type RunState =
   | { stage: "failed"; jobId: string; message: string; retryable: boolean };
 
 export default function AnnualReportValidatorPage() {
+  // License: every run counts, "Validate again" too.
+  const validatorRoom = useLicenseRoom("report_validation", "validations");
   const [run, setRun] = useState<RunState>({ stage: "form" });
   const { toast } = useToast();
   // Back to the Validator's own form (with Previous validations under it),
@@ -117,9 +121,11 @@ export default function AnnualReportValidatorPage() {
           description={`${run.validation.filename ?? "External report"} — checked ${checkedAt(run.validation.validated_at)}`}
           action={
             run.retryable ? (
-              <Button variant="outline" onClick={() => retry(run.jobId)}>
-                Validate again
-              </Button>
+              <span title={validatorRoom.blocked ? validatorRoom.reason : undefined}>
+                <Button variant="outline" disabled={validatorRoom.blocked} onClick={() => retry(run.jobId)}>
+                  Validate again
+                </Button>
+              </span>
             ) : (run.validation.skipped ?? []).length > 0 ? (
               // A check was skipped for an input with nothing usable in it -
               // re-running the same input would only skip it again.
@@ -150,7 +156,9 @@ export default function AnnualReportValidatorPage() {
         {/* "Validate again" only when the run saved what a retry needs;
             otherwise it only led to "This run didn't save enough to retry". */}
         {run.retryable ? (
-          <Button onClick={() => retry(run.jobId)}>Validate again</Button>
+          <span title={validatorRoom.blocked ? validatorRoom.reason : undefined}>
+            <Button disabled={validatorRoom.blocked} onClick={() => retry(run.jobId)}>Validate again</Button>
+          </span>
         ) : (
           <Button onClick={goBack}>Start a new validation</Button>
         )}
@@ -320,7 +328,9 @@ function ValidatorForm({
   const briefReady = briefFromFile ? briefFile !== null : brief.trim() !== "";
   const conceptsReady = conceptsFromFile ? conceptFile !== null : typedConcepts.length > 0;
   const toneReady = toneFromFile ? toneFile !== null : toneText.trim() !== "";
-  const canRun = !!report && briefReady && conceptsReady && toneReady && !submitting;
+  // License: every run counts. Greyed out with the reason when there's no room.
+  const validatorRoom = useLicenseRoom("report_validation", "validations");
+  const canRun = !!report && briefReady && conceptsReady && toneReady && !submitting && !validatorRoom.blocked;
 
   function updateConcept(index: number, change: Partial<ConceptRow>) {
     setConcepts(concepts.map((c, i) => (i === index ? { ...c, ...change } : c)));
@@ -528,10 +538,14 @@ function ValidatorForm({
             >
               {submitting ? "Uploading…" : "▶ Validate report"}
             </button>
+            <LimitHint room={validatorRoom} />
+            {validatorRoom.blocked && !submitError && (
+              <span style={{ fontSize: 11.5, color: MUTED }}>{validatorRoom.reason}</span>
+            )}
             {submitError && (
               <span style={{ fontSize: 11.5, color: "#DC2626" }}>{submitError}</span>
             )}
-            {!canRun && !submitting && !submitError && (
+            {!canRun && !submitting && !submitError && !validatorRoom.blocked && (
               <span style={{ fontSize: 11.5, color: MUTED }}>
                 The report, brief, concept messages and a tone guide are all required.
               </span>

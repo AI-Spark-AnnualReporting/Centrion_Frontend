@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { sarCycles, adminConsole } from '@/lib/api';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import { useAuth } from '@/context/AuthContext';
 import type { ContentLanguage, CreateCyclePayload, Cycle } from '@/types/cycles';
 import type { AdminUserRow } from '@/types/admin';
@@ -57,6 +59,8 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
 
   const [pms, setPms] = useState<AdminUserRow[]>([]);
   const [busy, setBusy] = useState(false);
+  // License: every new cycle counts as one annual report.
+  const annualRoom = useLicenseRoom('annual', 'Annual Reports');
   const [err, setErr] = useState('');
 
   // YYYY-MM-DD in local time — used as the deadline input's `min` so past dates can't be picked
@@ -310,10 +314,15 @@ export default function CycleForm({ onCreated }: { onCreated: (cycle: Cycle) => 
 
           {err && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: 12 }}>{err}</div>}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-            {/* Stays enabled; submit() reports the first missing field so the
-                click is never a silent no-op. */}
-            <button className="btn bp" type="button" onClick={submit} disabled={busy}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 18 }}>
+            <LimitHint room={annualRoom} />
+            {annualRoom.blocked && (
+              <span style={{ fontSize: 11.5, color: '#9BA3C4', maxWidth: 320 }}>{annualRoom.reason}</span>
+            )}
+            {/* Stays enabled for missing fields; submit() reports the first one
+                so the click is never a silent no-op. Greyed out only when the
+                license has no room (the reason is shown next to it). */}
+            <button className="btn bp" type="button" onClick={submit} disabled={busy || annualRoom.blocked}>
               {busy ? 'Creating…' : 'Create Cycle'}
             </button>
           </div>

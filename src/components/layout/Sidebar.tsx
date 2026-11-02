@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
 import { isAdminLevel, type BackendRole } from '@/constants/roles';
 import { sparkStudioUrl } from '@/lib/appRouting';
+import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
+import { license } from '@/lib/api';
+import type { CompanyLicense } from '@/types/license';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. (ESG Validator lives under
@@ -52,8 +55,23 @@ const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; f
   // hands off to the SAR app — it has no company context to reach this from).
   // This is the admin-side entry point, reached once an admin is already
   // inside their own company.
+  // Also needs the company's license to include the module (see isModuleShownByLicense).
   { key: 'annual-report-validator', label: 'Annual Report Validator', path: '/annual-report-validator', adminOnly: true },
 ];
+
+// Annual Report Validator is a licensed module with no feature key, so the
+// sidebar asks the license itself (client admins only — Spark staff are never
+// limited). Shown when the license has the module, even if expired or locked,
+// so old validations can still be opened; also shown for a key that doesn't
+// match (read-only, like every other module). Hidden with no license yet or
+// when the module isn't in it. The backend refuses new runs either way.
+const VALIDATOR_MODULE = 'annual_report_validator';
+
+function isModuleShownByLicense(data: CompanyLicense | null, moduleKey: string): boolean {
+  if (!data || data.status === 'none') return false;
+  if (data.status === 'invalid') return true;
+  return data.modules.includes(moduleKey);
+}
 
 // Sub-sections shown when the "Profile" item is expanded — User Profile
 // (personal info) and Company Profile (company details + brand identity,
@@ -155,6 +173,14 @@ const icons: Record<string, JSX.Element> = {
   brand: <svg viewBox="0 0 13 13" fill="none"><path d="M2.5 11.5V3a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 10.5 3v8.5l-4-2.2-4 2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><circle cx="6.5" cy="5" r="1.4" stroke="currentColor" strokeWidth="1.2"/></svg>,
 };
 
+// Spark admin console (`spark_admin`): the overview, its three lists and
+// Licenses. Labels come from SECTIONS so the sidebar can't disagree with the
+// page it opens.
+const SPARK_ADMIN_CHILDREN = [
+  ...SECTION_KEYS.map((key) => ({ key, label: SECTIONS[key].title, path: `/spark/${key}` })),
+  { key: 'licenses', label: 'Licenses', path: '/spark/licenses' },
+];
+
 export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -166,11 +192,25 @@ export function Sidebar() {
   // only thing worth offering — ProtectedRoute bounces them there anyway.
   const isSpark = user?.role === 'spark_internal';
   const sparkAwaitingCompany = isSpark && !actingCompany;
+  // Spark's platform owner belongs to no company: the whole tenant nav is
+  // replaced by the Spark admin console.
+  const isSparkAdmin = user?.role === 'spark_admin';
 
   // Excludes the bare '/reports' path — that's ESG Validator's route, now
   // under "Reports Validator" below — but still covers /reports/quarterly.
   const reportsActive =
     location.pathname.startsWith('/reports/') || location.pathname.startsWith('/earnings');
+  // Only the client admin's sidebar depends on the license (see isModuleShownByLicense).
+  const [companyLicense, setCompanyLicense] = useState<CompanyLicense | null>(null);
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    let cancelled = false;
+    license
+      .get()
+      .then((data) => { if (!cancelled) setCompanyLicense(data); })
+      .catch(() => { if (!cancelled) setCompanyLicense(null); });
+    return () => { cancelled = true; };
+  }, [user]); // user changes on refreshPermissions, e.g. right after a license is activated
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
 
   const validationActive =
@@ -195,7 +235,9 @@ export function Sidebar() {
   const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter(
     (child) =>
       (!child.featureKey || isVisible(child.featureKey)) &&
-      (!child.adminOnly || isAdminLevel(user?.role)),
+      (!child.adminOnly || isAdminLevel(user?.role)) &&
+      (child.key !== 'annual-report-validator' || user?.role !== 'admin' ||
+        isModuleShownByLicense(companyLicense, VALIDATOR_MODULE)),
   );
   const visibleAdminChildren = ADMIN_CHILDREN.filter(
     (child) => !child.allowedRoles || (!!user && child.allowedRoles.includes(user.role)),
@@ -301,7 +343,30 @@ export function Sidebar() {
           </button>
         </div>
       )}
-      {!sparkAwaitingCompany && NAV_ITEMS.map((section) => (
+      {isSparkAdmin && (
+        <div>
+          <div className="sb-sec">Spark</div>
+          <button
+            className={`sb-item ${location.pathname === '/spark' ? 'act' : ''}`}
+            onClick={() => handleNav('/spark')}
+          >
+            {icons['grid']}
+            Overview
+          </button>
+          {SPARK_ADMIN_CHILDREN.map((child) => (
+            <button
+              key={child.key}
+              className={`sb-item ${location.pathname === child.path ? 'act' : ''}`}
+              style={{ paddingLeft: 34, fontSize: 11 }}
+              onClick={() => handleNav(child.path)}
+            >
+              {child.key === 'licenses' ? icons['shield'] : null}
+              {child.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {!sparkAwaitingCompany && !isSparkAdmin && NAV_ITEMS.map((section) => (
         <div key={section.section}>
           {/* The spark allowlist leaves a single item in each of three sections;
               headers and dividers there would read as three empty groups. */}

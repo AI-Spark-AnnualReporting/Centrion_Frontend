@@ -31,7 +31,8 @@ export interface AuthUser {
   // `spark_internal` is Spark's own staff: no company of their own, every
   // permission, and they act inside whichever company they pick (see
   // src/lib/acting-company.ts). Never assignable from the Admin Console.
-  role: "admin" | "project_manager" | "hod" | "department_user" | "ir" | "spark_internal";
+  // `spark_admin` is Spark's platform owner: no company, only ever sees /spark.
+  role: "admin" | "project_manager" | "hod" | "department_user" | "ir" | "spark_internal" | "spark_admin";
   // Presentation-only label for `role`, resolved by the backend so the
   // mapping lives in one place. Never gate on this — `role` is the raw value
   // every permission check uses. Optional because a session stored before the

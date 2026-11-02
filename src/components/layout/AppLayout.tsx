@@ -1,3 +1,4 @@
+import { LicenseBanner } from '@/components/license/LicenseBanner';
 import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -36,6 +37,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/spark/companies': 'Companies',
   '/spark/reports': 'Reports',
   '/spark/users': 'Users',
+  '/spark/licenses': 'Licenses',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -161,6 +163,8 @@ export function AppLayout() {
                 its own way back — a thread's report card. One bar above every
                 page beats teaching each module page about threads. */}
             <BackToOrigin />
+            {/* Client admins only: shown when the license isn't active. */}
+            <LicenseBanner />
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

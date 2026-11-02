@@ -7,6 +7,17 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
+import type { SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
+import { normalizeTrends } from "@/types/spark";
+import type {
+  CompanyLicense,
+  LicenseUsage,
+  GeneratedLicense,
+  GenerateLicensePayload,
+  LicensableModule,
+  SparkLicenseRow,
+  UpgradeRequestPayload,
+} from "@/types/license";
 import type {
   AuthUser,
   DepartmentOption,
@@ -755,6 +766,18 @@ export const auth = {
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
 
+  // A fresh token with permissions re-read from the server. Called after Spark
+  // issues or changes the company's license, so new modules appear without
+  // logging out.
+  refreshToken: () =>
+    request<{
+      access_token: string;
+      permissions: AuthUser["permissions"];
+      visible_features: AuthUser["visible_features"];
+      apps: AuthUser["apps"];
+      default_app: AuthUser["default_app"];
+    }>("/api/v1/auth/refresh-token", { method: "POST" }),
+
   // Self-service reset, for users who can't log in at all (so no JWT — unlike
   // changePassword above). Query params, same as login/register: that's what
   // the backend reads.
@@ -776,6 +799,15 @@ export const auth = {
     request<{ reset: boolean }>("/api/v1/auth/reset-password", {
       method: "POST",
       query: { token, new_password: newPassword },
+      auth: false,
+    }),
+
+  // On-premises only: reset with a one-use code from Spark (for servers with no
+  // email server). The code is tied to this email and this server.
+  resetPasswordWithCode: (email: string, resetCode: string, newPassword: string) =>
+    request<{ reset: boolean }>("/api/v1/auth/reset-password-with-code", {
+      method: "POST",
+      body: { email, reset_code: resetCode, new_password: newPassword },
       auth: false,
     }),
 
@@ -5271,6 +5303,107 @@ export const sparkInternal = {
       method: "POST",
       body,
       noActingCompany: true,
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Spark admin console — the platform owner's (`spark_admin`) cross-tenant
+// view at /spark. Restored from ba6bdc5 (removed in merge 621cc27). Not scoped
+// to the caller's company: spark_admin belongs to none.
+// ---------------------------------------------------------------------------
+
+function listOrEnvelope<T>(raw: T[] | Record<string, T[]>, key: string): T[] {
+  return Array.isArray(raw) ? raw : (raw?.[key] ?? []);
+}
+
+export const spark = {
+  // Cards + the Companies tab in one call.
+  overview: () => request<SparkOverview>("/api/v1/spark/overview", { noActingCompany: true }),
+
+  listUsers: () =>
+    request<SparkUserRow[] | { users: SparkUserRow[] }>("/api/v1/spark/users", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "users")),
+
+  listReports: () =>
+    request<SparkReportRow[] | { reports: SparkReportRow[] }>("/api/v1/spark/reports", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "reports")),
+
+  // Report counts by type over time. `year` buckets by month; omitting it buckets by year.
+  reportTrends: (params: { year?: number; company_id?: string } = {}) =>
+    request<unknown>("/api/v1/spark/report-trends", { query: params, noActingCompany: true }).then(
+      normalizeTrends,
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Licensing (plan: Centriton/.claude/plans/company-licensing.md)
+// `sparkLicenses` — spark_admin only: make keys and unlock codes for every company.
+// `license` — the client admin: see the license, paste a key or unlock code
+// (on-premises), ask for an upgrade (cloud).
+// ---------------------------------------------------------------------------
+
+export const sparkLicenses = {
+  list: () =>
+    request<{ licenses: SparkLicenseRow[]; modules: LicensableModule[] }>("/api/v1/spark/licenses", {
+      noActingCompany: true,
+    }),
+
+  get: (companyId: string) =>
+    request<SparkLicenseRow & { modules_catalogue: LicensableModule[] }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`,
+      { noActingCompany: true },
+    ),
+
+  generate: (companyId: string, body: GenerateLicensePayload) =>
+    request<GeneratedLicense>(`/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  unlockCode: (companyId: string, body: { lock_id: string; server_id?: string }) =>
+    request<{ unlock_code: string; valid_days: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/unlock-code`,
+      { method: "POST", body, noActingCompany: true },
+    ),
+
+  passwordResetCode: (companyId: string, email: string) =>
+    request<{ reset_code: string; valid_hours: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/password-reset-code`,
+      { method: "POST", body: { email }, noActingCompany: true },
+    ),
+
+  addOnPremClient: (name: string) =>
+    request<{ company: { id: string; name: string; deployment: "on_prem" } }>(
+      "/api/v1/spark/on-prem-clients",
+      { method: "POST", body: { name }, noActingCompany: true },
+    ),
+};
+
+export const license = {
+  get: () => request<CompanyLicense>("/api/v1/admin/license"),
+
+  // Any company user: room left per limit (create buttons).
+  usage: () => request<LicenseUsage>("/api/v1/license/usage"),
+
+  activate: (licenseKey: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/activate", {
+      method: "POST",
+      body: { license_key: licenseKey },
+    }),
+
+  unlock: (unlockCode: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/unlock", {
+      method: "POST",
+      body: { unlock_code: unlockCode },
+    }),
+
+  requestUpgrade: (body: UpgradeRequestPayload) =>
+    request<{ requested: boolean; details: string }>("/api/v1/admin/license/upgrade-request", {
+      method: "POST",
+      body,
     }),
 };
 

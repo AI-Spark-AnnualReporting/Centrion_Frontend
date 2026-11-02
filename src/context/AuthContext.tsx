@@ -37,6 +37,9 @@ interface AuthContextValue {
   // Re-fetch /auth/me and replace the cached user. Useful right after a
   // password change to flush must_change_password back to false.
   refreshUser(): Promise<void>;
+  // Get a fresh token + permissions from the server. Used after Spark issues
+  // or changes the license, so new modules appear without logging out.
+  refreshPermissions(): Promise<void>;
   // Submit the first-login onboarding form. Stores the freshly-issued token +
   // user (onboarding_completed = true) so the gate clears immediately.
   completeOnboarding(payload: OnboardingPayload): Promise<void>;
@@ -124,6 +127,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       setStoredUser(next);
       return next;
+    });
+  }, []);
+
+  const refreshPermissions = useCallback(async () => {
+    const data = await authApi.refreshToken();
+    setAuthToken(data.access_token);
+    setToken(data.access_token);
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated: AuthUser = {
+        ...prev,
+        permissions: data.permissions,
+        visible_features: data.visible_features,
+        apps: data.apps,
+        default_app: data.default_app,
+      };
+      setStoredUser(updated);
+      return updated;
     });
   }, []);
 
@@ -224,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         changePassword,
         refreshUser,
+        refreshPermissions,
         completeOnboarding,
         logout,
         actingCompany,

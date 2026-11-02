@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import {
   reports as reportsApi,
   quarterlyReports as quarterlyReportsApi,
@@ -740,6 +742,10 @@ export default function QuarterlyReportForm({
 
   const isUploadMode = !!selectedReportId;
   const isOpenMode = false;
+  // License: only a NEW report counts (adding files to one doesn't), so only
+  // that path is greyed out when the quarterly limit is full.
+  const quarterlyRoom = useLicenseRoom('quarterly', 'Quarterly Reports');
+  const blockedByLicense = !selectedReportId && quarterlyRoom.blocked;
 
   // The pills are pre-disabled for unavailable bases (see compAvail), so a click
   // only ever lands on a valid choice — just record it.
@@ -1267,11 +1273,14 @@ export default function QuarterlyReportForm({
         (!needsFinancialUpload || (hasFinancialFiles && !!financialScale && !tablesBlocked)) &&
         !langBlocked &&
         !comparisonBlocked &&
-        contextComplete));
+        contextComplete &&
+        !blockedByLicense));
 
   // Ordered to follow the form top to bottom, so the reason points at the next
   // thing the user will actually reach.
-  const disabledReason = isOpenMode
+  const disabledReason = blockedByLicense
+    ? quarterlyRoom.reason
+    : isOpenMode
     ? undefined
     : isUploadMode
       ? !hasFiles
@@ -2541,11 +2550,14 @@ export default function QuarterlyReportForm({
             pointer events on a disabled button, so the tooltip never appears and
             the user is left staring at a dead button. */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-          <span
-            aria-live="polite"
-            style={{ fontSize: 11.5, color: '#9BA3C4', lineHeight: 1.45 }}
-          >
-            {!canGenerate ? disabledReason ?? '' : ''}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {!selectedReportId && <LimitHint room={quarterlyRoom} />}
+            <span
+              aria-live="polite"
+              style={{ fontSize: 11.5, color: '#9BA3C4', lineHeight: 1.45 }}
+            >
+              {!canGenerate ? disabledReason ?? '' : ''}
+            </span>
           </span>
           <button
             type="button"
