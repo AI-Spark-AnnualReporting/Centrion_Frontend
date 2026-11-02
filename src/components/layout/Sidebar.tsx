@@ -11,13 +11,15 @@ import { sparkStudioUrl } from '@/lib/appRouting';
 // "Reports Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
 // Spark staff are an admin for every company's ANNUAL REPORT, not general-purpose
 // admins — so they get the directory, an Annual Report tab, the three
-// cross-cutting workspaces below, and nothing else.
-// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank. The
+// cross-cutting workspaces below, Upload Previous Reports (to see which annual
+// reports the chosen company has uploaded), and nothing else.
+// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank,
+// Upload Previous Reports. The
 // annual report is NOT one of them and can't be: this set is only ever consulted
 // against top-level NAV_ITEMS, while `annual` is a REPORT_CHILDREN key nested
 // under Reports — which spark never sees. Hence its own hand-rolled tab below,
 // the same shape as the Companies button.
-const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs']);
+const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs', 'uploadReports']);
 
 const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean; allowedRoles?: ('admin' | 'ir')[] }[] = [
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly', featureKey: 'quarterly_report' },
