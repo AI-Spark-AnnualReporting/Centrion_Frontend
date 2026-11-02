@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { companies as companiesApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { CheckCircle2, X, XCircle } from 'lucide-react';
 import type {
   AnnualReportExtraction as Extraction,
   ExtractedDepartments,
@@ -14,16 +15,6 @@ import type {
 // Everything the onboarding upload read out of the company's annual report(s),
 // printed as-is under the Uploaded Reports list. Empty parts say so instead of
 // disappearing, so it is visible what the ingest did NOT manage to read.
-
-// Same category colours as the dashboard's "What we learned" card.
-const HIGHLIGHT_STYLE: Record<string, { color: string; bg: string }> = {
-  financial: { color: '#0F9D6B', bg: '#E7F7F0' },
-  esg: { color: '#0D9488', bg: '#E2F6F3' },
-  governance: { color: '#4040C8', bg: '#ECEEFF' },
-  compliance: { color: '#B45309', bg: '#FDF3E2' },
-  strategy: { color: '#7C3AED', bg: '#F1ECFE' },
-};
-const HIGHLIGHT_FALLBACK = { color: '#5A6080', bg: '#F1F2F8' };
 
 const OUTLINE_FOLD_AT = 15;
 
@@ -96,51 +87,191 @@ export default function AnnualReportExtraction() {
   );
 }
 
-/** Every block of the panel, in the order the ingest produces them. */
+/** A tick/cross table; each part's details open in a popup. */
 function ExtractionBody({ data }: { data: Extraction }) {
-  const company = data.company;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {data.errors.length > 0 && <PartialErrors errors={data.errors} />}
-      <Block title="Writing tone">
-        <ToneDirective tone={company.tone} />
-      </Block>
-      <Block title="Tone profile">
-        <ToneDimensions dimensions={company.tone_dimensions} />
-      </Block>
-      <Block title="Example sentences quoted from the report">
-        <Exemplars exemplars={company.tone_exemplars} />
-      </Block>
-      <Block title="Themes">
-        <Themes themes={company.themes} />
-      </Block>
-      <Block title="Highlights">
-        <Highlights highlights={company.highlights} />
-      </Block>
-      <Block title="Revenue and profit">
-        <FinancialsPerReport reports={data.reports} />
-      </Block>
-      <Block title="Contents page">
-        <ContentsPagesPerReport reports={data.reports} />
-      </Block>
-      <Block title="Report outline (from the first upload)">
-        <FlatOutline outline={company.outline} />
-      </Block>
-      <Block title="Report sections created from the outline">
-        <Sections sections={data.sections} />
-      </Block>
-      <Block title="Suggested departments">
-        <Departments departments={company.departments} />
-      </Block>
+      <ExtractionSummaryTable data={data} />
     </div>
   );
 }
 
-/** One white card with an uppercase label on top. */
-function Block({ title, children }: { title: string; children: ReactNode }) {
+// ── Summary table: one tick or cross per part, each opening a popup ──
+
+type SummaryKey = 'tone' | 'dashboard' | 'outline' | 'departments';
+
+const SUMMARY_COLUMNS: { key: SummaryKey; label: string }[] = [
+  { key: 'tone', label: 'Tone' },
+  { key: 'dashboard', label: 'Dashboard data' },
+  { key: 'outline', label: 'Previous outline' },
+  { key: 'departments', label: 'Suggested departments' },
+];
+
+/** True when the tone paragraph, the tone settings or the example sentences exist. */
+function hasTone(data: Extraction): boolean {
+  const company = data.company;
+  return Boolean(company.tone)
+    || Object.keys(company.tone_dimensions ?? {}).length > 0
+    || (company.tone_exemplars ?? []).length > 0;
+}
+
+/** True when revenue/profit was read from at least one uploaded report. */
+function hasDashboardData(data: Extraction): boolean {
+  return data.reports.some((report) => Boolean(report.financials?.data));
+}
+
+/** True when the company has sections — what the cycle's "Previous" option shows. */
+function hasPreviousOutline(data: Extraction): boolean {
+  return data.sections.length > 0;
+}
+
+/** True when at least one department was suggested from the report. */
+function hasSuggestedDepartments(data: Extraction): boolean {
+  return (data.company.departments?.raw ?? []).length > 0;
+}
+
+function hasSummaryData(key: SummaryKey, data: Extraction): boolean {
+  if (key === 'tone') return hasTone(data);
+  if (key === 'dashboard') return hasDashboardData(data);
+  if (key === 'outline') return hasPreviousOutline(data);
+  return hasSuggestedDepartments(data);
+}
+
+/** A 4-column table of ticks and crosses; clicking a column opens that part's details. */
+function ExtractionSummaryTable({ data }: { data: Extraction }) {
+  const [openKey, setOpenKey] = useState<SummaryKey | null>(null);
+  const openColumn = SUMMARY_COLUMNS.find((column) => column.key === openKey);
+  const buttonStyle: CSSProperties = {
+    width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '12px',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+  };
   return (
-    <div className="card" style={{ padding: '16px 20px' }}>
-      <div style={{ ...labelStyle, marginBottom: 10 }}>{title}</div>
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <tbody>
+          <tr>
+            {SUMMARY_COLUMNS.map((column) => {
+              const found = hasSummaryData(column.key, data);
+              return (
+                <td key={column.key} style={{ padding: 0, borderRight: '1px solid #EEF0F7' }}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenKey(column.key)}
+                    aria-label={`${column.label}: ${found ? 'extracted' : 'not extracted'}`}
+                    style={buttonStyle}
+                  >
+                    <span style={labelStyle}>{column.label}</span>
+                    {found
+                      ? <CheckCircle2 size={22} color="#0F9D6B" />
+                      : <XCircle size={22} color="#DC2626" />}
+                  </button>
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+      {openKey && openColumn && (
+        <SummaryPopup title={openColumn.label} onClose={() => setOpenKey(null)}>
+          <SummaryDetails summaryKey={openKey} data={data} />
+        </SummaryPopup>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The popup shell, same as the app's other modals (e.g. ApproveConfirmDialog).
+ * The shared ui/dialog sits at z-index 50, under the app shell, so it never showed.
+ */
+function SummaryPopup({ title, onClose, children }: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1400,
+        background: 'rgba(20,22,40,.45)', backdropFilter: 'blur(2px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: 'min(720px, 100%)', maxHeight: '80vh', overflowY: 'auto',
+          background: '#fff', borderRadius: 16, padding: '20px 22px',
+          boxShadow: '0 24px 60px rgba(20,22,40,.28)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5A6080' }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** The popup body: the same blocks the section draws below, for one column. */
+function SummaryDetails({ summaryKey, data }: { summaryKey: SummaryKey; data: Extraction }) {
+  const company = data.company;
+  if (summaryKey === 'tone') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <PopupPart title="Writing tone"><ToneDirective tone={company.tone} /></PopupPart>
+        <PopupPart title="Tone profile"><ToneDimensions dimensions={company.tone_dimensions} /></PopupPart>
+        <PopupPart title="Example sentences quoted from the report">
+          <Exemplars exemplars={company.tone_exemplars} />
+        </PopupPart>
+      </div>
+    );
+  }
+  if (summaryKey === 'dashboard') {
+    return <PopupPart title="Revenue and profit"><FinancialsPerReport reports={data.reports} /></PopupPart>;
+  }
+  if (summaryKey === 'outline') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <PopupPart title="Sections (what the Previous option shows)">
+          <Sections sections={data.sections} />
+        </PopupPart>
+        <PopupPart title="Contents page"><ContentsPagesPerReport reports={data.reports} /></PopupPart>
+        <PopupPart title="Report outline (from the first upload)">
+          <FlatOutline outline={company.outline} />
+        </PopupPart>
+      </div>
+    );
+  }
+  return <PopupPart title="Suggested departments"><Departments departments={company.departments} /></PopupPart>;
+}
+
+function PopupPart({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div style={{ ...labelStyle, marginBottom: 8 }}>{title}</div>
       {children}
     </div>
   );
@@ -206,41 +337,6 @@ function Exemplars({ exemplars }: { exemplars: string[] }) {
           {sentence}
         </blockquote>
       ))}
-    </div>
-  );
-}
-
-function Themes({ themes }: { themes: Extraction['company']['themes'] }) {
-  if (themes.length === 0) return <Empty />;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {themes.map((theme) => (
-        <div key={theme.name}>
-          <span style={{ ...pillStyle, background: '#ECEEFF', color: '#3B52E0' }}>{theme.name}</span>
-          {theme.explanation && (
-            <p dir="auto" style={{ ...bodyStyle, marginTop: 4 }}>{theme.explanation}</p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Highlights({ highlights }: { highlights: Extraction['company']['highlights'] }) {
-  if (highlights.length === 0) return <Empty />;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {highlights.map((highlight, index) => {
-        const style = HIGHLIGHT_STYLE[highlight.category] ?? HIGHLIGHT_FALLBACK;
-        return (
-          <div key={index} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <span style={{ ...pillStyle, background: style.bg, color: style.color, flexShrink: 0 }}>
-              {highlight.category}
-            </span>
-            <span dir="auto" style={bodyStyle}>{highlight.text}</span>
-          </div>
-        );
-      })}
     </div>
   );
 }

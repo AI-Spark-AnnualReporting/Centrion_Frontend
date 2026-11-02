@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import type { AnnualReportExtraction as Extraction } from '@/types/company';
 
 const getExtraction = vi.fn();
@@ -70,50 +70,67 @@ describe('AnnualReportExtraction', () => {
     getExtraction.mockReset();
   });
 
-  it('prints every part of a full extraction', async () => {
+  async function openPopup(label: string) {
+    fireEvent.click(await screen.findByLabelText(label));
+    return screen.findByRole('dialog');
+  }
+
+  it('shows only the table on the page, not the long list', async () => {
     getExtraction.mockResolvedValue(fullExtraction());
     render(<AnnualReportExtraction />);
-
-    expect(await screen.findByText('Use formal language.')).toBeInTheDocument();
+    await screen.findByLabelText('Tone: extracted');
     expect(getExtraction).toHaveBeenCalledWith('co-1');
-    // Processing status, uploaded files and company profile are left out on purpose.
-    expect(screen.queryByText('Processing status')).not.toBeInTheDocument();
-    expect(screen.queryByText('Uploaded annual reports')).not.toBeInTheDocument();
-    expect(screen.queryByText('Company profile')).not.toBeInTheDocument();
-    expect(screen.queryByText('966 chunks')).not.toBeInTheDocument();
-    expect(screen.queryByText('Dhahran')).not.toBeInTheDocument();
-    expect(screen.getByText('Use formal language.')).toBeInTheDocument();
-    expect(screen.getByText('Bad news framing')).toBeInTheDocument();
-    expect(screen.getByText('strategic growth')).toBeInTheDocument();
-    expect(screen.getByText('Revenue rose.')).toBeInTheDocument();
-    expect(screen.getByText('398')).toBeInTheDocument();
-    expect(screen.getByText('مليار')).toBeInTheDocument();
-    expect(screen.getByText('Vision')).toBeInTheDocument();
-    expect(screen.getByText('generate (confirmed)')).toBeInTheDocument();
-    expect(screen.getByText('Matches an existing department')).toBeInTheDocument();
+    expect(screen.queryByText('Use formal language.')).not.toBeInTheDocument();
+    expect(screen.queryByText('strategic growth')).not.toBeInTheDocument();
+    expect(screen.queryByText('Revenue rose.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows the revenue and profit in the dashboard popup', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    const popup = await openPopup('Dashboard data: extracted');
+    expect(within(popup).getByText('398')).toBeInTheDocument();
+    expect(within(popup).getByText('مليار')).toBeInTheDocument();
+  });
+
+  it('shows the departments in their popup', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    const popup = await openPopup('Suggested departments: extracted');
+    expect(within(popup).getByText('Matches an existing department')).toBeInTheDocument();
   });
 
   it('keeps an Arabic quote in its own direction', async () => {
     getExtraction.mockResolvedValue(fullExtraction());
     render(<AnnualReportExtraction />);
-    const quote = await screen.findByText('تتمثل رؤية أرامكو السعودية');
-    expect(quote).toHaveAttribute('dir', 'auto');
+    const popup = await openPopup('Tone: extracted');
+    expect(within(popup).getByText('تتمثل رؤية أرامكو السعودية')).toHaveAttribute('dir', 'auto');
   });
 
   it('folds a long contents page', async () => {
     getExtraction.mockResolvedValue(fullExtraction());
     render(<AnnualReportExtraction />);
-    await screen.findByText('Entry 15');
-    expect(screen.queryByText('Entry 16')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('Show all 20'));
-    expect(screen.getByText('Entry 20')).toBeInTheDocument();
+    const popup = await openPopup('Previous outline: extracted');
+    expect(within(popup).getByText('Entry 15')).toBeInTheDocument();
+    expect(within(popup).queryByText('Entry 16')).not.toBeInTheDocument();
+    fireEvent.click(within(popup).getByText('Show all 20'));
+    expect(within(popup).getByText('Entry 20')).toBeInTheDocument();
   });
 
   it('says what is missing instead of hiding it', async () => {
     getExtraction.mockResolvedValue(emptyExtraction());
     render(<AnnualReportExtraction />);
-    expect(await screen.findByText('No sections were created from this report.')).toBeInTheDocument();
-    expect(screen.getByText('No departments were suggested from this report.')).toBeInTheDocument();
+    const popup = await openPopup('Previous outline: not extracted');
+    expect(within(popup).getByText('No sections were created from this report.')).toBeInTheDocument();
+  });
+
+  it('closes the popup with the close button', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    const popup = await openPopup('Tone: extracted');
+    fireEvent.click(within(popup).getByLabelText('Close'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows the parts the server could not read', async () => {
@@ -128,5 +145,40 @@ describe('AnnualReportExtraction', () => {
     getExtraction.mockRejectedValue(new Error('down'));
     render(<AnnualReportExtraction />);
     expect(await screen.findByText(/Could not load what was extracted/)).toBeInTheDocument();
+  });
+
+  it('shows a tick for every part of a full extraction', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    expect(await screen.findByLabelText('Tone: extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dashboard data: extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Previous outline: extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Suggested departments: extracted')).toBeInTheDocument();
+  });
+
+  it('shows a cross for every part when nothing was extracted', async () => {
+    getExtraction.mockResolvedValue(emptyExtraction());
+    render(<AnnualReportExtraction />);
+    expect(await screen.findByLabelText('Tone: not extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dashboard data: not extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Previous outline: not extracted')).toBeInTheDocument();
+    expect(screen.getByLabelText('Suggested departments: not extracted')).toBeInTheDocument();
+  });
+
+  it('opens the tone details in a popup', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    fireEvent.click(await screen.findByLabelText('Tone: extracted'));
+    const popup = await screen.findByRole('dialog');
+    expect(within(popup).getByText('Use formal language.')).toBeInTheDocument();
+    expect(within(popup).queryByText('strategic growth')).not.toBeInTheDocument();
+  });
+
+  it('opens the previous outline sections in a popup', async () => {
+    getExtraction.mockResolvedValue(fullExtraction());
+    render(<AnnualReportExtraction />);
+    fireEvent.click(await screen.findByLabelText('Previous outline: extracted'));
+    const popup = await screen.findByRole('dialog');
+    expect(within(popup).getByText('generate (confirmed)')).toBeInTheDocument();
   });
 });
