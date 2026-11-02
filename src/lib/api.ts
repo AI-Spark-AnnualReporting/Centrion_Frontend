@@ -20,6 +20,7 @@ import type { DetectedBrandColors } from "@/types/brand";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
+  AnnualReportExtraction,
   Company,
   CompanyBrandUpdate,
   CreateCompanyRequest,
@@ -866,6 +867,12 @@ export const companies = {
   // the common case: it is only written for an annual PDF the customer gave us.
   getLatestOutline: (companyId: string) =>
     request<LatestOutlineResponse>(`/api/v1/companies/${companyId}/latest-outline`),
+
+  // Everything onboarding read out of the uploaded annual report(s): tone, themes,
+  // highlights, profile, outline, sections, departments, and per file its chunks,
+  // contents page and revenue/profit. Read-only; shown on Upload Previous Reports.
+  getAnnualReportExtraction: (companyId: string) =>
+    request<AnnualReportExtraction>(`/api/v1/companies/${companyId}/annual-report-extraction`),
 
   // The logo lives behind its own endpoint because it's ~1.4 MB of inline
   // base64 and getMyCompany() runs on nearly every page — fetch it only where
