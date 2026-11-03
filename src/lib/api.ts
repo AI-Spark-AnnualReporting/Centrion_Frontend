@@ -16,6 +16,7 @@ import type {
   GenerateLicensePayload,
   LicensableModule,
   SparkLicenseRow,
+  SparkUpgradeRequest,
   UpgradeRequestPayload,
 } from "@/types/license";
 import type {
@@ -5346,7 +5347,7 @@ export const spark = {
 
 export const sparkLicenses = {
   list: () =>
-    request<{ licenses: SparkLicenseRow[]; modules: LicensableModule[] }>("/api/v1/spark/licenses", {
+    request<{ licenses: SparkLicenseRow[]; modules: LicensableModule[]; upgrade_requests?: SparkUpgradeRequest[] }>("/api/v1/spark/licenses", {
       noActingCompany: true,
     }),
 

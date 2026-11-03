@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 const usage = vi.fn();
 
@@ -33,14 +34,14 @@ function usageWithSeats(used: number, max: number) {
 describe("Invite user and the seat limit", () => {
   it("shows the seats left while there's room", async () => {
     usage.mockResolvedValue(usageWithSeats(14, 16));
-    render(<AdminUsersPage />);
+    render(<MemoryRouter><AdminUsersPage /></MemoryRouter>);
     expect(await screen.findByText("2 seats left (14 of 16)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Invite user" })).toBeEnabled();
   });
 
   it("greys out Invite user when the limit is full", async () => {
     usage.mockResolvedValue(usageWithSeats(16, 16));
-    render(<AdminUsersPage />);
+    render(<MemoryRouter><AdminUsersPage /></MemoryRouter>);
     expect(await screen.findByText(/User limit reached \(16 \/ 16\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Invite user" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Request more" })).toBeInTheDocument();

@@ -3,8 +3,7 @@
 // admin gets "Request more"; everyone else who isn't an admin gets
 // "Ask your admin" (only admins can ask Centriyon).
 
-import { useState } from 'react';
-import { license } from '@/lib/api';
+import { useNavigate } from 'react-router-dom';
 import type { LicenseRoom } from './useLicenseRoom';
 
 const TONE_STYLE = {
@@ -13,18 +12,19 @@ const TONE_STYLE = {
   full: { color: '#B91C1C', background: 'rgba(239,68,68,.10)' },
 } as const;
 
-export function LimitHint({ room }: { room: LicenseRoom }) {
-  const [sent, setSent] = useState('');
-  if (!room.tone || !room.hint) return null;
+// "Request more": opens the Request upgrade popup on the Admin Console, where
+// the admin picks what they need and confirms it.
+function RequestMoreLink({ style }: { style: React.CSSProperties }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" style={style} onClick={() => navigate('/admin-console#request-upgrade')}>
+      Request more
+    </button>
+  );
+}
 
-  const requestMore = async () => {
-    try {
-      await license.requestUpgrade({ note: `Limit reached: ${room.hint}.` });
-      setSent('Request sent');
-    } catch (err) {
-      setSent(err instanceof Error ? err.message : 'Could not send');
-    }
-  };
+export function LimitHint({ room }: { room: LicenseRoom }) {
+  if (!room.tone || !room.hint) return null;
 
   const linkStyle = { marginLeft: 6, textDecoration: 'underline', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' } as const;
 
@@ -35,8 +35,8 @@ export function LimitHint({ room }: { room: LicenseRoom }) {
     >
       {room.hint}
       {room.tone === 'full' && (
-        sent ? <span style={{ marginLeft: 6 }}>· {sent}</span>
-          : room.canRequest ? <button type="button" style={linkStyle} onClick={requestMore}>Request more</button>
+        room.requestSentOn && !room.askAdmin ? <span style={{ marginLeft: 6 }}>· Request sent {room.requestSentOn}</span>
+          : room.canRequest ? <RequestMoreLink style={linkStyle} />
           : room.askAdmin ? <span style={{ marginLeft: 6 }}>· Ask your admin</span>
           : null
       )}

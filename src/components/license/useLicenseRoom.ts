@@ -21,6 +21,8 @@ export interface LicenseRoom {
   reason: string;         // hover text on a greyed-out button
   canRequest: boolean;    // cloud admin: show "Request more"
   askAdmin: boolean;      // not an admin: show "Ask your admin"
+  limitReached?: string;  // set only when a number limit is full: "used / limit", e.g. "1 / 1"
+  requestSentOn?: string; // an upgrade request is already open: its date, e.g. "2026-11-03"
 }
 
 const NOTHING: LicenseRoom = { blocked: false, tone: null, hint: '', reason: '', canRequest: false, askAdmin: false };
@@ -52,7 +54,7 @@ function seatsRoom(usage: LicenseUsage): Omit<LicenseRoom, 'askAdmin'> {
   const canRequest = !!usage.can_request;
   if (used >= max) {
     return {
-      blocked: true, tone: 'full', canRequest,
+      blocked: true, tone: 'full', canRequest, limitReached: `${used} / ${max}`,
       hint: `User limit reached (${used} / ${max})`,
       reason: `Your license allows ${max} users and all ${max} are in use. Deactivate a user or ask Centriyon for more.`,
     };
@@ -85,7 +87,7 @@ function reportRoom(usage: LicenseUsage, reportType: string, label: string): Omi
   const { used, limit } = entry;
   if (used >= limit) {
     return {
-      blocked: true, tone: 'full', canRequest,
+      blocked: true, tone: 'full', canRequest, limitReached: `${used} / ${limit}`,
       hint: `Limit reached (${used} / ${limit})`,
       reason: `Your license allows ${limit} ${label} this period and all ${limit} are used. Existing ones stay open. Ask Centriyon to raise the limit.`,
     };
@@ -99,7 +101,11 @@ function reportRoom(usage: LicenseUsage, reportType: string, label: string): Omi
 /** Room left for `kind` ("seats" or a report type). Pure, so it's easy to test. */
 export function roomFor(usage: LicenseUsage | null, kind: string, label = ''): LicenseRoom {
   if (!usage || usage.unlimited) return NOTHING;
-  return { ...roomForLicensed(usage, kind, label), askAdmin: usage.is_admin === false };
+  return {
+    ...roomForLicensed(usage, kind, label),
+    askAdmin: usage.is_admin === false,
+    requestSentOn: usage.upgrade_requested_at ? usage.upgrade_requested_at.slice(0, 10) : undefined,
+  };
 }
 
 function roomForLicensed(usage: LicenseUsage, kind: string, label: string): Omit<LicenseRoom, 'askAdmin'> {
@@ -131,6 +137,20 @@ export function useLicenseRoom(kind: string, label = ''): LicenseRoom & { refres
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // Back to this tab (e.g. after reading Centriyon's reply): check again, so a
+  // raised limit shows without a refresh.
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshWhenVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshWhenVisible);
+    };
+  }, [refresh]);
 
   return { ...roomFor(usage, kind, label), refresh };
 }

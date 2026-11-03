@@ -23,6 +23,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { license } from '@/lib/api';
 import type { CompanyLicense } from '@/types/license';
+import { useLicenseRoom } from './useLicenseRoom';
 
 const RECHECK_MS = 30_000;
 const ENDING_SOON_DAYS = 30;
@@ -33,10 +34,14 @@ const CLOSED_KEY_PREFIX = 'license-banner-closed:';
 export const LICENSE_CARD_ID = 'license-card';
 export const LICENSE_KEY_BOX_ID = 'license-key-box';
 export const LICENSE_UNLOCK_BOX_ID = 'license-unlock-box';
+// Open the Request upgrade popup on the License card (every request needs the
+// admin's consent there, so nothing is sent from the banner itself).
+export const REQUEST_UPGRADE_HASH = 'request-upgrade';
+export const REQUEST_RENEWAL_HASH = 'request-renewal';
 
 type Tone = 'red' | 'amber' | 'blue';
 type Action = 'open' | 'copyServer' | 'copyLock' | 'pasteKey' | 'pasteUnlock' | 'renew' | 'upgrade' | 'close';
-type Closable = 'limit' | 'ending';
+type Closable = 'ending';
 
 interface ModuleRow {
   label: string;
@@ -54,7 +59,7 @@ interface Banner {
   closable?: Closable;
 }
 
-const TONE_STYLE: Record<Tone, { background: string; color: string }> = {
+export const TONE_STYLE: Record<Tone, { background: string; color: string }> = {
   red: { background: 'rgba(239,68,68,.10)', color: '#B91C1C' },
   amber: { background: 'rgba(245,158,11,.12)', color: '#92400E' },
   blue: { background: 'rgba(79,70,229,.08)', color: '#3730A3' },
@@ -95,51 +100,6 @@ function reportLabel(data: CompanyLicense, reportType: string): string {
   return data.modules_catalogue.find((m) => m.report_type === reportType)?.label ?? reportType;
 }
 
-/** Everything with a number limit, split into full and still free, e.g.
- *  full: ['Board Report 10 / 10', 'Users 25 / 25']. Unlimited ones are left out. */
-export function limitUsage(data: CompanyLicense): { full: string[]; free: string[]; fullNames: string[] } {
-  const full: string[] = [];
-  const free: string[] = [];
-  const fullNames: string[] = [];
-  for (const [reportType, limit] of Object.entries(data.report_limits)) {
-    if (limit == null) continue;
-    const used = data.reports_used[reportType];
-    if (used == null) continue; // module not in the key
-    const label = reportLabel(data, reportType);
-    const line = `${label} ${used} / ${limit}`;
-    if (used >= limit) {
-      full.push(line);
-      fullNames.push(label);
-    } else {
-      free.push(line);
-    }
-  }
-  if (data.max_seats != null) {
-    const line = `Users ${data.seats_used} / ${data.max_seats}`;
-    if (data.seats_used >= data.max_seats) {
-      full.push(line);
-      fullNames.push('users');
-    } else {
-      free.push(line);
-    }
-  }
-  return { full, free, fullNames };
-}
-
-/** 'A', 'A or B', 'A, B or C' — for "You can't create more … ". */
-function joinWithOr(items: string[]): string {
-  if (items.length <= 1) return items.join('');
-  return `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
-}
-
-function limitSentence(fullNames: string[]): string {
-  const reports = fullNames.filter((name) => name !== 'users');
-  const parts: string[] = [];
-  if (reports.length) parts.push(`create more ${joinWithOr(reports)}`);
-  if (fullNames.includes('users')) parts.push('add users');
-  return `You can't ${parts.join(' or ')} until Centriyon raises the limit.`;
-}
-
 // ── Which banner ────────────────────────────────────────────────────
 
 /** The one banner to show for this license, or null. `closed` = the warnings
@@ -147,6 +107,10 @@ function limitSentence(fullNames: string[]): string {
 export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: string = todayText()): Banner | null {
   const cloud = data.deployment === 'cloud';
   const licensed = moduleLabels(data);
+  // Once a request is open, "Contact Centriyon" is out of date: say it was sent.
+  const renewWords = data.upgrade_requested_at
+    ? `Your request was sent on ${formatLicenseDate(data.upgrade_requested_at.slice(0, 10))} — Centriyon will be in touch.`
+    : 'Contact Centriyon to renew.';
 
   switch (data.status) {
     case 'none':
@@ -179,7 +143,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
       return {
         tone: 'red', icon: '⏱',
         title: `Your license expired on ${formatLicenseDate(data.expires_at)}.`,
-        text: "You can still open and download your reports and use AI Copilot, but you can't create new reports or add users. Contact Centriyon to renew.",
+        text: `You can still open and download your reports and use AI Copilot, but you can't create new reports or add users. ${renewWords}`,
         rows: [{ label: 'Read-only now:', items: licensed }],
         actions: cloud ? ['renew', 'open'] : ['open'],
       };
@@ -203,21 +167,8 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
       break;
   }
 
-  // Active: a full limit first (it blocks work today), then "ending soon".
-  const { full, free, fullNames } = limitUsage(data);
-  if (full.length && !closed.has('limit')) {
-    return {
-      tone: 'amber', icon: '!',
-      title: "You've reached a license limit.",
-      text: limitSentence(fullNames),
-      rows: [
-        { label: 'Full:', items: full, emphasis: true },
-        ...(free.length ? [{ label: 'Still free:', items: free }] : []),
-      ],
-      actions: cloud ? ['upgrade', 'close'] : ['open', 'close'],
-      closable: 'limit',
-    };
-  }
+  // Active: only "ending soon" here. A full limit is shown on the page where
+  // that kind of report (or user) is created — see PageLimitBanner.
   if (data.expires_at && !closed.has('ending')) {
     const days = daysUntil(data.expires_at, today);
     if (days >= 0 && days <= ENDING_SOON_DAYS) {
@@ -225,7 +176,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
       return {
         tone: 'blue', icon: '⏱',
         title: `Your license ends on ${formatLicenseDate(data.expires_at)} — ${when}.`,
-        text: "After that you can still open your reports, but you can't create new ones or add users. Contact Centriyon to renew.",
+        text: `After that you can still open your reports, but you can't create new ones or add users. ${renewWords}`,
         rows: [{ label: 'Your modules:', items: licensed }],
         actions: cloud ? ['renew', 'close'] : ['open', 'close'],
         closable: 'ending',
@@ -239,7 +190,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
 
 function readClosed(): Set<Closable> {
   const closed = new Set<Closable>();
-  for (const kind of ['limit', 'ending'] as Closable[]) {
+  for (const kind of ['ending'] as Closable[]) {
     try {
       if (localStorage.getItem(CLOSED_KEY_PREFIX + kind) === todayText()) closed.add(kind);
     } catch {
@@ -267,17 +218,23 @@ export function LicenseBanner() {
   const [closed, setClosed] = useState<Set<Closable>>(readClosed);
   const [done, setDone] = useState<Partial<Record<Action, string>>>({});
   const wasActive = useRef<boolean | null>(null);
+  // The modules the license gave at the last check, e.g. "annual_report,leadership".
+  const lastModules = useRef<string | null>(null);
   const isClientAdmin = user?.role === 'admin' && !!user.company_id;
 
   const check = useCallback(async () => {
     try {
       const next = await license.get();
       const nowActive = next.status === 'active';
-      // Turned active since the last check (Spark issued or unlocked it).
-      if (wasActive.current === false && nowActive) {
+      const modules = [...next.modules].sort().join(',');
+      // Turned active since the last check (Spark issued or unlocked it), or
+      // Spark added / removed a module: refresh the login so the sidebar matches.
+      const modulesChanged = lastModules.current !== null && lastModules.current !== modules;
+      if ((wasActive.current === false && nowActive) || modulesChanged) {
         await refreshPermissions().catch(() => undefined);
       }
       wasActive.current = nowActive;
+      lastModules.current = modules;
       setData(next);
     } catch {
       // Banner is a hint; a failed check just leaves it as it was.
@@ -328,14 +285,9 @@ export function LicenseBanner() {
     }
   };
 
-  const sendRequest = async (action: Action, note: string) => {
-    try {
-      await license.requestUpgrade({ note });
-      await check();
-    } catch (err) {
-      flash(action, err instanceof Error ? err.message : 'Could not send');
-    }
-  };
+  // Always a navigation (even on the Admin Console): the hash change is what
+  // opens the popup on the License card.
+  const openRequest = (hashId: string) => navigate(`${ADMIN_CONSOLE}#${hashId}`);
 
   const close = (kind: Closable) => {
     rememberClosed(kind);
@@ -348,8 +300,8 @@ export function LicenseBanner() {
     copyLock: () => copy('copyLock', data.lock_id),
     pasteKey: () => goToLicense(LICENSE_KEY_BOX_ID),
     pasteUnlock: () => goToLicense(LICENSE_UNLOCK_BOX_ID),
-    renew: () => sendRequest('renew', `Please renew our license (ends ${formatLicenseDate(data.expires_at)}).`),
-    upgrade: () => sendRequest('upgrade', `Limit reached: ${limitUsage(data).full.join(', ')}.`),
+    renew: () => openRequest(REQUEST_RENEWAL_HASH),
+    upgrade: () => openRequest(REQUEST_UPGRADE_HASH),
     close: () => banner.closable && close(banner.closable),
   };
 
@@ -420,6 +372,96 @@ export function LicenseBanner() {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+
+// ── "You've reached a license limit" — only on the create page ──────
+//
+// Shown only on the exact page where that kind of report (or a user) is
+// created, and only for that page's own limit: not on every page, and not on
+// the later steps of a report that already exists (/quarterly-report/<id>/...
+// never matches). The whole-license banners above stay on every page.
+const CREATE_PAGES: Record<string, { kind: string; name: string; plural: string }> = {
+  '/reports/quarterly': { kind: 'quarterly', name: 'Quarterly Report', plural: 'Quarterly Reports' },
+  '/reports': { kind: 'esg', name: 'ESG report', plural: 'ESG reports' },
+  '/earnings/setup': { kind: 'earnings', name: 'Earnings Report', plural: 'Earnings Reports' },
+  '/annual-report': { kind: 'annual', name: 'Annual Report', plural: 'Annual Reports' },
+  '/board-report': { kind: 'board_report', name: 'Board Report', plural: 'Board Reports' },
+  '/annual-report-validator': { kind: 'report_validation', name: 'Annual Report Validator', plural: 'validations' },
+  '/admin-console/users': { kind: 'seats', name: 'Users', plural: 'users' },
+};
+
+const PAGE_CLOSED_KEY_PREFIX = 'license-limit-closed:';
+
+function isClosedToday(kind: string): boolean {
+  try {
+    return localStorage.getItem(PAGE_CLOSED_KEY_PREFIX + kind) === todayText();
+  } catch {
+    return false;
+  }
+}
+
+export function PageLimitBanner() {
+  const location = useLocation();
+  const page = CREATE_PAGES[location.pathname];
+  return page ? <CreatePageLimitBanner key={page.kind} page={page} /> : null;
+}
+
+function CreatePageLimitBanner({ page }: { page: { kind: string; name: string; plural: string } }) {
+  const navigate = useNavigate();
+  const room = useLicenseRoom(page.kind, page.plural);
+  const [closed, setClosed] = useState(() => isClosedToday(page.kind));
+  if (!room.limitReached || closed) return null;
+
+  const close = () => {
+    try {
+      localStorage.setItem(PAGE_CLOSED_KEY_PREFIX + page.kind, todayText());
+    } catch {
+      // Storage blocked: closed for this page view only.
+    }
+    setClosed(true);
+  };
+  const text = page.kind === 'seats'
+    ? "You can't add more users until Centriyon raises the limit."
+    : `You can't create more ${page.plural} until Centriyon raises the limit.`;
+
+  return (
+    <div
+      role="status"
+      style={{
+        margin: '0 0 12px', padding: '12px 16px', borderRadius: 12,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+        ...TONE_STYLE.amber,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ width: 30, height: 30, borderRadius: 8, flex: 'none', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 15, background: 'rgba(255,255,255,.7)' }}>!</div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 2 }}>You&apos;ve reached a license limit.</div>
+          <div style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.92 }}>{text}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, marginRight: 2 }}>Full:</span>
+            <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 999, padding: '2px 9px', background: '#fff', outline: '1px solid currentColor' }}>
+              {page.name} {room.limitReached}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 'none', display: 'flex', gap: 6, alignItems: 'center' }}>
+        {room.requestSentOn && !room.askAdmin ? (
+          // One open request per company: say so instead of offering another.
+          <span style={{ fontSize: 11.5, fontWeight: 700 }}>Request sent on {room.requestSentOn}</span>
+        ) : room.canRequest ? (
+          <button type="button" className="btn bs bsm" onClick={() => navigate(`${ADMIN_CONSOLE}#${REQUEST_UPGRADE_HASH}`)}>
+            Request upgrade
+          </button>
+        ) : room.askAdmin ? (
+          <span style={{ fontSize: 11.5, fontWeight: 700 }}>Ask your admin</span>
+        ) : null}
+        <button type="button" className="btn bs bsm" aria-label="Close until tomorrow" onClick={close}>✕</button>
       </div>
     </div>
   );

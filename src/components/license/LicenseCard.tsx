@@ -10,9 +10,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useLocation } from 'react-router-dom';
 import { CopyBox } from '@/components/spark/CopyBox';
+import { UpgradeRequestDialog } from '@/components/license/UpgradeRequestDialog';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { license } from '@/lib/api';
-import { LICENSE_CARD_ID, LICENSE_KEY_BOX_ID, LICENSE_UNLOCK_BOX_ID } from '@/components/license/LicenseBanner';
+import { LICENSE_CARD_ID, LICENSE_KEY_BOX_ID, LICENSE_UNLOCK_BOX_ID, REQUEST_RENEWAL_HASH, REQUEST_UPGRADE_HASH, TONE_STYLE, pickBanner } from '@/components/license/LicenseBanner';
 import type { CompanyLicense, LicenseStatus } from '@/types/license';
 
 const STATUS_TEXT: Record<LicenseStatus, { label: string; cls: string }> = {
@@ -74,54 +76,6 @@ function PasteBox({
   );
 }
 
-// Cloud only: ask Spark for more. Never changes the license itself.
-function UpgradeRequest({ data, onSent }: { data: CompanyLicense; onSent: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [seats, setSeats] = useState('');
-  const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  if (data.upgrade_requested_at) {
-    return <span className="badge b-am">Request sent on {data.upgrade_requested_at.slice(0, 10)}</span>;
-  }
-  if (!open) {
-    return <button type="button" className="btn bs bsm" onClick={() => setOpen(true)}>Request upgrade</button>;
-  }
-
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
-    try {
-      await license.requestUpgrade({
-        ...(seats ? { max_seats: Number(seats) } : {}),
-        ...(note.trim() ? { note: note.trim() } : {}),
-      });
-      setOpen(false);
-      onSent();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send the request.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form onSubmit={send} style={{ marginTop: 12, width: '100%' }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input className="inp" type="number" min={1} placeholder="Users needed" value={seats} onChange={(e) => setSeats(e.target.value)} style={{ width: 130 }} />
-        <input className="inp" placeholder="What else do you need? (reports, modules…)" value={note} onChange={(e) => setNote(e.target.value)} style={{ flex: 1 }} />
-      </div>
-      {error && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 4 }}>{error}</div>}
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
-        <button type="button" className="btn bs bsm" onClick={() => setOpen(false)}>Cancel</button>
-        <button type="submit" className="btn bp bsm" disabled={saving || (!seats && !note.trim())}>{saving ? 'Sending…' : 'Send to Centriyon'}</button>
-      </div>
-    </form>
-  );
-}
-
 export function LicenseCard() {
   const { refreshPermissions } = useAuth();
   const [data, setData] = useState<CompanyLicense | null>(null);
@@ -136,8 +90,18 @@ export function LicenseCard() {
   // Opened from the license banner (/admin-console#license-key-box): once the
   // card is drawn, scroll to the part it asked for and put the cursor there.
   const { hash } = useLocation();
+  // null = closed; otherwise whether it opens with "Renew my license" ticked.
+  const [requestOpen, setRequestOpen] = useState<null | { renewal: boolean }>(null);
   useEffect(() => {
     if (!data || !hash) return;
+    // From the banner's / a limit tag's "Request …" buttons: open the popup.
+    if (hash === `#${REQUEST_UPGRADE_HASH}` || hash === `#${REQUEST_RENEWAL_HASH}`) {
+      if (data.deployment === 'cloud' && !data.upgrade_requested_at) {
+        setRequestOpen({ renewal: hash === `#${REQUEST_RENEWAL_HASH}` });
+      }
+      document.getElementById(LICENSE_CARD_ID)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     const target = document.getElementById(hash.slice(1));
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -156,7 +120,7 @@ export function LicenseCard() {
   };
 
   if (error) return <div className="card" style={{ padding: 18, fontSize: 12, color: '#DC2626' }}>{error}</div>;
-  if (!data) return null;
+  if (!data) return <LicenseCardSkeleton />;
 
   const status = STATUS_TEXT[data.status] ?? STATUS_TEXT.none;
   const onPrem = data.deployment === 'on_prem';
@@ -169,10 +133,23 @@ export function LicenseCard() {
           <span className={`badge ${status.cls}`}>{status.label}</span>
           {data.lock_id && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11 }}>Lock ID {data.lock_id}</span>}
         </div>
-        {!onPrem && data.status !== 'none' && <UpgradeRequest data={data} onSent={load} />}
+        {!onPrem && data.status !== 'none' && (
+          data.upgrade_requested_at
+            ? <span className="badge b-am">Request sent on {data.upgrade_requested_at.slice(0, 10)}</span>
+            : <button type="button" className="btn bs bsm" onClick={() => setRequestOpen({ renewal: false })}>Request upgrade</button>
+        )}
+        {requestOpen && (
+          <UpgradeRequestDialog
+            data={data}
+            companyName={data.company_name ?? 'your company'}
+            startWithRenewal={requestOpen.renewal}
+            onClose={() => setRequestOpen(null)}
+            onSent={() => { setRequestOpen(null); load(); }}
+          />
+        )}
       </div>
 
-      {data.message && <div style={{ fontSize: 12, color: '#5A6080', marginTop: 8 }}>{data.message}</div>}
+      <CardNotice data={data} />
 
       {data.status !== 'none' && data.starts_at && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10, marginTop: 14 }}>
@@ -217,6 +194,53 @@ function Usage({ label, used, limit }: { label: string; used: number; limit: num
       <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "'DM Mono', monospace", color: full ? '#DC2626' : '#1A1D2E' }}>
         {used} / {limit ?? '∞'}
       </div>
+    </div>
+  );
+}
+
+// Same shape as the loaded card (title + badge, button, usage numbers,
+// module tags), so nothing jumps when the license arrives.
+function LicenseCardSkeleton() {
+  return (
+    <div className="card" style={{ padding: 18 }} aria-busy="true" aria-label="Loading license">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Skeleton style={{ width: 56, height: 14 }} />
+          <Skeleton style={{ width: 52, height: 18, borderRadius: 999 }} />
+        </div>
+        <Skeleton style={{ width: 118, height: 30, borderRadius: 8 }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10, marginTop: 14 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i}>
+            <Skeleton style={{ width: 70, height: 10 }} />
+            <Skeleton style={{ width: 64, height: 18, marginTop: 6 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
+        <Skeleton style={{ width: 92, height: 20, borderRadius: 999 }} />
+        <Skeleton style={{ width: 108, height: 20, borderRadius: 999 }} />
+      </div>
+    </div>
+  );
+}
+
+// The banner's message, always shown on the card (no ✕): closing the banner
+// never hides that the license is ending, expired, locked, ... Same wording as
+// the banner (pickBanner), with nothing treated as closed.
+function CardNotice({ data }: { data: CompanyLicense }) {
+  const banner = pickBanner(data, new Set());
+  if (!banner) return null;
+  return (
+    <div
+      role="note"
+      style={{ marginTop: 10, padding: '9px 12px', borderRadius: 10, fontSize: 12, lineHeight: 1.5, display: 'flex', gap: 8, ...TONE_STYLE[banner.tone] }}
+    >
+      <span style={{ fontWeight: 800 }}>{banner.icon}</span>
+      <span>
+        <b>{banner.title}</b> {banner.text}
+      </span>
     </div>
   );
 }

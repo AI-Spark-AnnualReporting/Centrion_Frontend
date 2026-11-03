@@ -21,6 +21,7 @@ export interface LicensableModule {
 
 // GET /admin/license — the client admin's license card and banners.
 export interface CompanyLicense {
+  company_name?: string | null;
   deployment: Deployment;
   status: LicenseStatus;
   message: string | null;
@@ -39,6 +40,8 @@ export interface CompanyLicense {
 }
 
 export interface UpgradeRequestPayload {
+  consent?: boolean;                  // required by the server: the admin ticked "I confirm..."
+  renewal?: boolean;
   max_seats?: number;
   report_limits?: Record<string, number>;
   modules?: string[];
@@ -63,6 +66,31 @@ export interface SparkLicenseRow {
   lock: { lock_id: string; reason: string; locked_at: string } | null;
   open_upgrade_requests: number;
   reports_used?: Record<string, number> | null;
+  // GET /spark/companies/{id}/license only: the open upgrade request.
+  open_request?: SparkOpenRequest | null;
+}
+
+// What a client admin asked for. `asked` is null for requests sent before the
+// numbers were saved — then only the text (`lines`) can be shown.
+export interface SparkOpenRequest {
+  sent_at: string | null;
+  asked_by: string | null;
+  lines: string[];
+  asked: {
+    renewal?: boolean;
+    max_seats?: number;
+    report_limits?: Record<string, number>;
+    modules?: string[];
+  } | null;
+}
+
+// GET /spark/licenses → upgrade_requests: one open request (cloud clients).
+export interface SparkUpgradeRequest {
+  company_id: string;
+  company_name: string | null;
+  asked_by: string | null;
+  sent_at: string | null;
+  lines: string[];                    // e.g. "Users: 30", "Note: …"
 }
 
 // POST /spark/companies/{id}/license
@@ -90,6 +118,7 @@ export interface LicenseUsage {
   message?: string | null;
   can_request?: boolean;
   is_admin?: boolean;
+  upgrade_requested_at?: string | null;
   seats?: { used: number; max: number | null };
   reports?: Record<string, { module_on: boolean; used: number; limit: number | null }>;
 }

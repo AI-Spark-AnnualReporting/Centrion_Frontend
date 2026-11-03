@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import type { LicenseUsage } from "@/types/license";
 
 let mockUser: Record<string, unknown> = { user_id: "usr_admin", role: "admin", company_id: "cmp_1" };
@@ -70,17 +71,36 @@ describe("roomFor", () => {
   });
 });
 
+describe("useLicenseRoom", () => {
+  it("checks again when the browser tab comes back", async () => {
+    const { useLicenseRoom } = await import("@/components/license/useLicenseRoom");
+    usage.mockReset().mockResolvedValue(usageOf());
+    const Probe = () => { useLicenseRoom("seats"); return null; };
+    render(<Probe />);
+    await waitFor(() => expect(usage).toHaveBeenCalledTimes(1));
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(usage).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe("LimitHint", () => {
   beforeEach(() => {
     requestUpgrade.mockReset().mockResolvedValue({ requested: true });
   });
 
-  it("a cloud admin can request more from a full limit", async () => {
+  it("a cloud admin's Request more opens the Request upgrade popup", async () => {
     mockUser = { role: "admin" };
-    render(<LimitHint room={roomFor(usageOf({ seats: { used: 16, max: 16 } }), "seats")} />);
+    let seen = "";
+    const Where = () => { seen = useLocation().pathname + useLocation().hash; return null; };
+    render(
+      <MemoryRouter>
+        <LimitHint room={roomFor(usageOf({ seats: { used: 16, max: 16 } }), "seats")} />
+        <Where />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Request more" }));
-    await waitFor(() => expect(requestUpgrade).toHaveBeenCalledWith({ note: "Limit reached: User limit reached (16 / 16)." }));
-    expect(await screen.findByText(/Request sent/)).toBeInTheDocument();
+    await waitFor(() => expect(seen).toBe("/admin-console#request-upgrade"));
+    expect(requestUpgrade).not.toHaveBeenCalled();
   });
 
   it("other roles are told to ask their admin", () => {
@@ -98,7 +118,7 @@ describe("Create Cycle button", () => {
 
   it("is greyed out with the reason when the annual limit is full", async () => {
     usage.mockResolvedValue(usageOf({ reports: { annual: { module_on: true, used: 5, limit: 5 } } }));
-    render(<CycleForm onCreated={vi.fn()} />);
+    render(<MemoryRouter><CycleForm onCreated={vi.fn()} /></MemoryRouter>);
     fireEvent.click(screen.getByText("Create Reporting Cycle"));
     expect(await screen.findByText("Limit reached (5 / 5)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Cycle" })).toBeDisabled();
@@ -107,7 +127,7 @@ describe("Create Cycle button", () => {
 
   it("stays usable when the license call fails (the server still checks)", async () => {
     usage.mockRejectedValue(new Error("network"));
-    render(<CycleForm onCreated={vi.fn()} />);
+    render(<MemoryRouter><CycleForm onCreated={vi.fn()} /></MemoryRouter>);
     fireEvent.click(screen.getByText("Create Reporting Cycle"));
     await waitFor(() => expect(usage).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "Create Cycle" })).toBeEnabled();

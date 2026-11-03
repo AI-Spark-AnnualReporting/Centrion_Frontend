@@ -148,6 +148,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Permissions are saved at login. A license can gain (or lose) modules while
+  // someone stays logged in, so on every app start / page refresh ask once for
+  // fresh ones. Best effort: if it fails, the saved ones stay.
+  useEffect(() => {
+    if (!getToken()) return;
+    refreshPermissions().catch(() => undefined);
+  }, [refreshPermissions]);
+
   const completeOnboarding = useCallback(
     async (payload: OnboardingPayload) => {
       const data = await authApi.onboarding(payload);
