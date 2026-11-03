@@ -7,7 +7,7 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
-import { checkAiCreditsHeader } from './aiCreditsToast';
+import { checkAiCreditsHeader, showAiCreditsPausedToast } from './aiCreditsToast';
 import type {
   AuthUser,
   DepartmentOption,
@@ -2535,8 +2535,13 @@ export const quarterlyReports = {
       if (!line.startsWith("data: ")) return;
       const json = line.slice(6).trim();
       if (!json) return;
-      try { onEvent(JSON.parse(json) as ChatStreamEvent); }
-      catch { /* skip malformed line */ }
+      try {
+        const event = JSON.parse(json) as ChatStreamEvent;
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        if (event?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        onEvent(event);
+      } catch { /* skip malformed line */ }
     };
 
     while (true) {
@@ -4048,13 +4053,20 @@ async function* consumeSse(
           .map((l) => l.slice(5).replace(/^\s/, ""));
         if (dataLines.length === 0) continue;
         const payload = dataLines.join("\n");
+        let event: ChatStreamEvent;
         try {
-          yield JSON.parse(payload) as ChatStreamEvent;
+          event = JSON.parse(payload) as ChatStreamEvent;
         } catch {
           // Non-JSON heartbeat — surface as a raw token so the caller can
           // ignore or render.
           yield { type: "token", content: payload };
+          continue;
         }
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        const fields = event as unknown as Record<string, unknown> | null;
+        if (fields?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        yield event;
       }
     }
   } finally {

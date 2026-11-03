@@ -1,4 +1,4 @@
-import { toast } from '@/hooks/use-toast';
+import { AI_CREDITS_TOAST_ID, toast } from '@/hooks/use-toast';
 
 // The backends add this header to every response while the OpenAI account is out of
 // credit (see Centriton/ai_credits.py and AIAnnualReporting/app/core/ai_credits.py).
@@ -7,20 +7,46 @@ import { toast } from '@/hooks/use-toast';
 export const AI_CREDITS_HEADER = 'X-AI-Credits';
 const EXHAUSTED_VALUE = 'exhausted';
 
-// Many calls fail at once when the credit runs out; one toast is enough.
+// Many calls fail at once when the credit runs out; one toast is enough. The quiet
+// period starts when the user CLOSES the toast, not when it opens, so a toast that
+// opened in a background tab is not hidden for 5 minutes before anyone saw it.
 const REPEAT_AFTER_MS = 5 * 60 * 1000;
-let lastShownAt: number | null = null;
+let isToastOpen = false;
+let lastClosedAt: number | null = null;
 
-export const AI_CREDITS_TITLE = 'AI features are paused';
+export const AI_CREDITS_TITLE = 'AI features are unavailable';
 export const AI_CREDITS_MESSAGE =
-  'Your account has reached its AI usage limit. Please contact support to restore access.';
+  "AI features can't be used at the moment. Please contact the support team for help.";
 
-/** Show the "AI features are paused" toast, at most once every 5 minutes. */
+/** True while the toast is open, or within 5 minutes of the user closing it. */
+function isToastBlocked(): boolean {
+  if (isToastOpen) return true;
+  if (lastClosedAt === null) return false;
+  return Date.now() - lastClosedAt < REPEAT_AFTER_MS;
+}
+
+/** Remember that the user closed the toast, which starts the 5-minute quiet period. */
+function handleToastOpenChange(open: boolean): void {
+  if (open) return;
+  isToastOpen = false;
+  lastClosedAt = Date.now();
+}
+
+/**
+ * Show the "AI features are unavailable" toast. It stays until the user closes it,
+ * is not shown again while open, and not again for 5 minutes after it is closed.
+ */
 export function showAiCreditsPausedToast(): void {
-  const now = Date.now();
-  if (lastShownAt !== null && now - lastShownAt < REPEAT_AFTER_MS) return;
-  lastShownAt = now;
-  toast({ variant: 'destructive', title: AI_CREDITS_TITLE, description: AI_CREDITS_MESSAGE });
+  if (isToastBlocked()) return;
+  isToastOpen = true;
+  toast({
+    id: AI_CREDITS_TOAST_ID,
+    variant: 'destructive',
+    title: AI_CREDITS_TITLE,
+    description: AI_CREDITS_MESSAGE,
+    duration: Infinity,
+    onOpenChange: handleToastOpenChange,
+  });
 }
 
 /**
@@ -33,7 +59,8 @@ export function checkAiCreditsHeader(response: Response | null | undefined): voi
   if (value === EXHAUSTED_VALUE) showAiCreditsPausedToast();
 }
 
-/** Test-only: forget when the toast was last shown. */
+/** Test-only: forget whether the toast is open and when it was last closed. */
 export function resetAiCreditsToastForTests(): void {
-  lastShownAt = null;
+  isToastOpen = false;
+  lastClosedAt = null;
 }
