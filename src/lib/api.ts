@@ -7,6 +7,7 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
+import { checkAiCreditsHeader } from './aiCreditsToast';
 import type {
   AuthUser,
   DepartmentOption,
@@ -435,6 +436,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     body,
     signal: opts.signal,
   });
+  checkAiCreditsHeader(res);
 
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
@@ -455,6 +457,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -479,6 +482,7 @@ async function postPipeline(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -1663,6 +1667,7 @@ export const complianceValidation = {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(full, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
       const parsed: unknown = await res.json().catch(() => null);
@@ -4991,6 +4996,7 @@ export const communications = {
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(url, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
     return res.blob();
@@ -5903,6 +5909,7 @@ export async function fetchWithAuth(
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  checkAiCreditsHeader(res);
   if (res.status === 401) handleUnauthorized();
   return res;
 }
@@ -5936,6 +5943,7 @@ export async function getSectors(): Promise<Sector[]> {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
       headers: { accept: "application/json", ...defaultRequestHeaders() },
     });
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
@@ -6009,6 +6017,7 @@ export async function createCompany(
         headers: { accept: "application/json", ...defaultRequestHeaders() },
       },
     );
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
