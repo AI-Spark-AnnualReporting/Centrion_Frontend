@@ -31,11 +31,12 @@ export interface PlanContact {
   phone?: string | null;
 }
 
-// What a client admin asked for in "Get a quote".
+// What a client admin sent with Contact us on the Enterprise card.
 export interface PlanQuote {
-  asked: PlanLimits;
-  duration: PaidDuration | null;
-  note: string | null;
+  name: string;
+  phone: string;
+  message: string;
+  enterprise_plan_id: string;
   asked_by: string;
   asked_by_name: string | null;
   asked_at: string;
@@ -96,6 +97,9 @@ export interface PlanForClient extends PlanLimits {
   contact: PlanContact | null;
   max_departments: number;
   made_for_you: boolean;
+  // Changing plan (shown in a popup on Buy now):
+  too_small: string[];        // why it can't take the company's people — can't be bought
+  lost_modules: string[];     // modules the company has now that it doesn't include — confirm first
 }
 
 // One row of company_subscriptions: a checkout waiting for payment, or a paid period.
@@ -122,7 +126,10 @@ export interface CurrentSubscription {
   subscription: CompanySubscription | null;
 }
 
-export interface QuoteRequestForm extends PlanLimits {
-  duration?: PaidDuration | null;
-  note?: string | null;
+// Contact us on an Enterprise card.
+export interface QuoteRequestForm {
+  plan_id: string;            // the Enterprise card clicked
+  name: string;
+  phone: string;
+  message: string;
 }

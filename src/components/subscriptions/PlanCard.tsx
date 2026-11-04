@@ -8,7 +8,7 @@
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LicensableModule } from '@/types/license';
 import type { Duration, PlanContact, PlanLimits } from '@/types/subscription';
 import { departmentsSummary, durationPer } from './PlanFields';
@@ -55,7 +55,8 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
         <small>{per[0]}<br />{per.slice(1).join(' ')}</small>
       </div>
       <div className="sub-pc-line" />
-      <ul>
+      {/* The module lines on their own: past 15 modules this list scrolls inside the card. */}
+      <ul className="sub-pc-mods">
         {catalogue.map((module) => {
           const on = plan.modules.includes(module.key);
           const reports = module.report_type ? plan.report_limits[module.report_type] : undefined;
@@ -66,6 +67,8 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
             </li>
           );
         })}
+      </ul>
+      <ul>
         <li><span className="sub-ic sub-ok">✓</span><span>1 admin (included)</span></li>
         <li>
           <span className="sub-ic sub-ok">✓</span>
@@ -74,6 +77,95 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
         <li><span className="sub-ic sub-ok">✓</span><span>{departmentsSummary(plan)}</span></li>
       </ul>
     </>
+  );
+}
+
+// ── One row of cards that never makes the page scroll ───────────────
+
+const CARD_STEP = 256;   // a card's width + the gap between cards
+
+// Room the strip keeps above (the cards' name tabs) and below (Edit / Delete bar).
+const STRIP_PADDING_Y = 22 + 28;
+// Up to this many modules the cards shrink a little to fit; past it the text
+// would get too small, so they stay full size and the module list scrolls.
+export const SCROLL_AFTER_MODULES = 15;
+const MIN_LIST_HEIGHT = 120;
+
+/** The module list's height when it scrolls: what's left after taking off
+ *  how much the card is too tall (never below a readable minimum). */
+export function scrollingListHeight(listHeight: number, cardNeeds: number, heightThereIs: number): number {
+  return Math.max(MIN_LIST_HEIGHT, listHeight - (cardNeeds - heightThereIs));
+}
+
+/** How much to shrink the cards so the tallest fits the height there is
+ *  (1 = full size; never bigger than full size). */
+export function fitScale(available: number, tallestCard: number): number {
+  if (available <= 0 || tallestCard <= 0) return 1;
+  return Math.min(1, available / (tallestCard + STRIP_PADDING_Y));
+}
+
+/** The cards in one row, all the same height. They never scroll up or down:
+ *  on a short screen they shrink to fit — or, past 15 modules, stay full size
+ *  and their module lists scroll inside. If they don't all fit across, the row
+ *  scrolls sideways inside the band, with ‹ › arrows. The page never grows. */
+export function CardStrip({ children }: { children: ReactNode }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  const [canGoLeft, setCanGoLeft] = useState(false);
+  const [canGoRight, setCanGoRight] = useState(false);
+
+  const updateArrows = useCallback(() => {
+    const el = strip.current;
+    if (!el) return;
+    setCanGoLeft(el.scrollLeft > 4);
+    setCanGoRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  // CSS zoom on the inner row shrinks the cards and their layout together (so
+  // the sideways scroll width stays right). The outer strip keeps the band's
+  // height, which is what the cards must fit. Measured at full size, then set.
+  const fitHeight = useCallback(() => {
+    const box = strip.current;
+    const cards = row.current;
+    if (!box || !cards) return;
+    const lists = Array.from(cards.querySelectorAll<HTMLElement>('.sub-pc-mods'));
+    cards.style.zoom = '1';
+    for (const list of lists) { list.style.maxHeight = ''; list.classList.remove('scroll'); }
+
+    let tallest = 0;
+    for (const card of Array.from(cards.children) as HTMLElement[]) tallest = Math.max(tallest, card.offsetHeight);
+    const needs = tallest + STRIP_PADDING_Y;
+    const there = box.clientHeight;
+    const moduleCount = lists[0]?.children.length ?? 0;
+
+    if (moduleCount > SCROLL_AFTER_MODULES && there > 0 && needs > there) {
+      // Same height for every list, so the cards stay equal.
+      let tallestList = 0;
+      for (const list of lists) tallestList = Math.max(tallestList, list.offsetHeight);
+      const height = scrollingListHeight(tallestList, needs, there);
+      for (const list of lists) { list.style.maxHeight = `${height}px`; list.classList.add('scroll'); }
+    } else {
+      cards.style.zoom = String(fitScale(there, tallest));
+    }
+    updateArrows();
+  }, [updateArrows]);
+
+  useEffect(() => {
+    fitHeight();
+    window.addEventListener('resize', fitHeight);
+    return () => window.removeEventListener('resize', fitHeight);
+  }, [fitHeight, children]);
+
+  const move = (direction: number) => strip.current?.scrollBy({ left: direction * CARD_STEP, behavior: 'smooth' });
+
+  return (
+    <div className="sub-strip-wrap">
+      {canGoLeft && <button type="button" className="sub-arrow left" aria-label="Earlier plans" onClick={() => move(-1)}>‹</button>}
+      <div ref={strip} className="sub-strip" onScroll={updateArrows}>
+        <div ref={row} className="sub-strip-row">{children}</div>
+      </div>
+      {canGoRight && <button type="button" className="sub-arrow right" aria-label="More plans" onClick={() => move(1)}>›</button>}
+    </div>
   );
 }
 
@@ -129,7 +221,7 @@ export function PlanCard({ plan, position, catalogue, flag, button, selected, cu
       <div className="sub-pc-tab" style={{ background: colour }}>{plan.name || 'Plan name'}</div>
       {flag && <span className="sub-pc-flag">{flag}</span>}
       {enterprise ? <EnterpriseBody contact={plan.contact} /> : <PricedBody plan={plan} catalogue={catalogue} />}
-      {button ? <div className="sub-pc-line" /> : <div className="sub-pc-gap" />}
+      {button ? <div className="sub-pc-line sub-pc-bottom" /> : <div className="sub-pc-gap sub-pc-bottom" />}
       {button}
       {actions && <div className="sub-pc-actions" onClick={(e) => e.stopPropagation()}>{actions}</div>}
     </div>

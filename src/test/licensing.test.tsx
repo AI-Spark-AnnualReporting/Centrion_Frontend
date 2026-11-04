@@ -249,6 +249,17 @@ describe("LicenseBanner", () => {
     );
   }
 
+  it("isn't shown on the Subscription or payment page (they already say it)", async () => {
+    mockAuth = { user: CLIENT_ADMIN, refreshPermissions: vi.fn() };
+    licenseGet.mockResolvedValue(licenseOf("none"));
+    for (const path of ["/admin-console/subscription", "/admin-console/subscription/checkout"]) {
+      const { unmount } = render(<MemoryRouter initialEntries={[path]}><LicenseBanner /></MemoryRouter>);
+      await waitFor(() => expect(licenseGet).toHaveBeenCalled());
+      expect(screen.queryByText("Your company doesn't have a subscription yet.")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("says the license isn't active yet for a new company", async () => {
     mockAuth = { user: CLIENT_ADMIN, refreshPermissions: vi.fn() };
     licenseGet.mockResolvedValue(licenseOf("none"));

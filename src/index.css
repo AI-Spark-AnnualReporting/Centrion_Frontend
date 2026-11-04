@@ -365,6 +365,11 @@ body {
 }
 /* Pages with no launcher over them need no clearance under them. */
 .content.no-fab { padding-bottom: 20px; }
+/* One-screen pages (subscription cards, plan editor): the content area is a
+   column and never scrolls; banners above keep their own height and the page
+   (its last child) takes the rest. */
+.content.content--fit { display: flex; flex-direction: column; overflow: hidden; }
+.content.content--fit > :last-child { flex: 1; min-height: 0; }
 /* The report-building flow hides the launcher (isReportFlowRoute in AppLayout),
    so the clearance above is dead space under what is meant to be a full-height
    page — it left the section list clipped ~130px short of the bottom. Give those

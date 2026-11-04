@@ -5474,7 +5474,8 @@ export const subscriptions = {
   current: () => request<CurrentSubscription>("/api/v1/subscriptions/current"),
 
   // The plan's own duration and price are used; Enterprise can't be bought.
-  startCheckout: (body: { plan_id: string }, idempotencyKey: string) =>
+  // accept_lost_modules: the admin confirmed the modules the new plan doesn't include.
+  startCheckout: (body: { plan_id: string; accept_lost_modules?: boolean }, idempotencyKey: string) =>
     request<CompanySubscription>("/api/v1/subscriptions/checkouts", {
       method: "POST",
       body,

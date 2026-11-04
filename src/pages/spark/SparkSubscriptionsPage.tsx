@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
-import { DurationTabs, PlanCard, matchesDuration, type DurationFilter } from '@/components/subscriptions/PlanCard';
+import { CardStrip, DurationTabs, PlanCard, matchesDuration, type DurationFilter } from '@/components/subscriptions/PlanCard';
 import { useToast } from '@/hooks/use-toast';
 import { sparkPlans } from '@/lib/api';
 import { PAGE_SIZES, Pager } from '@/pages/spark/SparkLicensesPage';
@@ -22,10 +22,9 @@ const STATUS_TABS: { key: PlanStatus; label: string; title: string }[] = [
   { key: 'archived', label: 'Archived', title: 'Archived — nobody new can buy these' },
 ];
 
+// Only plans made for one company get a badge (no "N companies" count).
 function flagFor(plan: SubscriptionPlan) {
   if (plan.company_id) return <span className="badge b-am">For {plan.company_name ?? 'one company'}</span>;
-  const count = plan.subscriber_count ?? 0;
-  if (count > 0) return <span className="badge b-gy">{count} compan{count === 1 ? 'y' : 'ies'}</span>;
   return null;
 }
 
@@ -111,7 +110,7 @@ export default function SparkSubscriptionsPage() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="sub-fit">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Subscription plans</div>
@@ -145,7 +144,7 @@ export default function SparkSubscriptionsPage() {
               No plans here. Use <b>+ Create subscription</b>.
             </div>
           ) : (
-            <div className="sub-cards">
+            <CardStrip>
               {shown.map((plan, index) => (
                 <PlanCard
                   key={plan.id}
@@ -158,7 +157,7 @@ export default function SparkSubscriptionsPage() {
                   actions={actionsFor(plan)}
                 />
               ))}
-            </div>
+            </CardStrip>
           )}
         </div>
       )}

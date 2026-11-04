@@ -222,8 +222,10 @@ export default function SparkPlanEditorPage() {
         </div>
       </div>
       {error && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: -6 }}>{error}</div>}
-      {isQuote && plan?.quote?.note && (
-        <div style={{ fontSize: 12, color: '#5A6080', marginTop: -6 }}>Their note: “{plan.quote.note}”</div>
+      {isQuote && plan?.quote && (
+        <div style={{ fontSize: 12, color: '#5A6080', marginTop: -6 }}>
+          Their request: <b>{plan.quote.name}</b> · {plan.quote.phone} — “{plan.quote.message}”
+        </div>
       )}
 
       <div className="sub-ed-cards">

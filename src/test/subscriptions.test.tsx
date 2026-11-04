@@ -8,7 +8,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 const refreshPermissions = vi.fn().mockResolvedValue(undefined);
-vi.mock("@/context/AuthContext", () => ({ useAuth: () => ({ refreshPermissions }) }));
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ refreshPermissions, user: { full_name: "Aizaz Admin Aramco" } }),
+}));
 const toast = vi.fn();
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 
@@ -19,9 +21,10 @@ vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions }));
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");
 const { peopleTotal, departmentUsersTotal, resizeDepartments } = await import("@/components/subscriptions/PlanFields");
-const { PlanCard } = await import("@/components/subscriptions/PlanCard");
+const { PlanCard, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
+const { default: SparkQuotesPage } = await import("@/pages/spark/SparkQuotesPage");
 const { QuoteForm } = await import("@/components/subscriptions/QuoteForm");
-const { default: SubscriptionPage } = await import("@/pages/admin/SubscriptionPage");
+const { default: SubscriptionPage, orderPlans } = await import("@/pages/admin/SubscriptionPage");
 const { default: CheckoutPage } = await import("@/pages/admin/CheckoutPage");
 
 const CATALOGUE = [
@@ -78,6 +81,15 @@ describe("plan numbers", () => {
 
 // ── The pricing card ─────────────────────────────────────────────────
 
+describe("cards fit the height instead of scrolling", () => {
+  it("full size when there's room, shrunk just enough when there isn't, never bigger", () => {
+    expect(fitScale(700, 400)).toBe(1);
+    expect(fitScale(450, 400)).toBeCloseTo(450 / (400 + 50));
+    expect(fitScale(300, 400)).toBeCloseTo(300 / 450);
+    expect(fitScale(0, 400)).toBe(1);            // not measured yet (e.g. tests): leave it
+  });
+});
+
 describe("PlanCard", () => {
   it("shows the USD price for the duration, ✓/✗ per module and the people lines", () => {
     render(<PlanCard plan={GOLD} position={0} catalogue={CATALOGUE} />);
@@ -118,7 +130,7 @@ describe("SparkSubscriptionsPage", () => {
     expect(await screen.findByRole("button", { name: "Gold" })).toBeInTheDocument();
     expect(screen.queryByText("Buy now")).not.toBeInTheDocument();
     expect(screen.queryByText("Contact us")).not.toBeInTheDocument();
-    expect(screen.getByText("2 companies")).toBeInTheDocument();
+    expect(screen.queryByText("2 companies")).not.toBeInTheDocument();     // no company count on the cards
 
     fireEvent.click(screen.getByRole("button", { name: "Gold" }));
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();      // in use: no Delete
@@ -228,11 +240,12 @@ describe("SparkPlanEditorPage", () => {
   it("publishes a quote for that company", async () => {
     sparkPlans.get.mockResolvedValue({
       ...GOLD, status: "draft", price: null, company_id: "c1", company_name: "Aramco",
-      quote: { asked: LIMITS, duration: null, note: "Two subsidiaries", asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "" },
+      quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "Two subsidiaries", enterprise_plan_id: "plan_ent",
+               asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "" },
     });
     sparkPlans.update.mockResolvedValue({});
     renderEditor("/spark/subscriptions/plan_gold/edit");
-    expect(await screen.findByText("Their note: “Two subsidiaries”")).toBeInTheDocument();
+    expect(await screen.findByText(/Their request:/)).toHaveTextContent("Their request: Aizaz · +966 55 123 4567 — “Two subsidiaries”");
     fireEvent.change(screen.getByLabelText(/Price \(USD\)/), { target: { value: "30000" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish for Aramco" }));
     await waitFor(() => expect(sparkPlans.update).toHaveBeenCalledWith("plan_gold",
@@ -260,13 +273,33 @@ function renderSubscriptionPage() {
   );
 }
 
+describe("plan order on the client page", () => {
+  it("Your plan first, then Made for you, then the rest cheapest first, Enterprise last", () => {
+    const plan = (id: string, price: number | null, extra = {}) =>
+      ({ ...GOLD, id, name: id, price, made_for_you: false, too_small: [], lost_modules: [], ...extra });
+    const ordered = orderPlans([
+      plan("enterprise", null, { duration: "enterprise" }),
+      plan("standard", 150),
+      plan("cheap", 50),
+      plan("custom", 900, { made_for_you: true }),
+      plan("starter", 66),
+    ], "starter");
+    expect(ordered.map((p) => p.id)).toEqual(["starter", "custom", "cheap", "standard", "enterprise"]);
+  });
+});
+
 describe("SubscriptionPage", () => {
   beforeEach(() => {
     subscriptions.plans.mockResolvedValue({
       items: [
-        { ...GOLD, made_for_you: false },
-        { ...GOLD, id: "plan_custom", name: "Custom plan for Aramco", duration: "quarterly", price: 9000, made_for_you: true },
-        { ...ENTERPRISE, made_for_you: false },
+        { ...GOLD, made_for_you: false, too_small: [], lost_modules: [] },
+        { ...GOLD, id: "plan_custom", name: "Custom plan for Aramco", duration: "quarterly", price: 9000, made_for_you: true,
+          too_small: [], lost_modules: [] },
+        { ...GOLD, id: "plan_small", name: "Starter", duration: "half_year", price: 66, made_for_you: false,
+          too_small: ["You have 5 PMs; this plan allows 2."], lost_modules: [] },
+        { ...GOLD, id: "plan_std", name: "Standard", duration: "yearly", price: 250, made_for_you: false,
+          too_small: [], lost_modules: ["Board Report"] },
+        { ...ENTERPRISE, made_for_you: false, too_small: [], lost_modules: [] },
       ],
       modules_catalogue: CATALOGUE,
     });
@@ -294,25 +327,56 @@ describe("SubscriptionPage", () => {
   it("Buy now starts a checkout with an Idempotency-Key and opens the payment page", async () => {
     subscriptions.startCheckout.mockResolvedValue({ id: "chk_1" });
     renderSubscriptionPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Buy now" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Buy now" }))[0]);     // the plan made for them
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription/checkout"));
     const [body, key] = subscriptions.startCheckout.mock.calls[0];
     expect(body).toEqual({ plan_id: "plan_custom" });
     expect(key).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("Contact us opens the quote popup with the contact details", async () => {
+  it("Contact us opens the form with the card's contact and the admin's name filled in", async () => {
     renderSubscriptionPage();
     fireEvent.click(await screen.findByRole("button", { name: "Contact us" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("✉ sales@centriyon.com")).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Send request" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Name")).toHaveValue("Aizaz Admin Aramco");
+    expect(within(dialog).getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("a plan too small for the team shows why in a popup and can't be bought", async () => {
+    renderSubscriptionPage();
+    const starter = (await screen.findByText("Starter")).closest(".sub-pc") as HTMLElement;
+    fireEvent.click(within(starter).getByRole("button", { name: "Buy now" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Starter is too small for your team")).toBeInTheDocument();
+    expect(within(dialog).getByText("• You have 5 PMs; this plan allows 2.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /payment/ })).not.toBeInTheDocument();
+    expect(subscriptions.startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("a plan missing a module asks to confirm, then sends accept_lost_modules", async () => {
+    subscriptions.startCheckout.mockResolvedValue({ id: "chk_2" });
+    renderSubscriptionPage();
+    const standard = (await screen.findByText("Standard")).closest(".sub-pc") as HTMLElement;
+    fireEvent.click(within(standard).getByRole("button", { name: "Buy now" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("• Board Report")).toBeInTheDocument();
+    const go = within(dialog).getByRole("button", { name: "Continue to payment" });
+    expect(go).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(go);
+    await waitFor(() => expect(subscriptions.startCheckout).toHaveBeenCalledWith(
+      { plan_id: "plan_std", accept_lost_modules: true }, expect.any(String)));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription/checkout"));
   });
 });
 
 describe("CheckoutPage", () => {
-  const CHECKOUT = { id: "chk_1", plan_name: "Standard", billing_period: "half_year", price: 12000,
-                     starts_at: "2026-11-04", ends_at: "2027-05-03", status: "pending_payment" };
+  const CHECKOUT = {
+    ...LIMITS, id: "chk_1", plan_name: "Standard", billing_period: "half_year", price: 12000,
+    starts_at: "2026-11-04", ends_at: "2027-05-03", status: "pending_payment", max_departments: 3,
+    modules: ["quarterly_report", "leadership"], report_limits: { quarterly: 4 },
+  };
 
   function renderCheckout(state: unknown) {
     return render(
@@ -325,15 +389,47 @@ describe("CheckoutPage", () => {
     );
   }
 
-  it("shows the USD price and period, and Pay activates it once, then goes back", async () => {
+  it("shows the steps, the plan, the period and what they get", () => {
+    renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE });
+    expect(screen.getByText("Choose plan")).toBeInTheDocument();
+    expect(screen.getByText("Payment").closest(".sub-co-step")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("per 6 months")).toBeInTheDocument();
+    expect(screen.getByText("6 months")).toBeInTheDocument();                     // on the timeline
+    expect(screen.getByText("3 May 2027")).toBeInTheDocument();
+    expect(screen.getByText("✓ Quarterly Report · 4 reports")).toBeInTheDocument();
+    expect(screen.getByText("✓ Leadership")).toBeInTheDocument();
+    expect(screen.getByText("1 + 2")).toBeInTheDocument();                        // admin + PMs
+    expect(screen.getByText("3 · 8")).toBeInTheDocument();                        // departments · users
+    expect(screen.getByText("TEST MODE")).toBeInTheDocument();
+    expect(screen.queryByText("Changing plan")).not.toBeInTheDocument();          // first subscription
+  });
+
+  it("when switching, shows the old plan and the modules they confirmed giving up", () => {
+    renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE, replaces: "Starter", switchedOff: ["Board Report"] });
+    expect(screen.getByText("Changing plan")).toBeInTheDocument();
+    expect(screen.getByText("Starter", { selector: ".old" })).toBeInTheDocument();
+    expect(screen.getByText("✗ Board Report")).toBeInTheDocument();
+    expect(screen.getByText(/Switched off \(you confirmed\):/)).toBeInTheDocument();
+  });
+
+  it("Pay activates it once, refreshes the login and shows the branded success popup", async () => {
     subscriptions.pay.mockResolvedValue({ ...CHECKOUT, status: "active" });
-    renderCheckout({ checkout: CHECKOUT, replaces: "Gold" });
-    expect(screen.getByText("Half year")).toBeInTheDocument();
-    expect(screen.getByText("4 Nov 2026 → 3 May 2027")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Pay $12,000" }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription"));
+    renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE });
+    fireEvent.click(screen.getByRole("button", { name: "🔒 Pay $12,000" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Standard is active", { selector: ".sub-co-success h2" })).toBeInTheDocument();
     expect(subscriptions.pay).toHaveBeenCalledTimes(1);
     expect(refreshPermissions).toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Go to my subscription" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription"));
+  });
+
+  it("shows the error and lets them try again when the payment fails", async () => {
+    subscriptions.pay.mockRejectedValue(new Error("This checkout can't be paid any more. Start a new one."));
+    renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE });
+    fireEvent.click(screen.getByRole("button", { name: "🔒 Pay $12,000" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("can't be paid any more");
+    expect(screen.getByRole("button", { name: "🔒 Pay $12,000" })).toBeEnabled();
   });
 
   it("without a checkout (e.g. after a refresh) goes back to the plans", () => {
@@ -342,25 +438,67 @@ describe("CheckoutPage", () => {
   });
 });
 
-describe("QuoteForm", () => {
-  it("sends the cards' numbers, the duration and the note", async () => {
+describe("QuoteForm (Contact us)", () => {
+  function renderForm(onSent = vi.fn()) {
+    render(<QuoteForm enterprisePlanId="plan_ent" contact={ENTERPRISE.contact} defaultName="Aizaz" onSent={onSent} onClose={vi.fn()} />);
+    return onSent;
+  }
+
+  it("needs a name, a real phone number and a message before Send works", async () => {
     subscriptions.requestQuote.mockResolvedValue({});
-    const onSent = vi.fn();
-    render(<QuoteForm catalogue={CATALOGUE} contact={null} startFrom={LIMITS} onSent={onSent} onCancel={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "More Department 3 users" }));
-    fireEvent.change(screen.getByLabelText(/Duration you/), { target: { value: "quarterly" } });
-    fireEvent.change(screen.getByLabelText(/Anything else/), { target: { value: "We grow in Q2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    const onSent = renderForm();
+    const send = screen.getByRole("button", { name: "Send" });
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "12" } });
+    fireEvent.blur(screen.getByLabelText("Phone number"));
+    expect(screen.getByText("Enter a valid phone number")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+966 55 123 4567" } });
+    expect(send).toBeDisabled();                                    // no message yet
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "All modules, 3 subsidiaries" } });
+    fireEvent.click(send);
     await waitFor(() => expect(onSent).toHaveBeenCalled());
-    expect(subscriptions.requestQuote).toHaveBeenCalledWith(expect.objectContaining({
-      department_sizes: [5, 2, 2], report_limits: { quarterly: 4 }, duration: "quarterly", note: "We grow in Q2",
-    }));
+    expect(subscriptions.requestQuote).toHaveBeenCalledWith({
+      plan_id: "plan_ent", name: "Aizaz", phone: "+966 55 123 4567", message: "All modules, 3 subsidiaries",
+    });
+    expect(screen.getByText("Request sent")).toBeInTheDocument();
   });
 
-  it("shows the server's answer when a quote is already open", async () => {
+  it("shows the server's answer when a request is already open", async () => {
     subscriptions.requestQuote.mockRejectedValue(new Error("You already asked for a quote on 2026-11-01."));
-    render(<QuoteForm catalogue={CATALOGUE} contact={null} startFrom={LIMITS} onSent={vi.fn()} onCancel={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Send request" }));
+    renderForm();
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+966 55 123 4567" } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("You already asked for a quote on 2026-11-01.")).toBeInTheDocument();
+  });
+});
+
+describe("SparkQuotesPage", () => {
+  it("lists each request's name, phone and message, with Make a plan", async () => {
+    sparkPlans.list.mockResolvedValue({
+      items: [{ ...GOLD, id: "q1", status: "draft", company_id: "c1", company_name: "Aramco", modules: [],
+                quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "All modules please", enterprise_plan_id: "plan_ent",
+                         asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "2026-11-04T10:00:00Z" } }],
+      total: 1, page: 1, limit: 10, modules_catalogue: CATALOGUE,
+    });
+    render(
+      <MemoryRouter initialEntries={["/spark/quotes"]}>
+        <Routes>
+          <Route path="/spark/quotes" element={<SparkQuotesPage />} />
+          <Route path="/spark/subscriptions/:planId/edit" element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("+966 55 123 4567")).toBeInTheDocument();
+    expect(screen.getByText("All modules please")).toBeInTheDocument();
+    expect(screen.getByText("Needs a plan", { selector: "span" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Make a plan" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/spark/subscriptions/q1/edit");
+  });
+});
+
+describe("module list past 15 modules", () => {
+  it("scrolls inside the card: the list loses what the card is too tall, never below 120px", () => {
+    expect(scrollingListHeight(500, 800, 600)).toBe(300);
+    expect(scrollingListHeight(300, 900, 400)).toBe(120);
   });
 });

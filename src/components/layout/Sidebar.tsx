@@ -6,7 +6,7 @@ import type { FeatureKey } from '@/constants/features';
 import { isAdminLevel, type BackendRole } from '@/constants/roles';
 import { sparkStudioUrl } from '@/lib/appRouting';
 import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
-import { license } from '@/lib/api';
+import { license, sparkPlans } from '@/lib/api';
 import { IS_ON_PREM } from '@/lib/deployment';
 import type { CompanyLicense } from '@/types/license';
 
@@ -219,6 +219,18 @@ export function Sidebar() {
       .catch(() => { if (!cancelled) setCompanyLicense(null); });
     return () => { cancelled = true; };
   }, [user]); // user changes on refreshPermissions, e.g. right after a license is activated
+  // spark_admin: how many Enterprise requests still need a plan (Quotes badge).
+  // Rechecked on every page change, like the license banner.
+  const [openQuotes, setOpenQuotes] = useState(0);
+  useEffect(() => {
+    if (!isSparkAdmin) return;
+    let cancelled = false;
+    sparkPlans
+      .list({ quotes_only: true, status: 'draft', limit: 1 })
+      .then((page) => { if (!cancelled) setOpenQuotes(page.total); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isSparkAdmin, location.pathname]);
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
 
   const validationActive =
@@ -370,6 +382,7 @@ export function Sidebar() {
             >
               {child.key === 'licenses' ? icons['shield'] : null}
               {child.label}
+              {child.key === 'quotes' && openQuotes > 0 && <span className="sb-badge am">{openQuotes}</span>}
             </button>
           ))}
         </div>

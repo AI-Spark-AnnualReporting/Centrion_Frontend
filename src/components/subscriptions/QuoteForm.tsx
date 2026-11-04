@@ -1,18 +1,23 @@
-// The client admin's "Contact us — Enterprise" popup (Get a quote): the
-// Enterprise contact details on top, then what they need — the same Modules,
-// Users and Departments cards as the plan editor — a duration they'd like and
-// a note. Centriyon turns it into a plan just for this company, sets the
-// price, and it then shows on the Subscription page as "Made for you".
-// One open quote at a time (the server says so if one is open).
+// The client admin's "Contact us — Enterprise" popup: name, phone number and a
+// message, all required. Sent to Centriyon: every spark_admin gets an in-app
+// notification, the Enterprise card's contact email gets an email, and the
+// request shows on Spark → Quotes, where a plan is made for this company. The
+// plan then shows on the Subscription page as "Made for you".
+// One open request at a time (the server says so if one is open).
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
 import { useState } from 'react';
 import { subscriptions } from '@/lib/api';
-import { DepartmentsCard, EMPTY_LIMITS, ModulesCard, UsersCard } from '@/components/subscriptions/PlanFields';
-import type { LicensableModule } from '@/types/license';
-import type { PaidDuration, PlanContact, PlanLimits } from '@/types/subscription';
+import type { PlanContact } from '@/types/subscription';
 import './subscriptions.css';
+
+// Same rule as the server: digits, spaces, + ( ) - only, 7–20 characters.
+const PHONE_PATTERN = /^\+?[0-9 ()-]{7,20}$/;
+
+export function isPhoneNumber(text: string): boolean {
+  return PHONE_PATTERN.test(text.trim());
+}
 
 function ContactLine({ contact }: { contact: PlanContact | null }) {
   const parts: string[] = [];
@@ -23,36 +28,32 @@ function ContactLine({ contact }: { contact: PlanContact | null }) {
   return <div className="sub-quote-contact">{parts.map((part) => <span key={part}>{part}</span>)}</div>;
 }
 
-/** Just the plan limits out of a bigger object (e.g. the current subscription). */
-function limitsOf(source?: PlanLimits): PlanLimits {
-  if (!source) return EMPTY_LIMITS;
-  return {
-    modules: source.modules,
-    report_limits: source.report_limits,
-    max_pms: source.max_pms,
-    max_ir_users: source.max_ir_users,
-    department_sizes: source.department_sizes,
-  };
-}
+type Sent = { phone: string } | null;
 
-export function QuoteForm({ catalogue, contact, startFrom, onSent, onCancel }: {
-  catalogue: LicensableModule[];
-  contact: PlanContact | null;     // the Enterprise card's details
-  startFrom?: PlanLimits;          // the current plan, so they only change what they need
+export function QuoteForm({ enterprisePlanId, contact, defaultName, onSent, onClose }: {
+  enterprisePlanId: string;        // the Enterprise card clicked
+  contact: PlanContact | null;     // that card's contact details
+  defaultName: string;             // the admin's own name
   onSent: () => void;
-  onCancel: () => void;
+  onClose: () => void;
 }) {
-  const [limits, setLimits] = useState<PlanLimits>(() => limitsOf(startFrom));
-  const [duration, setDuration] = useState<PaidDuration>('yearly');
-  const [note, setNote] = useState('');
+  const [name, setName] = useState(defaultName);
+  const [phone, setPhone] = useState('');
+  const [message, setMessage] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [sent, setSent] = useState<Sent>(null);
+
+  const phoneBad = phoneTouched && phone.trim() !== '' && !isPhoneNumber(phone);
+  const ready = name.trim() !== '' && isPhoneNumber(phone) && message.trim() !== '';
 
   const send = async () => {
     setSending(true);
     setError('');
     try {
-      await subscriptions.requestQuote({ ...limits, duration, note: note.trim() || null });
+      await subscriptions.requestQuote({ plan_id: enterprisePlanId, name: name.trim(), phone: phone.trim(), message: message.trim() });
+      setSent({ phone: phone.trim() });
       onSent();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the request.');
@@ -61,41 +62,56 @@ export function QuoteForm({ catalogue, contact, startFrom, onSent, onCancel }: {
     }
   };
 
+  if (sent) {
+    return (
+      <div className="card" style={{ padding: '22px 24px', maxWidth: 460, margin: '0 auto', textAlign: 'center' }}>
+        <div className="sub-done-tick">✓</div>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>Request sent</div>
+        <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6, lineHeight: 1.6 }}>
+          Thanks — Centriyon will contact you on {sent.phone}.<br />
+          When your plan is ready it shows here as <b>Made for you</b>.
+        </div>
+        <button type="button" className="btn bp" style={{ marginTop: 16 }} onClick={onClose}>Done</button>
+      </div>
+    );
+  }
+
   return (
-    <div className="card" style={{ padding: '20px 24px', maxWidth: 640, margin: '0 auto' }}>
+    <div className="card" style={{ padding: '22px 24px', maxWidth: 460, margin: '0 auto' }}>
       <div style={{ fontSize: 15, fontWeight: 800 }}>Contact us — Enterprise</div>
       <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 3 }}>
-        Tell us what you need; Centriyon prepares a plan just for your company and sends you a price.
+        Leave your details and Centriyon will get back to you with a plan for your company.
       </div>
       <ContactLine contact={contact} />
 
-      <div className="sub-quote-cards">
-        <ModulesCard value={limits} catalogue={catalogue} onChange={setLimits} />
-        <UsersCard value={limits} onChange={setLimits} />
-        <DepartmentsCard value={limits} onChange={setLimits} flex={false} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 12, marginTop: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
         <label style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
-          Duration you&apos;d like
-          <select className="inp" style={{ marginTop: 5 }} value={duration} onChange={(e) => setDuration(e.target.value as PaidDuration)}>
-            <option value="quarterly">Quarterly</option>
-            <option value="half_year">Half year</option>
-            <option value="yearly">1 year</option>
-          </select>
+          Name
+          <input className="inp" style={{ marginTop: 5 }} maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
-          Anything else? (optional)
-          <textarea className="inp" rows={2} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} style={{ marginTop: 5 }} />
-        </label>
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#5A6080', display: 'block' }}>
+            Phone number
+            <input className={`inp ${phoneBad ? 'inp-error' : ''}`} style={{ marginTop: 5 }} inputMode="tel" maxLength={20}
+              aria-invalid={phoneBad} aria-describedby="contact-phone-error"
+              placeholder="+966 5x xxx xxxx" value={phone} onChange={(e) => setPhone(e.target.value)} onBlur={() => setPhoneTouched(true)} />
+          </label>
+          <div id="contact-phone-error" role="alert" style={{ fontSize: 10.5, color: '#DC2626', marginTop: 3, minHeight: 14 }}>
+            {phoneBad ? 'Enter a valid phone number' : ''}
+          </div>
+        </div>
       </div>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#5A6080', marginTop: 4 }}>
+        Message
+        <textarea className="inp" rows={4} maxLength={2000} style={{ marginTop: 5 }}
+          placeholder="What do you need? e.g. modules, how many users and departments…"
+          value={message} onChange={(e) => setMessage(e.target.value)} />
+      </label>
       {error && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 10 }}>{error}</div>}
 
-      <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button type="button" className="btn bs" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn bp" disabled={sending || limits.modules.length === 0} onClick={send}>
-          {sending ? 'Sending…' : 'Send request'}
-        </button>
+      <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <button type="button" className="btn bs" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn bp" disabled={sending || !ready} onClick={send}>{sending ? 'Sending…' : 'Send'}</button>
       </div>
     </div>
   );

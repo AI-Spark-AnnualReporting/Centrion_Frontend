@@ -255,6 +255,9 @@ export function LicenseBanner() {
   }, [isClientAdmin, check, location.pathname]);
 
   if (!isClientAdmin || !data) return null;
+  // The Subscription and payment pages are where every button here leads, and
+  // they already say the same under their title — no banner there.
+  if (location.pathname.startsWith(SUBSCRIPTION_PAGE)) return null;
   const banner = pickBanner(data, closed);
   if (!banner) return null;
 
