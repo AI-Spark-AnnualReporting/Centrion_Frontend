@@ -1,9 +1,10 @@
 // The small tag next to a create button: grey "9 of 16 users", amber
 // "2 seats left", red "Limit reached (16 / 16)". Next to a red one, a cloud
-// admin gets "Request more"; everyone else who isn't an admin gets
-// "Ask your admin" (only admins can ask Centriyon).
+// admin gets "Change plan" (the Subscription page); everyone else who isn't
+// an admin gets "Ask your admin".
 
 import { useNavigate } from 'react-router-dom';
+import { SUBSCRIPTION_PAGE } from './LicenseBanner';
 import type { LicenseRoom } from './useLicenseRoom';
 
 const TONE_STYLE = {
@@ -12,13 +13,12 @@ const TONE_STYLE = {
   full: { color: '#B91C1C', background: 'rgba(239,68,68,.10)' },
 } as const;
 
-// "Request more": opens the Request upgrade popup on the Admin Console, where
-// the admin picks what they need and confirms it.
-function RequestMoreLink({ style }: { style: React.CSSProperties }) {
+// "Change plan": the Subscription page, where a bigger plan (or a quote) is.
+function ChangePlanLink({ style }: { style: React.CSSProperties }) {
   const navigate = useNavigate();
   return (
-    <button type="button" style={style} onClick={() => navigate('/admin-console#request-upgrade')}>
-      Request more
+    <button type="button" style={style} onClick={() => navigate(SUBSCRIPTION_PAGE)}>
+      Change plan
     </button>
   );
 }
@@ -35,8 +35,7 @@ export function LimitHint({ room }: { room: LicenseRoom }) {
     >
       {room.hint}
       {room.tone === 'full' && (
-        room.requestSentOn && !room.askAdmin ? <span style={{ marginLeft: 6 }}>· Request sent {room.requestSentOn}</span>
-          : room.canRequest ? <RequestMoreLink style={linkStyle} />
+        room.canRequest ? <ChangePlanLink style={linkStyle} />
           : room.askAdmin ? <span style={{ marginLeft: 6 }}>· Ask your admin</span>
           : null
       )}

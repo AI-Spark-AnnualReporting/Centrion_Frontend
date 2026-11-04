@@ -88,7 +88,7 @@ describe("LimitHint", () => {
     requestUpgrade.mockReset().mockResolvedValue({ requested: true });
   });
 
-  it("a cloud admin's Request more opens the Request upgrade popup", async () => {
+  it("a cloud admin's Change plan goes to the Subscription page", async () => {
     mockUser = { role: "admin" };
     let seen = "";
     const Where = () => { seen = useLocation().pathname + useLocation().hash; return null; };
@@ -98,8 +98,8 @@ describe("LimitHint", () => {
         <Where />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Request more" }));
-    await waitFor(() => expect(seen).toBe("/admin-console#request-upgrade"));
+    fireEvent.click(screen.getByRole("button", { name: "Change plan" }));
+    await waitFor(() => expect(seen).toBe("/admin-console/subscription"));
     expect(requestUpgrade).not.toHaveBeenCalled();
   });
 
@@ -107,7 +107,7 @@ describe("LimitHint", () => {
     mockUser = { role: "ir" };
     render(<LimitHint room={roomFor(usageOf({ can_request: false, is_admin: false }), "board_report", "Board Reports")} />);
     expect(screen.getByText(/Ask your admin/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Request more" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change plan" })).not.toBeInTheDocument();
   });
 });
 

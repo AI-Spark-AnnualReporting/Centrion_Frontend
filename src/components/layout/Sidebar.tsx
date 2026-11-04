@@ -7,6 +7,7 @@ import { isAdminLevel, type BackendRole } from '@/constants/roles';
 import { sparkStudioUrl } from '@/lib/appRouting';
 import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
 import { license } from '@/lib/api';
+import { IS_ON_PREM } from '@/lib/deployment';
 import type { CompanyLicense } from '@/types/license';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
@@ -103,6 +104,10 @@ const ADMIN_CHILDREN: {
   // this is about what the nav offers, not access.
   { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
+  // Cloud only: on-premises installs use license keys (the License card).
+  ...(IS_ON_PREM ? [] : [
+    { key: 'subscription', label: 'Subscription', path: '/admin-console/subscription', allowedRoles: ['admin'] as BackendRole[] },
+  ]),
 ];
 
 // Explicitly typed (like REPORT_CHILDREN / ADMIN_CHILDREN above) because only
@@ -178,7 +183,10 @@ const icons: Record<string, JSX.Element> = {
 // page it opens.
 const SPARK_ADMIN_CHILDREN = [
   ...SECTION_KEYS.map((key) => ({ key, label: SECTIONS[key].title, path: `/spark/${key}` })),
-  { key: 'licenses', label: 'Licenses', path: '/spark/licenses' },
+  // Cloud companies subscribe to a plan; on-premises clients still get keys.
+  { key: 'subscriptions', label: 'Subscriptions', path: '/spark/subscriptions' },
+  { key: 'quotes', label: 'Quotes', path: '/spark/quotes' },
+  { key: 'licenses', label: 'Licenses (on-premises)', path: '/spark/licenses' },
 ];
 
 export function Sidebar() {
@@ -356,7 +364,7 @@ export function Sidebar() {
           {SPARK_ADMIN_CHILDREN.map((child) => (
             <button
               key={child.key}
-              className={`sb-item ${location.pathname === child.path ? 'act' : ''}`}
+              className={`sb-item ${location.pathname === child.path || location.pathname.startsWith(`${child.path}/`) ? 'act' : ''}`}
               style={{ paddingLeft: 34, fontSize: 11 }}
               onClick={() => handleNav(child.path)}
             >

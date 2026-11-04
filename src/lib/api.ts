@@ -20,6 +20,19 @@ import type {
   UpgradeRequestPayload,
 } from "@/types/license";
 import type {
+  CompanySubscription,
+  Duration,
+  CurrentSubscription,
+  PlanChanges,
+  PlanForClient,
+  PlanForm,
+  PlanPage,
+  PlanStatus,
+  PlanSubscriber,
+  QuoteRequestForm,
+  SubscriptionPlan,
+} from "@/types/subscription";
+import type {
   AuthUser,
   DepartmentOption,
   JwtPermissionClaims,
@@ -5406,6 +5419,76 @@ export const license = {
       method: "POST",
       body,
     }),
+};
+
+// ---------------------------------------------------------------------------
+// Cloud subscriptions (plan: Centriton/.claude/plans/cloud-subscriptions.md)
+// `sparkPlans` — spark_admin: the plans and the quotes clients sent.
+// `subscriptions` — the client admin: choose, pay for, or ask for a plan.
+// Checkout and payment send an Idempotency-Key, so a repeated click (or a
+// retry after a lost answer) never buys or pays twice.
+// ---------------------------------------------------------------------------
+
+export interface PlanListQuery {
+  status?: PlanStatus;
+  duration?: Duration;
+  quotes_only?: boolean;
+  page?: number;
+  limit?: number;
+  sort_by?: "name" | "price" | "created_at" | "updated_at";
+  order?: "asc" | "desc";
+}
+
+export const sparkPlans = {
+  list: (query: PlanListQuery = {}) =>
+    request<PlanPage>("/api/v1/spark/subscription-plans", { query, noActingCompany: true }),
+
+  get: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, { noActingCompany: true }),
+
+  create: (body: PlanForm) =>
+    request<SubscriptionPlan>("/api/v1/spark/subscription-plans", { method: "POST", body, noActingCompany: true }),
+
+  update: (planId: string, body: PlanChanges) =>
+    request<SubscriptionPlan & { updated_subscriptions: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`,
+      { method: "PATCH", body, noActingCompany: true },
+    ),
+
+  subscribers: (planId: string) =>
+    request<{ items: PlanSubscriber[]; total: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/subscribers`,
+      { noActingCompany: true },
+    ),
+
+  remove: (planId: string) =>
+    request<void>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
+      method: "DELETE",
+      noActingCompany: true,
+    }),
+};
+
+export const subscriptions = {
+  plans: () => request<{ items: PlanForClient[]; modules_catalogue: LicensableModule[] }>("/api/v1/subscription-plans"),
+
+  current: () => request<CurrentSubscription>("/api/v1/subscriptions/current"),
+
+  // The plan's own duration and price are used; Enterprise can't be bought.
+  startCheckout: (body: { plan_id: string }, idempotencyKey: string) =>
+    request<CompanySubscription>("/api/v1/subscriptions/checkouts", {
+      method: "POST",
+      body,
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  pay: (checkoutId: string, idempotencyKey: string) =>
+    request<CompanySubscription>(`/api/v1/subscriptions/checkouts/${encodeURIComponent(checkoutId)}/payments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  requestQuote: (body: QuoteRequestForm) =>
+    request<SubscriptionPlan>("/api/v1/quote-requests", { method: "POST", body }),
 };
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
+import { IS_ON_PREM } from "./lib/deployment";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
 import {
@@ -57,6 +58,12 @@ const SparkCompaniesPage = lazy(() => import("./pages/spark/CompaniesPage"));
 const SparkDashboardPage = lazy(() => import("./pages/spark/SparkDashboardPage"));
 const SparkSectionPage = lazy(() => import("./pages/spark/SparkSectionPage"));
 const SparkLicensesPage = lazy(() => import("./pages/spark/SparkLicensesPage"));
+// Cloud subscriptions (Centriton/.claude/plans/cloud-subscriptions.md).
+const SparkSubscriptionsPage = lazy(() => import("./pages/spark/SparkSubscriptionsPage"));
+const SparkQuotesPage = lazy(() => import("./pages/spark/SparkQuotesPage"));
+const SparkPlanEditorPage = lazy(() => import("./pages/spark/SparkPlanEditorPage"));
+const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
+const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
@@ -181,6 +188,10 @@ const App = () => (
           <Route element={<ProtectedRoute requiredRole="spark_admin" />}>
             <Route path="/spark" element={<SparkDashboardPage />} />
             <Route path="/spark/licenses" element={<SparkLicensesPage />} />
+            <Route path="/spark/subscriptions" element={<SparkSubscriptionsPage />} />
+            <Route path="/spark/subscriptions/new" element={<SparkPlanEditorPage />} />
+            <Route path="/spark/subscriptions/:planId/edit" element={<SparkPlanEditorPage />} />
+            <Route path="/spark/quotes" element={<SparkQuotesPage />} />
             {/* One page for the three lists; an unknown section redirects back. */}
             <Route path="/spark/:section" element={<SparkSectionPage />} />
           </Route>
@@ -312,6 +323,14 @@ const App = () => (
               element={<AdminDepartmentsPage />}
             />
           </Route>
+          {/* Subscription — the company's own admin only, and only on the cloud
+              (on-premises installs use license keys on the License card). */}
+          {!IS_ON_PREM && (
+            <Route element={<ProtectedRoute requiredRole="admin" />}>
+              <Route path="/admin-console/subscription" element={<SubscriptionPage />} />
+              <Route path="/admin-console/subscription/checkout" element={<CheckoutPage />} />
+            </Route>
+          )}
           {/* Annual Report (Cycles) — admin + IR, inside the main shell so the
               sidebar + topbar stay. Admins manage cycles; IR is read-only
               (create/edit hidden in the pages). No separate /new route — the

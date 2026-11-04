@@ -119,6 +119,9 @@ export function AppLayout() {
   // just relaunch the page you're already on. The page also runs full-height,
   // same as the report flow, so it needs the launcher's clearance freed up too.
   const aiPage = location.pathname === '/ai';
+  // spark_admin's plan editor is one screen that never scrolls (no launcher for
+  // spark_admin either), so it needs the launcher's clearance freed up too.
+  const planEditor = /^\/spark\/subscriptions\/(new|[^/]+\/edit)$/.test(location.pathname);
   // The directory is company-less, and the chatbot answers questions about a
   // company's data — on this page it would be a dead button (it routes to /ai,
   // which the spark gate bounces straight back here). Only Spark reaches
@@ -152,7 +155,7 @@ export function AppLayout() {
               launcher — dead space on a page that doesn't scroll. */}
           <div
             className={
-              boardBuilder || aiPage
+              boardBuilder || aiPage || planEditor
                 ? 'content no-fab'
                 : reportFlow
                   ? 'content content--flush'

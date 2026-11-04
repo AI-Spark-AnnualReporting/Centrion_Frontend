@@ -25,6 +25,9 @@ export interface CompanyLicense {
   deployment: Deployment;
   status: LicenseStatus;
   message: string | null;
+  // Cloud: the subscription's plan (null for a key).
+  plan_name?: string | null;
+  billing_period?: "monthly" | "yearly" | null;
   starts_at: string | null;
   expires_at: string | null;
   modules: string[];

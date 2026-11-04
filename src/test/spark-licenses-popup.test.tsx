@@ -1,13 +1,14 @@
-// spark_admin → Licenses: the key form opens as a popup that only ✕ (or
-// Cancel / Esc) closes — a click outside it must not lose a half-filled form.
+// spark_admin → Licenses (on-premises): the key form opens as a popup that only
+// ✕ (or Cancel / Esc) closes — a click outside it must not lose a half-filled
+// form. Cloud companies aren't listed: they subscribe to a plan instead.
 
 import { describe, it, expect, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const ROW = {
-  company_id: "cmp_1", company_name: "Aramco", deployment: "cloud", status: "none",
+  company_id: "cmp_1", company_name: "Aramco", deployment: "on_prem", status: "none",
   starts_at: null, expires_at: null, issued_at: null, modules: [], report_limits: {},
-  max_seats: null, server_id: null, seats_used: 16, reports_counted: {}, lock: null,
+  max_seats: null, server_id: "SRV-1111-2222-3333", seats_used: null, reports_counted: {}, lock: null,
   open_upgrade_requests: 0,
 };
 const MODULES = [
@@ -20,11 +21,9 @@ const LICENSED = {
   modules: ["annual_report", "board_report", "leadership"], report_limits: { annual: 3 },
   open_upgrade_requests: 1,
 };
-const ON_PREM = { ...ROW, company_id: "cmp_3", company_name: "Ministry A", deployment: "on_prem", server_id: "SRV-AAAA-BBBB-CCCC" };
-const REQUEST = { company_id: "cmp_2", company_name: "BUPA", asked_by: "Sara", sent_at: "2026-11-02T10:00:00Z",
-                  lines: ["Users: 30", "Note: second report"] };
+const CLOUD = { ...ROW, company_id: "cmp_3", company_name: "Cloud Co", deployment: "cloud", server_id: null };
 
-const list = vi.fn().mockResolvedValue({ licenses: [ROW, LICENSED, ON_PREM], modules: MODULES, upgrade_requests: [REQUEST] });
+const list = vi.fn().mockResolvedValue({ licenses: [ROW, LICENSED, CLOUD], modules: MODULES, upgrade_requests: [] });
 
 vi.mock("@/lib/api", () => ({
   sparkLicenses: {
@@ -66,54 +65,44 @@ describe("Licenses key form popup", () => {
 });
 
 
-describe("Licenses tabs", () => {
-  it("Cloud lists cloud companies with their modules by name and limit", async () => {
+describe("Licenses (on-premises)", () => {
+  it("lists on-premises clients with their Server ID and modules, and the add-client box", async () => {
     render(<SparkLicensesPage />);
     expect(await screen.findByText("BUPA")).toBeInTheDocument();
-    expect(screen.queryByText("Ministry A")).not.toBeInTheDocument();
     expect(screen.getByText("Annual · 3")).toBeInTheDocument();
     expect(screen.getByText("Board")).toBeInTheDocument();       // no limit = no number
     expect(screen.getByText("Leadership")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("On-premises client name")).not.toBeInTheDocument();
-  });
-
-  it("On-premises shows the Server ID and the add-client box", async () => {
-    render(<SparkLicensesPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: /On-premises/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^All/ }));   // the client has no license yet
-    expect(screen.getByText("Ministry A")).toBeInTheDocument();
-    expect(screen.getByText("SRV-AAAA-BBBB-CCCC")).toBeInTheDocument();
-    expect(screen.queryByText("Aramco")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("On-premises client name")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(screen.getAllByText("SRV-1111-2222-3333").length).toBeGreaterThan(0);
   });
 
-  it("Upgrade requests lists what was asked, and Make new key opens the popup", async () => {
+  it("doesn't list cloud companies (they subscribe to a plan) or offer cloud tabs", async () => {
     render(<SparkLicensesPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: /Upgrade requests/ }));
-    expect(screen.getByText("Users: 30")).toBeInTheDocument();
-    expect(screen.getByText("Sara")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Make new key" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await screen.findByText("BUPA");
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(screen.queryByText("Cloud Co")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Cloud|Upgrade requests/ })).not.toBeInTheDocument();
   });
 });
 
 
 describe("Licenses page reloads by itself", () => {
-  it("picks up a new request without a refresh, and not while a popup is open", async () => {
+  it("picks up a new client without a refresh, and not while a popup is open", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     list.mockClear();
     render(<SparkLicensesPage />);
     await screen.findByText("BUPA");
     expect(list).toHaveBeenCalledTimes(1);
 
-    list.mockResolvedValueOnce({ licenses: [ROW, LICENSED, ON_PREM], modules: MODULES,
-      upgrade_requests: [REQUEST, { ...REQUEST, company_id: "cmp_1", company_name: "Aramco", sent_at: "2026-11-03T10:00:00Z" }] });
+    const added = { ...LICENSED, company_id: "cmp_4", company_name: "Ministry B" };
+    list.mockResolvedValueOnce({ licenses: [ROW, LICENSED, added], modules: MODULES, upgrade_requests: [] });
     await act(async () => { vi.advanceTimersByTime(30_000); });
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("tab", { name: /Upgrade requests\s*2/ })).toBeInTheDocument();
+    expect(await screen.findByText("Ministry B")).toBeInTheDocument();
 
     // A popup is open: no reload under it.
-    fireEvent.click(screen.getByRole("button", { name: "New key" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "New key" })[0]);
     await screen.findByRole("dialog");
     await act(async () => { vi.advanceTimersByTime(30_000); });
     expect(list).toHaveBeenCalledTimes(2);

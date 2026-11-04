@@ -44,6 +44,6 @@ describe("Invite user and the seat limit", () => {
     render(<MemoryRouter><AdminUsersPage /></MemoryRouter>);
     expect(await screen.findByText(/User limit reached \(16 \/ 16\)/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "+ Invite user" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Request more" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change plan" })).toBeInTheDocument();
   });
 });

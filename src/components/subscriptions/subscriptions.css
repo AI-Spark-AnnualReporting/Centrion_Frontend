@@ -1,0 +1,114 @@
+/* Cloud subscriptions v2 — the pricing cards and the plan editor page.
+   Copied from the approved mockup (.claude/mockups/subscriptions-v2-mockup.html);
+   every class starts with "sub-" so nothing clashes with the rest of the app.
+   Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md */
+
+/* ── Pricing cards on a Centriyon-blue band ─────────────────────────── */
+.sub-stage { position: relative; border-radius: 18px; overflow: hidden; padding: 34px 24px 30px;
+  background: linear-gradient(#3535B5 0, #3535B5 150px, transparent 150px); }
+.sub-stage-title { color: #fff; font-size: 13px; font-weight: 700; opacity: .85; margin-bottom: 26px; text-align: center; }
+.sub-cards { display: flex; flex-wrap: wrap; gap: 22px; justify-content: center; }
+.sub-pc { width: 250px; background: #fff; border-radius: 22px 22px 46px 46px; box-shadow: 0 14px 34px rgba(26,29,46,.14);
+  position: relative; padding: 38px 22px 20px; display: flex; flex-direction: column; align-items: center; transition: .15s; }
+.sub-pc.clickable { cursor: pointer; }
+.sub-pc.clickable:hover { transform: translateY(-3px); box-shadow: 0 18px 40px rgba(64,64,200,.22); }
+.sub-pc.sel { outline: 3px solid #4040C8; outline-offset: 3px; }
+.sub-pc.current { outline: 3px solid #16A34A; outline-offset: 3px; }
+.sub-pc-tab { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); min-width: 150px; text-align: center;
+  color: #fff; font-weight: 800; font-size: 14px; padding: 9px 18px; border-radius: 12px 12px 18px 18px; white-space: nowrap;
+  max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+.sub-pc-flag { position: absolute; top: 10px; right: 12px; }
+.sub-pc-price { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; }
+.sub-pc-price b { font-size: 34px; font-weight: 800; letter-spacing: -1px; color: #3A3F55; line-height: 1; }
+.sub-pc-price small { font-size: 10px; font-weight: 700; color: #5A6080; line-height: 1.2; margin-top: 3px; }
+.sub-pc-cur { font-size: 12px; font-weight: 800; color: #3A3F55; margin-top: 3px; }
+.sub-pc-line { width: 90px; height: 1px; background: #D5D8E6; margin: 16px 0; }
+.sub-pc-gap { height: 8px; }
+.sub-pc ul { list-style: none; width: 100%; font-size: 11.5px; font-weight: 600; color: #3A3F55; margin: 0; padding: 0; }
+.sub-pc li { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; }
+.sub-pc li .sub-ic { width: 16px; flex: none; font-weight: 900; font-size: 13px; line-height: 1.1; text-align: center; }
+.sub-ok { color: #16A34A; }
+.sub-no { color: #EF4444; }
+.sub-pc li.off { color: #A3A8BF; }
+.sub-pc-buy { border: none; background: none; font-family: inherit; font-size: 15px; font-weight: 800; letter-spacing: 2px;
+  color: #3A3F55; cursor: pointer; padding: 6px 12px; border-radius: 10px; }
+.sub-pc-buy:hover { color: #4040C8; background: #F5F5FF; }
+.sub-pc-buy:disabled { color: #A3A8BF; cursor: default; background: none; letter-spacing: .5px; font-size: 12px; }
+.sub-pc-ent { text-align: center; font-size: 12px; color: #5A6080; line-height: 1.6; padding: 4px 6px; }
+.sub-pc-ent b { display: block; font-size: 26px; color: #3A3F55; margin-bottom: 6px; letter-spacing: -.5px; }
+.sub-pc-contact { width: 100%; font-size: 11.5px; font-weight: 600; color: #3A3F55; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.sub-pc-contact div { display: flex; gap: 8px; align-items: center; word-break: break-word; }
+.sub-pc-contact span:first-child { width: 16px; text-align: center; flex: none; }
+.sub-pc-actions { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px;
+  background: #fff; padding: 6px; border-radius: 12px; box-shadow: 0 8px 22px rgba(26,29,46,.18); }
+
+/* ── Plan editor page: one screen, no page scroll ──────────────────── */
+.sub-ed { display: flex; flex-direction: column; gap: 14px; height: calc(100vh - 56px - 40px); min-height: 520px; }
+.sub-ed-top { display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 14px 18px; }
+.sub-ed-top label { font-size: 11px; font-weight: 700; color: #5A6080; display: block; }
+.sub-ed-top label .inp { margin-top: 5px; }
+.sub-ed-btns { display: flex; gap: 8px; }
+.sub-ed-cards { display: grid; grid-template-columns: 1.15fr 1fr 290px; gap: 14px; flex: 1; min-height: 0; }
+.sub-ed-col { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.sub-ec { padding: 14px 16px; display: flex; flex-direction: column; min-height: 0; }
+.sub-ec-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.sub-ec-ic { width: 26px; height: 26px; border-radius: 8px; background: #EEEEFF; color: #4040C8; display: grid; place-items: center; font-size: 13px; font-weight: 800; flex: none; }
+.sub-ec-t { font-size: 13px; font-weight: 800; color: #1A1D2E; }
+.sub-ec-s { font-size: 10.5px; color: #9BA3C4; font-weight: 500; }
+.sub-ec-count { margin-left: auto; font-size: 10.5px; font-weight: 700; color: #4040C8; background: #EEEEFF; border-radius: 20px; padding: 3px 9px; white-space: nowrap; }
+
+.sub-mods { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.sub-mt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1.5px solid #ECEEF8; border-radius: 12px;
+  background: #fff; cursor: pointer; transition: .15s; min-height: 44px; }
+.sub-mt:hover { border-color: #C9CBF5; }
+.sub-mt.on { border-color: #4040C8; background: linear-gradient(90deg, #F5F5FF, #fff); box-shadow: 0 3px 10px rgba(64,64,200,.08); }
+.sub-mt-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+  flex: none; background: #F2F3FA; color: #9BA3C4; transition: .15s; }
+.sub-mt.on .sub-mt-ic { background: #4040C8; color: #fff; }
+.sub-mt-tx { flex: 1; min-width: 0; }
+.sub-mt-nm { font-size: 12px; font-weight: 700; color: #1A1D2E; }
+.sub-mt:not(.on) .sub-mt-nm { color: #5A6080; font-weight: 600; }
+.sub-mt-cap { font-size: 10px; color: #9BA3C4; margin-top: 1px; }
+.sub-step { display: flex; align-items: center; border: 1.5px solid #DCDDF5; border-radius: 9px; overflow: hidden; background: #fff; }
+.sub-step button { width: 24px; height: 26px; border: none; background: #F5F5FF; color: #4040C8; font-weight: 800; font-size: 13px; cursor: pointer; font-family: inherit; }
+.sub-step button:hover { background: #EEEEFF; }
+.sub-step button:disabled { color: #C9CBF5; cursor: default; background: #FAFAFF; }
+.sub-step input { width: 38px; height: 26px; border: none; text-align: center; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; color: #1A1D2E; outline: none; }
+.sub-step-l { font-size: 10px; color: #9BA3C4; font-weight: 600; margin-left: 6px; }
+.sub-incl { font-size: 10px; font-weight: 700; color: #16A34A; background: rgba(34,197,94,.12); border-radius: 20px; padding: 3px 9px; }
+.sub-sw { width: 32px; height: 18px; border-radius: 20px; background: #DDE0EE; position: relative; flex: none; transition: .15s; }
+.sub-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: .15s; }
+.sub-mt.on .sub-sw { background: #4040C8; }
+.sub-mt.on .sub-sw::after { left: 16px; }
+
+.sub-prow { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; font-size: 12px; border-top: 1px solid #F2F3FA; color: #1A1D2E; }
+.sub-prow:first-of-type { border-top: none; }
+.sub-num { width: 70px; text-align: right; font-family: 'DM Mono', monospace; padding: 5px 9px; }
+.sub-lock { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #5A6080; background: #F2F3FA; border-radius: 8px; padding: 6px 10px; }
+
+.sub-depts { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-top: 10px;
+  overflow-y: auto; min-height: 0; flex: 1; align-content: start; padding: 2px; }
+.sub-dc { border: 1.5px solid #DCDDF5; border-radius: 12px; padding: 8px 10px; background: linear-gradient(180deg, #F7F7FF, #fff); }
+.sub-dc-n { font-size: 11px; font-weight: 800; color: #3535B5; margin-bottom: 6px; }
+.sub-dc-r { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #5A6080; padding: 2px 0; }
+.sub-dc-r b { font-family: 'DM Mono', monospace; color: #1A1D2E; }
+.sub-dc .sub-step button { width: 22px; height: 22px; font-size: 12px; }
+.sub-dc .sub-step input { width: 28px; height: 22px; font-size: 11px; }
+.sub-tot { margin-top: 10px; font-size: 11.5px; color: #5A6080; background: #F2F3FA; border-radius: 10px; padding: 8px 11px; }
+
+.sub-ed-prev { display: flex; flex-direction: column; align-items: center; padding-top: 22px; min-height: 0; overflow: hidden; }
+.sub-ed-prev-t { font-size: 11px; font-weight: 700; color: #5A6080; margin-bottom: 22px; }
+.sub-ed-prev .sub-pc { transform: scale(.86); transform-origin: top center; }
+
+.sub-ent-wide { grid-column: 1 / 3; }
+.sub-cfields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sub-cfields label { font-size: 11px; font-weight: 700; color: #5A6080; display: block; }
+.sub-cfields label .inp { margin-top: 5px; }
+.sub-cfields .wide { grid-column: 1 / 3; }
+.sub-chint { font-size: 11.5px; color: #3535B5; background: #EEEEFF; border-radius: 10px; padding: 9px 12px; margin-top: 12px; line-height: 1.55; }
+
+/* The quote popup reuses the three cards, stacked. */
+.sub-quote-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.sub-quote-cards .sub-depts { max-height: 220px; flex: none; }
+.sub-quote-contact { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; font-weight: 600; margin-top: 12px; color: #3535B5; }

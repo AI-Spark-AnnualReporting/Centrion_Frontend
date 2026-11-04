@@ -253,7 +253,7 @@ describe("LicenseBanner", () => {
     mockAuth = { user: CLIENT_ADMIN, refreshPermissions: vi.fn() };
     licenseGet.mockResolvedValue(licenseOf("none"));
     renderBanner();
-    expect(await screen.findByText("Your company doesn't have a license yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Your company doesn't have a subscription yet.")).toBeInTheDocument();
   });
 
   it("shows the Lock ID when locked", async () => {
@@ -297,7 +297,7 @@ describe("LicenseBanner", () => {
     mockAuth = { user: CLIENT_ADMIN, refreshPermissions };
     licenseGet.mockResolvedValueOnce(licenseOf("none")).mockResolvedValue(licenseOf("active"));
     renderBanner();
-    await screen.findByText("Your company doesn't have a license yet.");
+    await screen.findByText("Your company doesn't have a subscription yet.");
 
     await act(async () => {
       vi.advanceTimersByTime(30_000);
@@ -358,7 +358,7 @@ describe("LicenseBanner details", () => {
   it("names the modules in the key when read-only, and all modules when there's no license", () => {
     const expired = pickBanner(ACTIVE({ status: "expired" }), NONE_CLOSED, "2027-01-05")!;
     expect(expired.tone).toBe("red");
-    expect(expired.title).toBe("Your license expired on 31 Dec 2026.");
+    expect(expired.title).toBe("Your subscription expired on 31 Dec 2026.");
     expect(expired.rows[0].items).toEqual(["Board Report", "Quarterly Report", "Leadership"]);
 
     const none = pickBanner(licenseOf("none"), NONE_CLOSED)!;
@@ -374,7 +374,7 @@ describe("LicenseBanner details", () => {
     expect(pickBanner(ACTIVE(), NONE_CLOSED, "2026-11-30")).toBeNull();
     const ending = pickBanner(ACTIVE(), NONE_CLOSED, "2026-12-19")!;
     expect(ending.tone).toBe("blue");
-    expect(ending.title).toBe("Your license ends on 31 Dec 2026 — in 12 days.");
+    expect(ending.title).toBe("Your subscription ends on 31 Dec 2026 — in 12 days.");
   });
 
   it("a full limit is never in the global banner (it's on the create page)", () => {
@@ -426,12 +426,10 @@ describe("LicenseCard always shows the license message", () => {
     localStorage.clear();
   });
 
-  it("after a request is sent, it says so instead of 'Contact Centriyon'", () => {
+  it("on the cloud, renewing is on the Subscription page (not 'Contact Centriyon')", () => {
     const soon = new Date(Date.now() + 17 * 86_400_000).toISOString().slice(0, 10);
-    const banner = pickBanner(licenseOf("active", {
-      starts_at: "2026-01-01", expires_at: soon, upgrade_requested_at: "2026-11-03T09:00:00Z",
-    }), new Set())!;
-    expect(banner.text).toContain("Your request was sent on 3 Nov 2026 — Centriyon will be in touch.");
+    const banner = pickBanner(licenseOf("active", { starts_at: "2026-01-01", expires_at: soon }), new Set())!;
+    expect(banner.text).toContain("Renew it on the Subscription page.");
     expect(banner.text).not.toContain("Contact Centriyon to renew");
   });
 
@@ -442,7 +440,7 @@ describe("LicenseCard always shows the license message", () => {
       starts_at: "2026-01-01", expires_at: "2099-12-31", modules: ["board_report"], max_seats: 5, seats_used: 1,
     }));
     render(<MemoryRouter><LicenseCard /></MemoryRouter>);
-    await screen.findByText("License");
+    await screen.findByText("Subscription");
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 });
@@ -480,7 +478,7 @@ describe("PageLimitBanner (limit reached, on the create page only)", () => {
 
   it("shows on the new Quarterly report page, with only that limit", async () => {
     renderAt("/reports/quarterly");
-    expect(await screen.findByText("You can't create more Quarterly Reports until Centriyon raises the limit.")).toBeInTheDocument();
+    expect(await screen.findByText("You can't create more Quarterly Reports until you move to a bigger plan.")).toBeInTheDocument();
     expect(screen.getByText("Quarterly Report 1 / 1")).toBeInTheDocument();
     expect(screen.queryByText(/Annual Report/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Users/)).not.toBeInTheDocument();
@@ -500,18 +498,11 @@ describe("PageLimitBanner (limit reached, on the create page only)", () => {
     expect(screen.queryByText(/reached a license limit/)).not.toBeInTheDocument();
   });
 
-  it("Request upgrade opens the popup on the License card, sending nothing itself", async () => {
+  it("Change plan goes to the Subscription page, sending nothing itself", async () => {
     const seen = renderAt("/reports/quarterly");
-    fireEvent.click(await screen.findByRole("button", { name: "Request upgrade" }));
-    await waitFor(() => expect(seen()).toBe("/admin-console#request-upgrade"));
+    fireEvent.click(await screen.findByRole("button", { name: "Change plan" }));
+    await waitFor(() => expect(seen()).toBe("/admin-console/subscription"));
     expect(requestUpgrade).not.toHaveBeenCalled();
-  });
-
-  it("says the request was sent instead of offering another", async () => {
-    licenseUsage.mockResolvedValue({ ...USAGE, upgrade_requested_at: "2026-11-03T09:00:00Z" });
-    renderAt("/reports/quarterly");
-    expect(await screen.findByText("Request sent on 2026-11-03")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Request upgrade" })).not.toBeInTheDocument();
   });
 
   it("✕ hides it until tomorrow", async () => {

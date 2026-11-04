@@ -1,13 +1,12 @@
-// Spark admin → Licenses. Every company with its license, and where spark_admin
-// makes license keys and unlock codes. spark_admin only (route + backend).
+// Spark admin → Licenses (on-premises). Every on-premises client with its
+// license, and where spark_admin makes license keys and unlock codes. The key
+// is copied and sent to the client admin, who pastes it on their own server;
+// clients are added here with "Add on-premises client". spark_admin only.
 //
-// Three tabs:
-//   Cloud            — a generated key is active straight away.
-//   On-premises      — the key is copied and sent to the client admin, who
-//                      pastes it on their own server; clients are added here
-//                      with "Add on-premises client".
-//   Upgrade requests — what cloud admins asked for; "Make new key" opens the
-//                      key popup, and making the key closes the request.
+// Cloud companies don't use keys any more: they subscribe to a plan (Spark →
+// Subscriptions / Quotes; plan: Centriton/.claude/plans/cloud-subscriptions.md).
+// The Cloud and Upgrade requests views below stay in the code but aren't
+// offered — remove them once no cloud key is left in use.
 //
 // Plan: Centriton/.claude/plans/company-licensing.md (round 17)
 
@@ -77,7 +76,7 @@ export function isEndingSoon(row: SparkLicenseRow): boolean {
   return groupOf(row) === 'active' && days != null && days <= ENDING_SOON_DAYS;
 }
 
-const PAGE_SIZES = [10, 25, 50];
+export const PAGE_SIZES = [10, 25, 50];
 
 // New upgrade requests and keys show up without a refresh: the list reloads
 // quietly this often, and as soon as the browser tab is back in view. Same
@@ -200,7 +199,7 @@ function TabButton({ label, count, active, alert, onClick }: {
   );
 }
 
-function Pager({ total, page, pages, size, onPage, onSize }: {
+export function Pager({ total, page, pages, size, onPage, onSize }: {
   total: number; page: number; pages: number; size: number;
   onPage: (page: number) => void; onSize: (size: number) => void;
 }) {
@@ -243,7 +242,7 @@ function Pager({ total, page, pages, size, onPage, onSize }: {
   );
 }
 
-function FilterChip({ label, count, dot, active, onClick }: {
+export function FilterChip({ label, count, dot, active, onClick }: {
   label: string; count: number; dot?: string; active: boolean; onClick: () => void;
 }) {
   return (
@@ -268,7 +267,8 @@ export default function SparkLicensesPage() {
   const [rows, setRows] = useState<SparkLicenseRow[]>([]);
   const [modules, setModules] = useState<LicensableModule[]>([]);
   const [requests, setRequests] = useState<SparkUpgradeRequest[]>([]);
-  const [tab, setTab] = useState<Tab>('cloud');
+  // On-premises only now (see the top of the file).
+  const tab = 'on_prem' as Tab;
   const [filter, setFilter] = useState<Filter>('active');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);
@@ -345,7 +345,6 @@ export default function SparkLicensesPage() {
   const shownPage = tab === 'requests' ? requestPage : companyPage;
   const shownTotal = tab === 'requests' ? requests.length : filtered.length;
 
-  const switchTab = (next: Tab) => { setTab(next); setFilter('active'); setPage(1); };
   const switchFilter = (next: Filter) => { setFilter(next); setPage(1); };
   const groupLabel = (key: Group) => GROUPS.find((g) => g.key === key)?.label ?? key;
   const groupCount = (key: Group) => tabRows.filter((row) => groupOf(row) === key).length;
@@ -360,18 +359,12 @@ export default function SparkLicensesPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Licenses</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Licenses (on-premises)</div>
           <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
-            Modules, report limits and users for every company. Only Spark admins can change them.
+            License keys for clients running Centriyon on their own servers. Cloud companies subscribe to a plan instead.
           </div>
         </div>
         {tab === 'on_prem' && <AddOnPremClient onAdded={load} />}
-      </div>
-
-      <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E3E6F0' }}>
-        <TabButton label="Cloud" count={cloudRows.length} active={tab === 'cloud'} onClick={() => switchTab('cloud')} />
-        <TabButton label="On-premises" count={onPremRows.length} active={tab === 'on_prem'} onClick={() => switchTab('on_prem')} />
-        <TabButton label="Upgrade requests" count={requests.length} alert active={tab === 'requests'} onClick={() => switchTab('requests')} />
       </div>
 
       {tab !== 'requests' && (

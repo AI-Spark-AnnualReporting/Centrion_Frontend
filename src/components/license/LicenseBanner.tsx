@@ -38,9 +38,12 @@ export const LICENSE_UNLOCK_BOX_ID = 'license-unlock-box';
 // admin's consent there, so nothing is sent from the banner itself).
 export const REQUEST_UPGRADE_HASH = 'request-upgrade';
 export const REQUEST_RENEWAL_HASH = 'request-renewal';
+// Cloud: the license is the company's subscription, so renewing or getting
+// more means choosing a plan there (plan: cloud-subscriptions.md).
+export const SUBSCRIPTION_PAGE = '/admin-console/subscription';
 
 type Tone = 'red' | 'amber' | 'blue';
-type Action = 'open' | 'copyServer' | 'copyLock' | 'pasteKey' | 'pasteUnlock' | 'renew' | 'upgrade' | 'close';
+type Action = 'open' | 'copyServer' | 'copyLock' | 'pasteKey' | 'pasteUnlock' | 'plans' | 'renew' | 'upgrade' | 'close';
 type Closable = 'ending';
 
 interface ModuleRow {
@@ -107,20 +110,17 @@ function reportLabel(data: CompanyLicense, reportType: string): string {
 export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: string = todayText()): Banner | null {
   const cloud = data.deployment === 'cloud';
   const licensed = moduleLabels(data);
-  // Once a request is open, "Contact Centriyon" is out of date: say it was sent.
-  const renewWords = data.upgrade_requested_at
-    ? `Your request was sent on ${formatLicenseDate(data.upgrade_requested_at.slice(0, 10))} — Centriyon will be in touch.`
-    : 'Contact Centriyon to renew.';
+  const renewWords = cloud ? 'Renew it on the Subscription page.' : 'Contact Centriyon to renew.';
 
   switch (data.status) {
     case 'none':
       return cloud
         ? {
             tone: 'amber', icon: '!',
-            title: "Your company doesn't have a license yet.",
-            text: "Modules are switched off, and you can't create reports or invite users. Contact Centriyon to set up your license.",
-            rows: [{ label: 'Switched off until licensed:', items: allModuleLabels(data) }],
-            actions: ['open'],
+            title: "Your company doesn't have a subscription yet.",
+            text: "Modules are switched off, and you can't create reports or invite users. Choose a plan to switch them on.",
+            rows: [{ label: 'Switched off until you subscribe:', items: allModuleLabels(data) }],
+            actions: ['plans'],
           }
         : {
             tone: 'amber', icon: '!',
@@ -142,7 +142,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
     case 'expired':
       return {
         tone: 'red', icon: '⏱',
-        title: `Your license expired on ${formatLicenseDate(data.expires_at)}.`,
+        title: `Your ${cloud ? 'subscription' : 'license'} expired on ${formatLicenseDate(data.expires_at)}.`,
         text: `You can still open and download your reports and use AI Copilot, but you can't create new reports or add users. ${renewWords}`,
         rows: [{ label: 'Read-only now:', items: licensed }],
         actions: cloud ? ['renew', 'open'] : ['open'],
@@ -158,7 +158,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
     case 'not_started':
       return {
         tone: 'amber', icon: '⏱',
-        title: `Your license starts on ${formatLicenseDate(data.starts_at)}.`,
+        title: `Your ${cloud ? 'subscription' : 'license'} starts on ${formatLicenseDate(data.starts_at)}.`,
         text: "Until then you can't create reports or add users.",
         rows: [{ label: 'Starts with:', items: licensed }],
         actions: ['open'],
@@ -175,7 +175,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
       const when = days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`;
       return {
         tone: 'blue', icon: '⏱',
-        title: `Your license ends on ${formatLicenseDate(data.expires_at)} — ${when}.`,
+        title: `Your ${cloud ? 'subscription' : 'license'} ends on ${formatLicenseDate(data.expires_at)} — ${when}.`,
         text: `After that you can still open your reports, but you can't create new ones or add users. ${renewWords}`,
         rows: [{ label: 'Your modules:', items: licensed }],
         actions: cloud ? ['renew', 'close'] : ['open', 'close'],
@@ -285,10 +285,6 @@ export function LicenseBanner() {
     }
   };
 
-  // Always a navigation (even on the Admin Console): the hash change is what
-  // opens the popup on the License card.
-  const openRequest = (hashId: string) => navigate(`${ADMIN_CONSOLE}#${hashId}`);
-
   const close = (kind: Closable) => {
     rememberClosed(kind);
     setClosed((prev) => new Set(prev).add(kind));
@@ -300,8 +296,9 @@ export function LicenseBanner() {
     copyLock: () => copy('copyLock', data.lock_id),
     pasteKey: () => goToLicense(LICENSE_KEY_BOX_ID),
     pasteUnlock: () => goToLicense(LICENSE_UNLOCK_BOX_ID),
-    renew: () => openRequest(REQUEST_RENEWAL_HASH),
-    upgrade: () => openRequest(REQUEST_UPGRADE_HASH),
+    plans: () => navigate(SUBSCRIPTION_PAGE),
+    renew: () => navigate(SUBSCRIPTION_PAGE),
+    upgrade: () => navigate(SUBSCRIPTION_PAGE),
     close: () => banner.closable && close(banner.closable),
   };
 
@@ -311,13 +308,13 @@ export function LicenseBanner() {
     copyLock: 'Copy Lock ID',
     pasteKey: 'Paste key',
     pasteUnlock: 'Paste unlock code',
-    renew: 'Request renewal',
-    upgrade: 'Request upgrade',
+    plans: 'Choose a plan',
+    renew: 'Renew subscription',
+    upgrade: 'Change plan',
     close: '✕',
   };
 
   const tone = TONE_STYLE[banner.tone];
-  const requestSentOn = data.upgrade_requested_at?.slice(0, 10);
 
   return (
     <div
@@ -356,10 +353,6 @@ export function LicenseBanner() {
       </div>
       <div style={{ flex: 'none', display: 'flex', gap: 6, alignItems: 'center' }}>
         {banner.actions.map((action) => {
-          // One open request per company: show when it was sent instead.
-          if ((action === 'renew' || action === 'upgrade') && requestSentOn) {
-            return <span key={action} style={{ fontSize: 11, fontWeight: 700 }}>Request sent {requestSentOn}</span>;
-          }
           return (
             <button
               key={action}
@@ -425,8 +418,8 @@ function CreatePageLimitBanner({ page }: { page: { kind: string; name: string; p
     setClosed(true);
   };
   const text = page.kind === 'seats'
-    ? "You can't add more users until Centriyon raises the limit."
-    : `You can't create more ${page.plural} until Centriyon raises the limit.`;
+    ? "You can't add more users until you move to a bigger plan."
+    : `You can't create more ${page.plural} until you move to a bigger plan.`;
 
   return (
     <div
@@ -451,12 +444,9 @@ function CreatePageLimitBanner({ page }: { page: { kind: string; name: string; p
         </div>
       </div>
       <div style={{ flex: 'none', display: 'flex', gap: 6, alignItems: 'center' }}>
-        {room.requestSentOn && !room.askAdmin ? (
-          // One open request per company: say so instead of offering another.
-          <span style={{ fontSize: 11.5, fontWeight: 700 }}>Request sent on {room.requestSentOn}</span>
-        ) : room.canRequest ? (
-          <button type="button" className="btn bs bsm" onClick={() => navigate(`${ADMIN_CONSOLE}#${REQUEST_UPGRADE_HASH}`)}>
-            Request upgrade
+        {room.canRequest ? (
+          <button type="button" className="btn bs bsm" onClick={() => navigate(SUBSCRIPTION_PAGE)}>
+            Change plan
           </button>
         ) : room.askAdmin ? (
           <span style={{ fontSize: 11.5, fontWeight: 700 }}>Ask your admin</span>

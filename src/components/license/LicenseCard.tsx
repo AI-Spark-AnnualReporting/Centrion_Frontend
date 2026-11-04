@@ -1,20 +1,20 @@
 // The client admin's License card (Admin Console → Overview).
 //
 // Shows the license, users used / max, and reports used / limit per type.
-// Cloud: a "Request upgrade" button (Spark makes the new key).
+// Cloud: the license is the subscription — its plan name and a "Change plan"
+// button to the Subscription page.
 // On-premises: the Server ID to send to Spark, and boxes to paste the license
 // key and unlock codes Spark sends back. The admin can never make a key.
 //
 // Plan: Centriton/.claude/plans/company-licensing.md
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { CopyBox } from '@/components/spark/CopyBox';
-import { UpgradeRequestDialog } from '@/components/license/UpgradeRequestDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { license } from '@/lib/api';
-import { LICENSE_CARD_ID, LICENSE_KEY_BOX_ID, LICENSE_UNLOCK_BOX_ID, REQUEST_RENEWAL_HASH, REQUEST_UPGRADE_HASH, TONE_STYLE, pickBanner } from '@/components/license/LicenseBanner';
+import { LICENSE_CARD_ID, LICENSE_KEY_BOX_ID, LICENSE_UNLOCK_BOX_ID, REQUEST_RENEWAL_HASH, REQUEST_UPGRADE_HASH, SUBSCRIPTION_PAGE, TONE_STYLE, pickBanner } from '@/components/license/LicenseBanner';
 import type { CompanyLicense, LicenseStatus } from '@/types/license';
 
 const STATUS_TEXT: Record<LicenseStatus, { label: string; cls: string }> = {
@@ -90,23 +90,19 @@ export function LicenseCard() {
   // Opened from the license banner (/admin-console#license-key-box): once the
   // card is drawn, scroll to the part it asked for and put the cursor there.
   const { hash } = useLocation();
-  // null = closed; otherwise whether it opens with "Renew my license" ticked.
-  const [requestOpen, setRequestOpen] = useState<null | { renewal: boolean }>(null);
+  const navigate = useNavigate();
   useEffect(() => {
     if (!data || !hash) return;
-    // From the banner's / a limit tag's "Request …" buttons: open the popup.
+    // Old "Request upgrade / renewal" links: on the cloud that's the Subscription page now.
     if (hash === `#${REQUEST_UPGRADE_HASH}` || hash === `#${REQUEST_RENEWAL_HASH}`) {
-      if (data.deployment === 'cloud' && !data.upgrade_requested_at) {
-        setRequestOpen({ renewal: hash === `#${REQUEST_RENEWAL_HASH}` });
-      }
-      document.getElementById(LICENSE_CARD_ID)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (data.deployment === 'cloud') navigate(SUBSCRIPTION_PAGE, { replace: true });
       return;
     }
     const target = document.getElementById(hash.slice(1));
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (target instanceof HTMLTextAreaElement) target.focus({ preventScroll: true });
-  }, [data, hash]);
+  }, [data, hash, navigate]);
 
   // After a key or unlock code is accepted: show it, and refresh the login so
   // the licensed modules appear without logging out.
@@ -129,23 +125,16 @@ export function LicenseCard() {
     <div id={LICENSE_CARD_ID} className="card" style={{ padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>License</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
+            {onPrem ? 'License' : data.plan_name ? `Subscription · ${data.plan_name}` : 'Subscription'}
+          </span>
           <span className={`badge ${status.cls}`}>{status.label}</span>
           {data.lock_id && <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11 }}>Lock ID {data.lock_id}</span>}
         </div>
-        {!onPrem && data.status !== 'none' && (
-          data.upgrade_requested_at
-            ? <span className="badge b-am">Request sent on {data.upgrade_requested_at.slice(0, 10)}</span>
-            : <button type="button" className="btn bs bsm" onClick={() => setRequestOpen({ renewal: false })}>Request upgrade</button>
-        )}
-        {requestOpen && (
-          <UpgradeRequestDialog
-            data={data}
-            companyName={data.company_name ?? 'your company'}
-            startWithRenewal={requestOpen.renewal}
-            onClose={() => setRequestOpen(null)}
-            onSent={() => { setRequestOpen(null); load(); }}
-          />
+        {!onPrem && (
+          <button type="button" className="btn bs bsm" onClick={() => navigate(SUBSCRIPTION_PAGE)}>
+            {data.status === 'none' ? 'Choose a plan' : 'Change plan'}
+          </button>
         )}
       </div>
 
