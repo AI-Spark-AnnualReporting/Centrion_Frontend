@@ -74,4 +74,4 @@ License card in Admin Console (the card is still there, one click away in the si
   (7 skipped); lint 0 errors.
   Browser: QA No Plan admin on the dashboard; Spark added Quarterly to "QA Board 1" (apply to everyone) → still off
   right after; tab back after 61 s → **on, without a reload**, timeline row unlocked; plan put back afterwards.
-  The cloud expired banner was checked by the tests only (a browser check needs the end date moved in the DB).
+  Cloud expired banner browser-checked too (approved DB date change, put back): only Renew subscription.
