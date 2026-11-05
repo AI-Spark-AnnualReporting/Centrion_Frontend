@@ -23,6 +23,7 @@ import {
   setActingCompany,
   type ActingCompany,
 } from "@/lib/acting-company";
+import { MIN_GAP_ON_FOCUS_MS, REFRESH_EVERY_MS, samePermissions } from "@/lib/permissionsRefresh";
 import type { AuthUser, OnboardingPayload, UserProfile } from "@/types/auth";
 import type { CompanyRecord } from "@/types/company";
 
@@ -136,6 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(data.access_token);
     setUser((prev) => {
       if (!prev) return prev;
+      // Nothing changed: keep the same object, so the screens don't redraw.
+      if (samePermissions(prev, data)) return prev;
       const updated: AuthUser = {
         ...prev,
         permissions: data.permissions,
@@ -155,6 +158,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!getToken()) return;
     refreshPermissions().catch(() => undefined);
   }, [refreshPermissions]);
+
+  // ...and while they stay on the page: every 5 minutes when the tab is visible,
+  // and when they come back to the tab (at most once a minute). So when the admin
+  // buys or changes the plan, everyone else gets it without a reload.
+  const loggedIn = token !== null;
+  useEffect(() => {
+    if (!loggedIn) return;
+    let lastAsked = Date.now();
+    const askAgain = () => {
+      lastAsked = Date.now();
+      refreshPermissions().catch(() => undefined);
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") askAgain();
+    }, REFRESH_EVERY_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastAsked >= MIN_GAP_ON_FOCUS_MS) askAgain();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loggedIn, refreshPermissions]);
 
   const completeOnboarding = useCallback(
     async (payload: OnboardingPayload) => {

@@ -403,6 +403,19 @@ describe("LicenseBanner details", () => {
     expect(Object.values(localStorage).length).toBe(1);
   });
 
+  it("cloud, expired: only Renew subscription — no leftover Open license", async () => {
+    licenseGet.mockResolvedValue(licenseOf("expired", { expires_at: "2026-01-31", deployment: "cloud" }));
+    render(<MemoryRouter><LicenseBanner /></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: "Renew subscription" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open license" })).not.toBeInTheDocument();
+  });
+
+  it("on-premises, expired: Open license stays (it leads to the box for a new key)", async () => {
+    licenseGet.mockResolvedValue(licenseOf("expired", { expires_at: "2026-01-31", deployment: "on_prem" }));
+    render(<MemoryRouter><LicenseBanner /></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: "Open license" })).toBeInTheDocument();
+  });
+
   it("Open license on the Admin Console scrolls to the card instead of navigating", async () => {
     licenseGet.mockResolvedValue(licenseOf("expired", { expires_at: "2026-01-31", deployment: "on_prem" }));
     const card = document.createElement("div");

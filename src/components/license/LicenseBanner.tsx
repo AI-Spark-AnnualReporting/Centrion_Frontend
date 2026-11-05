@@ -145,7 +145,9 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
         title: `Your ${cloud ? 'subscription' : 'license'} expired on ${formatLicenseDate(data.expires_at)}.`,
         text: `You can still open and download your reports and use AI Copilot, but you can't create new reports or add users. ${renewWords}`,
         rows: [{ label: 'Read-only now:', items: licensed }],
-        actions: cloud ? ['renew', 'open'] : ['open'],
+        // Cloud: Renew is the way out ("Open license" was left over from keys).
+        // On-premises: Open license leads to the box for pasting a new key.
+        actions: cloud ? ['renew'] : ['open'],
       };
     case 'invalid':
       return {
