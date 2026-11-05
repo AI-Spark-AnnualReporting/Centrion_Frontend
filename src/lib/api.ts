@@ -21,11 +21,14 @@ import type {
 } from "@/types/license";
 import type {
   CompanySubscription,
+  CustomPlanCompanyPage,
   Duration,
   CurrentSubscription,
   PlanChanges,
+  PlanDeleteResult,
   PlanForClient,
   PlanForm,
+  PlanKind,
   PlanPage,
   PlanStatus,
   PlanSubscriber,
@@ -5432,6 +5435,9 @@ export const license = {
 export interface PlanListQuery {
   status?: PlanStatus;
   duration?: Duration;
+  with_enterprise?: boolean;          // keep Enterprise next to a duration filter
+  kind?: PlanKind;                    // public = for every company, custom = for one
+  company_id?: string;
   quotes_only?: boolean;
   page?: number;
   limit?: number;
@@ -5461,11 +5467,16 @@ export const sparkPlans = {
       { noActingCompany: true },
     ),
 
+  // Never-bought plans are removed; bought ones are hidden (see PlanDeleteResult).
   remove: (planId: string) =>
-    request<void>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
+    request<PlanDeleteResult>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
       method: "DELETE",
       noActingCompany: true,
     }),
+
+  // Custom plans → the companies table (companies with a plan made for them).
+  companies: (query: { search?: string; page?: number; limit?: number } = {}) =>
+    request<CustomPlanCompanyPage>("/api/v1/spark/subscription-plans/companies", { query, noActingCompany: true }),
 };
 
 export const subscriptions = {

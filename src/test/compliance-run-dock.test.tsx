@@ -50,8 +50,17 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/hooks/use-toast", () => ({ toast: (body: ToastBody) => toastSpy(body) }));
 
+// The user has Compliance Validation (the dock only watches when they do);
+// one test below takes it away.
+const authState = { canRead: true };
 vi.mock("@/context/AuthContext", () => ({
-  useAuth: () => ({ user: { id: "u1", company_id: "co-1" } }),
+  useAuth: () => ({
+    user: {
+      id: "u1",
+      company_id: "co-1",
+      permissions: authState.canRead ? { compliance_validation: { read: true } } : {},
+    },
+  }),
 }));
 
 import {
@@ -132,6 +141,19 @@ afterEach(() => {
 });
 
 describe("background watching", () => {
+  it("never asks without Compliance Validation (not in the plan, or not for this role)", async () => {
+    // The server would answer 403 to every sweep.
+    authState.canRead = false;
+    try {
+      mount();
+      await advance(0);
+      await advance(60_000);
+      expect(listRuns).not.toHaveBeenCalled();
+    } finally {
+      authState.canRead = true;
+    }
+  });
+
   it("picks up a run nobody in this tab started", async () => {
     // The whole point of the discovery sweep: a refresh, a second tab, or a
     // colleague's run should all surface without anyone registering them.

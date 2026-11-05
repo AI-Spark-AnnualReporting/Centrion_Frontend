@@ -34,7 +34,8 @@ export function ProtectedRoute({
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
+  // Remember the page asked for (e.g. a link in an email) so login can return to it.
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
 
   // Force first-login users to set a permanent password before they can
   // see any other authenticated page. The change-password screen itself is

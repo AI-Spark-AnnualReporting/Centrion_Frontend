@@ -8,6 +8,7 @@
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
+import { useState } from 'react';
 import type { LicensableModule } from '@/types/license';
 import type { Duration, PlanContact, PlanLimits } from '@/types/subscription';
 import './subscriptions.css';
@@ -109,9 +110,109 @@ export function Stepper({ value, onChange, label }: { value: number; onChange: (
 
 // ── Modules ─────────────────────────────────────────────────────────
 
+// The groups on the Modules card, in order. A module not listed here (Board
+// Meetings, Leadership, or one added later) has no group and shows below them.
+const MODULE_GROUPS: { name: string; keys: string[] }[] = [
+  { name: 'Reports', keys: ['quarterly_report', 'earnings_report', 'annual_report', 'board_report'] },
+  { name: 'Validators', keys: ['esg_validator', 'compliance_validation', 'annual_report_validator'] },
+];
+
+/** The modules of the catalogue that are in no group, in the catalogue's order. */
+function modulesWithoutGroup(catalogue: LicensableModule[]): LicensableModule[] {
+  const grouped = MODULE_GROUPS.flatMap((group) => group.keys);
+  return catalogue.filter((module) => !grouped.includes(module.key));
+}
+
+/** The modules of the catalogue that are in this group, in the catalogue's order. */
+function modulesInGroup(catalogue: LicensableModule[], groupName: string): LicensableModule[] {
+  const group = MODULE_GROUPS.find((g) => g.name === groupName);
+  return catalogue.filter((module) => group?.keys.includes(module.key));
+}
+
+/** Names of the groups with at least one module switched on — the groups the card opens with. */
+function groupsWithModulesOn(limits: PlanLimits, catalogue: LicensableModule[]): string[] {
+  const names: string[] = [];
+  for (const group of MODULE_GROUPS) {
+    const anyOn = modulesInGroup(catalogue, group.name).some((module) => limits.modules.includes(module.key));
+    if (anyOn) names.push(group.name);
+  }
+  return names;
+}
+
+/** One module tile: name, what it counts, the switch and (when on) the report stepper. */
+function ModuleTile({ module, value, onToggle, onSetReports }: {
+  module: LicensableModule; value: PlanLimits;
+  onToggle: (module: LicensableModule) => void; onSetReports: (reportType: string, count: number) => void;
+}) {
+  const on = value.modules.includes(module.key);
+  const reports = module.report_type ? value.report_limits[module.report_type] ?? 1 : 0;
+  return (
+    <div role="switch" aria-checked={on} aria-label={module.label} tabIndex={0}
+      className={`sub-mt ${on ? 'on' : ''}`} onClick={() => onToggle(module)}
+      onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggle(module); } }}>
+      <div className="sub-mt-ic">{MODULE_ICON[module.key] ?? module.label.slice(0, 1)}</div>
+      <div className="sub-mt-tx">
+        <div className="sub-mt-nm">{module.label}</div>
+        <div className="sub-mt-cap">{module.report_type ? 'Reports per plan period' : 'Access only — no report count'}</div>
+      </div>
+      {!on && <span className="sub-mt-cap">Off</span>}
+      {on && module.report_type && (
+        <>
+          <Stepper value={reports} label={`${module.label} reports`} onChange={(n) => onSetReports(module.report_type as string, n)} />
+          <span className="sub-step-l">reports</span>
+        </>
+      )}
+      {on && !module.report_type && <span className="sub-incl">Included</span>}
+      <div className="sub-sw" />
+    </div>
+  );
+}
+
+/** "Quarterly Report · 4, Compliance Validation" — what's on in a closed group. */
+function closedGroupSummary(modules: LicensableModule[], value: PlanLimits): string {
+  const parts: string[] = [];
+  for (const module of modules) {
+    if (!value.modules.includes(module.key)) continue;
+    const reports = module.report_type ? value.report_limits[module.report_type] : undefined;
+    parts.push(reports != null ? `${module.label} · ${reports}` : module.label);
+  }
+  return parts.length > 0 ? parts.join(', ') : 'Nothing switched on';
+}
+
+/** A group heading that opens and closes, then its tiles (open) or one summary line (closed). */
+function ModuleGroup({ name, modules, open, onOpenChange, value, onToggle, onSetReports }: {
+  name: string; modules: LicensableModule[]; open: boolean; onOpenChange: (open: boolean) => void;
+  value: PlanLimits; onToggle: (module: LicensableModule) => void; onSetReports: (reportType: string, count: number) => void;
+}) {
+  const onCount = modules.filter((module) => value.modules.includes(module.key)).length;
+  return (
+    <>
+      <button type="button" className={`sub-grp ${open ? '' : 'closed'}`} aria-expanded={open} onClick={() => onOpenChange(!open)}>
+        <span className="sub-grp-chev" aria-hidden="true">▼</span>
+        <span className="sub-grp-t">{name}</span>
+        <span className="sub-grp-line" />
+        <span className={`sub-grp-c ${onCount > 0 ? 'some' : ''}`}>{onCount} of {modules.length} on</span>
+      </button>
+      {open && modules.map((module) => (
+        <ModuleTile key={module.key} module={module} value={value} onToggle={onToggle} onSetReports={onSetReports} />
+      ))}
+      {!open && <div className="sub-grp-sum">{closedGroupSummary(modules, value)}</div>}
+    </>
+  );
+}
+
 export function ModulesCard({ value, onChange, catalogue }: {
   value: PlanLimits; onChange: (next: PlanLimits) => void; catalogue: LicensableModule[];
 }) {
+  // Decided once, when the card first shows (the editor waits for the plan to
+  // load first). Not remembered between visits, and switching modules on or off
+  // never opens or closes a group by itself.
+  const [openGroups, setOpenGroups] = useState<string[]>(() => groupsWithModulesOn(value, catalogue));
+
+  const setGroupOpen = (name: string, open: boolean) => {
+    setOpenGroups(open ? [...openGroups, name] : openGroups.filter((g) => g !== name));
+  };
+
   const toggle = (module: LicensableModule) => {
     const on = value.modules.includes(module.key);
     const modules = on ? value.modules.filter((key) => key !== module.key) : [...value.modules, module.key];
@@ -138,30 +239,19 @@ export function ModulesCard({ value, onChange, catalogue }: {
         <span className="sub-ec-count">{value.modules.length} of {catalogue.length} on</span>
       </div>
       <div className="sub-mods">
-        {catalogue.map((module) => {
-          const on = value.modules.includes(module.key);
-          const reports = module.report_type ? value.report_limits[module.report_type] ?? 1 : 0;
+        {MODULE_GROUPS.map((group) => {
+          const modules = modulesInGroup(catalogue, group.name);
+          if (modules.length === 0) return null;
           return (
-            <div key={module.key} role="switch" aria-checked={on} aria-label={module.label} tabIndex={0}
-              className={`sub-mt ${on ? 'on' : ''}`} onClick={() => toggle(module)}
-              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(module); } }}>
-              <div className="sub-mt-ic">{MODULE_ICON[module.key] ?? module.label.slice(0, 1)}</div>
-              <div className="sub-mt-tx">
-                <div className="sub-mt-nm">{module.label}</div>
-                <div className="sub-mt-cap">{module.report_type ? 'Reports per plan period' : 'Access only — no report count'}</div>
-              </div>
-              {!on && <span className="sub-mt-cap">Off</span>}
-              {on && module.report_type && (
-                <>
-                  <Stepper value={reports} label={`${module.label} reports`} onChange={(n) => setReports(module.report_type as string, n)} />
-                  <span className="sub-step-l">reports</span>
-                </>
-              )}
-              {on && !module.report_type && <span className="sub-incl">Included</span>}
-              <div className="sub-sw" />
-            </div>
+            <ModuleGroup key={group.name} name={group.name} modules={modules}
+              open={openGroups.includes(group.name)} onOpenChange={(open) => setGroupOpen(group.name, open)}
+              value={value} onToggle={toggle} onSetReports={setReports} />
           );
         })}
+        {modulesWithoutGroup(catalogue).length > 0 && <div className="sub-grp-gap" />}
+        {modulesWithoutGroup(catalogue).map((module) => (
+          <ModuleTile key={module.key} module={module} value={value} onToggle={toggle} onSetReports={setReports} />
+        ))}
       </div>
     </div>
   );

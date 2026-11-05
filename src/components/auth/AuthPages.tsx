@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { auth, createCompany, extractProfileAtSignup, register, ApiError, rateLimitDetailOf } from '@/lib/api';
-import { redirectToApp, shouldStayInCentriton } from '@/lib/appRouting';
+import { redirectToApp, safeReturnPath, shouldStayInCentriton } from '@/lib/appRouting';
 import type { StepOneState, StepTwoState } from '@/types/register';
 import { StepIndicator } from '@/components/registration/StepIndicator';
 import { StepOneForm } from '@/components/registration/StepOneForm';
@@ -38,6 +38,7 @@ export function LoginPage() {
     verified?: boolean;
     passwordReset?: boolean;
     email?: string;
+    from?: string;            // the page a logged-out visitor asked for (ProtectedRoute)
   } | null;
   const [email, setEmail] = useState(arrivedFrom?.email ?? '');
   const [password, setPassword] = useState('');
@@ -79,7 +80,7 @@ export function LoginPage() {
         // Centriyon. redirectToApp() navigates away; stop here.
         return;
       } else {
-        navigate('/');
+        navigate(safeReturnPath(arrivedFrom?.from));
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {

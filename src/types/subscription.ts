@@ -55,7 +55,7 @@ export interface SubscriptionPlan extends PlanLimits {
   quote: PlanQuote | null;            // set = made from a client's quote
   created_at: string;
   updated_at: string;
-  company_name?: string | null;       // list only
+  company_name?: string | null;       // list, and one plan
   subscriber_count?: number;          // list only: companies on it now
 }
 
@@ -65,6 +65,32 @@ export interface PlanPage {
   page: number;
   limit: number;
   modules_catalogue: LicensableModule[];
+}
+
+// Spark → Subscriptions tabs: plans for every company, or plans made for one.
+export type PlanKind = "public" | "custom";
+
+// What Delete did: "deleted" = nobody ever bought it, the row is gone;
+// "hidden" = it was bought, so it's kept (history) but nobody sees it.
+export interface PlanDeleteResult {
+  result: "deleted" | "hidden";
+  companies_on_it: number;            // they keep it until it ends
+}
+
+// One row of Custom plans → the companies table.
+export interface CustomPlanCompany {
+  company_id: string;
+  company_name: string;
+  plans: number;
+  published: number;
+  drafts: number;
+}
+
+export interface CustomPlanCompanyPage {
+  items: CustomPlanCompany[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface PlanForm extends PlanLimits {

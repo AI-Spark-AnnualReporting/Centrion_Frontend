@@ -201,7 +201,8 @@ function TabButton({ label, count, active, alert, onClick }: {
 
 export function Pager({ total, page, pages, size, onPage, onSize }: {
   total: number; page: number; pages: number; size: number;
-  onPage: (page: number) => void; onSize: (size: number) => void;
+  onPage: (page: number) => void;
+  onSize?: (size: number) => void;    // leave out for a fixed page size (no "Rows per page")
 }) {
   const from = total ? (page - 1) * size + 1 : 0;
   const to = Math.min(page * size, total);
@@ -231,13 +232,15 @@ export function Pager({ total, page, pages, size, onPage, onSize }: {
         {numbers}
         {pageButton(page + 1, 'Next ›', page >= pages)}
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        Rows per page
-        <select value={size} onChange={(e) => onSize(Number(e.target.value))}
-          style={{ border: '1px solid #DDE1EE', borderRadius: 8, padding: '5px 8px', fontSize: 12, background: '#fff' }}>
-          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-      </label>
+      {onSize && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          Rows per page
+          <select value={size} onChange={(e) => onSize(Number(e.target.value))}
+            style={{ border: '1px solid #DDE1EE', borderRadius: 8, padding: '5px 8px', fontSize: 12, background: '#fff' }}>
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

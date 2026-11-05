@@ -14,7 +14,7 @@ vi.mock("@/context/AuthContext", () => ({
 const toast = vi.fn();
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 
-const sparkPlans = { get: vi.fn(), create: vi.fn(), update: vi.fn(), subscribers: vi.fn(), list: vi.fn(), remove: vi.fn() };
+const sparkPlans = { get: vi.fn(), create: vi.fn(), update: vi.fn(), subscribers: vi.fn(), list: vi.fn(), remove: vi.fn(), companies: vi.fn() };
 const subscriptions = { plans: vi.fn(), current: vi.fn(), startCheckout: vi.fn(), pay: vi.fn(), requestQuote: vi.fn() };
 vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions }));
 
@@ -124,8 +124,11 @@ describe("SparkSubscriptionsPage", () => {
     );
   }
 
-  it("shows the plans as cards without Buy now; clicking one gives Edit, which opens the editor", async () => {
-    sparkPlans.list.mockResolvedValue({ items: [GOLD, ENTERPRISE], total: 2, page: 1, limit: 10, modules_catalogue: CATALOGUE });
+  const page = (items: unknown[], total = items.length) =>
+    ({ items, total, page: 1, limit: 3, modules_catalogue: CATALOGUE });
+
+  it("shows the plans as cards without Buy now; clicking one gives Edit and Delete (never Archive)", async () => {
+    sparkPlans.list.mockResolvedValue(page([GOLD, ENTERPRISE]));
     renderPage();
     expect(await screen.findByRole("button", { name: "Gold" })).toBeInTheDocument();
     expect(screen.queryByText("Buy now")).not.toBeInTheDocument();
@@ -133,9 +136,88 @@ describe("SparkSubscriptionsPage", () => {
     expect(screen.queryByText("2 companies")).not.toBeInTheDocument();     // no company count on the cards
 
     fireEvent.click(screen.getByRole("button", { name: "Gold" }));
-    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();      // in use: no Delete
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();       // in use: Delete too
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "✎ Edit" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/spark/subscriptions/plan_gold/edit");
+  });
+
+  it("has Published, Drafts and Custom plans tabs with counts — no Archived tab", async () => {
+    sparkPlans.list.mockImplementation((query: { kind?: string; status?: string; limit?: number }) => {
+      if (query.limit === 1) return Promise.resolve(page([], query.kind === "custom" ? 7 : query.status === "draft" ? 1 : 5));
+      return Promise.resolve(page([GOLD]));
+    });
+    renderPage();
+    expect(await screen.findByRole("tab", { name: /^Published\s*5$/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Drafts\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Custom plans\s*7$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Archived/ })).not.toBeInTheDocument();
+    // Published asks for plans for every company, 3 at a time, cheapest first.
+    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "public", status: "published", limit: 3, page: 1 }));
+  });
+
+  it("pages the cards 3 at a time and sends the duration chip to the server with Enterprise", async () => {
+    sparkPlans.list.mockResolvedValue(page([GOLD, GOLD, GOLD].map((p, i) => ({ ...p, id: `p${i}`, name: `Plan ${i}` })), 5));
+    renderPage();
+    expect(await screen.findByText(/Showing/)).toHaveTextContent("Showing 1–3 of 5");
+    expect(screen.queryByText("Rows per page")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 3 })));
+    fireEvent.click(screen.getByRole("tab", { name: "Quarterly" }));
+    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(
+      expect.objectContaining({ duration: "quarterly", with_enterprise: true, page: 1 })));
+  });
+
+  it("Delete asks first, then says what the server did", async () => {
+    sparkPlans.list.mockResolvedValue(page([GOLD]));
+    sparkPlans.remove.mockResolvedValue({ result: "hidden", companies_on_it: 2 });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Gold" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(confirm.mock.calls[0][0]).toBe("2 companies are on Gold. They keep it until it ends, but nobody new can buy it. Delete Gold?");
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ title: "Gold deleted. 2 companies keep it until it ends." }));
+    confirm.mockRestore();
+  });
+
+  it("Custom plans: a table of companies, the first one's cards with Draft / Published tags", async () => {
+    const forAramco = { ...GOLD, id: "plan_a", name: "Custom plan for Aramco", company_id: "cmp_a", status: "draft" as const };
+    sparkPlans.list.mockImplementation((query: { kind?: string; company_id?: string; limit?: number }) =>
+      Promise.resolve(query.limit === 1 ? page([], 2) : query.company_id === "cmp_a" ? page([forAramco]) : page([GOLD])));
+    sparkPlans.companies.mockResolvedValue({
+      items: [{ company_id: "cmp_a", company_name: "Aramco", plans: 1, published: 0, drafts: 1 },
+              { company_id: "cmp_b", company_name: "BUPA", plans: 1, published: 1, drafts: 0 }],
+      total: 2, page: 1, limit: 10,
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: /Custom plans/ }));
+    expect(await screen.findByText("Custom plans for Aramco")).toBeInTheDocument();
+    const card = await screen.findByRole("button", { name: "Custom plan for Aramco" });
+    expect(within(card).getByText("Draft")).toBeInTheDocument();
+    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "custom", company_id: "cmp_a", limit: 3 }));
+
+    fireEvent.click(screen.getByText("BUPA"));
+    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ company_id: "cmp_b", page: 1 })));
+    expect(screen.getByText("Custom plans for BUPA")).toBeInTheDocument();
+  });
+
+  it("Custom plans with no company yet says where they come from", async () => {
+    sparkPlans.list.mockResolvedValue(page([]));
+    sparkPlans.companies.mockResolvedValue({ items: [], total: 0, page: 1, limit: 10 });
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: /Custom plans/ }));
+    expect(await screen.findByText(/They appear when a company sends a request/)).toBeInTheDocument();
+    expect(screen.getByText("No custom plans yet.")).toBeInTheDocument();
+  });
+});
+
+describe("Delete wording", () => {
+  it("asks plainly for a plan nobody is on, and reports deleted vs hidden", async () => {
+    const { deleteQuestion, deletedMessage } = await import("@/pages/spark/SparkSubscriptionsPage");
+    expect(deleteQuestion({ ...GOLD, subscriber_count: 0 })).toBe("Delete Gold? This can't be undone.");
+    expect(deleteQuestion({ ...GOLD, subscriber_count: 1 })).toMatch(/^1 company is on Gold\./);
+    expect(deletedMessage("Gold", "deleted", 0)).toBe("Gold deleted");
+    expect(deletedMessage("Gold", "hidden", 0)).toBe("Gold deleted. Companies that bought it keep their history.");
   });
 });
 
@@ -162,6 +244,7 @@ describe("SparkPlanEditorPage", () => {
     expect(screen.getByText("per 6 months", { selector: "span" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Price \(USD\)/), { target: { value: "12000" } });
 
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));                    // new plan: the group starts closed
     fireEvent.click(screen.getByRole("switch", { name: "Quarterly Report" }));
     expect(screen.getByLabelText("Quarterly Report reports")).toHaveValue("1");          // starts at 1
     expect(screen.getByRole("button", { name: "Fewer Quarterly Report reports" })).toBeDisabled();   // never below 1
@@ -180,6 +263,34 @@ describe("SparkPlanEditorPage", () => {
       modules: ["quarterly_report"], report_limits: { quarterly: 2 }, department_sizes: [2, 1, 1],
     });
     expect(screen.getByTestId("where")).toHaveTextContent("/spark/subscriptions");
+  });
+
+  it("modules are grouped: a new plan starts with Reports closed; ungrouped modules always show", async () => {
+    renderEditor();
+    const reports = await screen.findByRole("button", { name: /Reports/ });
+    expect(reports).toHaveAttribute("aria-expanded", "false");
+    expect(reports).toHaveTextContent("0 of 2 on");
+    expect(screen.getByText("Nothing switched on")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Quarterly Report" })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Leadership" })).toBeInTheDocument();         // no group
+    expect(screen.queryByRole("button", { name: /Validators/ })).not.toBeInTheDocument();  // none in this catalogue
+  });
+
+  it("editing a plan opens the groups with modules on; closing shows what's on; switching off keeps it open", async () => {
+    sparkPlans.get.mockResolvedValue(GOLD);
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    const reports = await screen.findByRole("button", { name: /Reports/ });
+    expect(reports).toHaveAttribute("aria-expanded", "true");
+    expect(reports).toHaveTextContent("1 of 2 on");
+
+    fireEvent.click(reports);
+    expect(screen.getByText("Quarterly Report · 4")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Quarterly Report" })).not.toBeInTheDocument();
+
+    fireEvent.click(reports);
+    fireEvent.click(screen.getByRole("switch", { name: "Quarterly Report" }));             // last one off
+    expect(reports).toHaveAttribute("aria-expanded", "true");
+    expect(reports).toHaveTextContent("0 of 2 on");
   });
 
   it("typing 0 users in a department keeps it at 1", async () => {

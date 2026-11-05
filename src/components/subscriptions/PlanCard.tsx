@@ -4,7 +4,7 @@
 // Enterprise, "Let's talk" and the contact details.
 //
 // Only the client gets a button (Buy now / Contact us). spark_admin's cards are
-// clickable instead and show Edit / Archive / Delete when selected.
+// clickable instead and show Edit / Delete when selected.
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
@@ -206,7 +206,7 @@ export function PlanCard({ plan, position, catalogue, flag, button, selected, cu
   selected?: boolean;
   current?: boolean;
   onClick?: () => void;          // spark_admin: select the card
-  actions?: ReactNode;           // spark_admin: Edit / Archive / Delete, when selected
+  actions?: ReactNode;           // spark_admin: Edit / Delete, when selected
 }) {
   const enterprise = plan.duration === 'enterprise';
   const colour = enterprise ? ENTERPRISE_COLOUR : TAB_COLOURS[position % TAB_COLOURS.length];

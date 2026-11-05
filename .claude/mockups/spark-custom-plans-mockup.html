@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup — Spark Subscriptions: Custom plans tab, by company, paged</title>
+<style>
+  * { box-sizing: border-box; }
+  /* No outer scroll: the page is exactly the window; only the table rows scroll inside, cards shrink to fit. */
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; background: #F0F1FA; font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; color: #1A1D2E; }
+  .shell { display: flex; height: 100vh; }
+  .main { display: flex; flex-direction: column; min-height: 0; }
+  .row { flex: 1; min-height: 0; }
+  .co, .stage { min-height: 0; }
+  .co-body { flex: 1; min-height: 0; overflow-y: auto; }
+  .band { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .cards-fit { position: relative; flex: 1; min-height: 0; display: flex; justify-content: center; align-items: flex-start; }
+  .cards { transform-origin: top center; }
+  .side { width: 210px; background: #3535B8; color: #fff; padding: 18px 10px; flex: none; }
+  .side .logo { font-weight: 800; font-size: 15px; padding: 0 8px 20px; }
+  .side .sec { font-size: 9px; letter-spacing: .1em; opacity: .6; padding: 0 10px 8px; }
+  .side .it { font-size: 12px; padding: 9px 14px; border-radius: 9px; opacity: .85; }
+  .side .it.act { background: rgba(255,255,255,.14); font-weight: 700; opacity: 1; }
+  .main { flex: 1; padding: 22px 26px; min-width: 0; }
+  .note { font-size: 11.5px; color: #5A6080; background: #fff; border: 1px dashed #C9CBF5; border-radius: 10px; padding: 9px 12px; margin-bottom: 16px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  .ttl { font-size: 15px; font-weight: 800; }
+  .sub { font-size: 12px; color: #9BA3C4; margin-top: 2px; }
+  .tabs { align-self: flex-start; display: inline-flex; gap: 4px; background: #fff; border: 1px solid #E4E6F3; border-radius: 22px; padding: 4px; }
+  .tab { border: none; background: none; font-family: inherit; font-size: 12.5px; font-weight: 600; color: #5A6080; padding: 7px 16px; border-radius: 18px; cursor: pointer; }
+  .tab.act { background: #4040C8; color: #fff; }
+  .tab .n { display: inline-block; min-width: 18px; margin-left: 5px; font-size: 10px; border-radius: 10px; padding: 1px 6px; background: #EEEEFF; color: #4040C8; }
+  .tab.act .n { background: rgba(255,255,255,.25); color: #fff; }
+  .btn { border: none; border-radius: 10px; font-family: inherit; font-weight: 700; font-size: 12px; padding: 9px 14px; cursor: pointer; }
+  .bp { background: #4040C8; color: #fff; }
+  .bs { background: #fff; color: #4040C8; border: 1.5px solid #DCDDF5; }
+  .row { display: flex; gap: 16px; margin-top: 14px; align-items: stretch; }
+
+  /* left: companies table */
+  .co { width: 300px; flex: none; background: #fff; border-radius: 16px; border: 1px solid #ECEEF8; display: flex; flex-direction: column; }
+  .co-h { padding: 12px 14px 8px; font-size: 12.5px; font-weight: 800; }
+  .co-h small { display: block; font-size: 10.5px; font-weight: 500; color: #9BA3C4; }
+  .co input { margin: 0 14px 8px; padding: 7px 10px; border: 1.5px solid #E4E6F3; border-radius: 9px; font-family: inherit; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #9BA3C4; padding: 6px 14px; border-bottom: 1px solid #F2F3FA; }
+  td { padding: 9px 14px; border-bottom: 1px solid #F5F6FB; }
+  tr.c { cursor: pointer; }
+  tr.c:hover td { background: #F8F8FF; }
+  tr.c.sel td { background: #EEEEFF; }
+  tr.c.sel td:first-child { box-shadow: inset 3px 0 0 #4040C8; font-weight: 700; }
+  .pill { font-size: 10px; font-weight: 700; border-radius: 10px; padding: 2px 7px; }
+  .p-gn { background: rgba(34,197,94,.12); color: #16A34A; }
+  .p-am { background: #FFF4E0; color: #B26B00; }
+  .p-gy { background: #F2F3FA; color: #9BA3C4; }
+
+  /* pager (both sides) */
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 14px; font-size: 11px; color: #9BA3C4; margin-top: auto; }
+  .pager .pg { display: flex; gap: 4px; }
+  .pager button { min-width: 26px; height: 26px; border-radius: 8px; border: 1.5px solid #E4E6F3; background: #fff; font-family: inherit; font-size: 11px; font-weight: 700; color: #5A6080; cursor: pointer; }
+  .pager button.act { background: #4040C8; border-color: #4040C8; color: #fff; }
+  .pager button:disabled { opacity: .4; cursor: default; }
+
+  /* right: cards on the blue band */
+  .stage { flex: 1; min-width: 0; background: #fff; border-radius: 16px; border: 1px solid #ECEEF8; display: flex; flex-direction: column; overflow: hidden; }
+  .band { position: relative; padding: 16px 20px 22px; }
+  .band::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 150px; background: #3838BA; }
+  .band-t { position: relative; color: #fff; text-align: center; font-weight: 800; font-size: 14px; margin-bottom: 4px; }
+  .band-s { position: relative; color: #C9CBF5; text-align: center; font-size: 11px; margin-bottom: 22px; }
+  .cards { position: relative; display: flex; justify-content: center; gap: 18px; }
+  .card { width: 228px; background: #fff; border-radius: 22px; box-shadow: 0 8px 26px rgba(26,29,46,.1); padding: 26px 16px 16px; position: relative; cursor: pointer; border: 2px solid transparent; }
+  .card.sel { border-color: #4040C8; }
+  .tag { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); color: #fff; font-weight: 700; font-size: 12px; padding: 6px 16px; border-radius: 10px; white-space: nowrap; }
+  .st { position: absolute; top: 10px; right: 10px; }
+  .price { text-align: center; font-weight: 800; font-size: 28px; margin: 6px 0 2px; }
+  .price small { font-size: 10px; font-weight: 600; color: #5A6080; }
+  .ln { font-size: 11px; display: flex; gap: 6px; padding: 2px 0; }
+  .ln.off { color: #B6BBD0; }
+  .ln .y { color: #16A34A; } .ln .x { color: #EF4444; }
+  .hr { height: 1px; background: #ECEEF8; margin: 8px 20px; }
+  .acts { display: flex; gap: 6px; margin-top: 10px; }
+  .acts .btn { flex: 1; padding: 7px; font-size: 11px; }
+  .empty { position: relative; text-align: center; color: #9BA3C4; font-size: 12px; padding: 50px 0; }
+  .wide .co { display: none; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="side">
+    <div class="logo">▦ Centriyon</div>
+    <div class="sec">SPARK</div>
+    <div class="it">Overview</div><div class="it">Companies</div><div class="it">Reports</div><div class="it">Users</div>
+    <div class="it act">Subscriptions</div><div class="it">Quotes</div><div class="it">Licenses (on-premises)</div>
+  </div>
+  <div class="main">
+    <div class="note">
+      <b>Mockup.</b> Tabs: <b>Published</b> (plans every company can buy) · <b>Drafts</b> · <b>Custom plans</b> (made for one company —
+      moved out of Published). Custom plans: <b>companies table on the left</b> (10 per page) → that company's <b>cards on the right</b>
+      (3 per page). Published / Drafts: cards only, 3 per page. Click a card for Edit / Delete. Sample data.
+    </div>
+    <div class="top">
+      <div>
+        <div class="ttl">Subscription plans</div>
+        <div class="sub" id="subtitle"></div>
+      </div>
+      <button class="btn bp">+ Create subscription</button>
+    </div>
+    <div style="margin-top:14px" class="tabs" id="tabs"></div>
+    <div class="row" id="row">
+      <div class="co" id="co"></div>
+      <div class="stage" id="stage"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const MODS = ['Quarterly Report', 'Earnings Report', 'Annual Report', 'Board Report', 'ESG Validator', 'Compliance Validation', 'Board Meetings', 'Leadership', 'Annual Report Validator'];
+  const COLORS = ['#4F7BEA', '#14B8A6', '#4040C8', '#8B5CF6', '#F59E0B'];
+  function plan(name, price, per, on, people, status, company) { return { name, price, per, on, people, status, company }; }
+  const PUBLIC = [
+    plan('Starter', 66, '6 months', { 'Quarterly Report': 2, 'Board Meetings': 0, 'Leadership': 0 }, '1 PM · 1 IR · 2 departments', 'published'),
+    plan('Standard', 150, 'quarter', { 'ESG Validator': 3, 'Annual Report Validator': 4 }, '10 PM · 10 IR · 10 departments', 'published'),
+    plan('QA Fit Plus', 950, 'year', { 'Quarterly Report': 2, 'Annual Report': 3, 'Board Meetings': 0, 'Leadership': 0 }, '2 PM · 6 IR · 4 departments', 'published'),
+    plan('Gold', 4000, 'year', { 'Quarterly Report': 4, 'Annual Report': 2, 'Board Report': 2 }, '5 PM · 3 IR · 5 departments', 'published'),
+    plan('Enterprise', null, '', {}, '', 'published'),
+  ];
+  const DRAFTS = [plan('Silver (draft)', 500, 'half year', { 'Quarterly Report': 1 }, '1 PM · 1 IR · 1 department', 'draft')];
+  const CUSTOM = [
+    plan('Custom plan for Aramco', 1, '6 months', { 'Quarterly Report': 1 }, '2 PM · 6 IR · 4 departments', 'published', 'Aramco'),
+    plan('Aramco — Board pack', 2400, 'year', { 'Board Report': 6, 'Board Meetings': 0 }, '2 PM · 6 IR · 4 departments', 'published', 'Aramco'),
+    plan('Aramco — ESG add-on', 900, 'year', { 'ESG Validator': 4 }, '2 PM · 6 IR · 4 departments', 'draft', 'Aramco'),
+    plan('Aramco 2027', 5200, 'year', { 'Quarterly Report': 4, 'Annual Report': 2, 'ESG Validator': 2 }, '3 PM · 6 IR · 5 departments', 'draft', 'Aramco'),
+    plan('Custom plan for BUPA', 3100, 'year', { 'Annual Report': 2, 'Compliance Validation': 0 }, '4 PM · 2 IR · 3 departments', 'published', 'BUPA'),
+    plan('Custom plan for SABIC', null, 'year', {}, '1 PM · 1 IR · 1 department', 'draft', 'SABIC'),
+  ];
+  const MORE = ['STC', 'Almarai', 'Ma’aden', 'SNB', 'Al Rajhi', 'Mobily', 'Jarir', 'Savola', 'Bahri'];
+  MORE.forEach((c, i) => CUSTOM.push(plan(`Custom plan for ${c}`, 1000 + i * 250, 'year', { 'Quarterly Report': 2 }, '2 PM · 2 IR · 2 departments', i % 3 ? 'published' : 'draft', c)));
+
+  const CARDS_PER_PAGE = 3, COMPANIES_PER_PAGE = 10;
+  const state = { tab: 'custom', company: 'Aramco', cardPage: 1, coPage: 1, selected: null, search: '' };
+
+  function companies() {
+    const map = {};
+    for (const p of CUSTOM) {
+      if (!map[p.company]) map[p.company] = { name: p.company, total: 0, published: 0, draft: 0 };
+      map[p.company].total++; map[p.company][p.status]++;
+    }
+    return Object.values(map).filter((c) => c.name.toLowerCase().includes(state.search.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function pagerHtml(page, pages, total, label, kind) {
+    if (pages <= 1) return `<div class="pager"><span>${total} ${label}</span></div>`;
+    let nums = '';
+    for (let i = 1; i <= pages; i++) nums += `<button class="${i === page ? 'act' : ''}" data-${kind}="${i}">${i}</button>`;
+    return `<div class="pager"><span>${total} ${label} · page ${page} of ${pages}</span>
+      <div class="pg"><button data-${kind}="${page - 1}" ${page === 1 ? 'disabled' : ''}>‹</button>${nums}
+      <button data-${kind}="${page + 1}" ${page === pages ? 'disabled' : ''}>›</button></div></div>`;
+  }
+
+  function cardHtml(p, i) {
+    const color = p.price == null && !p.company ? '#1A1D2E' : COLORS[i % COLORS.length];
+    const status = p.status === 'draft' ? '<span class="pill p-gy st">Draft</span>' : (p.company ? '<span class="pill p-gn st">Published</span>' : '');
+    let body;
+    if (p.price == null && !p.company) {
+      body = `<div class="price" style="font-size:22px">Let's talk</div><div class="ln" style="justify-content:center;color:#5A6080">get your plan according to business</div>`;
+    } else {
+      body = `<div class="price">${p.price == null ? '—' : '$ ' + p.price.toLocaleString()} <small>${p.per ? 'per ' + p.per : ''}</small></div><div class="hr"></div>`
+        + MODS.map((m) => m in p.on ? `<div class="ln"><span class="y">✓</span>${m}${p.on[m] ? ' · ' + p.on[m] + (p.on[m] === 1 ? ' report' : ' reports') : ''}</div>`
+                                      : `<div class="ln off"><span class="x">✗</span>${m}</div>`).join('')
+        + `<div class="ln"><span class="y">✓</span>1 admin (included)</div><div class="ln"><span class="y">✓</span>${p.people}</div>`;
+    }
+    const sel = state.selected === p.name;
+    const acts = sel ? `<div class="acts"><button class="btn bp">✎ Edit</button><button class="btn bs">Delete</button></div>` : '';
+    return `<div class="card ${sel ? 'sel' : ''}" data-card="${p.name}"><span class="tag" style="background:${color}">${p.name}</span>${status}${body}${acts}</div>`;
+  }
+
+  function draw() {
+    const custom = CUSTOM.length, cos = companies();
+    const tabs = [['published', 'Published', PUBLIC.length], ['draft', 'Drafts', DRAFTS.length], ['custom', 'Custom plans', custom]];
+    document.getElementById('tabs').innerHTML = tabs.map(([k, l, n]) =>
+      `<button class="tab ${state.tab === k ? 'act' : ''}" data-tab="${k}">${l}<span class="n">${n}</span></button>`).join('');
+    document.getElementById('subtitle').textContent = state.tab === 'custom'
+      ? 'Plans made for one company from its request (Quotes → Make a plan). Only that company sees them.'
+      : 'What every cloud company sees on its Subscription page. Click a plan to edit it.';
+    document.getElementById('row').className = 'row' + (state.tab === 'custom' ? '' : ' wide');
+
+    // left: companies
+    const coPages = Math.max(1, Math.ceil(cos.length / COMPANIES_PER_PAGE));
+    state.coPage = Math.min(state.coPage, coPages);
+    const coRows = cos.slice((state.coPage - 1) * COMPANIES_PER_PAGE, state.coPage * COMPANIES_PER_PAGE).map((c) =>
+      `<tr class="c ${c.name === state.company ? 'sel' : ''}" data-co="${c.name}"><td>${c.name}</td><td>${c.total}</td>
+       <td>${c.published ? `<span class="pill p-gn">${c.published} live</span>` : ''} ${c.draft ? `<span class="pill p-gy">${c.draft} draft</span>` : ''}</td></tr>`).join('');
+    document.getElementById('co').innerHTML = `<div class="co-h">Companies<small>with a custom plan</small></div>
+      <input placeholder="Search company…" value="${state.search}" id="search">
+      <div class="co-body"><table><thead><tr><th>Company</th><th>Plans</th><th>Status</th></tr></thead><tbody>${coRows || '<tr><td colspan="3" style="color:#9BA3C4">No company found.</td></tr>'}</tbody></table></div>
+      ${pagerHtml(state.coPage, coPages, cos.length, 'companies', 'copage')}`;
+
+    // right: cards
+    let list, title, sub;
+    if (state.tab === 'custom') {
+      list = CUSTOM.filter((p) => p.company === state.company);
+      title = `Custom plans for ${state.company}`; sub = 'Only ' + state.company + ' sees these · drafts are not shown to them yet';
+    } else if (state.tab === 'draft') {
+      list = DRAFTS; title = 'Drafts'; sub = 'Companies don’t see these yet';
+    } else {
+      list = PUBLIC; title = 'Published plans'; sub = 'Every cloud company sees these';
+    }
+    const pages = Math.max(1, Math.ceil(list.length / CARDS_PER_PAGE));
+    state.cardPage = Math.min(state.cardPage, pages);
+    const shown = list.slice((state.cardPage - 1) * CARDS_PER_PAGE, state.cardPage * CARDS_PER_PAGE);
+    document.getElementById('stage').innerHTML = `<div class="band"><div class="band-t">${title}</div><div class="band-s">${sub}</div>
+      <div class="cards-fit"><div class="cards">${shown.length ? shown.map((p, i) => cardHtml(p, i + (state.cardPage - 1) * CARDS_PER_PAGE)).join('') : '<div class="empty">No plans here.</div>'}</div></div></div>
+      ${pagerHtml(state.cardPage, pages, list.length, 'plans', 'cardpage')}`;
+    fitCards();
+  }
+
+  // Short screen: shrink the cards (never grow them) so the tallest fits the space.
+  function fitCards() {
+    const box = document.querySelector('.cards-fit'), cards = document.querySelector('.cards');
+    if (!box || !cards) return;
+    cards.style.transform = '';
+    const scale = Math.min(1, (box.clientHeight - 6) / cards.scrollHeight, box.clientWidth / cards.scrollWidth);
+    if (scale < 1) cards.style.transform = `scale(${scale})`;
+  }
+  window.addEventListener('resize', fitCards);
+
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-tab],[data-co],[data-copage],[data-cardpage],[data-card]');
+    if (!t) return;
+    if (t.dataset.tab) { state.tab = t.dataset.tab; state.cardPage = 1; state.selected = null; }
+    else if (t.dataset.co) { state.company = t.dataset.co; state.cardPage = 1; state.selected = null; }
+    else if (t.dataset.copage) { state.coPage = Number(t.dataset.copage); }
+    else if (t.dataset.cardpage) { state.cardPage = Number(t.dataset.cardpage); state.selected = null; }
+    else if (t.dataset.card) { state.selected = state.selected === t.dataset.card ? null : t.dataset.card; }
+    draw();
+  });
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'search') return;
+    state.search = e.target.value; state.coPage = 1; draw();
+    const s = document.getElementById('search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length);
+  });
+  draw();
+</script>
+</body>
+</html>

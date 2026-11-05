@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup — Disclosure Timeline: buttons for modules not in the plan</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; background: #F0F1FA; font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; color: #1A1D2E; display: flex; flex-direction: column; }
+  header { padding: 14px 22px 4px; }
+  h1 { font-size: 16px; margin: 0; }
+  .hint { font-size: 11.5px; color: #5A6080; margin-top: 3px; }
+  .switch { display: inline-flex; gap: 4px; background: #fff; border: 1px solid #E4E6F3; border-radius: 22px; padding: 4px; margin-top: 10px; }
+  .switch button { border: none; background: none; font-family: inherit; font-size: 12px; font-weight: 700; color: #5A6080; padding: 6px 14px; border-radius: 18px; cursor: pointer; }
+  .switch button.act { background: #4040C8; color: #fff; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 12px 22px 18px; }
+  .col { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .col-h { font-size: 12.5px; font-weight: 800; }
+  .col-h small { display: block; font-weight: 500; color: #5A6080; font-size: 11px; margin-top: 2px; }
+  .col.rec .col-h::after { content: 'My suggestion'; margin-left: 8px; font-size: 10px; font-weight: 800; background: #4040C8; color: #fff; border-radius: 10px; padding: 2px 8px; }
+
+  /* the real card's look (DisclosureTimeline.tsx) */
+  .card { background: #fff; border-radius: 16px; border: 1px solid #ECEEF8; box-shadow: 0 2px 10px rgba(26,29,46,.04); padding: 18px 20px; }
+  .card-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .card-h .t { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: #5A6080; }
+  .card-h .t::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #E8A33D; }
+  .card-h a { font-size: 12px; font-weight: 700; color: #4040C8; }
+  .rule { height: 1px; background: #ECEEF8; margin: 10px 0 2px; }
+  .ev { display: flex; gap: 11px; padding-left: 6px; }
+  .rail { position: relative; width: 9px; flex: none; }
+  .rail::before { content: ''; position: absolute; left: 50%; transform: translateX(-50%); width: 2px; background: #E4E8F2; top: 0; bottom: 0; }
+  .ev:first-child .rail::before { top: 9px; }
+  .ev:last-child .rail::before { bottom: auto; height: 9px; }
+  .dot { position: relative; width: 9px; height: 9px; border-radius: 50%; margin-top: 9px; background: #4F7BEA; box-shadow: 0 0 0 3px #4F7BEA22; }
+  .ev.off .dot { background: #C9CDDE; box-shadow: 0 0 0 3px #C9CDDE33; }
+  .ev-b { flex: 1; padding: 4px 0 18px; }
+  .ev:last-child .ev-b { padding-bottom: 4px; }
+  .ev-t { font-size: 13px; font-weight: 600; }
+  .ev.off .ev-t { color: #8C92AE; }
+  .ev-s { font-size: 11.5px; color: #9BA3C4; margin-top: 2px; }
+  .cta { margin-top: 7px; font-size: 11px; font-weight: 700; color: #4040C8; background: #ECEEFF; border: none; border-radius: 7px; padding: 5px 10px; font-family: inherit; cursor: pointer; }
+  .cta.lock { color: #9BA3C4; background: #F2F3F8; cursor: not-allowed; }
+  .lockline { margin-top: 7px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pill { font-size: 10px; font-weight: 700; color: #8C92AE; background: #F2F3F8; border-radius: 999px; padding: 3px 9px; }
+  .link { font-size: 11px; font-weight: 700; color: #4040C8; cursor: pointer; }
+  .note { font-size: 11px; color: #5A6080; background: #fff; border: 1px dashed #C9CBF5; border-radius: 10px; padding: 8px 10px; line-height: 1.5; }
+  .tip { position: relative; display: inline-block; }
+  .tip:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 110%; white-space: nowrap; background: #1A1D2E; color: #fff; font-size: 10.5px; padding: 5px 8px; border-radius: 6px; z-index: 2; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Disclosure Timeline — buttons for modules the plan doesn't include</h1>
+  <div class="hint">Home dashboard, top-right card. Switch the company and the viewer below. Hover a grey button in A to see its tip. Answer A or B.</div>
+  <div class="switch" id="sw">
+    <button data-k="none" class="act">Company with no plan</button>
+    <button data-k="quarterly">Plan with Quarterly only</button>
+  </div>
+  <div class="switch" id="who" style="margin-left:8px">
+    <button data-w="admin" class="act">Seen by the admin</button>
+    <button data-w="user">Seen by another user</button>
+  </div>
+</header>
+<main id="main"></main>
+
+<script>
+  const ROWS = [
+    { key: 'annual_report', title: 'Next Annual report due', sub: 'Not scheduled yet', cta: 'Start cycle' },
+    { key: 'esg_validator', title: 'Next ESG report due', sub: 'Not scheduled yet', cta: 'Open ESG studio' },
+    { key: 'quarterly_report', title: 'Next Quarterly report due', sub: 'Not scheduled yet', cta: 'Start quarterly report' },
+  ];
+  const PLANS = { none: [], quarterly: ['quarterly_report'] };
+  let plan = 'none', who = 'admin';
+
+  function row(r, on, kind) {
+    let action = `<button class="cta">${r.cta} →</button>`;
+    if (!on && kind === 'today') action = `<button class="cta">${r.cta} →</button>`;
+    if (!on && kind === 'grey') {
+      const tip = who === 'admin' ? 'Not in your plan — choose a plan to switch it on' : 'Not in your plan — ask your admin';
+      action = `<div class="lockline"><span class="tip" data-tip="${tip}"><button class="cta lock" disabled>🔒 ${r.cta}</button></span>
+        ${who === 'admin' ? '<span class="link">Choose a plan →</span>' : '<span class="pill">Ask your admin</span>'}</div>`;
+    }
+    if (!on && kind === 'hide') action = '';
+    const off = !on && kind !== 'today';
+    const sub = !on && kind === 'hide' ? 'Not in your plan' : r.sub;
+    return `<div class="ev ${off ? 'off' : ''}"><div class="rail"><div class="dot"></div></div>
+      <div class="ev-b"><div class="ev-t">${r.title}</div><div class="ev-s">${sub}</div>${action}</div></div>`;
+  }
+
+  function card(kind) {
+    const on = PLANS[plan];
+    return `<div class="card"><div class="card-h"><span class="t">Disclosure Timeline</span><a>Full calendar →</a></div><div class="rule"></div>
+      ${ROWS.map((r) => row(r, on.includes(r.key), kind)).join('')}</div>`;
+  }
+
+  function draw() {
+    document.getElementById('main').innerHTML = `
+      <div class="col"><div class="col-h">Today<small>Every button looks usable. Clicking one opens a page the plan doesn't allow; creating is refused.</small></div>
+        ${card('today')}
+        <div class="note">The problem: nothing tells the user the module is off until the server says no.</div></div>
+      <div class="col rec"><div class="col-h">A — Grey with a lock<small>The row stays; the button is greyed with 🔒 and can't be clicked. Admin: <b>Choose a plan →</b>. Others: <b>Ask your admin</b>.</small></div>
+        ${card('grey')}
+        <div class="note">Shows what the plan is missing and how to get it — the same idea as the banner's "Switched off" list. Rows for modules in the plan look exactly as today.</div></div>
+      <div class="col"><div class="col-h">B — Hide the button<small>The row stays with the text "Not in your plan"; no button, no link.</small></div>
+        ${card('hide')}
+        <div class="note">Quieter, but gives no way forward from the card (the banner at the top still has Choose a plan).</div></div>`;
+  }
+
+  document.getElementById('sw').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-k]'); if (!b) return;
+    plan = b.dataset.k; document.querySelectorAll('#sw button').forEach((x) => x.classList.toggle('act', x === b)); draw();
+  });
+  document.getElementById('who').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-w]'); if (!b) return;
+    who = b.dataset.w; document.querySelectorAll('#who button').forEach((x) => x.classList.toggle('act', x === b)); draw();
+  });
+  draw();
+</script>
+</body>
+</html>

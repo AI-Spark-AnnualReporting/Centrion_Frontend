@@ -19,13 +19,13 @@ const CELL = { padding: '10px 14px', verticalAlign: 'top' } as const;
 const STATUS_TABS: { key: PlanStatus; label: string }[] = [
   { key: 'draft', label: 'Needs a plan' },
   { key: 'published', label: 'Published' },
-  { key: 'archived', label: 'Archived' },
+  { key: 'archived', label: 'Deleted' },          // deleted on Subscriptions (kept hidden for its history)
 ];
 
 const STATUS_BADGE: Record<PlanStatus, { label: string; cls: string }> = {
   draft: { label: 'Needs a plan', cls: 'b-am' },
   published: { label: 'Published', cls: 'b-gn' },
-  archived: { label: 'Archived', cls: 'b-gy' },
+  archived: { label: 'Deleted', cls: 'b-gy' },
 };
 
 export default function SparkQuotesPage() {
