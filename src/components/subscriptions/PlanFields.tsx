@@ -1,6 +1,8 @@
 // The parts of a plan spark_admin fills in on the editor page (and a client in
 // "Get a quote"): the Modules, Users and Departments cards, the Enterprise
-// contact card, and the small helpers both sides use.
+// contact card, and the small helpers both sides use. The License key page
+// uses the same cards; for an upgrade it passes `floor` (the current key), so
+// nothing can go below it and each change gets a small mark (+2, New).
 //
 // Rules: a module that counts reports always has at least 1 report (no
 // unlimited, no 0). The one admin is always included. Each department card has
@@ -53,6 +55,12 @@ export function peopleTotal(limits: PlanLimits): number {
   return 1 + limits.max_pms + limits.max_ir_users + limits.department_sizes.length + departmentUsersTotal(limits);
 }
 
+/** "2 project managers · 6 IR users" (the plan card's words) */
+export function usersSummary(limits: Pick<PlanLimits, 'max_pms' | 'max_ir_users'>): string {
+  const pms = `${limits.max_pms} project manager${limits.max_pms === 1 ? '' : 's'}`;
+  return `${pms} · ${limits.max_ir_users} IR user${limits.max_ir_users === 1 ? '' : 's'}`;
+}
+
 /** "3 departments · 1 HOD each · 8 department users" */
 export function departmentsSummary(limits: PlanLimits): string {
   const count = limits.department_sizes.length;
@@ -84,6 +92,13 @@ export function ModuleTags({ limits, catalogue }: { limits: PlanLimits; catalogu
   );
 }
 
+/** What a module's number counts: "validation" for Compliance Validation
+ *  (each run counts, since 2026-11-09), "report" for the others. */
+export function countWord(moduleKey: string, howMany = 1): string {
+  const word = moduleKey === 'compliance_validation' ? 'validation' : 'report';
+  return howMany === 1 ? word : `${word}s`;
+}
+
 /** A whole number from an input, never below `min`. */
 export function readWholeNumber(text: string, min: number): number {
   const value = Math.floor(Number(text));
@@ -98,15 +113,42 @@ const MODULE_ICON: Record<string, string> = {
 
 // ── − n + ───────────────────────────────────────────────────────────
 
-export function Stepper({ value, onChange, label }: { value: number; onChange: (next: number) => void; label: string }) {
+export function Stepper({ value, onChange, label, min = 1 }: {
+  value: number; onChange: (next: number) => void; label: string; min?: number;
+}) {
   return (
     <div className="sub-step" onClick={(e) => e.stopPropagation()}>
-      <button type="button" aria-label={`Fewer ${label}`} disabled={value <= 1} onClick={() => onChange(Math.max(1, value - 1))}>−</button>
-      <input aria-label={label} inputMode="numeric" value={value} onChange={(e) => onChange(readWholeNumber(e.target.value, 1))} />
+      <button type="button" aria-label={`Fewer ${label}`} disabled={value <= min} onClick={() => onChange(Math.max(min, value - 1))}>−</button>
+      <input aria-label={label} inputMode="numeric" value={value} onChange={(e) => onChange(readWholeNumber(e.target.value, min))} />
       <button type="button" aria-label={`More ${label}`} onClick={() => onChange(value + 1)}>+</button>
     </div>
   );
 }
+
+// ── A price box (quote offers only) ─────────────────────────────────
+
+/** A price from its input: a number ≥ 0 (blank or not a number = 0). */
+export function readPriceBox(text: string): number {
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/** "× $ [500] / report", "$ [1500] flat" or "$ [3000]": what Spark types on a quote. */
+export function PriceBox({ value, onChange, label, before = '$', after }: {
+  value: number; onChange: (next: number) => void; label: string; before?: string; after?: string;
+}) {
+  return (
+    <span className="sub-price" onClick={(e) => e.stopPropagation()}>
+      {before}
+      <input aria-label={label} inputMode="decimal" value={value} onChange={(e) => onChange(readPriceBox(e.target.value))} />
+      {after}
+    </span>
+  );
+}
+
+// Quote offers: the typed price per module, and what to do when one changes.
+// Left out on the plan editor and the key page: then there are no price boxes.
+type ModulePrices = { prices: Record<string, number>; onPriceChange: (moduleKey: string, price: number) => void };
 
 // ── Modules ─────────────────────────────────────────────────────────
 
@@ -139,30 +181,67 @@ function groupsWithModulesOn(limits: PlanLimits, catalogue: LicensableModule[]):
   return names;
 }
 
+/** The upgrade's lowest report number for a module: the current key's, or 1. */
+function lowestReports(module: LicensableModule, floor: PlanLimits | null): number {
+  if (!floor || !module.report_type || !floor.modules.includes(module.key)) return 1;
+  return floor.report_limits[module.report_type] ?? 1;
+}
+
+/** "New" for a module the current key doesn't have, "+2" for more reports, or ''. */
+function changeMark(module: LicensableModule, value: PlanLimits, floor: PlanLimits | null): string {
+  if (!floor || !value.modules.includes(module.key)) return '';
+  if (!floor.modules.includes(module.key)) return 'New';
+  if (!module.report_type) return '';
+  const before = floor.report_limits[module.report_type] ?? 1;
+  const after = value.report_limits[module.report_type] ?? 1;
+  return after > before ? `+${after - before}` : '';
+}
+
 /** One module tile: name, what it counts, the switch and (when on) the report stepper. */
-function ModuleTile({ module, value, onToggle, onSetReports }: {
+function ModuleTile({ module, value, onToggle, onSetReports, floor, caption, pricing, captionIsCurrent = false }: {
   module: LicensableModule; value: PlanLimits;
   onToggle: (module: LicensableModule) => void; onSetReports: (reportType: string, count: number) => void;
+  floor: PlanLimits | null; caption?: string; pricing?: ModulePrices;
+  captionIsCurrent?: boolean;   // the caption is the client's current plan (blue)
 }) {
   const on = value.modules.includes(module.key);
   const reports = module.report_type ? value.report_limits[module.report_type] ?? 1 : 0;
+  // An upgrade can't remove a module the current key has.
+  const locked = !!floor && floor.modules.includes(module.key);
+  const mark = changeMark(module, value, floor);
+  const toggle = () => { if (!locked) onToggle(module); };
+  const accessOnly = pricing ? 'Access only — one flat price' : 'Access only — no report count';
+  const unit = countWord(module.key);           // "report" / "validation"
+  const units = countWord(module.key, 2);
+  const unitsTitle = units.charAt(0).toUpperCase() + units.slice(1);
+  const reportCaption = caption ?? (pricing ? `${unitsTitle} × price per ${unit}` : `${unitsTitle} per plan period`);
+  const price = pricing?.prices[module.key] ?? 0;
+  const setPrice = (next: number) => pricing?.onPriceChange(module.key, next);
   return (
-    <div role="switch" aria-checked={on} aria-label={module.label} tabIndex={0}
-      className={`sub-mt ${on ? 'on' : ''}`} onClick={() => onToggle(module)}
-      onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggle(module); } }}>
+    <div role="switch" aria-checked={on} aria-label={module.label} aria-disabled={locked || undefined} tabIndex={0}
+      title={locked ? "An upgrade can't remove a module" : undefined}
+      className={`sub-mt ${on ? 'on' : ''} ${locked ? 'locked' : ''}`} onClick={toggle}
+      onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } }}>
       <div className="sub-mt-ic">{MODULE_ICON[module.key] ?? module.label.slice(0, 1)}</div>
       <div className="sub-mt-tx">
-        <div className="sub-mt-nm">{module.label}</div>
-        <div className="sub-mt-cap">{module.report_type ? 'Reports per plan period' : 'Access only — no report count'}</div>
+        <div className="sub-mt-nm">
+          {module.label}
+          {mark && <span className={`sub-mark ${mark === 'New' ? 'new' : 'up'}`}>{mark}</span>}
+        </div>
+        <div className={`sub-mt-cap ${captionIsCurrent && caption ? 'cur' : ''}`}>{module.report_type ? reportCaption : caption ?? accessOnly}</div>
       </div>
       {!on && <span className="sub-mt-cap">Off</span>}
       {on && module.report_type && (
         <>
-          <Stepper value={reports} label={`${module.label} reports`} onChange={(n) => onSetReports(module.report_type as string, n)} />
-          <span className="sub-step-l">reports</span>
+          <Stepper value={reports} label={`${module.label} ${units}`} min={lowestReports(module, floor)}
+            onChange={(n) => onSetReports(module.report_type as string, n)} />
+          {pricing
+            ? <PriceBox value={price} onChange={setPrice} label={`${module.label} price per ${unit}`} before="× $" after={`/ ${unit}`} />
+            : <span className="sub-step-l">{units}</span>}
         </>
       )}
-      {on && !module.report_type && <span className="sub-incl">Included</span>}
+      {on && !module.report_type && pricing && <PriceBox value={price} onChange={setPrice} label={`${module.label} price`} after="flat" />}
+      {on && !module.report_type && !pricing && <span className="sub-incl">Included</span>}
       <div className="sub-sw" />
     </div>
   );
@@ -180,9 +259,10 @@ function closedGroupSummary(modules: LicensableModule[], value: PlanLimits): str
 }
 
 /** A group heading that opens and closes, then its tiles (open) or one summary line (closed). */
-function ModuleGroup({ name, modules, open, onOpenChange, value, onToggle, onSetReports }: {
+function ModuleGroup({ name, modules, open, onOpenChange, value, onToggle, onSetReports, floor, captions, pricing, captionsAreCurrent }: {
   name: string; modules: LicensableModule[]; open: boolean; onOpenChange: (open: boolean) => void;
   value: PlanLimits; onToggle: (module: LicensableModule) => void; onSetReports: (reportType: string, count: number) => void;
+  floor: PlanLimits | null; captions?: Record<string, string>; pricing?: ModulePrices; captionsAreCurrent: boolean;
 }) {
   const onCount = modules.filter((module) => value.modules.includes(module.key)).length;
   return (
@@ -194,20 +274,30 @@ function ModuleGroup({ name, modules, open, onOpenChange, value, onToggle, onSet
         <span className={`sub-grp-c ${onCount > 0 ? 'some' : ''}`}>{onCount} of {modules.length} on</span>
       </button>
       {open && modules.map((module) => (
-        <ModuleTile key={module.key} module={module} value={value} onToggle={onToggle} onSetReports={onSetReports} />
+        <ModuleTile key={module.key} module={module} value={value} onToggle={onToggle} onSetReports={onSetReports}
+          floor={floor} caption={captions?.[module.key]} pricing={pricing} captionIsCurrent={captionsAreCurrent} />
       ))}
-      {!open && <div className="sub-grp-sum">{closedGroupSummary(modules, value)}</div>}
+      {!open &&<div className="sub-grp-sum">{closedGroupSummary(modules, value)}</div>}
     </>
   );
 }
 
-export function ModulesCard({ value, onChange, catalogue }: {
+export function ModulesCard({ value, onChange, catalogue, floor = null, captions, subtitle, pricing, openWith = [] }: {
   value: PlanLimits; onChange: (next: PlanLimits) => void; catalogue: LicensableModule[];
+  // A caption per module in place of the usual one — key page: "Used 3 this period";
+  // quote offers: "Current: 2 reports". Key page: the current key (upgrade), the line under the title.
+  floor?: PlanLimits | null; captions?: Record<string, string>; subtitle?: string;
+  // Quote offers: a price box on each module that's switched on.
+  pricing?: ModulePrices;
+  // Quote offers: the client's current modules, so their groups start open and
+  // the "Current: 2 reports" captions (shown in blue) can be seen even with nothing switched on.
+  openWith?: string[];
 }) {
   // Decided once, when the card first shows (the editor waits for the plan to
   // load first). Not remembered between visits, and switching modules on or off
   // never opens or closes a group by itself.
-  const [openGroups, setOpenGroups] = useState<string[]>(() => groupsWithModulesOn(value, catalogue));
+  const [openGroups, setOpenGroups] = useState<string[]>(
+    () => groupsWithModulesOn({ ...value, modules: [...value.modules, ...openWith] }, catalogue));
 
   const setGroupOpen = (name: string, open: boolean) => {
     setOpenGroups(open ? [...openGroups, name] : openGroups.filter((g) => g !== name));
@@ -234,7 +324,7 @@ export function ModulesCard({ value, onChange, catalogue }: {
         <div className="sub-ec-ic">▦</div>
         <div>
           <div className="sub-ec-t">Modules</div>
-          <div className="sub-ec-s">Switch a module on · reports start at 1 (never 0 or unlimited)</div>
+          <div className="sub-ec-s">{subtitle ?? 'Switch a module on · reports start at 1 (never 0 or unlimited)'}</div>
         </div>
         <span className="sub-ec-count">{value.modules.length} of {catalogue.length} on</span>
       </div>
@@ -245,12 +335,14 @@ export function ModulesCard({ value, onChange, catalogue }: {
           return (
             <ModuleGroup key={group.name} name={group.name} modules={modules}
               open={openGroups.includes(group.name)} onOpenChange={(open) => setGroupOpen(group.name, open)}
-              value={value} onToggle={toggle} onSetReports={setReports} />
+              value={value} onToggle={toggle} onSetReports={setReports} floor={floor} captions={captions} pricing={pricing}
+              captionsAreCurrent={openWith.length > 0} />
           );
         })}
         {modulesWithoutGroup(catalogue).length > 0 && <div className="sub-grp-gap" />}
         {modulesWithoutGroup(catalogue).map((module) => (
-          <ModuleTile key={module.key} module={module} value={value} onToggle={toggle} onSetReports={setReports} />
+          <ModuleTile key={module.key} module={module} value={value} onToggle={toggle} onSetReports={setReports}
+            floor={floor} caption={captions?.[module.key]} pricing={pricing} captionIsCurrent={openWith.length > 0} />
         ))}
       </div>
     </div>
@@ -259,7 +351,33 @@ export function ModulesCard({ value, onChange, catalogue }: {
 
 // ── Users ───────────────────────────────────────────────────────────
 
-export function UsersCard({ value, onChange }: { value: PlanLimits; onChange: (next: PlanLimits) => void }) {
+/** Quote offers: one price for a whole card, and what to do when it changes. */
+type CardPrice = { price: number; onPriceChange: (price: number) => void };
+
+/** The small grey "current 2" next to a number: what the client's current plan has. */
+function CurrentHint({ count }: { count?: number }) {
+  if (count === undefined) return null;
+  return <em className="sub-cur">current {count}</em>;
+}
+
+export function UsersCard({ value, onChange, floor, cardPrice, current }: {
+  value: PlanLimits; onChange: (next: PlanLimits) => void;
+  // Key page only: − n + steppers instead of boxes, never below the current key (null = from 0).
+  floor?: PlanLimits | null;
+  // Quote offers: one price for all the card's users (the admin is free).
+  cardPrice?: CardPrice;
+  // Quote offers: the client's current plan, shown as "current 2" next to each number.
+  current?: Pick<PlanLimits, 'max_pms' | 'max_ir_users'>;
+}) {
+  const useSteppers = floor !== undefined;
+  const numberField = (label: string, field: 'max_pms' | 'max_ir_users') => {
+    if (useSteppers) {
+      return <Stepper value={value[field]} label={label} min={floor ? floor[field] : 0}
+        onChange={(n) => onChange({ ...value, [field]: n })} />;
+    }
+    return <input className="inp sub-num" aria-label={label} inputMode="numeric" value={value[field]}
+      onChange={(e) => onChange({ ...value, [field]: readWholeNumber(e.target.value, 0) })} />;
+  };
   return (
     <div className="card sub-ec">
       <div className="sub-ec-h">
@@ -271,15 +389,19 @@ export function UsersCard({ value, onChange }: { value: PlanLimits; onChange: (n
       </div>
       <div className="sub-prow"><span>Admin</span><span className="sub-lock">🔒 1 · included</span></div>
       <div className="sub-prow">
-        <span>Project managers (PMs)</span>
-        <input className="inp sub-num" aria-label="Project managers (PMs)" inputMode="numeric" value={value.max_pms}
-          onChange={(e) => onChange({ ...value, max_pms: readWholeNumber(e.target.value, 0) })} />
+        <span>Project managers (PMs)<CurrentHint count={current?.max_pms} /></span>
+        {numberField('Project managers (PMs)', 'max_pms')}
       </div>
       <div className="sub-prow">
-        <span>IR users</span>
-        <input className="inp sub-num" aria-label="IR users" inputMode="numeric" value={value.max_ir_users}
-          onChange={(e) => onChange({ ...value, max_ir_users: readWholeNumber(e.target.value, 0) })} />
+        <span>IR users<CurrentHint count={current?.max_ir_users} /></span>
+        {numberField('IR users', 'max_ir_users')}
       </div>
+      {cardPrice && (
+        <div className="sub-tot sub-card-price">
+          <span>Price for <b>{value.max_pms + value.max_ir_users} users</b></span>
+          <PriceBox value={cardPrice.price} onChange={cardPrice.onPriceChange} label="Price for the users" />
+        </div>
+      )}
     </div>
   );
 }
@@ -296,12 +418,22 @@ export function resizeDepartments(sizes: number[], count: number): number[] {
   return next;
 }
 
-export function DepartmentsCard({ value, onChange, flex = true }: {
+export function DepartmentsCard({ value, onChange, flex = true, floor = null, cardPrice, current }: {
   value: PlanLimits; onChange: (next: PlanLimits) => void; flex?: boolean;
+  // Key page, upgrade: the current key. Departments can't go below its number,
+  // and all department users together can't go below its total.
+  floor?: PlanLimits | null;
+  // Quote offers: one price for all the departments, their HODs and users.
+  cardPrice?: CardPrice;
+  // Quote offers: the client's current plan's department sizes ("current 4", "current 3").
+  current?: number[];
 }) {
   const sizes = value.department_sizes;
+  const fewestDepartments = floor ? floor.department_sizes.length : 0;
+  const usersBefore = floor ? departmentUsersTotal(floor) : 0;
+  const tooFewUsers = !!floor && departmentUsersTotal(value) < usersBefore;
   const setCount = (text: string) => {
-    const count = Math.min(MAX_DEPARTMENTS, readWholeNumber(text, 0));
+    const count = Math.min(MAX_DEPARTMENTS, Math.max(fewestDepartments, readWholeNumber(text, 0)));
     onChange({ ...value, department_sizes: resizeDepartments(sizes, count) });
   };
   const setSize = (index: number, users: number) => {
@@ -320,7 +452,7 @@ export function DepartmentsCard({ value, onChange, flex = true }: {
         </div>
       </div>
       <div className="sub-prow">
-        <span>Number of departments</span>
+        <span>Number of departments<CurrentHint count={current?.length} /></span>
         <input className="inp sub-num" aria-label="Number of departments" inputMode="numeric" value={sizes.length}
           onChange={(e) => setCount(e.target.value)} />
       </div>
@@ -328,7 +460,7 @@ export function DepartmentsCard({ value, onChange, flex = true }: {
         {sizes.length === 0 && <span style={{ fontSize: 11, color: '#9BA3C4' }}>No departments.</span>}
         {sizes.map((users, index) => (
           <div key={index} className="sub-dc">
-            <div className="sub-dc-n">Department {index + 1}</div>
+            <div className="sub-dc-n">Department {index + 1}<CurrentHint count={current?.[index]} /></div>
             <div className="sub-dc-r"><span>HOD</span><b>1</b></div>
             <div className="sub-dc-r">
               <span>Users</span>
@@ -337,7 +469,19 @@ export function DepartmentsCard({ value, onChange, flex = true }: {
           </div>
         ))}
       </div>
-      <div className="sub-tot">Total <b>{peopleTotal(value)} people</b></div>
+      {cardPrice ? (
+        <div className="sub-tot sub-card-price">
+          <span>Price for <b>{sizes.length} departments</b> · {sizes.length} HODs · {departmentUsersTotal(value)} users</span>
+          <PriceBox value={cardPrice.price} onChange={cardPrice.onPriceChange} label="Price for the departments" />
+        </div>
+      ) : (
+        <div className="sub-tot">
+          Total <b>{peopleTotal(value)} people</b>
+          {floor && <span style={{ color: '#9BA3C4' }}> · now {peopleTotal(floor)}</span>}
+        </div>
+      )}
+      {tooFewUsers && <div className="sub-err" role="alert">An upgrade can&apos;t lower department users ({usersBefore} now).</div>}
+      {floor && !tooFewUsers && <div className="sub-hint">An upgrade can add departments and users, never remove them.</div>}
     </div>
   );
 }

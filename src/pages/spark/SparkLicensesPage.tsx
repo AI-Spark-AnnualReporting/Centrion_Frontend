@@ -11,9 +11,9 @@
 // Plan: Centriton/.claude/plans/company-licensing.md (round 17)
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { LicenseKeyForm } from '@/components/spark/LicenseKeyForm';
 import { UnlockCodeForm } from '@/components/spark/UnlockCodeForm';
 import { PasswordResetCodeForm } from '@/components/spark/PasswordResetCodeForm';
 import { sparkLicenses } from '@/lib/api';
@@ -94,7 +94,6 @@ export function pageOf<T>(list: T[], page: number, size: number): { items: T[]; 
 }
 
 type Panel =
-  | { kind: 'key'; row: SparkLicenseRow }
   | { kind: 'unlock'; row: SparkLicenseRow }
   | { kind: 'reset'; row: SparkLicenseRow }
   | null;
@@ -278,7 +277,7 @@ export default function SparkLicensesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [panel, setPanel] = useState<Panel>(null);
-  const [opening, setOpening] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const load = useCallback(() => {
     setLoading(true);
@@ -314,18 +313,8 @@ export default function SparkLicensesPage() {
     };
   }, [load]);
 
-  // The form needs exact usage ("3 used"), which only the detail call counts.
-  const openKeyForm = async (row: SparkLicenseRow) => {
-    setOpening(row.company_id);
-    try {
-      const detail = await sparkLicenses.get(row.company_id);
-      setPanel({ kind: 'key', row: { ...row, ...detail } });
-    } catch {
-      setPanel({ kind: 'key', row });
-    } finally {
-      setOpening(null);
-    }
-  };
+  // The key page loads the client's current key itself.
+  const openKeyPage = (row: SparkLicenseRow) => navigate(`/spark/licenses/${encodeURIComponent(row.company_id)}/key`);
 
   const closePanel = (reload: boolean) => {
     setPanel(null);
@@ -353,8 +342,8 @@ export default function SparkLicensesPage() {
   const groupCount = (key: Group) => tabRows.filter((row) => groupOf(row) === key).length;
 
   const keyButton = (row: SparkLicenseRow, label?: string) => (
-    <button type="button" className="btn bp bsm" disabled={opening === row.company_id} onClick={() => openKeyForm(row)}>
-      {opening === row.company_id ? 'Opening…' : label ?? (row.status === 'none' ? 'Generate key' : 'New key')}
+    <button type="button" className="btn bp bsm" onClick={() => openKeyPage(row)}>
+      {label ?? (row.status === 'none' ? 'Generate key' : 'New key')}
     </button>
   );
 
@@ -399,12 +388,9 @@ export default function SparkLicensesPage() {
           aria-describedby={undefined}
         >
           <DialogTitle className="sr-only">
-            {panel?.kind === 'key' ? 'License key' : panel?.kind === 'unlock' ? 'Unlock code' : 'Password reset code'}
+            {panel?.kind === 'unlock' ? 'Unlock code' : 'Password reset code'}
             {panel ? ` — ${panel.row.company_name}` : ''}
           </DialogTitle>
-          {panel?.kind === 'key' && (
-            <LicenseKeyForm row={panel.row} modules={modules} onDone={() => closePanel(true)} onCancel={() => closePanel(false)} />
-          )}
           {panel?.kind === 'unlock' && <UnlockCodeForm row={panel.row} onDone={() => closePanel(true)} />}
           {panel?.kind === 'reset' && <PasswordResetCodeForm row={panel.row} onDone={() => closePanel(false)} />}
         </DialogContent>
@@ -447,7 +433,7 @@ export default function SparkLicensesPage() {
             <thead>
               <tr style={{ textAlign: 'left', color: '#5A6080', fontSize: 11 }}>
                 <th style={CELL}>{tab === 'on_prem' ? 'Client' : 'Company'}</th>
-                {tab === 'on_prem' && <th style={CELL}>Server ID</th>}
+                {tab === 'on_prem' && <th style={CELL}>Client ID</th>}
                 <th style={CELL}>Status</th>
                 <th style={CELL}>Users</th>
                 <th style={CELL}>Modules</th>

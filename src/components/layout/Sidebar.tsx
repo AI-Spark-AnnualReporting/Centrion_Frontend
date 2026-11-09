@@ -175,19 +175,55 @@ const icons: Record<string, JSX.Element> = {
   question: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 5.5C5 4.7 5.7 4 6.5 4S8 4.7 8 5.5c0 .6-.3 1.1-.8 1.4L7 7.5M7 9.5v.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   user: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1.5 12c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   calchk: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1v2M9 1v2M1 5.5h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M4.6 8.6l1.3 1.3 2.5-2.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  building: <svg viewBox="0 0 13 13" fill="none"><path d="M2 12V2h5.5v10M7.5 5h3.5v7" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M3.8 4h1.9M3.8 6.3h1.9M3.8 8.6h1.9M9.2 7.5h.01M9.2 9.5h.01M1 12h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+  server: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1.5" width="11" height="4" rx="1" stroke="currentColor" strokeWidth="1.2"/><rect x="1" y="7.5" width="11" height="4" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M3.5 3.5h.01M3.5 9.5h.01M6.5 3.5h3M6.5 9.5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  plans: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="3" width="8" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1h7a1 1 0 0 1 1 1v8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M3 6h4M3 8.3h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   brand: <svg viewBox="0 0 13 13" fill="none"><path d="M2.5 11.5V3a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 10.5 3v8.5l-4-2.2-4 2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><circle cx="6.5" cy="5" r="1.4" stroke="currentColor" strokeWidth="1.2"/></svg>,
 };
 
-// Spark admin console (`spark_admin`): the overview, its three lists and
-// Licenses. Labels come from SECTIONS so the sidebar can't disagree with the
-// page it opens.
-const SPARK_ADMIN_CHILDREN = [
-  ...SECTION_KEYS.map((key) => ({ key, label: SECTIONS[key].title, path: `/spark/${key}` })),
-  // Cloud companies subscribe to a plan; on-premises clients still get keys.
-  { key: 'subscriptions', label: 'Subscriptions', path: '/spark/subscriptions' },
-  { key: 'quotes', label: 'Quotes', path: '/spark/quotes' },
-  { key: 'licenses', label: 'Licenses (on-premises)', path: '/spark/licenses' },
+// Spark admin console (`spark_admin`), as the approved mockup
+// (spark-sidebar-mockup.html, version A): every item has an icon in a soft
+// tile; the overview and its three lists, then the money-and-access pages in
+// their own "Licensing & billing" group — on-premises keys first, then the
+// cloud plans, then the Enterprise requests. List labels come from SECTIONS so
+// the sidebar can't disagree with the page it opens.
+type SparkMenuItem = { key: string; label: string; hint?: string; path: string; icon: string };
+
+const SECTION_ICONS: Record<string, string> = { companies: 'building', reports: 'doc', users: 'people' };
+
+const SPARK_MAIN_ITEMS: SparkMenuItem[] = [
+  { key: 'overview', label: 'Overview', path: '/spark', icon: 'grid' },
+  ...SECTION_KEYS.map((key) => ({ key, label: SECTIONS[key].title, path: `/spark/${key}`, icon: SECTION_ICONS[key] ?? 'doc' })),
 ];
+
+const SPARK_LICENSING_ITEMS: SparkMenuItem[] = [
+  { key: 'licenses', label: 'Licenses', hint: 'On-premises keys', path: '/spark/licenses', icon: 'server' },
+  { key: 'subscriptions', label: 'Subscriptions', hint: 'Cloud plans', path: '/spark/subscriptions', icon: 'plans' },
+  { key: 'quotes', label: 'Quotes', hint: 'Enterprise requests', path: '/spark/quotes', icon: 'chat' },
+];
+
+/** Overview only on its own page; a list or page also on its sub-pages (e.g. the plan editor). */
+function isSparkItemActive(item: SparkMenuItem, pathname: string): boolean {
+  if (item.key === 'overview') return pathname === item.path;
+  return pathname === item.path || pathname.startsWith(`${item.path}/`);
+}
+
+/** One Spark menu item: the icon in a soft tile, the name (and a short hint
+ *  under it), and for Quotes the number of open requests. */
+function SparkMenuButton({ item, active, onClick, count = 0 }: {
+  item: SparkMenuItem; active: boolean; onClick: () => void; count?: number;
+}) {
+  return (
+    <button type="button" className={`sb-item sb-spark-item ${active ? 'act' : ''}`} aria-current={active ? 'page' : undefined} onClick={onClick}>
+      <span className="sb-spark-ic">{icons[item.icon]}</span>
+      <span className="sb-spark-label">
+        {item.label}
+        {item.hint && <small>{item.hint}</small>}
+      </span>
+      {count > 0 && <span className="sb-spark-count" aria-label={`${count} open`}>{count}</span>}
+    </button>
+  );
+}
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -226,7 +262,7 @@ export function Sidebar() {
     if (!isSparkAdmin) return;
     let cancelled = false;
     sparkPlans
-      .list({ quotes_only: true, status: 'draft', limit: 1 })
+      .list({ quotes_only: true, offer_state: 'received', limit: 1 })   // new quotes only
       .then((page) => { if (!cancelled) setOpenQuotes(page.total); })
       .catch(() => undefined);
     return () => { cancelled = true; };
@@ -366,25 +402,16 @@ export function Sidebar() {
       {isSparkAdmin && (
         <div>
           <div className="sb-sec">Spark</div>
-          <button
-            className={`sb-item ${location.pathname === '/spark' ? 'act' : ''}`}
-            onClick={() => handleNav('/spark')}
-          >
-            {icons['grid']}
-            Overview
-          </button>
-          {SPARK_ADMIN_CHILDREN.map((child) => (
-            <button
-              key={child.key}
-              className={`sb-item ${location.pathname === child.path || location.pathname.startsWith(`${child.path}/`) ? 'act' : ''}`}
-              style={{ paddingLeft: 34, fontSize: 11 }}
-              onClick={() => handleNav(child.path)}
-            >
-              {child.key === 'licenses' ? icons['shield'] : null}
-              {child.label}
-              {child.key === 'quotes' && openQuotes > 0 && <span className="sb-badge am">{openQuotes}</span>}
-            </button>
+          {SPARK_MAIN_ITEMS.map((item) => (
+            <SparkMenuButton key={item.key} item={item} active={isSparkItemActive(item, location.pathname)} onClick={() => handleNav(item.path)} />
           ))}
+          <div className="sb-sec">Licensing &amp; billing</div>
+          <div className="sb-spark-group">
+            {SPARK_LICENSING_ITEMS.map((item) => (
+              <SparkMenuButton key={item.key} item={item} active={isSparkItemActive(item, location.pathname)} onClick={() => handleNav(item.path)}
+                count={item.key === 'quotes' ? openQuotes : 0} />
+            ))}
+          </div>
         </div>
       )}
       {!sparkAwaitingCompany && !isSparkAdmin && NAV_ITEMS.map((section) => (

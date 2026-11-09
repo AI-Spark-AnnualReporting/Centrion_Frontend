@@ -3,7 +3,7 @@
 // Shows the license, users used / max, and reports used / limit per type.
 // Cloud: the license is the subscription — its plan name and a "Change plan"
 // button to the Subscription page.
-// On-premises: the Server ID to send to Spark, and boxes to paste the license
+// On-premises: the Client ID to send to Spark, and boxes to paste the license
 // key and unlock codes Spark sends back. The admin can never make a key.
 //
 // Plan: Centriton/.claude/plans/company-licensing.md
@@ -143,6 +143,14 @@ export function LicenseCard() {
       {data.status !== 'none' && data.starts_at && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10, marginTop: 14 }}>
           <Usage label="Users" used={data.seats_used} limit={data.max_seats} />
+          {data.people && (
+            <>
+              <Usage label="PMs" used={data.people.pms.used} limit={data.people.pms.max} />
+              <Usage label="IR users" used={data.people.ir_users.used} limit={data.people.ir_users.max} />
+              <Usage label="Departments" used={data.people.departments.used} limit={data.people.departments.max} />
+              <Usage label="Department users" used={data.people.department_users.used} limit={data.people.department_users.max} />
+            </>
+          )}
           {Object.entries(data.reports_used).map(([type, used]) => (
             <Usage key={type} label={reportLabel(data, type)} used={used} limit={data.report_limits[type] ?? null} />
           ))}
@@ -161,7 +169,7 @@ export function LicenseCard() {
 
       {onPrem && (
         <>
-          {data.server_id && <CopyBox label="Server ID — send this to Centriyon" value={data.server_id} />}
+          {data.server_id && <CopyBox label="Client ID — send this to Centriyon" value={data.server_id} />}
           <PasteBox id={LICENSE_KEY_BOX_ID} label="License key from Centriyon" button="Activate license" onSubmit={async (key) => afterChange(await license.activate(key))} />
           {data.status === 'locked' && (
             <PasteBox id={LICENSE_UNLOCK_BOX_ID} label="Unlock code from Centriyon" button="Unlock" onSubmit={async (code) => afterChange(await license.unlock(code))} />

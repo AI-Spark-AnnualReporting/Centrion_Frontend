@@ -1,4 +1,4 @@
-// A long value (license key, unlock code, Server ID) shown once with a Copy
+// A long value (license key, unlock code, Client ID) shown once with a Copy
 // button, so Spark staff can send it to the client without retyping it.
 
 import { useState } from 'react';

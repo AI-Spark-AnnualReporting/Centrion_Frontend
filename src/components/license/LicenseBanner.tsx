@@ -126,7 +126,7 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
             tone: 'amber', icon: '!',
             title: "This server doesn't have a license yet.",
             text: (
-              <>Send your Server ID <span style={MONO}>{data.server_id ?? ''}</span> to Centriyon, then paste the license key you get back.</>
+              <>Send your Client ID <span style={MONO}>{data.server_id ?? ''}</span> to Centriyon, then paste the license key you get back.</>
             ),
             rows: [{ label: 'Switched off until licensed:', items: allModuleLabels(data) }],
             actions: data.server_id ? ['copyServer', 'pasteKey'] : ['pasteKey'],
@@ -309,7 +309,7 @@ export function LicenseBanner() {
 
   const LABEL: Record<Action, string> = {
     open: 'Open license',
-    copyServer: 'Copy Server ID',
+    copyServer: 'Copy Client ID',
     copyLock: 'Copy Lock ID',
     pasteKey: 'Paste key',
     pasteUnlock: 'Paste unlock code',
@@ -389,6 +389,7 @@ const CREATE_PAGES: Record<string, { kind: string; name: string; plural: string 
   '/annual-report': { kind: 'annual', name: 'Annual Report', plural: 'Annual Reports' },
   '/board-report': { kind: 'board_report', name: 'Board Report', plural: 'Board Reports' },
   '/annual-report-validator': { kind: 'report_validation', name: 'Annual Report Validator', plural: 'validations' },
+  '/compliance': { kind: 'compliance_validation', name: 'Compliance Validation', plural: 'compliance validations' },
   '/admin-console/users': { kind: 'seats', name: 'Users', plural: 'users' },
 };
 

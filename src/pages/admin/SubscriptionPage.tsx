@@ -56,6 +56,7 @@ function newKey(): string {
 // The popup Buy now opens when a plan doesn't fit as it is.
 type PlanCheck = { kind: 'too_small' | 'lost_modules'; plan: PlanForClient } | null;
 
+
 export default function SubscriptionPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -149,6 +150,7 @@ export default function SubscriptionPage() {
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Subscription</div>
           <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>{currentPlanText(current)}</div>
+
         </div>
         <DurationTabs value={duration} onChange={setDuration} />
       </div>

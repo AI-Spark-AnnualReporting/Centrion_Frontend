@@ -64,6 +64,7 @@ function PageLoader() {
 // shorter prefix added later would otherwise silently shadow a longer one.
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
+  ['/spark/licenses', 'Licenses'],
   ['/annual-report', 'Annual Report'],
   ['/earnings', 'Earnings Report'],
   ['/communications', 'Communication Hub'],
@@ -123,6 +124,7 @@ export function AppLayout() {
   // plan cards and editor, and the client's Subscription page. The launcher
   // (client side) floats over the cards' band instead of getting clearance.
   const fitPage = /^\/spark\/subscriptions(\/new|\/[^/]+\/edit)?$/.test(location.pathname)
+    || /^\/spark\/licenses\/[^/]+\/key$/.test(location.pathname)
     || location.pathname === '/admin-console/subscription';
   // The directory is company-less, and the chatbot answers questions about a
   // company's data — on this page it would be a dead button (it routes to /ai,

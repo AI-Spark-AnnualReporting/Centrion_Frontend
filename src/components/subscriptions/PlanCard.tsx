@@ -8,10 +8,10 @@
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LicensableModule } from '@/types/license';
 import type { Duration, PlanContact, PlanLimits } from '@/types/subscription';
-import { departmentsSummary, durationPer } from './PlanFields';
+import { countWord, departmentsSummary, durationPer, usersSummary } from './PlanFields';
 import './subscriptions.css';
 
 // Tab colours by position (blue, teal, indigo); Enterprise is dark.
@@ -63,7 +63,7 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
           return (
             <li key={module.key} className={on ? '' : 'off'}>
               <span className={`sub-ic ${on ? 'sub-ok' : 'sub-no'}`}>{on ? '✓' : '✗'}</span>
-              <span>{module.label}{on && reports != null ? ` · ${reports} report${reports === 1 ? '' : 's'}` : ''}</span>
+              <span>{module.label}{on && reports != null ? ` · ${reports} ${countWord(module.key, reports)}` : ''}</span>
             </li>
           );
         })}
@@ -72,7 +72,7 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
         <li><span className="sub-ic sub-ok">✓</span><span>1 admin (included)</span></li>
         <li>
           <span className="sub-ic sub-ok">✓</span>
-          <span>{plan.max_pms} project manager{plan.max_pms === 1 ? '' : 's'} · {plan.max_ir_users} IR user{plan.max_ir_users === 1 ? '' : 's'}</span>
+          <span>{usersSummary(plan)}</span>
         </li>
         <li><span className="sub-ic sub-ok">✓</span><span>{departmentsSummary(plan)}</span></li>
       </ul>
@@ -82,7 +82,14 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
 
 // ── One row of cards that never makes the page scroll ───────────────
 
-const CARD_STEP = 256;   // a card's width + the gap between cards
+const CARD_STEP = 256;   // a card's width + the gap between cards (used before cards are measured)
+const AUTO_SLIDE_MS = 4000;          // the slider moves one card this often
+const QUIET_AFTER_USE_MS = 8000;     // ...but waits this long after someone moves it
+
+/** True when the computer asks for less motion (then there's no auto-slide). */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 // Room the strip keeps above (the cards' name tabs) and below (Edit / Delete bar).
 const STRIP_PADDING_Y = 22 + 28;
@@ -104,26 +111,54 @@ export function fitScale(available: number, tallestCard: number): number {
   return Math.min(1, available / (tallestCard + STRIP_PADDING_Y));
 }
 
-/** The cards in one row, all the same height. They never scroll up or down:
- *  on a short screen they shrink to fit — or, past 15 modules, stay full size
- *  and their module lists scroll inside. If they don't all fit across, the row
- *  scrolls sideways inside the band, with ‹ › arrows. The page never grows. */
-export function CardStrip({ children }: { children: ReactNode }) {
+/** The cards in one row, all the same height, as a slider (approved mockup:
+ *  plan-slider-mockup.html). They never scroll up or down: on a short screen
+ *  they shrink to fit — or, past 15 modules, stay full size and their module
+ *  lists scroll inside. More cards than fit across: ‹ › arrows on the edges,
+ *  a soft fade where more are hidden, dots under them (click to jump), and the
+ *  row always comes to rest on a card (scroll snap). It also slides itself
+ *  every 4 seconds, back to the first card after the last, but pauses while
+ *  the mouse is over it, for 8 seconds after someone moves it, while `paused`
+ *  (e.g. a card is selected), and when the computer asks for reduced motion. */
+export function CardStrip({ children, paused = false }: { children: ReactNode; paused?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLDivElement>(null);
   const [canGoLeft, setCanGoLeft] = useState(false);
   const [canGoRight, setCanGoRight] = useState(false);
+  const [activeCard, setActiveCard] = useState(0);
+  const [cardsInView, setCardsInView] = useState(0);
+  const [hovering, setHovering] = useState(false);
+  const [quiet, setQuiet] = useState(false);
+  const [cycle, setCycle] = useState(0);            // restarts the active dot's fill
+  const quietTimer = useRef<number | undefined>(undefined);
+  const cardCount = Children.count(children);
+  const overflow = canGoLeft || canGoRight;
 
-  const updateArrows = useCallback(() => {
-    const el = strip.current;
-    if (!el) return;
-    setCanGoLeft(el.scrollLeft > 4);
-    setCanGoRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  /** Arrows, the active dot and how many cards are in view, from where the row is. */
+  const updatePosition = useCallback(() => {
+    const box = strip.current;
+    const cards = row.current;
+    if (!box || !cards) return;
+    setCanGoLeft(box.scrollLeft > 4);
+    setCanGoRight(box.scrollLeft + box.clientWidth < box.scrollWidth - 4);
+    const view = box.getBoundingClientRect();
+    const middle = view.left + view.width / 2;
+    let nearest = 0;
+    let nearestDistance = Infinity;
+    let inView = 0;
+    (Array.from(cards.children) as HTMLElement[]).forEach((card, index) => {
+      const rect = card.getBoundingClientRect();
+      const distance = Math.abs(rect.left + rect.width / 2 - middle);
+      if (distance < nearestDistance) { nearestDistance = distance; nearest = index; }
+      if (rect.right > view.left + 4 && rect.left < view.right - 4) inView += 1;
+    });
+    setActiveCard(nearest);
+    setCardsInView(inView);
   }, []);
 
   // CSS zoom on the inner row shrinks the cards and their layout together (so
-  // the sideways scroll width stays right). The outer strip keeps the band's
-  // height, which is what the cards must fit. Measured at full size, then set.
+  // the sideways scroll width stays right). The outer strip keeps the space
+  // above the dots, which is what the cards must fit. Measured at full size, then set.
   const fitHeight = useCallback(() => {
     const box = strip.current;
     const cards = row.current;
@@ -147,24 +182,85 @@ export function CardStrip({ children }: { children: ReactNode }) {
     } else {
       cards.style.zoom = String(fitScale(there, tallest));
     }
-    updateArrows();
-  }, [updateArrows]);
+    updatePosition();
+  }, [updatePosition]);
 
+  // The dots appearing or going away changes the height there is, so fit again.
   useEffect(() => {
     fitHeight();
     window.addEventListener('resize', fitHeight);
     return () => window.removeEventListener('resize', fitHeight);
-  }, [fitHeight, children]);
+  }, [fitHeight, children, overflow]);
 
-  const move = (direction: number) => strip.current?.scrollBy({ left: direction * CARD_STEP, behavior: 'smooth' });
+  /** The real distance from one card to the next (cards may be zoomed). */
+  const cardStep = (): number => {
+    const cards = row.current?.children;
+    if (!cards || cards.length < 2) return CARD_STEP;
+    return cards[1].getBoundingClientRect().left - cards[0].getBoundingClientRect().left;
+  };
+
+  const slideBy = (direction: number) => strip.current?.scrollBy?.({ left: direction * cardStep(), behavior: 'smooth' });
+
+  const slideTo = (index: number) => {
+    const box = strip.current;
+    const card = row.current?.children[index] as HTMLElement | undefined;
+    if (!box || !card) return;
+    const view = box.getBoundingClientRect();
+    const rect = card.getBoundingClientRect();
+    const left = box.scrollLeft + rect.left - view.left - (view.width - rect.width) / 2;
+    box.scrollTo?.({ left, behavior: 'smooth' });
+  };
+
+  /** Someone moved the row: no auto-slide for the next 8 seconds. */
+  const markMoved = () => {
+    setQuiet(true);
+    window.clearTimeout(quietTimer.current);
+    quietTimer.current = window.setTimeout(() => setQuiet(false), QUIET_AFTER_USE_MS);
+  };
+  useEffect(() => () => window.clearTimeout(quietTimer.current), []);
+
+  const autoSlideOff = paused || hovering || quiet || !overflow || prefersReducedMotion();
+  useEffect(() => {
+    if (autoSlideOff) return;
+    const timer = window.setTimeout(() => {
+      const box = strip.current;
+      if (box && box.scrollLeft + box.clientWidth >= box.scrollWidth - 4) box.scrollTo?.({ left: 0, behavior: 'smooth' });
+      else slideBy(1);
+      setCycle((n) => n + 1);
+    }, AUTO_SLIDE_MS);
+    return () => window.clearTimeout(timer);
+  // slideBy reads the refs at the moment it runs; cycle restarts the wait after each slide.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSlideOff, cycle]);
+
+  const dots = [];
+  for (let index = 0; index < cardCount; index++) {
+    const on = index === activeCard;
+    dots.push(
+      <button key={`${index}-${on ? cycle : 0}`} type="button" aria-label={`Go to plan ${index + 1}`} aria-current={on || undefined}
+        className={`sub-dot ${on ? 'on' : ''} ${on && !autoSlideOff ? 'timing' : ''}`}
+        onClick={() => { markMoved(); slideTo(index); }} />,
+    );
+  }
 
   return (
-    <div className="sub-strip-wrap">
-      {canGoLeft && <button type="button" className="sub-arrow left" aria-label="Earlier plans" onClick={() => move(-1)}>‹</button>}
-      <div ref={strip} className="sub-strip" onScroll={updateArrows}>
-        <div ref={row} className="sub-strip-row">{children}</div>
+    <div className="sub-strip-wrap" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
+      <div className="sub-strip-view">
+        <button type="button" className={`sub-arrow left ${canGoLeft ? '' : 'hide'}`} aria-label="Previous plans"
+          tabIndex={canGoLeft ? 0 : -1} onClick={() => { markMoved(); slideBy(-1); }}>‹</button>
+        <div ref={strip} className={`sub-strip ${canGoLeft ? 'fade-left' : ''} ${canGoRight ? 'fade-right' : ''}`} onScroll={updatePosition}
+          onWheel={markMoved} onTouchStart={markMoved}>
+          <div ref={row} className="sub-strip-row">{children}</div>
+        </div>
+        <button type="button" className={`sub-arrow right ${canGoRight ? '' : 'hide'}`} aria-label="More plans"
+          tabIndex={canGoRight ? 0 : -1} onClick={() => { markMoved(); slideBy(1); }}>›</button>
       </div>
-      {canGoRight && <button type="button" className="sub-arrow right" aria-label="More plans" onClick={() => move(1)}>›</button>}
+      {overflow && (
+        <>
+          <div className="sub-dots">{dots}</div>
+          <div className="sub-strip-count">{cardsInView} of {cardCount} plans in view</div>
+        </>
+      )}
     </div>
   );
 }
@@ -197,7 +293,7 @@ export function DurationTabs({ value, onChange }: { value: DurationFilter; onCha
   );
 }
 
-export function PlanCard({ plan, position, catalogue, flag, button, selected, current, onClick, actions }: {
+export function PlanCard({ plan, position, catalogue, flag, button, selected, current, onClick, actions, enterpriseTab }: {
   plan: CardPlan;
   position: number;              // picks the tab colour
   catalogue: LicensableModule[];
@@ -207,9 +303,10 @@ export function PlanCard({ plan, position, catalogue, flag, button, selected, cu
   current?: boolean;
   onClick?: () => void;          // spark_admin: select the card
   actions?: ReactNode;           // spark_admin: Edit / Delete, when selected
+  enterpriseTab?: boolean;       // an Enterprise offer (a priced quote): the dark Enterprise tab
 }) {
   const enterprise = plan.duration === 'enterprise';
-  const colour = enterprise ? ENTERPRISE_COLOUR : TAB_COLOURS[position % TAB_COLOURS.length];
+  const colour = enterprise || enterpriseTab ? ENTERPRISE_COLOUR : TAB_COLOURS[position % TAB_COLOURS.length];
   const classes = ['sub-pc'];
   if (onClick) classes.push('clickable');
   if (selected) classes.push('sel');

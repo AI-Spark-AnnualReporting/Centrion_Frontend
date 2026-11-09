@@ -31,6 +31,47 @@ export interface PlanContact {
   phone?: string | null;
 }
 
+// The prices spark_admin types on a quote's offer: a price per report (report
+// modules) or one flat price (other modules), one price for the Users card
+// and one for the Departments card. Plan: Centriton/.claude/plans/quote-offers.md
+export interface OfferPrices {
+  modules: Record<string, number>;
+  users: number;
+  departments: number;
+}
+
+// Where a quote's offer is: received (not emailed yet), sent (emailed, waiting
+// for the client's reply), approved (Spark published it for them), deleted.
+// Only Spark approves; the client answers by replying to the email.
+/** A quote's company's active plan, shown as small "Current" words on the offer page. */
+export interface CurrentPlan {
+  name: string;
+  ends_at: string;
+  modules: string[];
+  report_limits: Record<string, number>;
+  max_pms: number;
+  max_ir_users: number;
+  department_sizes: number[];
+}
+
+// "changed" = edited after it was emailed: send it again before Approve.
+export type OfferState = "received" | "sent" | "changed" | "approved" | "deleted";
+
+export interface PlanOffer {
+  sent_at?: string | null;
+  sent_by?: string | null;
+  sent_to?: string[];
+  changed_at?: string | null;         // edited after it was emailed; cleared by sending again
+  approved_at?: string | null;
+  approved_by?: string | null;
+}
+
+// POST /spark/subscription-plans/{id}/offers: who gets the email, and its subject.
+export interface OfferEmailForm {
+  recipients: string[];               // 1 to 5 addresses
+  subject: string;
+}
+
 // What a client admin sent with Contact us on the Enterprise card.
 export interface PlanQuote {
   name: string;
@@ -40,6 +81,8 @@ export interface PlanQuote {
   asked_by: string;
   asked_by_name: string | null;
   asked_at: string;
+  prices?: OfferPrices;               // set once spark_admin types prices
+  offer?: PlanOffer;                  // set once the offer is emailed or approved
 }
 
 // spark_admin's view of a plan.
@@ -57,6 +100,9 @@ export interface SubscriptionPlan extends PlanLimits {
   updated_at: string;
   company_name?: string | null;       // list, and one plan
   subscriber_count?: number;          // list only: companies on it now
+  offer_state?: OfferState;           // quote plans only
+  company_admin_emails?: string[];    // one quote plan: the Send offer popup starts with these
+  current_plan?: CurrentPlan | null;  // one open quote plan: the company's active plan (null = none)
 }
 
 export interface PlanPage {
@@ -102,7 +148,7 @@ export interface PlanForm extends PlanLimits {
   status?: PlanStatus;
 }
 
-export type PlanChanges = Partial<PlanForm> & { apply_to?: "everyone" | "new" };
+export type PlanChanges = Partial<PlanForm> & { apply_to?: "everyone" | "new"; offer_prices?: OfferPrices };
 
 export interface PlanSubscriber {
   id: string;

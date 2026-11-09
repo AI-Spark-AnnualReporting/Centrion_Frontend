@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { license } from '@/lib/api';
-import type { LicenseStatus, LicenseUsage } from '@/types/license';
+import type { LicenseStatus, LicenseUsage, PeopleUsage } from '@/types/license';
 
 export type RoomTone = 'ok' | 'low' | 'full';
 
@@ -46,7 +46,27 @@ const NOT_ACTIVE_REASON: Record<Exclude<LicenseStatus, 'active'>, string> = {
   not_started: "Your license hasn't started yet.",
 };
 
-/** The users limit. */
+const PEOPLE_NAMES: [keyof PeopleUsage, string][] = [
+  ['pms', 'PMs'], ['ir_users', 'IR users'], ['departments', 'Departments'], ['department_users', 'Department users'],
+];
+
+/** "PMs 1/2 · IR users 1/1 · Departments 2/3 · Department users 5/8" — room per limit. */
+export function peopleHint(people: PeopleUsage): string {
+  const parts: string[] = [];
+  for (const [key, name] of PEOPLE_NAMES) {
+    const { used, max } = people[key];
+    if (max != null) parts.push(`${name} ${used}/${max}`);
+  }
+  return parts.join(' · ');
+}
+
+/** True when any one people limit (PMs, IR users, …) is full. */
+function anyPeopleLimitFull(people: PeopleUsage): boolean {
+  return PEOPLE_NAMES.some(([key]) => people[key].max != null && people[key].used >= (people[key].max as number));
+}
+
+/** The users limit. The total decides whether Invite is blocked; with the
+ *  per-role numbers the tag shows each one (the server refuses a full role). */
 function seatsRoom(usage: LicenseUsage): Omit<LicenseRoom, 'askAdmin'> {
   const seats = usage.seats;
   if (!seats || seats.max == null) return NOTHING;
@@ -60,6 +80,10 @@ function seatsRoom(usage: LicenseUsage): Omit<LicenseRoom, 'askAdmin'> {
     };
   }
   const left = max - used;
+  if (usage.people) {
+    const tone = left <= FEW_SEATS_LEFT || anyPeopleLimitFull(usage.people) ? 'low' : 'ok';
+    return { blocked: false, tone, canRequest, reason: '', hint: peopleHint(usage.people) };
+  }
   if (left <= FEW_SEATS_LEFT) {
     return {
       blocked: false, tone: 'low', canRequest, reason: '',

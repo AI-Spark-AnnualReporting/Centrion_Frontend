@@ -1,9 +1,12 @@
-// spark_admin → Licenses (on-premises): the key form opens as a popup that only
-// ✕ (or Cancel / Esc) closes — a click outside it must not lose a half-filled
-// form. Cloud companies aren't listed: they subscribe to a plan instead.
+// spark_admin → Licenses (on-premises): Generate key / New key open the key
+// page; the small codes (unlock, password reset) open as a popup that only
+// ✕ (or Cancel / Esc) closes. Cloud companies aren't listed: they subscribe
+// to a plan instead.
 
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render as renderBare, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import type { ReactElement } from "react";
 
 const ROW = {
   company_id: "cmp_1", company_name: "Aramco", deployment: "on_prem", status: "none",
@@ -36,18 +39,40 @@ vi.mock("@/lib/api", () => ({
 
 const { default: SparkLicensesPage } = await import("@/pages/spark/SparkLicensesPage");
 
-async function openKeyForm() {
+function Where() {
+  return <div data-testid="where">{useLocation().pathname}</div>;
+}
+
+/** The page inside a router (it navigates to the key page). */
+function render(page: ReactElement) {
+  return renderBare(
+    <MemoryRouter initialEntries={["/spark/licenses"]}>
+      <Routes>
+        <Route path="/spark/licenses" element={page} />
+        <Route path="*" element={<Where />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+async function openUnlockPopup() {
   render(<SparkLicensesPage />);
-  // Opens on "Active"; the unlicensed company is under "All" / "No license".
-  fireEvent.click(await screen.findByRole("button", { name: /^All/ }));
-  fireEvent.click((await screen.findAllByRole("button", { name: "Generate key" }))[0]);
+  fireEvent.click((await screen.findAllByRole("button", { name: "Unlock code" }))[0]);
   return screen.findByRole("dialog");
 }
 
-describe("Licenses key form popup", () => {
-  it("opens as a popup and a click outside does not close it", async () => {
-    const dialog = await openKeyForm();
-    expect(dialog).toHaveTextContent("Board Report");
+describe("Licenses key page and popups", () => {
+  it("Generate key opens the client's key page", async () => {
+    render(<SparkLicensesPage />);
+    // Opens on "Active"; the unlicensed company is under "All" / "No license".
+    fireEvent.click(await screen.findByRole("button", { name: /^All/ }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Generate key" }))[0]);
+    expect(await screen.findByTestId("where")).toHaveTextContent("/spark/licenses/cmp_1/key");
+  });
+
+  it("a code popup isn't closed by a click outside it", async () => {
+    const dialog = await openUnlockPopup();
+    expect(dialog).toHaveTextContent("Unlock code");
 
     // Radix closes on pointerdown outside the content, unless we stop it.
     fireEvent.pointerDown(document.body);
@@ -58,7 +83,7 @@ describe("Licenses key form popup", () => {
   });
 
   it("closes with ✕", async () => {
-    await openKeyForm();
+    await openUnlockPopup();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -66,7 +91,7 @@ describe("Licenses key form popup", () => {
 
 
 describe("Licenses (on-premises)", () => {
-  it("lists on-premises clients with their Server ID and modules, and the add-client box", async () => {
+  it("lists on-premises clients with their Client ID and modules, and the add-client box", async () => {
     render(<SparkLicensesPage />);
     expect(await screen.findByText("BUPA")).toBeInTheDocument();
     expect(screen.getByText("Annual · 3")).toBeInTheDocument();
@@ -102,7 +127,7 @@ describe("Licenses page reloads by itself", () => {
     expect(await screen.findByText("Ministry B")).toBeInTheDocument();
 
     // A popup is open: no reload under it.
-    fireEvent.click(screen.getAllByRole("button", { name: "New key" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Unlock code" })[0]);
     await screen.findByRole("dialog");
     await act(async () => { vi.advanceTimersByTime(30_000); });
     expect(list).toHaveBeenCalledTimes(2);

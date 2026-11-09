@@ -37,20 +37,55 @@
 .sub-co-table tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 #4040C8; font-weight: 700; }
 /* The shared Pager is wide; in the 300px table its parts wrap. */
 .sub-co > div:last-child { flex-wrap: wrap; row-gap: 6px; }
-/* One row of cards; more than fit → it scrolls sideways (and, on a very short
-   screen, down) inside the band only. Auto margins centre a row that fits. */
-.sub-strip-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
-/* Sideways only — never up/down: CardStrip shrinks the cards to fit the height. */
-.sub-strip { overflow-x: auto; overflow-y: hidden; flex: 1; min-height: 0; scroll-behavior: smooth; scrollbar-width: thin; }
-/* max-content + auto margins: centred when it fits, scrolls when it doesn't. */
-/* align-items: stretch → every card is as tall as the tallest one. */
+/* The plan slider (approved mockup: plan-slider-mockup.html): one row of
+   cards inside the band, the dots under it. Never scrolls up or down —
+   CardStrip shrinks the cards to fit the height instead. */
+.sub-strip-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sub-strip-view { position: relative; flex: 1; min-height: 0; display: flex; }
+/* Sideways only, no visible scrollbar, and it always comes to rest on a card. */
+.sub-strip { overflow-x: auto; overflow-y: hidden; flex: 1; min-height: 0; scroll-behavior: smooth;
+  scroll-snap-type: x mandatory; scrollbar-width: none; }
+.sub-strip::-webkit-scrollbar { display: none; }
+/* max-content + auto margins: centred when it fits, slides when it doesn't.
+   align-items: stretch → every card is as tall as the tallest one. The side
+   padding keeps the first and last card clear of the arrows. */
 .sub-strip-row { display: flex; flex-wrap: nowrap; gap: 20px; width: max-content; margin: 0 auto;
-  padding: 22px 8px 28px; align-items: stretch; }
-.sub-strip-row > .sub-pc { flex: none; }
-.sub-arrow { position: absolute; top: 120px; z-index: 2; width: 32px; height: 32px; border-radius: 50%; border: none;
-  background: #fff; color: #3535B5; font-size: 18px; font-weight: 800; cursor: pointer; box-shadow: 0 6px 16px rgba(26,29,46,.25); }
-.sub-arrow:hover { background: #F5F5FF; }
-.sub-arrow.left { left: 0; } .sub-arrow.right { right: 0; }
+  padding: 22px 44px 28px; align-items: stretch; }
+.sub-strip-row > .sub-pc { flex: none; scroll-snap-align: center; }
+/* Arrows on the band's edges, only when there's more to see that way. */
+.sub-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 38px; height: 38px; border-radius: 50%;
+  border: none; background: #fff; color: #3535B5; font-size: 20px; font-weight: 800; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(26,29,46,.22); transition: opacity .2s, transform .15s; }
+.sub-arrow:hover { transform: translateY(-50%) scale(1.08); }
+.sub-arrow.left { left: 4px; } .sub-arrow.right { right: 4px; }
+.sub-arrow.hide { opacity: 0; pointer-events: none; }
+/* A soft fade at an edge where more cards are hidden: the cards themselves
+   fade out (a mask), so the blue band or the page shows through — no colour
+   is painted on top (a painted fade looked like a white haze). */
+.sub-strip.fade-right {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 56px), transparent);
+}
+.sub-strip.fade-left {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 56px);
+  mask-image: linear-gradient(90deg, transparent, #000 56px);
+}
+.sub-strip.fade-left.fade-right {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+/* Dots: the active one is long; it fills up while the next auto-slide waits. */
+.sub-dots { display: flex; justify-content: center; gap: 7px; padding-top: 4px; }
+.sub-dot { width: 8px; height: 8px; border-radius: 8px; border: none; padding: 0; background: #C9CBF5; cursor: pointer; transition: width .2s, background .2s; }
+.sub-dot.on { width: 22px; background: #4040C8; }
+.sub-dot.on.timing { background: linear-gradient(90deg, #4040C8 50%, #A5A8EE 50%); background-size: 200% 100%;
+  background-position: 100% 0; animation: sub-dot-fill 4s linear forwards; }
+@keyframes sub-dot-fill { to { background-position: 0 0; } }
+.sub-strip-count { text-align: center; font-size: 11px; color: #9BA3C4; font-weight: 600; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .sub-strip { scroll-behavior: auto; }
+  .sub-dot.on.timing { animation: none; background: #4040C8; }
+}
 .sub-pc { width: 236px; background: #fff; border-radius: 20px 20px 40px 40px; box-shadow: 0 12px 30px rgba(26,29,46,.14);
   position: relative; padding: 30px 18px 12px; display: flex; flex-direction: column; align-items: center; transition: .15s; }
 .sub-pc.clickable { cursor: pointer; }
@@ -109,6 +144,12 @@
 .sub-mt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1.5px solid #ECEEF8; border-radius: 12px;
   background: #fff; cursor: pointer; transition: .15s; min-height: 44px; }
 .sub-mt:hover { border-color: #C9CBF5; }
+/* Keep each tile as tall as its text (the list scrolls instead of squeezing
+   tiles, which made long names spill over the next tile). */
+.sub-mods > * { flex-shrink: 0; }
+/* Focus ring for the keyboard only, in the app's blue (a mouse click showed the browser's black ring). */
+.sub-mt:focus { outline: none; }
+.sub-mt:focus-visible { outline: 2px solid #4040C8; outline-offset: 2px; }
 .sub-mt.on { border-color: #4040C8; background: linear-gradient(90deg, #F5F5FF, #fff); box-shadow: 0 3px 10px rgba(64,64,200,.08); }
 .sub-mt-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800;
   flex: none; background: #F2F3FA; color: #9BA3C4; transition: .15s; }
@@ -280,3 +321,68 @@
   .sub-co-wrap { grid-template-columns: 1fr; }
   .sub-co-pay { position: static; }
 }
+
+/* ── License key page (Spark → Licenses → Generate / Upgrade / Renew) ── */
+.sub-key-top { display: grid; grid-template-columns: 1.1fr .8fr .9fr 1.3fr auto; gap: 12px; align-items: end; padding: 14px 18px; }
+.sub-key-top label, .sub-key-top .sub-key-f { font-size: 11px; font-weight: 700; color: #5A6080; display: block; }
+.sub-key-top label .inp { margin-top: 5px; }
+.sub-key-who { display: flex; flex-direction: column; gap: 4px; }
+.sub-key-who b { font-size: 15px; font-weight: 800; color: #1A1D2E; }
+.sub-key-chip { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; width: fit-content; }
+.sub-key-chip.generate { background: #EEEEFF; color: #4040C8; }
+.sub-key-chip.upgrade { background: rgba(20,184,166,.14); color: #0F766E; }
+.sub-key-chip.renew { background: rgba(245,158,11,.14); color: #B45309; }
+.sub-key-fixed { margin-top: 5px; padding: 9px 12px; border-radius: 10px; background: #F2F3FA; font-size: 12px; font-weight: 700; color: #1A1D2E; }
+.sub-key-cards { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; flex: 1; min-height: 0; }
+.sub-err { font-size: 10.5px; color: #DC2626; margin-top: 4px; font-weight: 600; }
+.sub-hint { font-size: 10.5px; color: #9BA3C4; margin-top: 6px; line-height: 1.5; }
+.sub-mark { font-size: 9.5px; font-weight: 800; border-radius: 20px; padding: 2px 7px; margin-left: 6px; }
+.sub-mark.up { background: rgba(34,197,94,.14); color: #16A34A; }
+.sub-mark.new { background: #EEEEFF; color: #4040C8; }
+.sub-mt.locked { cursor: default; }
+.sub-mt.locked .sub-sw { opacity: .55; }
+.sub-key-copy { margin-top: 12px; border: 1.5px dashed #C9CBF5; border-radius: 12px; padding: 10px 12px; font-family: 'DM Mono', monospace;
+  font-size: 11px; color: #3535B5; word-break: break-all; background: #FAFAFF; max-height: 120px; overflow-y: auto; }
+
+/* ── Quote offers (Spark prices a quote; the client's admin approves) ── */
+.sub-price { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: #9BA3C4; font-weight: 600; margin-left: 6px; white-space: nowrap; }
+.sub-price input { width: 70px; padding: 5px 8px; border: 1.5px solid #DCDDF5; border-radius: 9px; font-family: 'DM Mono', monospace;
+  font-size: 12px; font-weight: 700; text-align: right; outline: none; color: #1A1D2E; background: #fff; }
+.sub-price input:focus { border-color: #4040C8; }
+.sub-card-price { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.sub-card-price .sub-price { color: #5A6080; }
+.sub-brk { width: 100%; margin-top: 6px; padding: 0 4px; }
+.sub-brk-t { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #9BA3C4; margin: 0 0 4px; }
+.sub-ln { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #ECEEF8; color: #3A3F55; }
+.sub-ln span:last-child { font-family: 'DM Mono', monospace; font-weight: 700; white-space: nowrap; }
+.sub-ln.total { border-bottom: none; font-weight: 800; font-size: 12px; }
+.sub-ln.total span:last-child { color: #3535B5; }
+.sub-ln-free { color: #16A34A; }
+.sub-offer-acts { display: flex; gap: 8px; width: 100%; }
+.sub-offer-acts .btn { flex: 1; padding: 9px; }
+.btn.sub-approve { background: #16A34A; color: #fff; box-shadow: 0 4px 14px rgba(22,163,74,.25); border: none; }
+.btn.sub-approve:hover { background: #15803D; }
+.sub-ed-prev .sub-brk { margin-top: 18px; }
+
+/* Send offer popup: To chips, subject, email preview */
+.sub-mail-label { display: block; font-size: 11px; font-weight: 700; color: #5A6080; margin-top: 12px; margin-bottom: 5px; }
+.sub-to-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1.5px solid #E2E4F0; border-radius: 10px; padding: 6px 8px; background: #fff; }
+.sub-to-row:focus-within { border-color: #4040C8; }
+.sub-to-row input { border: none; outline: none; flex: 1; min-width: 160px; font-family: inherit; font-size: 12px; padding: 4px; background: transparent; }
+.sub-mail-chip { display: inline-flex; align-items: center; gap: 6px; background: #EEEEFF; color: #3535B5; font-size: 11.5px; font-weight: 700; border-radius: 20px; padding: 4px 6px 4px 10px; }
+.sub-mail-chip.bad { background: #FEE2E2; color: #B91C1C; }
+.sub-mail-chip button { border: none; background: #fff; color: #5A6080; border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 10px; line-height: 18px; padding: 0; }
+.sub-mail-hint { font-size: 10.5px; color: #9BA3C4; margin-top: 4px; }
+.sub-mail-err { font-size: 10.5px; color: #DC2626; margin-top: 4px; font-weight: 600; }
+.sub-mail-preview { border: 1px solid #ECEEF8; border-radius: 12px; max-height: 260px; overflow-y: auto; }
+.sub-mail-hero { padding: 12px 16px; color: #fff; background: linear-gradient(135deg, #1A1D2E, #3535B5); }
+.sub-mail-hero small { display: block; font-size: 10px; font-weight: 800; letter-spacing: .1em; opacity: .7; }
+.sub-mail-hero b { display: block; font-size: 14px; margin-top: 4px; }
+.sub-mail-body { padding: 10px 16px 14px; font-size: 11.5px; line-height: 1.7; color: #3A3F55; }
+.sub-mail-reply { margin-top: 10px; background: #EEEEFF; color: #3535B5; border-radius: 10px; padding: 9px 11px; font-size: 11.5px; font-weight: 600; }
+
+
+/* Quote offers: "current 2" next to a number — what the client's current plan has. */
+.sub-cur { font-style: normal; font-size: 10.5px; font-weight: 700; color: #9BA3C4; margin-left: 6px; white-space: nowrap; }
+.sub-mt-cap.cur { color: #4040C8; font-weight: 700; }
+.sub-cur { color: #4040C8; }

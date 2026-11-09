@@ -32,6 +32,7 @@ import type {
   PlanPage,
   PlanStatus,
   PlanSubscriber,
+  OfferEmailForm,
   QuoteRequestForm,
   SubscriptionPlan,
 } from "@/types/subscription";
@@ -5439,6 +5440,7 @@ export interface PlanListQuery {
   kind?: PlanKind;                    // public = for every company, custom = for one
   company_id?: string;
   quotes_only?: boolean;
+  offer_state?: "received" | "sent";   // open quotes in that state
   page?: number;
   limit?: number;
   sort_by?: "name" | "price" | "created_at" | "updated_at";
@@ -5471,6 +5473,21 @@ export const sparkPlans = {
   remove: (planId: string) =>
     request<PlanDeleteResult>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
       method: "DELETE",
+      noActingCompany: true,
+    }),
+
+  // Email a quote's offer to the chosen addresses (the plan stays a draft).
+  sendOffer: (planId: string, body: OfferEmailForm) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/offers`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  // Approve a quote's plan: published for that company ("Made for you").
+  approveOffer: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/approvals`, {
+      method: "POST",
       noActingCompany: true,
     }),
 

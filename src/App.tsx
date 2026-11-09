@@ -62,6 +62,7 @@ const SparkLicensesPage = lazy(() => import("./pages/spark/SparkLicensesPage"));
 const SparkSubscriptionsPage = lazy(() => import("./pages/spark/SparkSubscriptionsPage"));
 const SparkQuotesPage = lazy(() => import("./pages/spark/SparkQuotesPage"));
 const SparkPlanEditorPage = lazy(() => import("./pages/spark/SparkPlanEditorPage"));
+const SparkLicenseKeyPage = lazy(() => import("./pages/spark/SparkLicenseKeyPage"));
 const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
 const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
@@ -188,6 +189,7 @@ const App = () => (
           <Route element={<ProtectedRoute requiredRole="spark_admin" />}>
             <Route path="/spark" element={<SparkDashboardPage />} />
             <Route path="/spark/licenses" element={<SparkLicensesPage />} />
+            <Route path="/spark/licenses/:companyId/key" element={<SparkLicenseKeyPage />} />
             <Route path="/spark/subscriptions" element={<SparkSubscriptionsPage />} />
             <Route path="/spark/subscriptions/new" element={<SparkPlanEditorPage />} />
             <Route path="/spark/subscriptions/:planId/edit" element={<SparkPlanEditorPage />} />

@@ -4,7 +4,7 @@
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 const refreshPermissions = vi.fn().mockResolvedValue(undefined);
@@ -14,18 +14,19 @@ vi.mock("@/context/AuthContext", () => ({
 const toast = vi.fn();
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 
-const sparkPlans = { get: vi.fn(), create: vi.fn(), update: vi.fn(), subscribers: vi.fn(), list: vi.fn(), remove: vi.fn(), companies: vi.fn() };
+const sparkPlans = { get: vi.fn(), create: vi.fn(), update: vi.fn(), subscribers: vi.fn(), list: vi.fn(), remove: vi.fn(), companies: vi.fn(), sendOffer: vi.fn(), approveOffer: vi.fn() };
 const subscriptions = { plans: vi.fn(), current: vi.fn(), startCheckout: vi.fn(), pay: vi.fn(), requestQuote: vi.fn() };
 vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions }));
 
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");
 const { peopleTotal, departmentUsersTotal, resizeDepartments } = await import("@/components/subscriptions/PlanFields");
-const { PlanCard, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
+const { CardStrip, PlanCard, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
 const { default: SparkQuotesPage } = await import("@/pages/spark/SparkQuotesPage");
 const { QuoteForm } = await import("@/components/subscriptions/QuoteForm");
 const { default: SubscriptionPage, orderPlans } = await import("@/pages/admin/SubscriptionPage");
 const { default: CheckoutPage } = await import("@/pages/admin/CheckoutPage");
+const { offerAddedUp } = await import("@/components/subscriptions/OfferBreakdown");
 
 const CATALOGUE = [
   { key: "quarterly_report", label: "Quarterly Report", report_type: "quarterly" },
@@ -152,20 +153,19 @@ describe("SparkSubscriptionsPage", () => {
     expect(screen.getByRole("tab", { name: /^Drafts\s*1$/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /^Custom plans\s*7$/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Archived/ })).not.toBeInTheDocument();
-    // Published asks for plans for every company, 3 at a time, cheapest first.
-    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "public", status: "published", limit: 3, page: 1 }));
+    // Published asks for all plans for every company (the slider shows them), cheapest first.
+    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "public", status: "published", limit: 100 }));
   });
 
-  it("pages the cards 3 at a time and sends the duration chip to the server with Enterprise", async () => {
-    sparkPlans.list.mockResolvedValue(page([GOLD, GOLD, GOLD].map((p, i) => ({ ...p, id: `p${i}`, name: `Plan ${i}` })), 5));
+  it("shows all the plans in the slider (no pager) and sends the duration chip to the server with Enterprise", async () => {
+    sparkPlans.list.mockResolvedValue(page([GOLD, GOLD, GOLD, GOLD, GOLD].map((p, i) => ({ ...p, id: `p${i}`, name: `Plan ${i}` })), 5));
     renderPage();
-    expect(await screen.findByText(/Showing/)).toHaveTextContent("Showing 1–3 of 5");
-    expect(screen.queryByText("Rows per page")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "2" }));
-    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 3 })));
+    expect(await screen.findByRole("button", { name: "Plan 4" })).toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next ›" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Quarterly" }));
     await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(
-      expect.objectContaining({ duration: "quarterly", with_enterprise: true, page: 1 })));
+      expect.objectContaining({ duration: "quarterly", with_enterprise: true, limit: 100 })));
   });
 
   it("Delete asks first, then says what the server did", async () => {
@@ -194,11 +194,44 @@ describe("SparkSubscriptionsPage", () => {
     expect(await screen.findByText("Custom plans for Aramco")).toBeInTheDocument();
     const card = await screen.findByRole("button", { name: "Custom plan for Aramco" });
     expect(within(card).getByText("Draft")).toBeInTheDocument();
-    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "custom", company_id: "cmp_a", limit: 3 }));
+    expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ kind: "custom", company_id: "cmp_a", limit: 100 }));
 
     fireEvent.click(screen.getByText("BUPA"));
-    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ company_id: "cmp_b", page: 1 })));
+    await waitFor(() => expect(sparkPlans.list).toHaveBeenCalledWith(expect.objectContaining({ company_id: "cmp_b" })));
     expect(screen.getByText("Custom plans for BUPA")).toBeInTheDocument();
+  });
+
+  it("Custom plans: an emailed offer's card says Offer sent and can be approved; a new quote's can't", async () => {
+    const quote = { name: "Aizaz", phone: "+966 55 123 4567", message: "x", enterprise_plan_id: "plan_ent",
+                    asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "" };
+    const emailed = { ...GOLD, id: "plan_sent", name: "Offer for Aramco", company_id: "cmp_a", company_name: "Aramco",
+                      status: "draft" as const, offer_state: "sent" as const,
+                      quote: { ...quote, offer: { sent_at: "2026-11-09T10:00:00Z", sent_to: ["admin@aramco.test"] } } };
+    const fresh = { ...GOLD, id: "plan_new", name: "New quote for Aramco", company_id: "cmp_a", company_name: "Aramco",
+                    status: "draft" as const, offer_state: "received" as const, quote };
+    sparkPlans.list.mockImplementation((query: { limit?: number; company_id?: string }) =>
+      Promise.resolve(query.limit === 1 ? page([], 2) : query.company_id === "cmp_a" ? page([emailed, fresh]) : page([GOLD])));
+    sparkPlans.companies.mockResolvedValue({
+      items: [{ company_id: "cmp_a", company_name: "Aramco", plans: 2, published: 0, drafts: 2 }], total: 1, page: 1, limit: 10,
+    });
+    sparkPlans.approveOffer.mockResolvedValue({});
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: /Custom plans/ }));
+
+    const newCard = await screen.findByRole("button", { name: "New quote for Aramco" });
+    expect(within(newCard).getByText("Draft")).toBeInTheDocument();
+    fireEvent.click(newCard);
+    expect(screen.queryByRole("button", { name: "✓ Approve" })).not.toBeInTheDocument();   // not emailed yet
+
+    const sentCard = screen.getByRole("button", { name: "Offer for Aramco" });
+    expect(within(sentCard).getByText("Offer sent")).toBeInTheDocument();
+    fireEvent.click(sentCard);
+    fireEvent.click(screen.getByRole("button", { name: "✓ Approve" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Approve this plan for Aramco?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(sparkPlans.approveOffer).toHaveBeenCalledWith("plan_sent"));
+    expect(toast).toHaveBeenCalledWith({ title: "Approved — Aramco can subscribe now" });
   });
 
   it("Custom plans with no company yet says where they come from", async () => {
@@ -348,20 +381,161 @@ describe("SparkPlanEditorPage", () => {
     expect(sparkPlans.update.mock.calls[0][1].apply_to).toBeUndefined();
   });
 
-  it("publishes a quote for that company", async () => {
-    sparkPlans.get.mockResolvedValue({
-      ...GOLD, status: "draft", price: null, company_id: "c1", company_name: "Aramco",
-      quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "Two subsidiaries", enterprise_plan_id: "plan_ent",
-               asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "" },
-    });
+  const QUOTE = {
+    ...GOLD, status: "draft" as const, price: null, company_id: "c1", company_name: "Aramco", offer_state: "received" as const,
+    quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "Two subsidiaries", enterprise_plan_id: "plan_ent",
+             asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "" },
+  };
+
+  it("opens a quote as an Enterprise offer: prices add up, the offer is emailed, the page stays", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, company_admin_emails: ["admin@aramco.test"] });
     sparkPlans.update.mockResolvedValue({});
+    sparkPlans.sendOffer.mockResolvedValue({ ...QUOTE, quote: { ...QUOTE.quote, offer: { sent_at: "2026-11-09T10:00:00Z", sent_to: ["admin@aramco.test", "cfo@aramco.test"] } } });
     renderEditor("/spark/subscriptions/plan_gold/edit");
     expect(await screen.findByText(/Their request:/)).toHaveTextContent("Their request: Aizaz · +966 55 123 4567 — “Two subsidiaries”");
-    fireEvent.change(screen.getByLabelText(/Price \(USD\)/), { target: { value: "30000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Publish for Aramco" }));
-    await waitFor(() => expect(sparkPlans.update).toHaveBeenCalledWith("plan_gold",
-      expect.objectContaining({ status: "published", price: 30000 })));
-    expect(toast).toHaveBeenCalledWith({ title: "Published — Aramco can subscribe now" });
+    expect(screen.getByRole("option", { name: "Enterprise · 1 year" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
+
+    // Quarterly: 4 reports × $500; Users $300; Departments $200 → $2,500.
+    fireEvent.change(screen.getByLabelText("Quarterly Report price per report"), { target: { value: "500" } });
+    fireEvent.change(screen.getByLabelText("Price for the users"), { target: { value: "300" } });
+    fireEvent.change(screen.getByLabelText("Price for the departments"), { target: { value: "200" } });
+    expect(screen.getByLabelText(/Price \(USD\)/)).toHaveValue("2500");
+
+    // The popup starts with the company's admin; a second email can be added.
+    fireEvent.click(screen.getByRole("button", { name: "✉ Send offer" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("admin@aramco.test")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Reply to this email to accept the offer/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("To"), { target: { value: "cfo@aramco.test" } });
+    fireEvent.keyDown(within(dialog).getByLabelText("To"), { key: "Enter" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send offer" }));
+
+    await waitFor(() => expect(sparkPlans.sendOffer).toHaveBeenCalledWith("plan_gold", {
+      recipients: ["admin@aramco.test", "cfo@aramco.test"], subject: "Your Enterprise offer from Centriyon",
+    }));
+    expect(sparkPlans.update).toHaveBeenCalledWith("plan_gold", expect.objectContaining({
+      status: "draft", price: null, offer_prices: { modules: { quarterly_report: 500 }, users: 300, departments: 200 },
+    }));
+    expect(toast).toHaveBeenCalledWith({ title: "Offer emailed to admin@aramco.test, cfo@aramco.test" });
+    expect(await screen.findByText(/Offer sent 2026-11-09 to admin@aramco.test, cfo@aramco.test/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "✓ Approve for Aramco" })).toBeEnabled();   // appears once it's emailed
+  });
+
+  it("a save that fails while sending shows its error in the popup, and nothing is emailed", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, company_admin_emails: ["admin@aramco.test"] });
+    sparkPlans.update.mockRejectedValue(new Error("There's already a plan called Gold. Choose another name."));
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    fireEvent.click(await screen.findByRole("button", { name: "✉ Send offer" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send offer" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("There's already a plan called Gold. Choose another name.");
+    expect(sparkPlans.sendOffer).not.toHaveBeenCalled();
+  });
+
+  it("shows the client's current plan as small 'Current' words in the cards", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, current_plan: {
+      name: "QA Fit Plus", ends_at: "2027-11-08", modules: ["quarterly_report", "leadership"], report_limits: { quarterly: 2 },
+      max_pms: 2, max_ir_users: 6, department_sizes: [3, 3, 3, 3] } });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    expect(await screen.findByText(/Their request:/)).toHaveTextContent("Current plan: QA Fit Plus (ends 2027-11-08)");
+    expect(screen.getByRole("switch", { name: "Quarterly Report" })).toHaveTextContent("Current: 2 reports");
+    expect(screen.getByRole("switch", { name: "Leadership" })).toHaveTextContent("Current: included");
+    expect(screen.getByRole("switch", { name: "Earnings Report" })).not.toHaveTextContent("Current");   // not in their plan
+    expect(screen.getByText("Project managers (PMs)")).toHaveTextContent("current 2");
+    expect(screen.getByText("IR users", { selector: "span" })).toHaveTextContent("current 6");
+    expect(screen.getByText("Number of departments")).toHaveTextContent("current 4");
+    expect(screen.getByText("Department 1")).toHaveTextContent("current 3");
+  });
+
+  it("a new offer with nothing on still opens the group of a current module, so its 'Current' words show", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, modules: [], report_limits: {}, current_plan: {
+      name: "Standard", ends_at: "2027-02-08", modules: ["quarterly_report"], report_limits: { quarterly: 3 },
+      max_pms: 10, max_ir_users: 10, department_sizes: [1] } });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    const tile = await screen.findByRole("switch", { name: "Quarterly Report" });
+    expect(tile).toHaveAttribute("aria-checked", "false");          // still off: only shown, not switched on
+    expect(tile).toHaveTextContent("Current: 3 reports");
+    expect(within(tile).getByText("Current: 3 reports")).toHaveClass("cur");   // blue, so it stands out
+  });
+
+  it("no 'Current' words when the client has no plan", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, current_plan: null });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    expect(await screen.findByText(/Their request:/)).not.toHaveTextContent("Current plan");
+    expect(screen.queryByText(/current \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Current:/)).not.toBeInTheDocument();
+  });
+
+  it("a wrong email can't be sent", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, company_admin_emails: [] });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    fireEvent.click(await screen.findByRole("button", { name: "✉ Send offer" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Add at least one email.")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("To"), { target: { value: "not-an-email" } });
+    fireEvent.keyDown(within(dialog).getByLabelText("To"), { key: "Enter" });
+    expect(within(dialog).getByText("not-an-email isn't an email address.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Send offer" })).toBeDisabled();
+  });
+
+  it("Approve isn't there until the offer is emailed — only Send offer", async () => {
+    sparkPlans.get.mockResolvedValue(QUOTE);
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    expect(await screen.findByRole("button", { name: "✉ Send offer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "✓ Approve for Aramco" })).not.toBeInTheDocument();
+  });
+
+  it("Approve publishes an emailed offer for the company after a confirm", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, offer_state: "sent",
+      quote: { ...QUOTE.quote, offer: { sent_at: "2026-11-09T10:00:00Z", sent_to: ["admin@aramco.test"] } } });
+    sparkPlans.update.mockResolvedValue({});
+    sparkPlans.approveOffer.mockResolvedValue({});
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Approve for Aramco" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Approve this plan for Aramco?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(sparkPlans.approveOffer).toHaveBeenCalledWith("plan_gold"));
+    expect(toast).toHaveBeenCalledWith({ title: "Approved — Aramco can subscribe now" });
+  });
+
+  it("changing an emailed offer hides Approve until it's sent again", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, offer_state: "sent",
+      quote: { ...QUOTE.quote, offer: { sent_at: "2026-11-09T10:00:00Z", sent_to: ["admin@aramco.test"] } } });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    expect(await screen.findByRole("button", { name: "✓ Approve for Aramco" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Price for the users"), { target: { value: "999" } });
+    expect(screen.queryByRole("button", { name: "✓ Approve for Aramco" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Changed since you emailed it on 2026-11-09 — send the offer again/)).toBeInTheDocument();
+    // Typing the old number back = what the client saw: Approve is back.
+    fireEvent.change(screen.getByLabelText("Price for the users"), { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "✓ Approve for Aramco" })).toBeInTheDocument();
+  });
+
+  it("an offer saved with changes after sending opens without Approve", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, offer_state: "changed",
+      quote: { ...QUOTE.quote, offer: { sent_at: "2026-11-09T10:00:00Z", changed_at: "2026-11-09T11:00:00Z", sent_to: ["admin@aramco.test"] } } });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    expect(await screen.findByText(/send the offer again/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "✓ Approve for Aramco" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "✉ Send offer" })).toBeEnabled();
+  });
+
+  it("a typed total replaces the added-up one, and the preview shows both", async () => {
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, quote: { ...QUOTE.quote, prices: { modules: { quarterly_report: 500 }, users: 0, departments: 0 } } });
+    renderEditor("/spark/subscriptions/plan_gold/edit");
+    const price = await screen.findByLabelText(/Price \(USD\)/);
+    expect(price).toHaveValue("2000");
+    fireEvent.change(price, { target: { value: "1800" } });
+    expect(screen.getByText("Added up").nextSibling).toHaveTextContent("$2,000");
+    expect(screen.getByText(/^Your price/).nextSibling).toHaveTextContent("$1,800");
+  });
+
+  it("adds up reports × price per report, flat prices and the two cards", () => {
+    const limits = { ...LIMITS, modules: ["quarterly_report", "leadership"] };
+    const prices = { modules: { quarterly_report: 500, leadership: 1500, earnings_report: 99 }, users: 3000, departments: 4000 };
+    expect(offerAddedUp(limits, prices, CATALOGUE)).toBe(4 * 500 + 1500 + 3000 + 4000);
   });
 });
 
@@ -584,7 +758,7 @@ describe("QuoteForm (Contact us)", () => {
 });
 
 describe("SparkQuotesPage", () => {
-  it("lists each request's name, phone and message, with Make a plan", async () => {
+  it("lists each request's name, phone and message, with Make offer", async () => {
     sparkPlans.list.mockResolvedValue({
       items: [{ ...GOLD, id: "q1", status: "draft", company_id: "c1", company_name: "Aramco", modules: [],
                 quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "All modules please", enterprise_plan_id: "plan_ent",
@@ -601,9 +775,58 @@ describe("SparkQuotesPage", () => {
     );
     expect(await screen.findByText("+966 55 123 4567")).toBeInTheDocument();
     expect(screen.getByText("All modules please")).toBeInTheDocument();
-    expect(screen.getByText("Needs a plan", { selector: "span" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Make a plan" }));
+    expect(screen.getByText("Quote received", { selector: "span" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Make offer" }));
     expect(screen.getByTestId("where")).toHaveTextContent("/spark/subscriptions/q1/edit");
+  });
+
+  it("shows an emailed offer with who it went to, and approves it from the list", async () => {
+    sparkPlans.list.mockResolvedValue({
+      items: [{ ...GOLD, id: "q2", status: "draft", company_id: "c1", company_name: "Aramco", offer_state: "sent",
+                quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "All modules please", enterprise_plan_id: "plan_ent",
+                         asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "2026-11-04T10:00:00Z",
+                         offer: { sent_at: "2026-11-05T09:00:00Z", sent_to: ["admin@aramco.test"] } } }],
+      total: 1, page: 1, limit: 10, modules_catalogue: CATALOGUE,
+    });
+    sparkPlans.approveOffer.mockResolvedValue({});
+    render(<MemoryRouter><SparkQuotesPage /></MemoryRouter>);
+    expect(await screen.findByText("Offer sent", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText("Emailed 2026-11-05 to admin@aramco.test")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit offer" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "✓ Approve" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(sparkPlans.approveOffer).toHaveBeenCalledWith("q2"));
+    expect(toast).toHaveBeenCalledWith({ title: "Approved — Aramco can subscribe now" });
+  });
+
+  it("an offer changed since it was emailed says send again and can't be approved from the list", async () => {
+    sparkPlans.list.mockResolvedValue({
+      items: [{ ...GOLD, id: "q4", status: "draft", company_id: "c1", company_name: "Aramco", offer_state: "changed",
+                quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "x", enterprise_plan_id: "plan_ent",
+                         asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "2026-11-04T10:00:00Z",
+                         offer: { sent_at: "2026-11-05T09:00:00Z", changed_at: "2026-11-06T09:00:00Z", sent_to: ["admin@aramco.test"] } } }],
+      total: 1, page: 1, limit: 10, modules_catalogue: CATALOGUE,
+    });
+    render(<MemoryRouter><SparkQuotesPage /></MemoryRouter>);
+    expect(await screen.findByText("Changed — send again", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit offer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "✓ Approve" })).not.toBeInTheDocument();
+  });
+
+  it("deletes a quote after a confirm", async () => {
+    sparkPlans.list.mockResolvedValue({
+      items: [{ ...GOLD, id: "q3", status: "draft", company_id: "c1", company_name: "Aramco", offer_state: "received",
+                quote: { name: "Aizaz", phone: "+966 55 123 4567", message: "x", enterprise_plan_id: "plan_ent",
+                         asked_by: "usr_a", asked_by_name: "Aizaz", asked_at: "2026-11-04T10:00:00Z" } }],
+      total: 1, page: 1, limit: 10, modules_catalogue: CATALOGUE,
+    });
+    sparkPlans.remove.mockResolvedValue({ result: "deleted", companies_on_it: 0 });
+    render(<MemoryRouter><SparkQuotesPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    // A new quote has no offer for the client yet, so it can't be approved.
+    expect(screen.queryByRole("button", { name: "✓ Approve" })).not.toBeInTheDocument();
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(sparkPlans.remove).toHaveBeenCalledWith("q3"));
   });
 });
 
@@ -611,5 +834,128 @@ describe("module list past 15 modules", () => {
   it("scrolls inside the card: the list loses what the card is too tall, never below 120px", () => {
     expect(scrollingListHeight(500, 800, 600)).toBe(300);
     expect(scrollingListHeight(300, 900, 400)).toBe(120);
+  });
+});
+
+
+// ── The slider ───────────────────────────────────────────────────────
+
+describe("CardStrip (the plan slider)", () => {
+  // jsdom lays nothing out, so give the strip a size: 3 of 5 cards fit.
+  function fakeLayout() {
+    const sizes = { scrollWidth: 1280, clientWidth: 760, clientHeight: 600 };
+    const restore: (() => void)[] = [];
+    for (const [key, value] of Object.entries(sizes)) {
+      const before = Object.getOwnPropertyDescriptor(HTMLElement.prototype, key);
+      Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get() { return this.classList?.contains("sub-strip") ? value : 0; } });
+      // These sizes live on Element.prototype, so removing ours brings the real ones back.
+      restore.push(() => {
+        if (before) Object.defineProperty(HTMLElement.prototype, key, before);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+      });
+    }
+    const scrollBy = vi.fn();
+    const scrollTo = vi.fn();
+    Object.assign(HTMLElement.prototype, { scrollBy, scrollTo });
+    return { scrollBy, scrollTo, restore: () => restore.forEach((r) => r()) };
+  }
+
+  function strip(props: { paused?: boolean } = {}) {
+    return render(
+      <CardStrip {...props}>
+        {[0, 1, 2, 3, 4].map((i) => <div key={i} className="sub-pc">Card {i}</div>)}
+      </CardStrip>,
+    );
+  }
+
+  it("shows the next arrow and one dot per card when they don't all fit, and dots jump to a card", () => {
+    const layout = fakeLayout();
+    strip();
+    expect(screen.getByRole("button", { name: "More plans" })).not.toHaveClass("hide");
+    expect(screen.getByRole("button", { name: "Previous plans" })).toHaveClass("hide");   // at the start
+    expect(screen.getAllByRole("button", { name: /Go to plan/ })).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: "Go to plan 4" }));
+    expect(layout.scrollTo).toHaveBeenCalled();
+    layout.restore();
+  });
+
+  it("slides by itself every 4 seconds, but not while the mouse is over it or a card is selected", () => {
+    vi.useFakeTimers();
+    const layout = fakeLayout();
+    const { container, rerender } = strip();
+    act(() => { vi.advanceTimersByTime(4000); });
+    expect(layout.scrollBy).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseEnter(container.querySelector(".sub-strip-wrap") as HTMLElement);
+    act(() => { vi.advanceTimersByTime(8000); });
+    expect(layout.scrollBy).toHaveBeenCalledTimes(1);                 // hovering: still
+    fireEvent.mouseLeave(container.querySelector(".sub-strip-wrap") as HTMLElement);
+
+    rerender(<CardStrip paused>{[0, 1, 2, 3, 4].map((i) => <div key={i} className="sub-pc">Card {i}</div>)}</CardStrip>);
+    act(() => { vi.advanceTimersByTime(8000); });
+    expect(layout.scrollBy).toHaveBeenCalledTimes(1);                 // a card is selected: still
+    layout.restore();
+    vi.useRealTimers();
+  });
+
+  it("waits 8 seconds after someone moves it before sliding again", () => {
+    vi.useFakeTimers();
+    const layout = fakeLayout();
+    strip();
+    fireEvent.click(screen.getByRole("button", { name: "More plans" }));
+    expect(layout.scrollBy).toHaveBeenCalledTimes(1);                 // the click itself
+    act(() => { vi.advanceTimersByTime(7900); });
+    expect(layout.scrollBy).toHaveBeenCalledTimes(1);                 // still quiet
+    act(() => { vi.advanceTimersByTime(200); });                      // the 8 seconds are over...
+    act(() => { vi.advanceTimersByTime(4000); });                     // ...then one normal wait
+    expect(layout.scrollBy).toHaveBeenCalledTimes(2);
+    layout.restore();
+    vi.useRealTimers();
+  });
+
+  it("has no arrows, dots or auto-slide when every card fits", () => {
+    vi.useFakeTimers();
+    const scrollBy = vi.fn();
+    Object.assign(HTMLElement.prototype, { scrollBy });
+    strip();
+    expect(screen.queryByRole("button", { name: /Go to plan/ })).not.toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(8000); });
+    expect(scrollBy).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+});
+
+// ── Client: no offer card (only Spark decides) ───────────────────────
+
+describe("Subscription page — offers", () => {
+  it("shows plans only: an offer waiting for Spark's approval isn't there", async () => {
+    subscriptions.plans.mockResolvedValue({ items: [], modules_catalogue: CATALOGUE });
+    subscriptions.current.mockResolvedValue({ status: "none", reason: null, subscription: null });
+    render(<MemoryRouter><SubscriptionPage /></MemoryRouter>);
+    expect(await screen.findByText("No plans are available yet. Please check back soon.")).toBeInTheDocument();
+    expect(screen.queryByText("New offer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "✓ Approve" })).not.toBeInTheDocument();
+  });
+});
+
+// ── Compliance Validation counts validations (2026-11-09) ────────────
+
+describe("Compliance Validation is counted in validations", () => {
+  const WITH_COMPLIANCE = [...CATALOGUE, { key: "compliance_validation", label: "Compliance Validation", report_type: "compliance_validation" }];
+
+  it("the plan card says validations", () => {
+    const plan = { ...LIMITS, name: "Gold", duration: "yearly" as const, price: 1, contact: null,
+                   modules: ["compliance_validation"], report_limits: { compliance_validation: 10 } };
+    render(<PlanCard plan={plan} position={0} catalogue={WITH_COMPLIANCE} />);
+    expect(screen.getByText("Compliance Validation · 10 validations")).toBeInTheDocument();
+  });
+
+  it("the module tile has a validations stepper instead of Included", async () => {
+    const { ModulesCard } = await import("@/components/subscriptions/PlanFields");
+    const value = { ...LIMITS, modules: ["compliance_validation"], report_limits: { compliance_validation: 3 } };
+    render(<ModulesCard value={value} onChange={vi.fn()} catalogue={WITH_COMPLIANCE} />);
+    expect(screen.getByLabelText("Compliance Validation validations")).toHaveValue("3");
+    expect(screen.getByText("Validations per plan period")).toBeInTheDocument();
+    expect(screen.queryByText("Included")).not.toBeInTheDocument();
   });
 });
