@@ -8,7 +8,10 @@ export type BackendRole =
   | "hod"
   | "department_user"
   | "ir"
-  | "spark_internal";
+  | "spark_internal"
+  // Spark's platform owner: belongs to no company, only ever sees /spark, and
+  // is the one role that issues licenses. Never assignable from the Admin Console.
+  | "spark_admin";
 
 export interface RoleMeta {
   label: string; // Display name shown to users
@@ -59,6 +62,12 @@ export const ROLE_DISPLAY: Record<BackendRole, RoleMeta> = {
     description: "Spark staff — acts on any company",
     badgeClass: "b-dk",
     dot: "#4040C8",
+  },
+  spark_admin: {
+    label: "Spark Admin",
+    description: "Platform owner — sees every company, issues licenses",
+    badgeClass: "b-dk",
+    dot: "#1A1D2E",
   },
 };
 

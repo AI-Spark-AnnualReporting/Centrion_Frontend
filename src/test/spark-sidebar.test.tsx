@@ -44,12 +44,28 @@ vi.mock("@/lib/appRouting", () => ({
   sparkStudioUrl: (path: string) => sparkStudioUrl(path),
 }));
 
+// The admin's Annual Report Validator item follows the company's license.
+let licensedModules: string[] = ["annual_report_validator"];
+let licenseStatus = "active";
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  license: { get: () => Promise.resolve({ status: licenseStatus, modules: licensedModules }) },
+}));
+
 const { Sidebar } = await import("@/components/layout/Sidebar");
 
 const SPARK = { user_id: "usr_s", full_name: "Spark", email: "spark@wearespark.me", role: "spark_internal" };
 const ADMIN = { ...SPARK, role: "admin" };
 
-const ALLOWED = ["Companies", "Annual Report", "AI Copilot", "Communication Hub", "Document Bank"];
+const ALLOWED = [
+  "Companies",
+  "Annual Report",
+  "AI Copilot",
+  "Communication Hub",
+  "Document Bank",
+  // So Spark can see which annual reports the chosen company has uploaded.
+  "Upload Previous Reports",
+];
 // What renders unguarded: the section header and the expandable parent. Its
 // children sit behind `adminOpen`, collapsed by default for every role — see the
 // expand test below. Spark gets only one of them: Departments is part of running
@@ -64,9 +80,6 @@ const HIDDEN = [
   "Leadership",
   "Questions Bank",
   "Profile",
-  // Still hidden: it is a NAV_ITEMS entry the allowlist filters out, and is a
-  // separate thing from the Admin Console section below.
-  "Upload Previous Reports",
 ];
 
 // Where a nav click actually landed. The router here is real, so this reads the
@@ -126,6 +139,15 @@ describe("sidebar for spark_internal", () => {
     expect(screen.getByTestId("path")).toHaveTextContent("/annual-report");
   });
 
+  it("opens Upload Previous Reports WITHOUT dropping the client", () => {
+    // The page lists the chosen company's uploaded reports, so the client
+    // has to stay selected.
+    renderSidebar();
+    fireEvent.click(screen.getByText("Upload Previous Reports"));
+    expect(leaveCompany).not.toHaveBeenCalled();
+    expect(screen.getByTestId("path")).toHaveTextContent("/upload-reports");
+  });
+
   it("stays lit on a cycle deep link, not just the index", () => {
     // Plain nav items match the path exactly, which would unlight the tab the
     // moment you opened a cycle.
@@ -146,12 +168,13 @@ describe("sidebar for spark_internal", () => {
     expect(screen.getByText("AI Copilot")).toBeInTheDocument();
   });
 
-  it("reveals Departments but not Users & Roles when the console is expanded", () => {
+  it("reveals Departments and Users & Roles when the console is expanded", () => {
+    // Spark hands out the logins it makes, so it needs every user's email and
+    // their waiting temporary password (boss's ask, 2026-11-10).
     renderSidebar();
     fireEvent.click(screen.getByText("Admin Console"));
     expect(screen.getByText("Departments")).toBeInTheDocument();
-    // Whoever owns the client owns its accounts.
-    expect(screen.queryByText("Users & Roles")).not.toBeInTheDocument();
+    expect(screen.getByText("Users & Roles")).toBeInTheDocument();
   });
 
   it("shows only the directory before a company is chosen", () => {
@@ -168,6 +191,7 @@ describe("sidebar for spark_internal", () => {
       "AI Copilot",
       "Communication Hub",
       "Document Bank",
+      "Upload Previous Reports",
       "Admin Console",
     ]) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
@@ -178,6 +202,32 @@ describe("sidebar for spark_internal", () => {
 describe("sidebar for everyone else", () => {
   beforeEach(() => {
     mockAuth = { user: ADMIN, logout: vi.fn(), leaveCompany, actingCompany: null };
+    licensedModules = ["annual_report_validator"];
+    licenseStatus = "active";
+  });
+
+  it("hides the Annual Report Validator when the license doesn't include it", async () => {
+    licensedModules = ["board_report"];
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    await screen.findByText("ESG Validator");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+  });
+
+  it("hides the Annual Report Validator when there's no license yet", async () => {
+    licenseStatus = "none";
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+  });
+
+  it("keeps it for an expired license that has it, so old validations open", async () => {
+    licenseStatus = "expired";
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    expect(await screen.findByText("Annual Report Validator")).toBeInTheDocument();
   });
 
   it("still shows the full nav for an admin", () => {
@@ -203,27 +253,25 @@ describe("sidebar for everyone else", () => {
   });
 
   it("still gives an admin Users & Roles", () => {
-    // The other half of hiding it from Spark: without this, a filter that hid it
-    // from everybody would look just as green.
     renderSidebar();
     fireEvent.click(screen.getByText("Admin Console"));
     expect(screen.getByText("Users & Roles")).toBeInTheDocument();
     expect(screen.getByText("Departments")).toBeInTheDocument();
   });
 
-  it("gives an admin the Annual Report Validator, under Reports Validator", () => {
+  it("gives an admin the Annual Report Validator, under Reports Validator", async () => {
     renderSidebar();
     // Collapsed behind the accordion by default, same as ESG Validator and
     // Compliance Validation sitting next to it.
     expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Reports Validator"));
-    expect(screen.getByText("Annual Report Validator")).toBeInTheDocument();
+    expect(await screen.findByText("Annual Report Validator")).toBeInTheDocument();
   });
 
-  it("opens the validator page in-app for an admin, not a hand-off", () => {
+  it("opens the validator page in-app for an admin, not a hand-off", async () => {
     renderSidebar();
     fireEvent.click(screen.getByText("Reports Validator"));
-    fireEvent.click(screen.getByText("Annual Report Validator"));
+    fireEvent.click(await screen.findByText("Annual Report Validator"));
 
     // Unlike Spark's link, this one stays inside Centriyon.
     expect(sparkStudioUrl).not.toHaveBeenCalled();

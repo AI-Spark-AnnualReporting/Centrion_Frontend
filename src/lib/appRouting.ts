@@ -48,3 +48,13 @@ export function sparkStudioUrl(path: string): string | null {
 export function shouldStayInCentriton(user: { default_app?: AppKey | null }): boolean {
   return (user.default_app ?? "centriton_dashboard") === "centriton_dashboard";
 }
+
+/** Where to go after login: the page a logged-out visitor asked for, but only
+ *  an address inside this app ("/spark/quotes"). "//other.site", "https://…",
+ *  "/login" itself, or nothing → home ("/"), so a link can't send someone
+ *  off-site or back to the login page. */
+export function safeReturnPath(from: string | null | undefined): string {
+  if (!from || !from.startsWith("/") || from.startsWith("//") || from.startsWith("/\\")) return "/";
+  if (from === "/login" || from.startsWith("/login?")) return "/";
+  return from;
+}

@@ -1,3 +1,4 @@
+import { ResetWithCodePage } from "./components/auth/ResetWithCodePage";
 import { Fragment, lazy, Suspense } from "react";
 import {
   BrowserRouter,
@@ -9,6 +10,7 @@ import {
 } from "react-router-dom";
 import { Spinner } from "./components/shared/Spinner";
 import { Toaster } from "./components/ui/toaster";
+import { IS_ON_PREM } from "./lib/deployment";
 import { LoginPage, SignupPage } from "./components/auth/AuthPages";
 import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
 import {
@@ -51,6 +53,18 @@ import EarningsReportPage from "./pages/earnings/EarningsReportPage";
 // They render inside AppLayout so the main sidebar drives navigation.
 const AdminOverviewPage = lazy(() => import("./pages/admin/AdminOverviewPage"));
 const SparkCompaniesPage = lazy(() => import("./pages/spark/CompaniesPage"));
+// Spark admin console — the platform owner's (`spark_admin`) cross-tenant view.
+// Restored from ba6bdc5; Licenses added for company licensing.
+const SparkDashboardPage = lazy(() => import("./pages/spark/SparkDashboardPage"));
+const SparkSectionPage = lazy(() => import("./pages/spark/SparkSectionPage"));
+const SparkLicensesPage = lazy(() => import("./pages/spark/SparkLicensesPage"));
+// Cloud subscriptions (Centriton/.claude/plans/cloud-subscriptions.md).
+const SparkSubscriptionsPage = lazy(() => import("./pages/spark/SparkSubscriptionsPage"));
+const SparkQuotesPage = lazy(() => import("./pages/spark/SparkQuotesPage"));
+const SparkPlanEditorPage = lazy(() => import("./pages/spark/SparkPlanEditorPage"));
+const SparkLicenseKeyPage = lazy(() => import("./pages/spark/SparkLicenseKeyPage"));
+const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
+const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
@@ -138,6 +152,8 @@ const App = () => (
           link; the token in its query string is the only identity proof. */}
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* On-premises only: reset with a one-use code from Spark (no email server). */}
+      <Route path="/reset-with-code" element={<ResetWithCodePage />} />
       <Route path="/signup" element={<SignupPage />} />
       {/* Post-register OTP step — a fresh account has no session yet either. */}
       <Route path="/verify-email" element={<VerifyEmailPage />} />
@@ -166,6 +182,20 @@ const App = () => (
               role's routing untouched. */}
           <Route element={<ProtectedRoute requiredRole="spark_internal" />}>
             <Route path="/companies" element={<SparkCompaniesPage />} />
+          </Route>
+          {/* Spark admin console — gated on the platform-owner role alone
+              (ProtectedRoute also pins spark_admin here: every other page reads
+              a company off the JWT, which spark_admin doesn't have). */}
+          <Route element={<ProtectedRoute requiredRole="spark_admin" />}>
+            <Route path="/spark" element={<SparkDashboardPage />} />
+            <Route path="/spark/licenses" element={<SparkLicensesPage />} />
+            <Route path="/spark/licenses/:companyId/key" element={<SparkLicenseKeyPage />} />
+            <Route path="/spark/subscriptions" element={<SparkSubscriptionsPage />} />
+            <Route path="/spark/subscriptions/new" element={<SparkPlanEditorPage />} />
+            <Route path="/spark/subscriptions/:planId/edit" element={<SparkPlanEditorPage />} />
+            <Route path="/spark/quotes" element={<SparkQuotesPage />} />
+            {/* One page for the three lists; an unknown section redirects back. */}
+            <Route path="/spark/:section" element={<SparkSectionPage />} />
           </Route>
           <Route element={<ProtectedRoute requiredFeature="command_center" />}>
             <Route index element={<DashboardPage />} />
@@ -295,6 +325,14 @@ const App = () => (
               element={<AdminDepartmentsPage />}
             />
           </Route>
+          {/* Subscription — the company's own admin only, and only on the cloud
+              (on-premises installs use license keys on the License card). */}
+          {!IS_ON_PREM && (
+            <Route element={<ProtectedRoute requiredRole="admin" />}>
+              <Route path="/admin-console/subscription" element={<SubscriptionPage />} />
+              <Route path="/admin-console/subscription/checkout" element={<CheckoutPage />} />
+            </Route>
+          )}
           {/* Annual Report (Cycles) — admin + IR, inside the main shell so the
               sidebar + topbar stay. Admins manage cycles; IR is read-only
               (create/edit hidden in the pages). No separate /new route — the

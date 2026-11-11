@@ -10,6 +10,7 @@ import {
   XAxis,
 } from 'recharts';
 import { adminConsole } from '@/lib/api';
+import { LicenseCard } from '@/components/license/LicenseCard';
 import type { ActivityType, AdminOverview } from '@/types/admin';
 import { shortDateTime } from '@/lib/time';
 
@@ -211,6 +212,7 @@ export default function AdminOverviewPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <LicenseCard />
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 14 }}>
         <StatCard

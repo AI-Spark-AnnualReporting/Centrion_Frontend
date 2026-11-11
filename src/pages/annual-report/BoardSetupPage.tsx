@@ -14,6 +14,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import { useAuth } from '@/context/AuthContext';
 import { useFeaturePermissions } from '@/lib/features';
 import { ApiError, boardReports, companies, getSectors } from '@/lib/api';
@@ -60,6 +62,10 @@ export default function BoardSetupPage() {
   const [sectors, setSectors] = useState<Sector[] | null>(null);
 
   const [creating, setCreating] = useState(false);
+  // License: the tag warns, but the button stays clickable — for a year that
+  // already has an unfinished board report the server offers to continue it
+  // (before it checks the limit), and that must keep working.
+  const boardRoom = useLicenseRoom('board_report', 'Board Reports');
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ message: string; reportId: string | null } | null>(null);
 
@@ -241,7 +247,11 @@ export default function BoardSetupPage() {
 
         {error && <Notice tone="red">{error}</Notice>}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 6 }}>
+          <LimitHint room={boardRoom} />
+          {boardRoom.blocked && (
+            <span style={{ fontSize: 11.5, color: '#9BA3C4', maxWidth: 320 }}>{boardRoom.reason}</span>
+          )}
           <button
             type="button"
             className="btn bp"

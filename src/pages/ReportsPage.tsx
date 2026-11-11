@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getSectors, lookups, reports as reportsApi } from '@/lib/api';
 import {
@@ -486,6 +488,8 @@ export default function ReportsPage() {
   // True from click → /reports/processing navigation. Lets us disable the
   // submit button during the POST without changing the visible screen.
   const [isSubmittingGenerate, setIsSubmittingGenerate] = useState(false);
+  // License: only a NEW ESG report counts; reopening or adding files doesn't.
+  const esgRoom = useLicenseRoom('esg', 'ESG reports');
   const genRequestIdRef = useRef(0);
 
   // ApiError.message already carries the backend's `detail` (or a generic
@@ -1489,7 +1493,8 @@ export default function ReportsPage() {
                   customYear !== null &&
                   uploadedFiles.length > 0 &&
                   hasFramework &&
-                  regionalReady;
+                  regionalReady &&
+                  !esgRoom.blocked;
                 const canGenerateFromDb =
                   selectedReport !== null &&
                   existingReportSource === 'db' &&
@@ -1503,7 +1508,9 @@ export default function ReportsPage() {
                   uploadedFiles.length > 0;
                 const canGenerate = canGenerateNew || canGenerateFromDb || canAddDocs;
                 const disabledReason =
-                  scope === 'regional' && selectedRegion === ''
+                  selectedReport === null && esgRoom.blocked
+                    ? esgRoom.reason
+                    : scope === 'regional' && selectedRegion === ''
                     ? 'Select a region to continue'
                     : scope === 'regional' && selectedCountryId === ''
                       ? 'Select a country to continue'
@@ -1519,6 +1526,8 @@ export default function ReportsPage() {
                 const isBusy = isSubmittingGenerate;
                 const btnEnabled = canGenerate && !isBusy;
                 return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {selectedReport === null && <LimitHint room={esgRoom} />}
                   <button
                     type="button"
                     disabled={!btnEnabled}
@@ -1559,6 +1568,7 @@ export default function ReportsPage() {
                     )}
                     {isBusy ? 'Starting…' : 'Run Validator'}
                   </button>
+                  </span>
                 );
               })()}
             </div>

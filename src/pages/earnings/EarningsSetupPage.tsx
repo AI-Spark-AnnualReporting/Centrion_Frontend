@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import { reportHref, resumeHref } from './earnings-resume';
 import { useAuth } from '@/context/AuthContext';
 import { useFeaturePermissions } from '@/lib/features';
@@ -93,6 +95,11 @@ export default function EarningsSetupPage() {
   // same report_id for both the upload route and Continue (never a second draft).
   const [sessionReportId, setSessionReportId] = useState<string | null>(null);
   const createInFlightRef = useRef<Promise<string> | null>(null);
+  // License: Continue creates the draft (that's what counts). The tag warns,
+  // but the button stays clickable: for a period that already has an
+  // unfinished report, Continue offers to resume it (the server answers that
+  // before it checks the limit), and that must keep working.
+  const earningsRoom = useLicenseRoom('earnings', 'Earnings Reports');
 
   // Create the draft once, then reuse. `createInFlightRef` collapses concurrent
   // callers (e.g. a fast double-click) onto a single POST /earnings/reports.
@@ -364,7 +371,11 @@ export default function EarningsSetupPage() {
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 6 }}>
+          {!sessionReportId && <LimitHint room={earningsRoom} />}
+          {!sessionReportId && earningsRoom.blocked && (
+            <span style={{ fontSize: 11.5, color: '#9BA3C4', maxWidth: 320 }}>{earningsRoom.reason}</span>
+          )}
           <button
             type="button"
             className="btn bp"

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>License key editor — mockup (Centriyon theme)</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: 'Plus Jakarta Sans', sans-serif; }
+  body { background: #F2F3FA; color: #1A1D2E; }
+  .app-shell { position: fixed; inset: 0; display: flex; }
+  .sb { width: 220px; background: #3535B5; flex-shrink: 0; display: flex; flex-direction: column; }
+  .sb-header { padding: 20px 16px 14px; border-bottom: 1px solid rgba(255,255,255,.12); color: #fff; font-weight: 800; font-size: 13px; }
+  .sb-sec { font-size: 9px; font-weight: 700; color: rgba(255,255,255,.35); text-transform: uppercase; letter-spacing: .8px; padding: 16px 16px 6px; }
+  .sb-item { display: flex; gap: 10px; align-items: center; padding: 8px 12px; font-size: 12px; color: rgba(255,255,255,.68); border-radius: 10px; margin: 1px 8px; }
+  .sb-item .t { width: 26px; height: 26px; border-radius: 8px; background: rgba(255,255,255,.08); }
+  .sb-item.act { background: #3D3DC0; color: #fff; font-weight: 700; } .sb-item.act .t { background: #fff; }
+  .group { margin: 2px 8px 0; padding: 4px 0; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+  .group .sb-item { margin: 1px 4px; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .topbar { height: 56px; background: #fff; border-bottom: 1px solid #E2E4F0; display: flex; align-items: center; padding: 0 22px; gap: 8px; }
+  .tb-page { font-size: 14px; font-weight: 800; } .tb-sep { color: #9BA3C4; } .tb-sub { font-size: 12px; color: #9BA3C4; }
+  .content { flex: 1; overflow: hidden; padding: 16px 22px 20px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .card { background: #fff; border: 1px solid #E2E4F0; border-radius: 16px; box-shadow: 0 2px 12px rgba(64,64,200,.06); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; border: none; white-space: nowrap; }
+  .bp { background: #4040C8; color: #fff; box-shadow: 0 4px 14px rgba(64,64,200,.3); } .bp:disabled { opacity: .45; cursor: not-allowed; }
+  .bs { background: #fff; color: #5A6080; border: 1.5px solid #E2E4F0; }
+  .inp { width: 100%; padding: 9px 12px; border: 1.5px solid #E2E4F0; border-radius: 10px; font-size: 12px; font-family: inherit; outline: none; margin-top: 5px; background: #fff; }
+  .inp:focus { border-color: #4040C8; box-shadow: 0 0 0 3px rgba(64,64,200,.1); }
+  .mono { font-family: 'DM Mono', monospace; }
+  label.f { font-size: 11px; font-weight: 700; color: #5A6080; display: block; }
+  .fixed { margin-top: 5px; padding: 9px 12px; border-radius: 10px; background: #F2F3FA; font-size: 12px; font-weight: 700; }
+  .demo { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 40; background: #1A1D2E; border-radius: 999px; padding: 4px; display: flex; gap: 2px; }
+  .demo button { border: none; background: none; color: rgba(255,255,255,.7); font-family: inherit; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  .demo button.on { background: #fff; color: #1A1D2E; }
+
+  /* Top card */
+  .top { display: grid; grid-template-columns: 1.1fr .8fr .9fr 1.3fr auto; gap: 12px; align-items: end; padding: 14px 18px; }
+  .who { display: flex; flex-direction: column; gap: 4px; }
+  .who b { font-size: 15px; font-weight: 800; }
+  .chip { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; width: fit-content; }
+  .chip.generate { background: #EEEEFF; color: #4040C8; } .chip.upgrade { background: rgba(20,184,166,.14); color: #0F766E; } .chip.renew { background: rgba(245,158,11,.14); color: #B45309; }
+  .err { font-size: 10.5px; color: #DC2626; margin-top: 3px; }
+  .btns { display: flex; gap: 8px; }
+
+  /* Cards row */
+  .cards { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; flex: 1; min-height: 0; }
+  .cards.with-req { grid-template-columns: 1.15fr 1fr 250px; }
+  .num { width: 64px; text-align: right; font-family: 'DM Mono', monospace; padding: 5px 9px; margin: 0; }
+  .depts { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-top: 10px; overflow-y: auto; min-height: 0; flex: 1; align-content: start; padding: 2px; }
+  .dc { border: 1.5px solid #DCDDF5; border-radius: 12px; padding: 8px 10px; background: linear-gradient(180deg, #F7F7FF, #fff); }
+  .dc-n { font-size: 11px; font-weight: 800; color: #3535B5; margin-bottom: 6px; }
+  .dc-r { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #5A6080; padding: 2px 0; }
+  .dc-r b { font-family: 'DM Mono', monospace; color: #1A1D2E; }
+  .dc .step button { width: 22px; height: 22px; } .dc .step span { width: 28px; font-size: 11px; }
+  .tot { margin-top: 10px; font-size: 11.5px; color: #5A6080; background: #F2F3FA; border-radius: 10px; padding: 8px 11px; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .ec { padding: 14px 16px; display: flex; flex-direction: column; min-height: 0; }
+  .ec-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .ec-ic { width: 26px; height: 26px; border-radius: 8px; background: #EEEEFF; color: #4040C8; display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+  .ec-t { font-size: 13px; font-weight: 800; } .ec-s { font-size: 10.5px; color: #9BA3C4; }
+  .count { margin-left: auto; font-size: 10.5px; font-weight: 700; color: #4040C8; background: #EEEEFF; border-radius: 20px; padding: 3px 9px; }
+
+  /* Module tiles — same as the plan editor */
+  .mods { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+  .mt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1.5px solid #ECEEF8; border-radius: 12px; cursor: pointer; min-height: 44px; transition: .15s; }
+  .mt.on { border-color: #4040C8; background: linear-gradient(90deg, #F5F5FF, #fff); }
+  .mt.locked { cursor: default; }
+  .mt-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: #F2F3FA; color: #9BA3C4; flex: none; }
+  .mt.on .mt-ic { background: #4040C8; color: #fff; }
+  .mt-tx { flex: 1; min-width: 0; } .mt-nm { font-size: 12px; font-weight: 700; } .mt:not(.on) .mt-nm { color: #5A6080; font-weight: 600; }
+  .mt-cap { font-size: 10px; color: #9BA3C4; margin-top: 1px; }
+  .step { display: flex; align-items: center; border: 1.5px solid #DCDDF5; border-radius: 9px; overflow: hidden; }
+  .step button { width: 24px; height: 26px; border: none; background: #F5F5FF; color: #4040C8; font-weight: 800; cursor: pointer; font-family: inherit; }
+  .step button:disabled { color: #C9CBF5; cursor: default; background: #FAFAFF; }
+  .step span { width: 36px; text-align: center; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; }
+  .incl { font-size: 10px; font-weight: 700; color: #16A34A; background: rgba(34,197,94,.12); border-radius: 20px; padding: 3px 9px; }
+  .mark { font-size: 9.5px; font-weight: 800; border-radius: 20px; padding: 2px 7px; }
+  .mark.up { background: rgba(34,197,94,.14); color: #16A34A; } .mark.new { background: #EEEEFF; color: #4040C8; } .mark.off { background: #F2F3FA; color: #9BA3C4; }
+  .sw { width: 32px; height: 18px; border-radius: 20px; background: #DDE0EE; position: relative; flex: none; }
+  .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: .15s; }
+  .mt.on .sw { background: #4040C8; } .mt.on .sw::after { left: 16px; } .mt.locked .sw { opacity: .55; }
+
+  .prow { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 12px; border-top: 1px solid #F2F3FA; }
+  .prow:first-of-type { border-top: none; }
+  .lock { font-size: 11px; color: #5A6080; background: #F2F3FA; border-radius: 8px; padding: 6px 10px; }
+  .hint { font-size: 10.5px; color: #9BA3C4; margin-top: 6px; line-height: 1.5; }
+
+  .req { background: linear-gradient(135deg, #FFF8E6, #fff); border: 1px solid rgba(245,158,11,.35); }
+  .req ul { list-style: none; font-size: 11.5px; line-height: 1.8; color: #3A3F55; }
+  .req .filled { font-size: 10.5px; color: #B45309; font-weight: 700; margin-top: 6px; }
+
+  /* Preview: the key as a card */
+  .prev { padding: 0; overflow: hidden; }
+  .kc { padding: 16px 18px; color: #fff; background: linear-gradient(135deg, #1A1D2E, #3535B5); position: relative; overflow: hidden; }
+  .kc::after { content: ''; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.07); }
+  .kc .k { font-size: 10px; font-weight: 800; letter-spacing: .1em; opacity: .7; } .kc b { display: block; font-size: 17px; font-weight: 800; margin-top: 6px; }
+  .kc .srv { font-family: 'DM Mono', monospace; font-size: 11px; opacity: .85; margin-top: 4px; }
+  .kc .per { margin-top: 10px; font-size: 11.5px; font-weight: 700; }
+  .ch { padding: 12px 18px; }
+  .ch-t { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #9BA3C4; margin-bottom: 6px; }
+  .ch li { list-style: none; font-size: 11.5px; padding: 3px 0; display: flex; gap: 7px; color: #3A3F55; } .ch li span { color: #4040C8; font-weight: 800; }
+
+  .ov { position: fixed; inset: 0; background: rgba(26,29,46,.5); display: none; justify-content: center; align-items: center; z-index: 30; }
+  .ov.open { display: flex; }
+  .modal { width: 460px; padding: 22px 24px; }
+  .copy { margin-top: 12px; border: 1.5px dashed #C9CBF5; border-radius: 12px; padding: 10px 12px; font-family: 'DM Mono', monospace; font-size: 11px; color: #3535B5; word-break: break-all; background: #FAFAFF; }
+  .note { font-size: 11.5px; color: #5A6080; }
+</style>
+</head>
+<body>
+<div class="demo" id="demo">
+  <button data-v="generate" class="on">Generate (new client)</button>
+  <button data-v="upgrade">Upgrade (active)</button>
+  <button data-v="renew">Renew (expired)</button>
+</div>
+<div class="app-shell">
+  <aside class="sb">
+    <div class="sb-header">Centriyon</div>
+    <div class="sb-sec">Spark</div><div class="sb-item"><span class="t"></span>Overview</div><div class="sb-item"><span class="t"></span>Companies</div>
+    <div class="sb-sec">Licensing &amp; billing</div>
+    <div class="group"><div class="sb-item act"><span class="t"></span>Licenses</div><div class="sb-item"><span class="t"></span>Subscriptions</div><div class="sb-item"><span class="t"></span>Quotes</div></div>
+  </aside>
+  <div class="main">
+    <div class="topbar"><span class="tb-page">Licenses (on-premises)</span><span class="tb-sep">›</span><span class="tb-sub" id="crumb"></span></div>
+    <div class="content" id="page"></div>
+  </div>
+</div>
+<div class="ov" id="ov"><div class="card modal" id="modal"></div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MODULES = [["quarterly", "Quarterly Report", "Q", true], ["earnings", "Earnings Report", "E", true], ["annual", "Annual Report", "A", true],
+  ["board", "Board Report", "B", true], ["esg", "ESG Validator", "ESG", true], ["compliance", "Compliance Validation", "✓", false],
+  ["meetings", "Board Meetings", "M", false], ["leadership", "Leadership", "L", false], ["arv", "Annual Report Validator", "AV", true]];
+// The client's current key (for upgrade / renew) and its open request.
+const CURRENT = { quarterly: 4, annual: 2, leadership: null };
+const USED = { quarterly: 3, annual: 1 };
+// What the current key allows (an upgrade can't go below it).
+const NOW_PEOPLE = { pms: 2, ir: 1, depts: [5, 2, 1] };
+const sum = (list) => list.reduce((a, b) => a + b, 0);
+const people = () => 1 + f.pms + f.ir + f.depts.length + sum(f.depts);
+let mode = "generate", f;
+
+function reset() {
+  f = mode === "generate"
+    ? { end: "2027-11-08", pms: 1, ir: 1, depts: [1], server: "", mods: {} }
+    : { end: mode === "upgrade" ? "2027-05-01" : "2027-11-08", pms: NOW_PEOPLE.pms, ir: NOW_PEOPLE.ir, depts: [...NOW_PEOPLE.depts], server: "SRV-7K2M-9QXA-4T8P", mods: { ...CURRENT } };
+  if (mode === "upgrade") { f.mods.quarterly = 6; f.mods.board = 10; f.pms = 4; f.depts = [5, 2, 1, 1]; }   // pre-filled from the client's request
+}
+
+function stepper(k, n, min) {
+  return `<div class="step" onclick="event.stopPropagation()"><button ${n <= min ? "disabled" : ""} onclick="f.mods['${k}']=Math.max(${min},${n}-1);render()">−</button><span>${n}</span><button onclick="f.mods['${k}']=${n}+1;render()">+</button></div>`;
+}
+function mark(k) {
+  if (mode !== "upgrade") return "";
+  const was = CURRENT[k], now = f.mods[k];
+  if (!(k in CURRENT) && k in f.mods) return '<span class="mark new">New</span>';
+  if (typeof was === "number" && typeof now === "number" && now > was) return `<span class="mark up">+${now - was}</span>`;
+  return "";
+}
+function modules() {
+  return MODULES.map(([k, label, icon, counted]) => {
+    const on = k in f.mods, locked = mode === "upgrade" && k in CURRENT;
+    const min = mode === "upgrade" && typeof CURRENT[k] === "number" ? CURRENT[k] : 1;
+    const cap = counted ? (mode === "upgrade" && USED[k] != null ? `Used ${USED[k]} this period` : mode === "renew" && USED[k] != null ? `Last period: ${USED[k]} used` : "Reports per license period") : "Access only — no report count";
+    const right = !on ? '<span class="mt-cap">Off</span>' : counted ? `${stepper(k, f.mods[k] ?? 1, min)}<span class="mt-cap">reports</span>` : '<span class="incl">Included</span>';
+    return `<div class="mt ${on ? "on" : ""} ${locked ? "locked" : ""}" ${locked ? 'title="An upgrade can\'t remove a module"' : `onclick="toggle('${k}', ${counted})"`}>
+      <div class="mt-ic">${icon}</div><div class="mt-tx"><div class="mt-nm">${label} ${mark(k)}</div><div class="mt-cap">${cap}</div></div>${right}<div class="sw"></div></div>`;
+  }).join("");
+}
+function minOf(key) { return mode === "upgrade" ? NOW_PEOPLE[key] : 0; }
+function peopleStep(key, min) {
+  return `<div class="step"><button ${f[key] <= min ? "disabled" : ""} onclick="f.${key}=Math.max(${min},f.${key}-1);render()">−</button><span>${f[key]}</span><button onclick="f.${key}++;render()">+</button></div>`;
+}
+function setDepts(text) {
+  const min = mode === "upgrade" ? NOW_PEOPLE.depts.length : 0;
+  const n = Math.max(min, Math.min(50, Math.floor(+text) || 0));
+  const next = f.depts.slice(0, n); while (next.length < n) next.push(1);
+  f.depts = next; render();
+}
+function upgradeWarning() {
+  if (mode !== "upgrade") return "";
+  const before = sum(NOW_PEOPLE.depts), after = sum(f.depts);
+  return after < before ? `<div class="err" style="margin-top:6px">An upgrade can't lower department users (${before} now).</div>`
+    : '<div class="hint">An upgrade can add departments and users, never remove them.</div>';
+}
+function toggle(k, counted) { if (k in f.mods) delete f.mods[k]; else f.mods[k] = counted ? 1 : null; render(); }
+
+function changes() {
+  const out = [];
+  if (mode === "generate") out.push(`Period 9 Nov 2026 → ${fmt(f.end)}`, `${f.pms} PM · ${f.ir} IR · ${f.depts.length} departments · ${sum(f.depts)} department users`);
+  if (mode === "renew") out.push(`New period 9 Nov 2026 → ${fmt(f.end)}`, "Report counts start again from 0");
+  if (mode === "upgrade") {
+    if (f.end !== "2027-05-01") out.push(`End date 1 May 2027 → ${fmt(f.end)}`);
+    if (f.pms !== NOW_PEOPLE.pms) out.push(`PMs ${NOW_PEOPLE.pms} → ${f.pms}`);
+    if (f.ir !== NOW_PEOPLE.ir) out.push(`IR users ${NOW_PEOPLE.ir} → ${f.ir}`);
+    if (f.depts.length !== NOW_PEOPLE.depts.length) out.push(`Departments ${NOW_PEOPLE.depts.length} → ${f.depts.length}`);
+    if (sum(f.depts) !== sum(NOW_PEOPLE.depts)) out.push(`Department users ${sum(NOW_PEOPLE.depts)} → ${sum(f.depts)}`);
+  }
+  for (const [k, label, , counted] of MODULES) {
+    if (!(k in f.mods)) continue;
+    if (mode === "upgrade" && !(k in CURRENT)) out.push(`${label} added${counted ? ` · ${f.mods[k]} reports` : ""}`);
+    else if (mode === "upgrade" && typeof CURRENT[k] === "number" && f.mods[k] > CURRENT[k]) out.push(`${label} ${CURRENT[k]} → ${f.mods[k]} reports`);
+    else if (mode !== "upgrade") out.push(`${label}${counted ? ` · ${f.mods[k]} reports` : ""}`);
+  }
+  return out;
+}
+function fmt(iso) { return new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }); }
+
+function page() {
+  const title = { generate: "Generate license key", upgrade: "Upgrade license", renew: "Renew license" }[mode];
+  const go = { generate: "Review", upgrade: "Review upgrade", renew: "Review renewal" }[mode];
+  const serverOk = /^SRV-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(f.server.trim().toUpperCase());
+  const ready = serverOk && Object.keys(f.mods).length > 0 && !(mode === "upgrade" && sum(f.depts) < sum(NOW_PEOPLE.depts));
+  const ch = changes();
+  return `
+  <div class="card top">
+    <div class="who"><span class="chip ${mode}">${title}</span><b>omn prem</b></div>
+    <div><label class="f">Start</label><div class="fixed">${mode === "upgrade" ? "Started 1 Nov 2026" : "Today, 9 Nov 2026"}</div></div>
+    <div><label class="f">End<input class="inp" type="date" value="${f.end}" min="${mode === "upgrade" ? "2027-05-01" : "2026-11-10"}" onchange="f.end=this.value;render()"></label>
+      ${mode === "upgrade" ? '<div class="err" style="color:#9BA3C4">Not before 1 May 2027</div>' : ""}</div>
+    <div><label class="f">Client ID <span style="color:#9BA3C4;font-weight:600">(from the client's License screen)</span>
+      <input class="inp mono" id="srv" value="${f.server}" placeholder="SRV-7K2M-9QXA-4T8P" ${mode !== "generate" ? "readonly" : ""} oninput="f.server=this.value" onchange="render()"></label>
+      ${f.server && !serverOk ? '<div class="err">Looks like SRV-XXXX-XXXX-XXXX</div>' : ""}</div>
+    <div class="btns"><button class="btn bs">Cancel</button><button class="btn bp" ${ready ? "" : "disabled"} onclick="review()">${go}</button></div>
+  </div>
+  <div class="cards">
+    <div class="card ec">
+      <div class="ec-h"><div class="ec-ic">▦</div><div><div class="ec-t">Modules</div><div class="ec-s">${mode === "upgrade" ? "An upgrade can add modules and raise reports — never lower them" : "Switch a module on · reports start at 1 (never 0 or unlimited)"}</div></div>
+        <span class="count">${Object.keys(f.mods).length} of ${MODULES.length} on</span></div>
+      <div class="mods">${modules()}</div>
+    </div>
+    <div class="col">
+      <div class="card ec">
+        <div class="ec-h"><div class="ec-ic">👤</div><div><div class="ec-t">Users</div><div class="ec-s">The admin is always included</div></div></div>
+        <div class="prow"><span>Admin</span><span class="lock">🔒 1 · included</span></div>
+        <div class="prow"><span>Project managers (PMs)</span>${peopleStep("pms", minOf("pms"))}</div>
+        <div class="prow"><span>IR users</span>${peopleStep("ir", minOf("ir"))}</div>
+      </div>
+      <div class="card ec" style="flex:1;min-height:0">
+        <div class="ec-h"><div class="ec-ic">▤</div><div><div class="ec-t">Departments</div><div class="ec-s">Each has 1 HOD and at least 1 user</div></div></div>
+        <div class="prow"><span>Number of departments</span><input class="inp num" value="${f.depts.length}" oninput="setDepts(this.value)"></div>
+        <div class="depts">${f.depts.map((n, i) => `<div class="dc"><div class="dc-n">Department ${i + 1}</div>
+          <div class="dc-r"><span>HOD</span><b>1</b></div>
+          <div class="dc-r"><span>Users</span><div class="step"><button ${n <= 1 ? "disabled" : ""} onclick="f.depts[${i}]=Math.max(1,${n}-1);render()">−</button><span>${n}</span><button onclick="f.depts[${i}]++;render()">+</button></div></div></div>`).join("")}</div>
+        <div class="tot">Total <b>${people()} people</b>${mode === "upgrade" ? ` <span style="color:#9BA3C4">· now ${1 + NOW_PEOPLE.pms + NOW_PEOPLE.ir + NOW_PEOPLE.depts.length + sum(NOW_PEOPLE.depts)}</span>` : ""}</div>
+        ${upgradeWarning()}
+      </div>
+    </div>
+
+  </div>`;
+}
+
+function review() {
+  const ch = changes();
+  $("modal").innerHTML = `<div style="font-size:15px;font-weight:800">${mode === "upgrade" ? "Upgrade omn prem's license?" : mode === "renew" ? "Renew omn prem's license?" : "Generate omn prem's license?"}</div>
+    <div class="note" style="margin-top:4px">${mode === "upgrade" ? "It replaces their current license now. Usage is kept." : mode === "renew" ? "It starts today. Report counts start again from 0 (old reports stay). Users don't reset." : "It starts today."}</div>
+    <ul style="list-style:none;margin-top:10px;font-size:12px;line-height:1.9">${ch.map((c) => `<li>• ${c}</li>`).join("")}</ul>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn bs" onclick="$('ov').classList.remove('open')">Back</button>
+    <button class="btn bp" onclick="done()">${mode === "upgrade" ? "Upgrade" : mode === "renew" ? "Renew" : "Generate key"}</button></div>`;
+  $("ov").classList.add("open");
+}
+function done() {
+  $("modal").innerHTML = `<div style="font-size:15px;font-weight:800">✓ Key ready for omn prem</div>
+    <div class="note" style="margin-top:4px">Send this key to the client admin. They paste it in Admin → License on their own server. It's shown once — copy it now.</div>
+    <div class="copy">eyJhbGciOiJFZERTQSJ9.eyJjb21wYW55IjoiT21uIFByZW0iLCJzZXJ2ZXJfaWQiOiJTUlYtN0sy…</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn bs">Copy key</button><button class="btn bp" onclick="$('ov').classList.remove('open')">Done — back to Licenses</button></div>`;
+}
+function render() { $("crumb").textContent = { generate: "Generate key", upgrade: "Upgrade license", renew: "Renew license" }[mode]; $("page").innerHTML = page(); }
+document.querySelectorAll("#demo button").forEach((b) => b.onclick = () => {
+  mode = b.dataset.v; document.querySelectorAll("#demo button").forEach((x) => x.classList.toggle("on", x === b)); reset(); render();
+});
+reset(); render();
+</script>
+</body>
+</html>

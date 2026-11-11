@@ -1,23 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useFeatureAccess } from '@/lib/features';
 import type { FeatureKey } from '@/constants/features';
 import { isAdminLevel, type BackendRole } from '@/constants/roles';
 import { sparkStudioUrl } from '@/lib/appRouting';
+import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
+import { license, sparkPlans } from '@/lib/api';
+import { IS_ON_PREM } from '@/lib/deployment';
+import type { CompanyLicense } from '@/types/license';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
 // generation flows offered on the Reports page. (ESG Validator lives under
 // "Reports Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
 // Spark staff are an admin for every company's ANNUAL REPORT, not general-purpose
 // admins — so they get the directory, an Annual Report tab, the three
-// cross-cutting workspaces below, and nothing else.
-// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank. The
+// cross-cutting workspaces below, Upload Previous Reports (to see which annual
+// reports the chosen company has uploaded), and nothing else.
+// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank,
+// Upload Previous Reports. The
 // annual report is NOT one of them and can't be: this set is only ever consulted
 // against top-level NAV_ITEMS, while `annual` is a REPORT_CHILDREN key nested
 // under Reports — which spark never sees. Hence its own hand-rolled tab below,
 // the same shape as the Companies button.
-const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs']);
+const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs', 'uploadReports']);
 
 const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean; allowedRoles?: ('admin' | 'ir')[] }[] = [
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly', featureKey: 'quarterly_report' },
@@ -52,8 +58,23 @@ const REPORTS_VALIDATION_CHILDREN: { key: string; label: string; path: string; f
   // hands off to the SAR app — it has no company context to reach this from).
   // This is the admin-side entry point, reached once an admin is already
   // inside their own company.
+  // Also needs the company's license to include the module (see isModuleShownByLicense).
   { key: 'annual-report-validator', label: 'Annual Report Validator', path: '/annual-report-validator', adminOnly: true },
 ];
+
+// Annual Report Validator is a licensed module with no feature key, so the
+// sidebar asks the license itself (client admins only — Spark staff are never
+// limited). Shown when the license has the module, even if expired or locked,
+// so old validations can still be opened; also shown for a key that doesn't
+// match (read-only, like every other module). Hidden with no license yet or
+// when the module isn't in it. The backend refuses new runs either way.
+const VALIDATOR_MODULE = 'annual_report_validator';
+
+function isModuleShownByLicense(data: CompanyLicense | null, moduleKey: string): boolean {
+  if (!data || data.status === 'none') return false;
+  if (data.status === 'invalid') return true;
+  return data.modules.includes(moduleKey);
+}
 
 // Sub-sections shown when the "Profile" item is expanded — User Profile
 // (personal info) and Company Profile (company details + brand identity,
@@ -80,11 +101,21 @@ const ADMIN_CHILDREN: {
   end?: boolean;
   allowedRoles?: BackendRole[];
 }[] = [
-  // Spark runs a client's annual report, not its payroll of accounts — whoever
-  // owns the client owns its users. The page itself is still reachable by URL;
-  // this is about what the nav offers, not access.
-  { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
+  // Spark staff see it too (boss's ask, 2026-11-10): they hand out the logins
+  // Spark makes for a client, so they need every user's email and the Show
+  // button for a waiting user's temporary password. The backend already lets
+  // them in for the company they are acting as.
+  {
+    key: 'users',
+    label: 'Users & Roles',
+    path: '/admin-console/users',
+    allowedRoles: ['admin', 'spark_internal'],
+  },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
+  // Cloud only: on-premises installs use license keys (the License card).
+  ...(IS_ON_PREM ? [] : [
+    { key: 'subscription', label: 'Subscription', path: '/admin-console/subscription', allowedRoles: ['admin'] as BackendRole[] },
+  ]),
 ];
 
 // Explicitly typed (like REPORT_CHILDREN / ADMIN_CHILDREN above) because only
@@ -152,8 +183,55 @@ const icons: Record<string, JSX.Element> = {
   question: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 5.5C5 4.7 5.7 4 6.5 4S8 4.7 8 5.5c0 .6-.3 1.1-.8 1.4L7 7.5M7 9.5v.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   user: <svg viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1.5 12c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   calchk: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="2" width="11" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1v2M9 1v2M1 5.5h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M4.6 8.6l1.3 1.3 2.5-2.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  building: <svg viewBox="0 0 13 13" fill="none"><path d="M2 12V2h5.5v10M7.5 5h3.5v7" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M3.8 4h1.9M3.8 6.3h1.9M3.8 8.6h1.9M9.2 7.5h.01M9.2 9.5h.01M1 12h11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+  server: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="1.5" width="11" height="4" rx="1" stroke="currentColor" strokeWidth="1.2"/><rect x="1" y="7.5" width="11" height="4" rx="1" stroke="currentColor" strokeWidth="1.2"/><path d="M3.5 3.5h.01M3.5 9.5h.01M6.5 3.5h3M6.5 9.5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  plans: <svg viewBox="0 0 13 13" fill="none"><rect x="1" y="3" width="8" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M4 1h7a1 1 0 0 1 1 1v8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><path d="M3 6h4M3 8.3h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
   brand: <svg viewBox="0 0 13 13" fill="none"><path d="M2.5 11.5V3a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 10.5 3v8.5l-4-2.2-4 2.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><circle cx="6.5" cy="5" r="1.4" stroke="currentColor" strokeWidth="1.2"/></svg>,
 };
+
+// Spark admin console (`spark_admin`), as the approved mockup
+// (spark-sidebar-mockup.html, version A): every item has an icon in a soft
+// tile; the overview and its three lists, then the money-and-access pages in
+// their own "Licensing & billing" group — on-premises keys first, then the
+// cloud plans, then the Enterprise requests. List labels come from SECTIONS so
+// the sidebar can't disagree with the page it opens.
+type SparkMenuItem = { key: string; label: string; hint?: string; path: string; icon: string };
+
+const SECTION_ICONS: Record<string, string> = { companies: 'building', reports: 'doc', users: 'people' };
+
+const SPARK_MAIN_ITEMS: SparkMenuItem[] = [
+  { key: 'overview', label: 'Overview', path: '/spark', icon: 'grid' },
+  ...SECTION_KEYS.map((key) => ({ key, label: SECTIONS[key].title, path: `/spark/${key}`, icon: SECTION_ICONS[key] ?? 'doc' })),
+];
+
+const SPARK_LICENSING_ITEMS: SparkMenuItem[] = [
+  { key: 'licenses', label: 'Licenses', hint: 'On-premises keys', path: '/spark/licenses', icon: 'server' },
+  { key: 'subscriptions', label: 'Subscriptions', hint: 'Cloud plans', path: '/spark/subscriptions', icon: 'plans' },
+  { key: 'quotes', label: 'Quotes', hint: 'Enterprise requests', path: '/spark/quotes', icon: 'chat' },
+];
+
+/** Overview only on its own page; a list or page also on its sub-pages (e.g. the plan editor). */
+function isSparkItemActive(item: SparkMenuItem, pathname: string): boolean {
+  if (item.key === 'overview') return pathname === item.path;
+  return pathname === item.path || pathname.startsWith(`${item.path}/`);
+}
+
+/** One Spark menu item: the icon in a soft tile, the name (and a short hint
+ *  under it), and for Quotes the number of open requests. */
+function SparkMenuButton({ item, active, onClick, count = 0 }: {
+  item: SparkMenuItem; active: boolean; onClick: () => void; count?: number;
+}) {
+  return (
+    <button type="button" className={`sb-item sb-spark-item ${active ? 'act' : ''}`} aria-current={active ? 'page' : undefined} onClick={onClick}>
+      <span className="sb-spark-ic">{icons[item.icon]}</span>
+      <span className="sb-spark-label">
+        {item.label}
+        {item.hint && <small>{item.hint}</small>}
+      </span>
+      {count > 0 && <span className="sb-spark-count" aria-label={`${count} open`}>{count}</span>}
+    </button>
+  );
+}
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -166,11 +244,37 @@ export function Sidebar() {
   // only thing worth offering — ProtectedRoute bounces them there anyway.
   const isSpark = user?.role === 'spark_internal';
   const sparkAwaitingCompany = isSpark && !actingCompany;
+  // Spark's platform owner belongs to no company: the whole tenant nav is
+  // replaced by the Spark admin console.
+  const isSparkAdmin = user?.role === 'spark_admin';
 
   // Excludes the bare '/reports' path — that's ESG Validator's route, now
   // under "Reports Validator" below — but still covers /reports/quarterly.
   const reportsActive =
     location.pathname.startsWith('/reports/') || location.pathname.startsWith('/earnings');
+  // Only the client admin's sidebar depends on the license (see isModuleShownByLicense).
+  const [companyLicense, setCompanyLicense] = useState<CompanyLicense | null>(null);
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    let cancelled = false;
+    license
+      .get()
+      .then((data) => { if (!cancelled) setCompanyLicense(data); })
+      .catch(() => { if (!cancelled) setCompanyLicense(null); });
+    return () => { cancelled = true; };
+  }, [user]); // user changes on refreshPermissions, e.g. right after a license is activated
+  // spark_admin: how many Enterprise requests still need a plan (Quotes badge).
+  // Rechecked on every page change, like the license banner.
+  const [openQuotes, setOpenQuotes] = useState(0);
+  useEffect(() => {
+    if (!isSparkAdmin) return;
+    let cancelled = false;
+    sparkPlans
+      .list({ quotes_only: true, offer_state: 'received', limit: 1 })   // new quotes only
+      .then((page) => { if (!cancelled) setOpenQuotes(page.total); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isSparkAdmin, location.pathname]);
   const [reportsOpen, setReportsOpen] = useState(reportsActive);
 
   const validationActive =
@@ -195,7 +299,9 @@ export function Sidebar() {
   const visibleValidationChildren = REPORTS_VALIDATION_CHILDREN.filter(
     (child) =>
       (!child.featureKey || isVisible(child.featureKey)) &&
-      (!child.adminOnly || isAdminLevel(user?.role)),
+      (!child.adminOnly || isAdminLevel(user?.role)) &&
+      (child.key !== 'annual-report-validator' || user?.role !== 'admin' ||
+        isModuleShownByLicense(companyLicense, VALIDATOR_MODULE)),
   );
   const visibleAdminChildren = ADMIN_CHILDREN.filter(
     (child) => !child.allowedRoles || (!!user && child.allowedRoles.includes(user.role)),
@@ -301,7 +407,22 @@ export function Sidebar() {
           </button>
         </div>
       )}
-      {!sparkAwaitingCompany && NAV_ITEMS.map((section) => (
+      {isSparkAdmin && (
+        <div>
+          <div className="sb-sec">Spark</div>
+          {SPARK_MAIN_ITEMS.map((item) => (
+            <SparkMenuButton key={item.key} item={item} active={isSparkItemActive(item, location.pathname)} onClick={() => handleNav(item.path)} />
+          ))}
+          <div className="sb-sec">Licensing &amp; billing</div>
+          <div className="sb-spark-group">
+            {SPARK_LICENSING_ITEMS.map((item) => (
+              <SparkMenuButton key={item.key} item={item} active={isSparkItemActive(item, location.pathname)} onClick={() => handleNav(item.path)}
+                count={item.key === 'quotes' ? openQuotes : 0} />
+            ))}
+          </div>
+        </div>
+      )}
+      {!sparkAwaitingCompany && !isSparkAdmin && NAV_ITEMS.map((section) => (
         <div key={section.section}>
           {/* The spark allowlist leaves a single item in each of three sections;
               headers and dividers there would read as three empty groups. */}
@@ -494,9 +615,9 @@ export function Sidebar() {
         </div>
       ))}
       {/* Spark staff get this too: they run each client's annual report AS that
-          client's admin, and Departments are part of that job. Users & Roles is
-          not — see ADMIN_CHILDREN. Still gated on having picked a company: the
-          console is company-scoped and would 400 without one. */}
+          client's admin, and Departments and Users & Roles are part of that job.
+          Still gated on having picked a company: the console is company-scoped
+          and would 400 without one. */}
       {isAdminLevel(user?.role) && !sparkAwaitingCompany && (
         <div>
           <div className="sb-div" />

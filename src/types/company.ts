@@ -94,6 +94,9 @@ export interface Company {
   reporting_sector: string | null;
   // Status of the signup-time background profile extraction (processing | done).
   profile_extraction_status?: string | null;
+  // The Spark user who created this company, or null for a self-signup company.
+  // Only Spark-created companies can get Spark-made lead logins.
+  created_by?: string | null;
   // Report style extracted (background) from the docs uploaded at onboarding.
   // report_tone = the prose style "directive"; report_tone_profile = the
   // structured dimensions + verbatim exemplar sentences; theme = prose.
@@ -223,4 +226,98 @@ export interface LatestOutlineResponse {
   period?: string | null;
   created_at?: string | null;
   outline: ReportOutlineDetail | null;
+}
+
+// GET /api/v1/companies/{id}/annual-report-extraction — everything the onboarding
+// upload read out of the company's annual report(s), for the panel on Upload
+// Previous Reports. Most of it is stored once per company; only `reports[]` holds
+// what belongs to one uploaded file.
+export interface ExtractionProfile {
+  description: string | null;
+  sector_id: string | null;
+  sector_name: string | null;
+  employee_count: number | null;
+  founded_year: number | null;
+  headquarter_city: string | null;
+  listed_exchange: string | null;
+  reporting_currency: string | null;
+  primary_language: string | null;
+  fiscal_year_end_month: number | null;
+  website_url: string | null;
+}
+
+export interface ExtractedDepartment {
+  name: string;
+  rank?: number;
+  reason?: string;
+  evidence?: string;
+}
+
+export interface MappedDepartment {
+  name: string;
+  department_id: string | null;
+  confidence?: number;
+}
+
+export interface ExtractedDepartments {
+  raw?: ExtractedDepartment[];
+  mapped?: MappedDepartment[];
+  source_report_id?: string;
+  source_document_id?: string;
+  extracted_at?: string;
+  dismissed?: boolean;
+}
+
+export interface ExtractedSection {
+  section_code: string;
+  title: string | null;
+  section_number: number | null;
+  mode: string | null;
+  mode_confirmed: boolean | null;
+}
+
+export interface ExtractedFinancials {
+  period: string | null;
+  version: number | null;
+  created_at: string | null;
+  data: {
+    periods?: { period_label?: string; line_items?: Record<string, number | null> }[];
+    yoy_deltas?: Record<string, number | null>;
+    currency?: string | null;
+    denomination?: string | null;
+  } | null;
+}
+
+export interface ExtractedReport {
+  document: {
+    id: string;
+    filename: string;
+    file_size_bytes: number | null;
+    created_at: string | null;
+    report_id: string | null;
+  };
+  period: string | null;
+  contents_page: ReportOutlineDetail | null;
+  chunks: { count: number; tokens: number } | null;
+  financials: ExtractedFinancials | null;
+}
+
+export interface AnnualReportExtraction {
+  status: {
+    report_extraction_status: string | null;
+    onboarding_progress: { stage?: string; detail?: string; percent?: number } | null;
+  };
+  company: {
+    profile: ExtractionProfile;
+    tone: string | null;
+    tone_dimensions: Record<string, string>;
+    tone_exemplars: string[];
+    themes: { name: string; explanation?: string }[];
+    highlights: { category: string; text: string }[];
+    outline: string[];
+    departments: ExtractedDepartments | null;
+  };
+  sections: ExtractedSection[];
+  reports: ExtractedReport[];
+  errors: string[];
 }

@@ -23,6 +23,8 @@ import {
   setActingCompany,
   type ActingCompany,
 } from "@/lib/acting-company";
+import { MIN_GAP_ON_FOCUS_MS, REFRESH_EVERY_MS, samePermissions } from "@/lib/permissionsRefresh";
+import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { AuthUser, OnboardingPayload, UserProfile } from "@/types/auth";
 import type { CompanyRecord } from "@/types/company";
 
@@ -37,6 +39,9 @@ interface AuthContextValue {
   // Re-fetch /auth/me and replace the cached user. Useful right after a
   // password change to flush must_change_password back to false.
   refreshUser(): Promise<void>;
+  // Get a fresh token + permissions from the server. Used after Spark issues
+  // or changes the license, so new modules appear without logging out.
+  refreshPermissions(): Promise<void>;
   // Submit the first-login onboarding form. Stores the freshly-issued token +
   // user (onboarding_completed = true) so the gate clears immediately.
   completeOnboarding(payload: OnboardingPayload): Promise<void>;
@@ -127,6 +132,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const refreshPermissions = useCallback(async () => {
+    const data = await authApi.refreshToken();
+    setAuthToken(data.access_token);
+    setToken(data.access_token);
+    setUser((prev) => {
+      if (!prev) return prev;
+      // Nothing changed: keep the same object, so the screens don't redraw.
+      if (samePermissions(prev, data)) return prev;
+      const updated: AuthUser = {
+        ...prev,
+        permissions: data.permissions,
+        visible_features: data.visible_features,
+        apps: data.apps,
+        default_app: data.default_app,
+      };
+      setStoredUser(updated);
+      return updated;
+    });
+  }, []);
+
+  // Permissions are saved at login. A license can gain (or lose) modules while
+  // someone stays logged in, so on every app start / page refresh ask once for
+  // fresh ones. Best effort: if it fails, the saved ones stay.
+  useEffect(() => {
+    if (!getToken()) return;
+    refreshPermissions().catch(() => undefined);
+  }, [refreshPermissions]);
+
+  // ...and while they stay on the page: every 5 minutes when the tab is visible,
+  // and when they come back to the tab (at most once a minute). So when the admin
+  // buys or changes the plan, everyone else gets it without a reload.
+  const loggedIn = token !== null;
+  useEffect(() => {
+    if (!loggedIn) return;
+    let lastAsked = Date.now();
+    const askAgain = () => {
+      lastAsked = Date.now();
+      refreshPermissions().catch(() => undefined);
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") askAgain();
+    }, REFRESH_EVERY_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastAsked >= MIN_GAP_ON_FOCUS_MS) askAgain();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loggedIn, refreshPermissions]);
+
   const completeOnboarding = useCallback(
     async (payload: OnboardingPayload) => {
       const data = await authApi.onboarding(payload);
@@ -183,6 +240,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setActing(null);
+    // A Spark temporary password must not outlive the session that made it.
+    clearAllSparkLoginKeys();
   }, []);
 
   const switchCompany = useCallback((company: ActingCompany) => {
@@ -200,6 +259,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* private mode / storage disabled — the flag simply isn't there */
     }
+    // Same for Spark's temporary-password and new-logins hand-offs: they belong
+    // to the company being left. (Wrapped in its own try/catch inside.)
+    clearAllSparkLoginKeys();
   }, []);
 
   // Spark staff have no company of their own, so everything downstream that
@@ -224,6 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         changePassword,
         refreshUser,
+        refreshPermissions,
         completeOnboarding,
         logout,
         actingCompany,

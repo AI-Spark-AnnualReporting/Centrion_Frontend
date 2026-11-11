@@ -7,6 +7,36 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
+import type { SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
+import { normalizeTrends } from "@/types/spark";
+import type {
+  CompanyLicense,
+  LicenseUsage,
+  GeneratedLicense,
+  GenerateLicensePayload,
+  LicensableModule,
+  SparkLicenseRow,
+  SparkUpgradeRequest,
+  UpgradeRequestPayload,
+} from "@/types/license";
+import type {
+  CompanySubscription,
+  CustomPlanCompanyPage,
+  Duration,
+  CurrentSubscription,
+  PlanChanges,
+  PlanDeleteResult,
+  PlanForClient,
+  PlanForm,
+  PlanKind,
+  PlanPage,
+  PlanStatus,
+  PlanSubscriber,
+  OfferEmailForm,
+  QuoteRequestForm,
+  SubscriptionPlan,
+} from "@/types/subscription";
+import { checkAiCreditsHeader, showAiCreditsPausedToast } from './aiCreditsToast';
 import type {
   AuthUser,
   DepartmentOption,
@@ -16,10 +46,12 @@ import type {
   OnboardingResponse,
 } from "@/types/auth";
 import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
+import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
+  AnnualReportExtraction,
   Company,
   CompanyBrandUpdate,
   CreateCompanyRequest,
@@ -434,6 +466,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     body,
     signal: opts.signal,
   });
+  checkAiCreditsHeader(res);
 
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
@@ -454,6 +487,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -478,6 +512,7 @@ async function postPipeline(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -755,6 +790,18 @@ export const auth = {
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
 
+  // A fresh token with permissions re-read from the server. Called after Spark
+  // issues or changes the company's license, so new modules appear without
+  // logging out.
+  refreshToken: () =>
+    request<{
+      access_token: string;
+      permissions: AuthUser["permissions"];
+      visible_features: AuthUser["visible_features"];
+      apps: AuthUser["apps"];
+      default_app: AuthUser["default_app"];
+    }>("/api/v1/auth/refresh-token", { method: "POST" }),
+
   // Self-service reset, for users who can't log in at all (so no JWT — unlike
   // changePassword above). Query params, same as login/register: that's what
   // the backend reads.
@@ -776,6 +823,15 @@ export const auth = {
     request<{ reset: boolean }>("/api/v1/auth/reset-password", {
       method: "POST",
       query: { token, new_password: newPassword },
+      auth: false,
+    }),
+
+  // On-premises only: reset with a one-use code from Spark (for servers with no
+  // email server). The code is tied to this email and this server.
+  resetPasswordWithCode: (email: string, resetCode: string, newPassword: string) =>
+    request<{ reset: boolean }>("/api/v1/auth/reset-password-with-code", {
+      method: "POST",
+      body: { email, reset_code: resetCode, new_password: newPassword },
       auth: false,
     }),
 
@@ -866,6 +922,12 @@ export const companies = {
   // the common case: it is only written for an annual PDF the customer gave us.
   getLatestOutline: (companyId: string) =>
     request<LatestOutlineResponse>(`/api/v1/companies/${companyId}/latest-outline`),
+
+  // Everything onboarding read out of the uploaded annual report(s): tone, themes,
+  // highlights, profile, outline, sections, departments, and per file its chunks,
+  // contents page and revenue/profit. Read-only; shown on Upload Previous Reports.
+  getAnnualReportExtraction: (companyId: string) =>
+    request<AnnualReportExtraction>(`/api/v1/companies/${companyId}/annual-report-extraction`),
 
   // The logo lives behind its own endpoint because it's ~1.4 MB of inline
   // base64 and getMyCompany() runs on nearly every page — fetch it only where
@@ -1656,6 +1718,7 @@ export const complianceValidation = {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(full, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
       const parsed: unknown = await res.json().catch(() => null);
@@ -2523,8 +2586,13 @@ export const quarterlyReports = {
       if (!line.startsWith("data: ")) return;
       const json = line.slice(6).trim();
       if (!json) return;
-      try { onEvent(JSON.parse(json) as ChatStreamEvent); }
-      catch { /* skip malformed line */ }
+      try {
+        const event = JSON.parse(json) as ChatStreamEvent;
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        if (event?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        onEvent(event);
+      } catch { /* skip malformed line */ }
     };
 
     while (true) {
@@ -4036,13 +4104,20 @@ async function* consumeSse(
           .map((l) => l.slice(5).replace(/^\s/, ""));
         if (dataLines.length === 0) continue;
         const payload = dataLines.join("\n");
+        let event: ChatStreamEvent;
         try {
-          yield JSON.parse(payload) as ChatStreamEvent;
+          event = JSON.parse(payload) as ChatStreamEvent;
         } catch {
           // Non-JSON heartbeat — surface as a raw token so the caller can
           // ignore or render.
           yield { type: "token", content: payload };
+          continue;
         }
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        const fields = event as unknown as Record<string, unknown> | null;
+        if (fields?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        yield event;
       }
     }
   } finally {
@@ -4984,6 +5059,7 @@ export const communications = {
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(url, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
     return res.blob();
@@ -5230,6 +5306,9 @@ export interface SparkCompanyRow {
   name: string;
   /** Annual reporting cycles this company has. Deliberately the only metric. */
   cycle_count: number;
+  /** True when a Spark user created this company (companies.created_by is set).
+   *  Only these rows get the Logins action. */
+  created_by_spark?: boolean;
 }
 
 /** The directory's headline numbers. Computed on the same two reads as the rows. */
@@ -5250,6 +5329,67 @@ export interface CreateSparkCompanyPayload {
   name: string;
   sector_id?: string | null;
   jurisdiction?: string | null;
+  /** Optional company admin login. Left out entirely when the switch is off,
+   *  so the request is exactly what it was before this feature. The server
+   *  always gives it the fixed Spark temporary password (1234). When it is
+   *  sent, the server also makes a project manager login (`<slug>@pm.com`)
+   *  by itself: there is no PM field here on purpose. */
+  admin?: { email: string };
+}
+
+/** GET /spark/email-available. `suggestion` is the next free variant of the
+ *  same address (e.g. aramco-2@admin.com), or null when this one is free. */
+export interface SparkEmailAvailability {
+  email: string;
+  valid: boolean;
+  available: boolean;
+  suggestion: string | null;
+}
+
+/** One planned lead email from the dry run (GET /spark/companies/{id}/lead-emails). */
+export interface SparkLeadEmail {
+  department_code: string | null;
+  department_name: string | null;
+  email: string;
+}
+
+/** POST /spark/companies/{id}/leads. The password is never in this response;
+ *  the Logins view reads it. */
+export interface SparkCreateLeadsResult {
+  created: {
+    user_id: string;
+    email: string;
+    department_code: string;
+    department_name: string;
+  }[];
+  skipped: { department_code: string; reason: string }[];
+}
+
+/** One admin, project manager or department-lead login of a Spark-created company. */
+export interface SparkLogin {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: "admin" | "project_manager" | "hod";
+  department_code: string | null;
+  department_name: string | null;
+  must_change_password: boolean;
+  /** Only while it is still unused and readable on this server; else null. */
+  temp_password: string | null;
+}
+
+/** GET /spark/companies/{id}/logins. */
+export interface SparkLoginsResponse {
+  company: { id: string; name: string };
+  logins: SparkLogin[];
+  departments_without_lead: number;
+}
+
+/** POST /spark/companies/{id}/users/{userId}/reset-password. */
+export interface SparkResetPasswordResult {
+  user_id: string;
+  email: string;
+  temp_password: string;
 }
 
 export const sparkInternal = {
@@ -5267,11 +5407,264 @@ export const sparkInternal = {
 
   /** Create a tenant so Spark staff can run onboarding for it themselves. */
   createCompany: (body: CreateSparkCompanyPayload) =>
-    request<{ company: { id: string; name: string } }>("/api/v1/spark/companies", {
+    request<{
+      company: { id: string; name: string };
+      admin?: { user_id: string; email: string };
+      /** Only when `admin` was sent: the project manager login the server made too. */
+      pm?: { user_id: string; email: string };
+    }>("/api/v1/spark/companies", {
       method: "POST",
       body,
       noActingCompany: true,
     }),
+
+  // The calls below all name the company in the URL, never through the
+  // X-Company-Id header: Spark makes them from the directory and the wizard,
+  // where the acting company may be unset or a different one.
+
+  /** Is this email free to use as a new login? Also returns the next free variant. */
+  emailAvailable: (email: string) =>
+    request<SparkEmailAvailability>("/api/v1/spark/email-available", {
+      noActingCompany: true,
+      query: { email },
+    }),
+
+  /** Dry run: the exact emails the department leads would get
+   *  (`<department name>-<company name>@hod.com`). Works from the names alone,
+   *  because during the wizard the departments don't exist yet. */
+  leadEmails: (companyId: string, departmentNames: string[]) =>
+    request<{ emails: SparkLeadEmail[] }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/lead-emails`,
+      // buildQuery repeats `name=` once per item, which is what the backend
+      // reads (a name can hold a comma, so no joining). No names = leave it
+      // out, so the server uses the company's own departments with no lead.
+      {
+        noActingCompany: true,
+        query: { name: departmentNames.length > 0 ? departmentNames : undefined },
+      },
+    ),
+
+  /** Create a lead login for every active department that has no lead yet.
+   *  Every lead gets the fixed Spark temporary password (1234). */
+  createLeads: (companyId: string) =>
+    request<SparkCreateLeadsResult>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/leads`,
+      {
+        method: "POST",
+        body: {},
+        noActingCompany: true,
+      },
+    ),
+
+  /** The company's admin, project manager and lead logins, with any still-unused temporary password. */
+  logins: (companyId: string) =>
+    request<SparkLoginsResponse>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/logins`,
+      { noActingCompany: true },
+    ),
+
+  /** Give one admin, project manager or lead login a new temporary password. */
+  resetPassword: (companyId: string, userId: string) =>
+    request<SparkResetPasswordResult>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/users/${encodeURIComponent(userId)}/reset-password`,
+      { method: "POST", noActingCompany: true },
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Spark admin console — the platform owner's (`spark_admin`) cross-tenant
+// view at /spark. Restored from ba6bdc5 (removed in merge 621cc27). Not scoped
+// to the caller's company: spark_admin belongs to none.
+// ---------------------------------------------------------------------------
+
+function listOrEnvelope<T>(raw: T[] | Record<string, T[]>, key: string): T[] {
+  return Array.isArray(raw) ? raw : (raw?.[key] ?? []);
+}
+
+export const spark = {
+  // Cards + the Companies tab in one call.
+  overview: () => request<SparkOverview>("/api/v1/spark/overview", { noActingCompany: true }),
+
+  listUsers: () =>
+    request<SparkUserRow[] | { users: SparkUserRow[] }>("/api/v1/spark/users", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "users")),
+
+  listReports: () =>
+    request<SparkReportRow[] | { reports: SparkReportRow[] }>("/api/v1/spark/reports", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "reports")),
+
+  // Report counts by type over time. `year` buckets by month; omitting it buckets by year.
+  reportTrends: (params: { year?: number; company_id?: string } = {}) =>
+    request<unknown>("/api/v1/spark/report-trends", { query: params, noActingCompany: true }).then(
+      normalizeTrends,
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Licensing (plan: Centriton/.claude/plans/company-licensing.md)
+// `sparkLicenses` — spark_admin only: make keys and unlock codes for every company.
+// `license` — the client admin: see the license, paste a key or unlock code
+// (on-premises), ask for an upgrade (cloud).
+// ---------------------------------------------------------------------------
+
+export const sparkLicenses = {
+  list: () =>
+    request<{ licenses: SparkLicenseRow[]; modules: LicensableModule[]; upgrade_requests?: SparkUpgradeRequest[] }>("/api/v1/spark/licenses", {
+      noActingCompany: true,
+    }),
+
+  get: (companyId: string) =>
+    request<SparkLicenseRow & { modules_catalogue: LicensableModule[] }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`,
+      { noActingCompany: true },
+    ),
+
+  generate: (companyId: string, body: GenerateLicensePayload) =>
+    request<GeneratedLicense>(`/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  unlockCode: (companyId: string, body: { lock_id: string; server_id?: string }) =>
+    request<{ unlock_code: string; valid_days: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/unlock-code`,
+      { method: "POST", body, noActingCompany: true },
+    ),
+
+  passwordResetCode: (companyId: string, email: string) =>
+    request<{ reset_code: string; valid_hours: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/password-reset-code`,
+      { method: "POST", body: { email }, noActingCompany: true },
+    ),
+
+  addOnPremClient: (name: string) =>
+    request<{ company: { id: string; name: string; deployment: "on_prem" } }>(
+      "/api/v1/spark/on-prem-clients",
+      { method: "POST", body: { name }, noActingCompany: true },
+    ),
+};
+
+export const license = {
+  get: () => request<CompanyLicense>("/api/v1/admin/license"),
+
+  // Any company user: room left per limit (create buttons).
+  usage: () => request<LicenseUsage>("/api/v1/license/usage"),
+
+  activate: (licenseKey: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/activate", {
+      method: "POST",
+      body: { license_key: licenseKey },
+    }),
+
+  unlock: (unlockCode: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/unlock", {
+      method: "POST",
+      body: { unlock_code: unlockCode },
+    }),
+
+  requestUpgrade: (body: UpgradeRequestPayload) =>
+    request<{ requested: boolean; details: string }>("/api/v1/admin/license/upgrade-request", {
+      method: "POST",
+      body,
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Cloud subscriptions (plan: Centriton/.claude/plans/cloud-subscriptions.md)
+// `sparkPlans` — spark_admin: the plans and the quotes clients sent.
+// `subscriptions` — the client admin: choose, pay for, or ask for a plan.
+// Checkout and payment send an Idempotency-Key, so a repeated click (or a
+// retry after a lost answer) never buys or pays twice.
+// ---------------------------------------------------------------------------
+
+export interface PlanListQuery {
+  status?: PlanStatus;
+  duration?: Duration;
+  with_enterprise?: boolean;          // keep Enterprise next to a duration filter
+  kind?: PlanKind;                    // public = for every company, custom = for one
+  company_id?: string;
+  quotes_only?: boolean;
+  offer_state?: "received" | "sent";   // open quotes in that state
+  page?: number;
+  limit?: number;
+  sort_by?: "name" | "price" | "created_at" | "updated_at";
+  order?: "asc" | "desc";
+}
+
+export const sparkPlans = {
+  list: (query: PlanListQuery = {}) =>
+    request<PlanPage>("/api/v1/spark/subscription-plans", { query, noActingCompany: true }),
+
+  get: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, { noActingCompany: true }),
+
+  create: (body: PlanForm) =>
+    request<SubscriptionPlan>("/api/v1/spark/subscription-plans", { method: "POST", body, noActingCompany: true }),
+
+  update: (planId: string, body: PlanChanges) =>
+    request<SubscriptionPlan & { updated_subscriptions: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`,
+      { method: "PATCH", body, noActingCompany: true },
+    ),
+
+  subscribers: (planId: string) =>
+    request<{ items: PlanSubscriber[]; total: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/subscribers`,
+      { noActingCompany: true },
+    ),
+
+  // Never-bought plans are removed; bought ones are hidden (see PlanDeleteResult).
+  remove: (planId: string) =>
+    request<PlanDeleteResult>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
+      method: "DELETE",
+      noActingCompany: true,
+    }),
+
+  // Email a quote's offer to the chosen addresses (the plan stays a draft).
+  sendOffer: (planId: string, body: OfferEmailForm) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/offers`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  // Approve a quote's plan: published for that company ("Made for you").
+  approveOffer: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/approvals`, {
+      method: "POST",
+      noActingCompany: true,
+    }),
+
+  // Custom plans → the companies table (companies with a plan made for them).
+  companies: (query: { search?: string; page?: number; limit?: number } = {}) =>
+    request<CustomPlanCompanyPage>("/api/v1/spark/subscription-plans/companies", { query, noActingCompany: true }),
+};
+
+export const subscriptions = {
+  plans: () => request<{ items: PlanForClient[]; modules_catalogue: LicensableModule[] }>("/api/v1/subscription-plans"),
+
+  current: () => request<CurrentSubscription>("/api/v1/subscriptions/current"),
+
+  // The plan's own duration and price are used; Enterprise can't be bought.
+  // accept_lost_modules: the admin confirmed the modules the new plan doesn't include.
+  startCheckout: (body: { plan_id: string; accept_lost_modules?: boolean }, idempotencyKey: string) =>
+    request<CompanySubscription>("/api/v1/subscriptions/checkouts", {
+      method: "POST",
+      body,
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  pay: (checkoutId: string, idempotencyKey: string) =>
+    request<CompanySubscription>(`/api/v1/subscriptions/checkouts/${encodeURIComponent(checkoutId)}/payments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  requestQuote: (body: QuoteRequestForm) =>
+    request<SubscriptionPlan>("/api/v1/quote-requests", { method: "POST", body }),
 };
 
 // ---------------------------------------------------------------------------
@@ -5812,6 +6205,10 @@ export function logout(): void {
   // Otherwise the next person to log in on this browser inherits a Spark
   // session's acting company and silently sends it on every request.
   clearActingCompany();
+  // A forced logout (any 401) comes here too, not through AuthContext, so the
+  // Spark temporary password must be cleared here or the next person to sign
+  // in on this tab inherits it.
+  clearAllSparkLoginKeys();
 }
 
 export function getToken(): string | null {
@@ -5896,6 +6293,7 @@ export async function fetchWithAuth(
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  checkAiCreditsHeader(res);
   if (res.status === 401) handleUnauthorized();
   return res;
 }
@@ -5929,6 +6327,7 @@ export async function getSectors(): Promise<Sector[]> {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
       headers: { accept: "application/json", ...defaultRequestHeaders() },
     });
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
@@ -6002,6 +6401,7 @@ export async function createCompany(
         headers: { accept: "application/json", ...defaultRequestHeaders() },
       },
     );
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
