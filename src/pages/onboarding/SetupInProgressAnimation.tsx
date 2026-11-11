@@ -123,6 +123,8 @@ export default function SetupInProgressAnimation({
   force = false,
   overlay = false,
   landingPath = '/dashboard',
+  onOnboarded,
+  onOnboardingFailed,
 }: {
   // null when this runs OUTSIDE onboarding (the Upload Reports page): onboarding is
   // already complete and there's no payload to submit, so completeOnboarding is
@@ -143,6 +145,16 @@ export default function SetupInProgressAnimation({
   // this navigate is the ONLY exit from a fixed full-screen overlay with no
   // cancel, so a destination that could ever be empty would trap the user.
   landingPath?: string;
+  // Runs once, right after completeOnboarding succeeds and before the app
+  // opens. Only /onboarding passes it, and only for Spark staff who asked for
+  // department lead logins (the departments exist only once onboarding is
+  // submitted). It must not throw; a failure is still caught here so the user
+  // is never trapped on this screen.
+  onOnboarded?: () => Promise<void>;
+  // Runs when completeOnboarding fails on the files path, where that failure
+  // is otherwise swallowed and the app opens anyway. Lets the caller record
+  // that the lead logins were not created.
+  onOnboardingFailed?: () => void;
 }) {
   const navigate = useNavigate();
   const { completeOnboarding, user } = useAuth();
@@ -163,6 +175,13 @@ export default function SetupInProgressAnimation({
   payloadRef.current = payload;
   const filesRef = useRef(files);
   filesRef.current = files;
+  // Held in refs, never in the flow effect's dependency list: the parent passes
+  // a new function on every render, and listing it there would restart the
+  // whole setup flow (and resubmit onboarding) each time.
+  const onOnboardedRef = useRef(onOnboarded);
+  onOnboardedRef.current = onOnboarded;
+  const onOnboardingFailedRef = useRef(onOnboardingFailed);
+  onOnboardingFailedRef.current = onOnboardingFailed;
 
   useEffect(() => {
     if (user?.company_id) companyIdRef.current = user.company_id;
@@ -182,6 +201,21 @@ export default function SetupInProgressAnimation({
 
     const run = async () => {
       const cid = companyIdRef.current;
+
+      // The caller's after-onboarding step (Spark lead logins), if any. Awaited
+      // so it finishes before the app opens; errors are swallowed because the
+      // user must always reach the app.
+      const runAfterOnboarded = async () => {
+        const afterOnboarded = onOnboardedRef.current;
+        if (!afterOnboarded || cancelled) return;
+        setDetail('Creating department lead logins…');
+        try {
+          await afterOnboarded();
+        } catch {
+          /* the callback reports its own result; never block entering the app */
+        }
+      };
+
       const items = filesRef.current
         .filter((f) => f.documentId)
         .map((f) => ({ document_id: f.documentId as string, doc_type: f.docType, period: f.period }));
@@ -195,10 +229,17 @@ export default function SetupInProgressAnimation({
         setDetail('Setting up your workspace…');
         // No payload → not onboarding; there is nothing to finalize.
         if (payloadRef.current) {
+          let onboarded = false;
           try {
             await completeOnboarding(payloadRef.current);
+            onboarded = true;
           } catch {
             /* still enter — onboarding is best-effort at this point */
+          }
+          if (onboarded) {
+            await runAfterOnboarded();
+          } else {
+            onOnboardingFailedRef.current?.();
           }
         }
         if (!cancelled) enterApp();
@@ -213,6 +254,7 @@ export default function SetupInProgressAnimation({
             if (!cancelled) setError(e instanceof Error ? e.message : 'Setup failed.');
             return;
           }
+          await runAfterOnboarded();
         }
         if (!cancelled) enterApp();
         return;

@@ -160,12 +160,13 @@ describe("sidebar for spark_internal", () => {
     expect(screen.getByText("AI Copilot")).toBeInTheDocument();
   });
 
-  it("reveals Departments but not Users & Roles when the console is expanded", () => {
+  it("reveals Departments and Users & Roles when the console is expanded", () => {
+    // Spark hands out the logins it makes, so it needs every user's email and
+    // their waiting temporary password (boss's ask, 2026-11-10).
     renderSidebar();
     fireEvent.click(screen.getByText("Admin Console"));
     expect(screen.getByText("Departments")).toBeInTheDocument();
-    // Whoever owns the client owns its accounts.
-    expect(screen.queryByText("Users & Roles")).not.toBeInTheDocument();
+    expect(screen.getByText("Users & Roles")).toBeInTheDocument();
   });
 
   it("shows only the directory before a company is chosen", () => {
@@ -218,8 +219,6 @@ describe("sidebar for everyone else", () => {
   });
 
   it("still gives an admin Users & Roles", () => {
-    // The other half of hiding it from Spark: without this, a filter that hid it
-    // from everybody would look just as green.
     renderSidebar();
     fireEvent.click(screen.getByText("Admin Console"));
     expect(screen.getByText("Users & Roles")).toBeInTheDocument();

@@ -94,6 +94,9 @@ export interface Company {
   reporting_sector: string | null;
   // Status of the signup-time background profile extraction (processing | done).
   profile_extraction_status?: string | null;
+  // The Spark user who created this company, or null for a self-signup company.
+  // Only Spark-created companies can get Spark-made lead logins.
+  created_by?: string | null;
   // Report style extracted (background) from the docs uploaded at onboarding.
   // report_tone = the prose style "directive"; report_tone_profile = the
   // structured dimensions + verbatim exemplar sentences; theme = prose.

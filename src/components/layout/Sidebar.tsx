@@ -82,10 +82,16 @@ const ADMIN_CHILDREN: {
   end?: boolean;
   allowedRoles?: BackendRole[];
 }[] = [
-  // Spark runs a client's annual report, not its payroll of accounts — whoever
-  // owns the client owns its users. The page itself is still reachable by URL;
-  // this is about what the nav offers, not access.
-  { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
+  // Spark staff see it too (boss's ask, 2026-11-10): they hand out the logins
+  // Spark makes for a client, so they need every user's email and the Show
+  // button for a waiting user's temporary password. The backend already lets
+  // them in for the company they are acting as.
+  {
+    key: 'users',
+    label: 'Users & Roles',
+    path: '/admin-console/users',
+    allowedRoles: ['admin', 'spark_internal'],
+  },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
 ];
 
@@ -496,9 +502,9 @@ export function Sidebar() {
         </div>
       ))}
       {/* Spark staff get this too: they run each client's annual report AS that
-          client's admin, and Departments are part of that job. Users & Roles is
-          not — see ADMIN_CHILDREN. Still gated on having picked a company: the
-          console is company-scoped and would 400 without one. */}
+          client's admin, and Departments and Users & Roles are part of that job.
+          Still gated on having picked a company: the console is company-scoped
+          and would 400 without one. */}
       {isAdminLevel(user?.role) && !sparkAwaitingCompany && (
         <div>
           <div className="sb-div" />

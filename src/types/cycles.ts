@@ -178,7 +178,10 @@ export interface ResolveSectionsResponse {
 // POST /api/v1/admin/cycles/{id}/assign-departments
 export interface AssignDepartmentsPayload {
   // HR Lead flow: department-only. The dept's HR Lead is resolved server-side; user_id is ignored.
-  assignments: { department_id: string; user_id?: string }[];
+  // `lead` is sent only by Spark: 'department' = the department's real lead heads
+  // the session (the default), 'self' = the Spark user leads it. Left out for
+  // everyone else, so their request stays exactly as before.
+  assignments: { department_id: string; user_id?: string; lead?: 'department' | 'self' }[];
   // true = `assignments` is the cycle's FULL list: departments left off it are removed
   // (only while they have no work; otherwise 409 and nothing changes).
   replace?: boolean;
