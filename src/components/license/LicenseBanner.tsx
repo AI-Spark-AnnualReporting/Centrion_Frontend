@@ -34,6 +34,9 @@ const CLOSED_KEY_PREFIX = 'license-banner-closed:';
 export const LICENSE_CARD_ID = 'license-card';
 export const LICENSE_KEY_BOX_ID = 'license-key-box';
 export const LICENSE_UNLOCK_BOX_ID = 'license-unlock-box';
+// lock_reason values from the backend (licensing.find_tamper_reason) that mean
+// the server clock, not edited license data.
+const CLOCK_LOCK_REASONS = ['Server clock was moved back', 'Server clock is not moving'];
 // Open the Request upgrade popup on the License card (every request needs the
 // admin's consent there, so nothing is sent from the banner itself).
 export const REQUEST_UPGRADE_HASH = 'request-upgrade';
@@ -135,7 +138,9 @@ export function pickBanner(data: CompanyLicense, closed: Set<Closable>, today: s
       return {
         tone: 'red', icon: '🔒',
         title: <>License check failed — Lock ID <span style={MONO}>{data.lock_id ?? ''}</span></>,
-        text: 'The license data on this server was changed, so new work is paused. Your reports stay open. Send the Lock ID to Centriyon to get an unlock code.',
+        text: CLOCK_LOCK_REASONS.includes(data.lock_reason ?? '')
+          ? "The server's date and time look wrong, so new work is paused. Your reports stay open. Set the server clock to the correct time, then send the Lock ID to Centriyon to get an unlock code."
+          : 'The license data on this server was changed, so new work is paused. Your reports stay open. Send the Lock ID to Centriyon to get an unlock code.',
         rows: [{ label: 'Read-only now:', items: licensed }],
         actions: ['copyLock', 'pasteUnlock'],
       };

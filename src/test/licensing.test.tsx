@@ -414,3 +414,38 @@ describe("PageLimitBanner (limit reached, on the create page only)", () => {
     expect(localStorage.getItem("license-limit-closed:quarterly")).not.toBeNull();
   });
 });
+
+describe("LicenseCard when locked (on-premises)", () => {
+  beforeEach(() => {
+    licenseGet.mockReset();
+    mockAuth = { user: CLIENT_ADMIN, refreshPermissions: vi.fn() };
+  });
+
+  async function renderCard(data: CompanyLicense) {
+    const { LicenseCard } = await import("@/components/license/LicenseCard");
+    licenseGet.mockResolvedValue(data);
+    render(<MemoryRouter><LicenseCard /></MemoryRouter>);
+    await screen.findByText("License");
+  }
+
+  const ON_PREM = { deployment: "on_prem", server_id: "SRV-AAAA-BBBB-CCCC" };
+
+  it("shows only the unlock box while locked", async () => {
+    await renderCard(licenseOf("locked", { ...ON_PREM, lock_id: "LCK-4F2A" }));
+    expect(screen.getByText("Unlock code from Centriyon")).toBeInTheDocument();
+    expect(screen.queryByText("License key from Centriyon")).not.toBeInTheDocument();
+  });
+
+  it("shows only the license key box when not locked", async () => {
+    await renderCard(licenseOf("none", ON_PREM));
+    expect(screen.getByText("License key from Centriyon")).toBeInTheDocument();
+    expect(screen.queryByText("Unlock code from Centriyon")).not.toBeInTheDocument();
+  });
+
+  it("says the server clock looks wrong for a clock lock", async () => {
+    const clockLock = { ...ON_PREM, lock_id: "LCK-4F2A", lock_reason: "Server clock was moved back" };
+    await renderCard(licenseOf("locked", clockLock));
+    expect(screen.getByText(/date and time look wrong/)).toBeInTheDocument();
+    expect(screen.queryByText(/license data on this server was changed/)).not.toBeInTheDocument();
+  });
+});

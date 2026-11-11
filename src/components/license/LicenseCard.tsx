@@ -170,9 +170,12 @@ export function LicenseCard() {
       {onPrem && (
         <>
           {data.server_id && <CopyBox label="Client ID — send this to Centriyon" value={data.server_id} />}
-          <PasteBox id={LICENSE_KEY_BOX_ID} label="License key from Centriyon" button="Activate license" onSubmit={async (key) => afterChange(await license.activate(key))} />
-          {data.status === 'locked' && (
+          {/* Locked: only an unlock code helps (a new key keeps the lock), so
+              show only that box; the key box comes back once unlocked. */}
+          {data.status === 'locked' ? (
             <PasteBox id={LICENSE_UNLOCK_BOX_ID} label="Unlock code from Centriyon" button="Unlock" onSubmit={async (code) => afterChange(await license.unlock(code))} />
+          ) : (
+            <PasteBox id={LICENSE_KEY_BOX_ID} label="License key from Centriyon" button="Activate license" onSubmit={async (key) => afterChange(await license.activate(key))} />
           )}
         </>
       )}
