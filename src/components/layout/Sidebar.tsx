@@ -15,13 +15,15 @@ import type { CompanyLicense } from '@/types/license';
 // "Reports Validation" instead — see REPORTS_VALIDATION_CHILDREN below.)
 // Spark staff are an admin for every company's ANNUAL REPORT, not general-purpose
 // admins — so they get the directory, an Annual Report tab, the three
-// cross-cutting workspaces below, and nothing else.
-// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank. The
+// cross-cutting workspaces below, Upload Previous Reports (to see which annual
+// reports the chosen company has uploaded), and nothing else.
+// Keys are NAV_ITEMS keys: AI Copilot, Communication Hub, Document Bank,
+// Upload Previous Reports. The
 // annual report is NOT one of them and can't be: this set is only ever consulted
 // against top-level NAV_ITEMS, while `annual` is a REPORT_CHILDREN key nested
 // under Reports — which spark never sees. Hence its own hand-rolled tab below,
 // the same shape as the Companies button.
-const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs']);
+const SPARK_NAV_KEYS = new Set(['ai', 'comms', 'docs', 'uploadReports']);
 
 const REPORT_CHILDREN: { key: string; label: string; path: string; featureKey: FeatureKey; end?: boolean; allowedRoles?: ('admin' | 'ir')[] }[] = [
   { key: 'quarterly', label: 'Quarterly', path: '/reports/quarterly', featureKey: 'quarterly_report' },
@@ -99,10 +101,16 @@ const ADMIN_CHILDREN: {
   end?: boolean;
   allowedRoles?: BackendRole[];
 }[] = [
-  // Spark runs a client's annual report, not its payroll of accounts — whoever
-  // owns the client owns its users. The page itself is still reachable by URL;
-  // this is about what the nav offers, not access.
-  { key: 'users', label: 'Users & Roles', path: '/admin-console/users', allowedRoles: ['admin'] },
+  // Spark staff see it too (boss's ask, 2026-11-10): they hand out the logins
+  // Spark makes for a client, so they need every user's email and the Show
+  // button for a waiting user's temporary password. The backend already lets
+  // them in for the company they are acting as.
+  {
+    key: 'users',
+    label: 'Users & Roles',
+    path: '/admin-console/users',
+    allowedRoles: ['admin', 'spark_internal'],
+  },
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
   // Cloud only: on-premises installs use license keys (the License card).
   ...(IS_ON_PREM ? [] : [
@@ -607,9 +615,9 @@ export function Sidebar() {
         </div>
       ))}
       {/* Spark staff get this too: they run each client's annual report AS that
-          client's admin, and Departments are part of that job. Users & Roles is
-          not — see ADMIN_CHILDREN. Still gated on having picked a company: the
-          console is company-scoped and would 400 without one. */}
+          client's admin, and Departments and Users & Roles are part of that job.
+          Still gated on having picked a company: the console is company-scoped
+          and would 400 without one. */}
       {isAdminLevel(user?.role) && !sparkAwaitingCompany && (
         <div>
           <div className="sb-div" />

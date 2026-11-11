@@ -2,6 +2,7 @@ import { useState } from 'react';
 import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import SetupInProgressAnimation from '@/pages/onboarding/SetupInProgressAnimation';
 import UploadedReportsList from '@/components/reports/UploadedReportsList';
+import AnnualReportExtraction from '@/components/reports/AnnualReportExtraction';
 
 // The onboarding upload step, reachable from inside the app.
 //
@@ -54,6 +55,8 @@ export default function UploadReportsPage() {
       </div>
 
       <UploadedReportsList />
+
+      <AnnualReportExtraction />
     </div>
   );
 }

@@ -24,6 +24,7 @@ import {
   type ActingCompany,
 } from "@/lib/acting-company";
 import { MIN_GAP_ON_FOCUS_MS, REFRESH_EVERY_MS, samePermissions } from "@/lib/permissionsRefresh";
+import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { AuthUser, OnboardingPayload, UserProfile } from "@/types/auth";
 import type { CompanyRecord } from "@/types/company";
 
@@ -239,6 +240,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setActing(null);
+    // A Spark temporary password must not outlive the session that made it.
+    clearAllSparkLoginKeys();
   }, []);
 
   const switchCompany = useCallback((company: ActingCompany) => {
@@ -256,6 +259,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* private mode / storage disabled — the flag simply isn't there */
     }
+    // Same for Spark's temporary-password and new-logins hand-offs: they belong
+    // to the company being left. (Wrapped in its own try/catch inside.)
+    clearAllSparkLoginKeys();
   }, []);
 
   // Spark staff have no company of their own, so everything downstream that

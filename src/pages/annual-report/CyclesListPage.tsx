@@ -8,6 +8,8 @@ import { isAdminLevel } from '@/constants/roles';
 import type { Cycle, CycleStatus } from '@/types/cycles';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import CycleForm from './CycleForm';
+import CompanyLoginsDialog from '@/pages/spark/CompanyLoginsDialog';
+import { readAndClearNewLogins, type NewLoginsRecord } from '@/lib/sparkLogins';
 import {
   CycleStatusBadge,
   formatCycleDate,
@@ -81,7 +83,7 @@ function StatTile({
 
 export default function CyclesListPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, actingCompany } = useAuth();
   const { canCreate: canCreateAnnual, canRead: canReadAnnual } = useFeaturePermissions('annual_report');
   const canManage = isAdminLevel(user?.role) && canCreateAnnual;
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -89,6 +91,23 @@ export default function CyclesListPage() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+
+  // Spark only: right after the setup wizard made the department lead logins,
+  // open the Logins dialog once. The key is read AND removed on mount, so a
+  // refresh doesn't reopen it. Other roles never touch sessionStorage here.
+  const [newLogins, setNewLogins] = useState<{
+    companyId: string;
+    companyName: string;
+    record: NewLoginsRecord;
+  } | null>(null);
+
+  useEffect(() => {
+    if (user?.role !== 'spark_internal' || !actingCompany) return;
+    const record = readAndClearNewLogins(actingCompany.id);
+    if (record) {
+      setNewLogins({ companyId: actingCompany.id, companyName: actingCompany.name, record });
+    }
+  }, [user?.role, actingCompany]);
 
   const fetchCycles = () => {
     setLoading(true);
@@ -285,6 +304,15 @@ export default function CyclesListPage() {
         )}
       </div>
       </>
+      )}
+
+      {newLogins && (
+        <CompanyLoginsDialog
+          companyId={newLogins.companyId}
+          companyName={newLogins.companyName}
+          origin={newLogins.record}
+          onClose={() => setNewLogins(null)}
+        />
       )}
     </div>
   );

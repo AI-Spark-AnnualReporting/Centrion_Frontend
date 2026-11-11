@@ -36,6 +36,7 @@ import type {
   QuoteRequestForm,
   SubscriptionPlan,
 } from "@/types/subscription";
+import { checkAiCreditsHeader, showAiCreditsPausedToast } from './aiCreditsToast';
 import type {
   AuthUser,
   DepartmentOption,
@@ -45,10 +46,12 @@ import type {
   OnboardingResponse,
 } from "@/types/auth";
 import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
+import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
+  AnnualReportExtraction,
   Company,
   CompanyBrandUpdate,
   CreateCompanyRequest,
@@ -463,6 +466,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     body,
     signal: opts.signal,
   });
+  checkAiCreditsHeader(res);
 
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
@@ -483,6 +487,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -507,6 +512,7 @@ async function postPipeline(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "POST", headers, body: form });
+  checkAiCreditsHeader(res);
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -916,6 +922,12 @@ export const companies = {
   // the common case: it is only written for an annual PDF the customer gave us.
   getLatestOutline: (companyId: string) =>
     request<LatestOutlineResponse>(`/api/v1/companies/${companyId}/latest-outline`),
+
+  // Everything onboarding read out of the uploaded annual report(s): tone, themes,
+  // highlights, profile, outline, sections, departments, and per file its chunks,
+  // contents page and revenue/profit. Read-only; shown on Upload Previous Reports.
+  getAnnualReportExtraction: (companyId: string) =>
+    request<AnnualReportExtraction>(`/api/v1/companies/${companyId}/annual-report-extraction`),
 
   // The logo lives behind its own endpoint because it's ~1.4 MB of inline
   // base64 and getMyCompany() runs on nearly every page — fetch it only where
@@ -1706,6 +1718,7 @@ export const complianceValidation = {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(full, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
       const parsed: unknown = await res.json().catch(() => null);
@@ -2573,8 +2586,13 @@ export const quarterlyReports = {
       if (!line.startsWith("data: ")) return;
       const json = line.slice(6).trim();
       if (!json) return;
-      try { onEvent(JSON.parse(json) as ChatStreamEvent); }
-      catch { /* skip malformed line */ }
+      try {
+        const event = JSON.parse(json) as ChatStreamEvent;
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        if (event?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        onEvent(event);
+      } catch { /* skip malformed line */ }
     };
 
     while (true) {
@@ -4086,13 +4104,20 @@ async function* consumeSse(
           .map((l) => l.slice(5).replace(/^\s/, ""));
         if (dataLines.length === 0) continue;
         const payload = dataLines.join("\n");
+        let event: ChatStreamEvent;
         try {
-          yield JSON.parse(payload) as ChatStreamEvent;
+          event = JSON.parse(payload) as ChatStreamEvent;
         } catch {
           // Non-JSON heartbeat — surface as a raw token so the caller can
           // ignore or render.
           yield { type: "token", content: payload };
+          continue;
         }
+        // The stream starts before the AI call, so the X-AI-Credits header
+        // can't carry an out-of-credit error; the backend puts it in the frame.
+        const fields = event as unknown as Record<string, unknown> | null;
+        if (fields?.ai_credits === "exhausted") showAiCreditsPausedToast();
+        yield event;
       }
     }
   } finally {
@@ -5034,6 +5059,7 @@ export const communications = {
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(url, { headers });
+    checkAiCreditsHeader(res);
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
     return res.blob();
@@ -5280,6 +5306,9 @@ export interface SparkCompanyRow {
   name: string;
   /** Annual reporting cycles this company has. Deliberately the only metric. */
   cycle_count: number;
+  /** True when a Spark user created this company (companies.created_by is set).
+   *  Only these rows get the Logins action. */
+  created_by_spark?: boolean;
 }
 
 /** The directory's headline numbers. Computed on the same two reads as the rows. */
@@ -5300,6 +5329,67 @@ export interface CreateSparkCompanyPayload {
   name: string;
   sector_id?: string | null;
   jurisdiction?: string | null;
+  /** Optional company admin login. Left out entirely when the switch is off,
+   *  so the request is exactly what it was before this feature. The server
+   *  always gives it the fixed Spark temporary password (1234). When it is
+   *  sent, the server also makes a project manager login (`<slug>@pm.com`)
+   *  by itself: there is no PM field here on purpose. */
+  admin?: { email: string };
+}
+
+/** GET /spark/email-available. `suggestion` is the next free variant of the
+ *  same address (e.g. aramco-2@admin.com), or null when this one is free. */
+export interface SparkEmailAvailability {
+  email: string;
+  valid: boolean;
+  available: boolean;
+  suggestion: string | null;
+}
+
+/** One planned lead email from the dry run (GET /spark/companies/{id}/lead-emails). */
+export interface SparkLeadEmail {
+  department_code: string | null;
+  department_name: string | null;
+  email: string;
+}
+
+/** POST /spark/companies/{id}/leads. The password is never in this response;
+ *  the Logins view reads it. */
+export interface SparkCreateLeadsResult {
+  created: {
+    user_id: string;
+    email: string;
+    department_code: string;
+    department_name: string;
+  }[];
+  skipped: { department_code: string; reason: string }[];
+}
+
+/** One admin, project manager or department-lead login of a Spark-created company. */
+export interface SparkLogin {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: "admin" | "project_manager" | "hod";
+  department_code: string | null;
+  department_name: string | null;
+  must_change_password: boolean;
+  /** Only while it is still unused and readable on this server; else null. */
+  temp_password: string | null;
+}
+
+/** GET /spark/companies/{id}/logins. */
+export interface SparkLoginsResponse {
+  company: { id: string; name: string };
+  logins: SparkLogin[];
+  departments_without_lead: number;
+}
+
+/** POST /spark/companies/{id}/users/{userId}/reset-password. */
+export interface SparkResetPasswordResult {
+  user_id: string;
+  email: string;
+  temp_password: string;
 }
 
 export const sparkInternal = {
@@ -5317,11 +5407,68 @@ export const sparkInternal = {
 
   /** Create a tenant so Spark staff can run onboarding for it themselves. */
   createCompany: (body: CreateSparkCompanyPayload) =>
-    request<{ company: { id: string; name: string } }>("/api/v1/spark/companies", {
+    request<{
+      company: { id: string; name: string };
+      admin?: { user_id: string; email: string };
+      /** Only when `admin` was sent: the project manager login the server made too. */
+      pm?: { user_id: string; email: string };
+    }>("/api/v1/spark/companies", {
       method: "POST",
       body,
       noActingCompany: true,
     }),
+
+  // The calls below all name the company in the URL, never through the
+  // X-Company-Id header: Spark makes them from the directory and the wizard,
+  // where the acting company may be unset or a different one.
+
+  /** Is this email free to use as a new login? Also returns the next free variant. */
+  emailAvailable: (email: string) =>
+    request<SparkEmailAvailability>("/api/v1/spark/email-available", {
+      noActingCompany: true,
+      query: { email },
+    }),
+
+  /** Dry run: the exact emails the department leads would get
+   *  (`<department name>-<company name>@hod.com`). Works from the names alone,
+   *  because during the wizard the departments don't exist yet. */
+  leadEmails: (companyId: string, departmentNames: string[]) =>
+    request<{ emails: SparkLeadEmail[] }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/lead-emails`,
+      // buildQuery repeats `name=` once per item, which is what the backend
+      // reads (a name can hold a comma, so no joining). No names = leave it
+      // out, so the server uses the company's own departments with no lead.
+      {
+        noActingCompany: true,
+        query: { name: departmentNames.length > 0 ? departmentNames : undefined },
+      },
+    ),
+
+  /** Create a lead login for every active department that has no lead yet.
+   *  Every lead gets the fixed Spark temporary password (1234). */
+  createLeads: (companyId: string) =>
+    request<SparkCreateLeadsResult>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/leads`,
+      {
+        method: "POST",
+        body: {},
+        noActingCompany: true,
+      },
+    ),
+
+  /** The company's admin, project manager and lead logins, with any still-unused temporary password. */
+  logins: (companyId: string) =>
+    request<SparkLoginsResponse>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/logins`,
+      { noActingCompany: true },
+    ),
+
+  /** Give one admin, project manager or lead login a new temporary password. */
+  resetPassword: (companyId: string, userId: string) =>
+    request<SparkResetPasswordResult>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/users/${encodeURIComponent(userId)}/reset-password`,
+      { method: "POST", noActingCompany: true },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -6058,6 +6205,10 @@ export function logout(): void {
   // Otherwise the next person to log in on this browser inherits a Spark
   // session's acting company and silently sends it on every request.
   clearActingCompany();
+  // A forced logout (any 401) comes here too, not through AuthContext, so the
+  // Spark temporary password must be cleared here or the next person to sign
+  // in on this tab inherits it.
+  clearAllSparkLoginKeys();
 }
 
 export function getToken(): string | null {
@@ -6142,6 +6293,7 @@ export async function fetchWithAuth(
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  checkAiCreditsHeader(res);
   if (res.status === 401) handleUnauthorized();
   return res;
 }
@@ -6175,6 +6327,7 @@ export async function getSectors(): Promise<Sector[]> {
     res = await fetch(`${API_BASE_URL}/api/v1/lookups/sectors`, {
       headers: { accept: "application/json", ...defaultRequestHeaders() },
     });
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
@@ -6248,6 +6401,7 @@ export async function createCompany(
         headers: { accept: "application/json", ...defaultRequestHeaders() },
       },
     );
+    checkAiCreditsHeader(res);
   } catch {
     throw new Error("Unable to connect. Check your connection.");
   }
