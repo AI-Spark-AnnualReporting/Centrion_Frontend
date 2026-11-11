@@ -12,6 +12,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { spark } from '@/lib/api';
 import { roleMeta } from '@/constants/roles';
 import type {
+  InternalUserRow,
   InternalUsersPage,
   SparkCompanyRow,
   SparkReportRow,
@@ -576,6 +577,21 @@ function InternalUsersPanel({
   const [reloadKey, setReloadKey] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [result, setResult] = useState<InviteUserResponse | null>(null);
+  const [editing, setEditing] = useState<InternalUserRow | null>(null);
+
+  // Swap the saved name/email into the row on screen — no reload.
+  const showSavedUser = (saved: EditableUser) => {
+    setData((page) =>
+      page
+        ? {
+            ...page,
+            users: page.users.map((u) =>
+              u.user_id === saved.user_id ? { ...u, full_name: saved.full_name, email: saved.email } : u,
+            ),
+          }
+        : page,
+    );
+  };
 
   // Wait for a short pause in typing so we don't call the server on every key.
   useEffect(() => {
@@ -702,8 +718,20 @@ function InternalUsersPanel({
                   </span>
                 </td>
                 <td>
-                  <span className={`badge ${STATUS_BADGE[u.status ?? ''] ?? 'b-gy'}`}>
-                    {label(u.status)}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`badge ${STATUS_BADGE[u.status ?? ''] ?? 'b-gy'}`}>
+                      {label(u.status)}
+                    </span>
+                    {u.can_edit && (
+                    <button
+                      type="button"
+                      className="btn bs bsm"
+                      onClick={() => setEditing(u)}
+                      aria-label={`Edit ${u.full_name}`}
+                    >
+                      ✎ Edit
+                    </button>
+                    )}
                   </span>
                 </td>
                 <td style={{ color: '#5A6080' }}>
@@ -754,6 +782,162 @@ function InternalUsersPanel({
         <AddInternalUserModal onClose={() => setAddOpen(false)} onCreated={handleCreated} />
       )}
       {result && <InviteResultModal result={result} onClose={() => setResult(null)} />}
+      {editing && (
+        <EditUserModal
+          user={editing}
+          subtitle="Spark Internal"
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            showSavedUser(saved);
+            toast({ title: `${saved.full_name} updated`, variant: 'success' });
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The fields a Spark admin can edit, plus who they belong to. */
+interface EditableUser {
+  user_id: string;
+  full_name: string;
+  email: string;
+}
+
+/** "Edit <name>" — change a company admin's or Spark staff member's name and email. */
+function EditUserModal({
+  user,
+  subtitle,
+  onClose,
+  onSaved,
+}: {
+  user: EditableUser;
+  subtitle: string;
+  onClose: () => void;
+  onSaved: (saved: EditableUser) => void;
+}) {
+  const [fullName, setFullName] = useState(user.full_name);
+  const [email, setEmail] = useState(user.email);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const nameChanged = fullName.trim() !== user.full_name;
+  const emailChanged = email.trim().toLowerCase() !== user.email.toLowerCase();
+
+  const save = async () => {
+    if (busy) return;
+    setErr('');
+    if (!fullName.trim()) return setErr('Full name is required');
+    if (!/.+@.+\..+/.test(email)) return setErr('A valid email is required');
+    setBusy(true);
+    try {
+      // Only what changed, so an untouched field is never rewritten.
+      const body: { full_name?: string; email?: string } = {};
+      if (nameChanged) body.full_name = fullName.trim();
+      if (emailChanged) body.email = email.trim();
+      const saved = await spark.updateUser(user.user_id, body);
+      onSaved(saved);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to save.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    // No background click-to-close: it would throw away the edit.
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ width: 440 }} role="dialog" aria-label={`Edit ${user.full_name}`}>
+        <div
+          style={{
+            padding: '20px 24px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>Edit {user.full_name}</div>
+            <div style={{ fontSize: 11, color: '#5A6080', marginTop: 3 }}>{subtitle}</div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            type="button"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              border: '1.5px solid #E2E4F0',
+              background: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ padding: '4px 24px 8px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="fl">
+            <label className="fl-label" htmlFor="edit-full-name">Full name</label>
+            <input
+              id="edit-full-name"
+              className="inp"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+            />
+          </div>
+          <div className="fl">
+            <label className="fl-label" htmlFor="edit-email">Email</label>
+            <input
+              id="edit-email"
+              className="inp"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            {emailChanged && (
+              <div style={{ fontSize: 10.5, color: '#5A6080', marginTop: 4 }}>Was: {user.email}</div>
+            )}
+          </div>
+          <div
+            style={{
+              padding: '8px 10px',
+              background: '#F2F3FA',
+              borderRadius: 8,
+              fontSize: 11,
+              color: '#5A6080',
+            }}
+          >
+            ⓘ They log in with the new email from now on. No email is sent to them. Saved in the
+            audit log.
+          </div>
+          {err && (
+            <div style={{ fontSize: 11, color: '#E5484D' }} role="alert">
+              {err}
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            padding: '14px 24px 18px',
+            borderTop: '1px solid #ECEEF8',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+          }}
+        >
+          <button className="btn bs" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="btn bp"
+            onClick={save}
+            type="button"
+            disabled={busy || (!nameChanged && !emailChanged)}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -890,6 +1074,16 @@ export default function SparkSectionPage() {
   const { section } = useParams<{ section: string }>();
   const [usersTab, setUsersTab] = useState<UsersTab>('company');
   const [activating, setActivating] = useState<SparkUserRow | null>(null);
+  const [editing, setEditing] = useState<SparkUserRow | null>(null);
+
+  // Swap the saved name/email into the row on screen — no reload.
+  const showSavedUser = (saved: EditableUser) => {
+    setUsers((rows) =>
+      (rows ?? []).map((u) =>
+        u.user_id === saved.user_id ? { ...u, full_name: saved.full_name, email: saved.email } : u,
+      ),
+    );
+  };
   const [internalCount, setInternalCount] = useState<number | null>(null);
 
   // limit=1: only the total is needed for the tab label. A failure just
@@ -1112,6 +1306,16 @@ export default function SparkSectionPage() {
                       Activate
                     </button>
                   )}
+                  {u.can_edit && (
+                    <button
+                      type="button"
+                      className="btn bs bsm"
+                      onClick={() => setEditing(u)}
+                      aria-label={`Edit ${u.full_name}`}
+                    >
+                      ✎ Edit
+                    </button>
+                  )}
                 </span>
               </td>
               <td style={{ color: '#5A6080' }}>
@@ -1169,6 +1373,18 @@ export default function SparkSectionPage() {
               </td>
             </tr>
           )}
+        />
+      )}
+      {editing && (
+        <EditUserModal
+          user={editing}
+          subtitle={`${roleMeta(editing.role).label} · ${editing.company_name ?? 'No company'}`}
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            showSavedUser(saved);
+            toast({ title: `${saved.full_name} updated`, variant: 'success' });
+            setEditing(null);
+          }}
         />
       )}
       {activating && (

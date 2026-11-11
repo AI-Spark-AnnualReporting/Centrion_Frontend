@@ -15,6 +15,7 @@ const listReports = vi.fn();
 const listInternalUsers = vi.fn();
 const createInternalUser = vi.fn();
 const activateUser = vi.fn();
+const updateUser = vi.fn();
 
 const COMPANIES = [
   { id: "c1", name: "Aramco", user_count: 2, report_count: 1, jurisdiction: "KSA" },
@@ -35,6 +36,7 @@ vi.mock("@/lib/api", () => ({
     listInternalUsers: (p: unknown) => listInternalUsers(p),
     createInternalUser: (b: unknown) => createInternalUser(b),
     activateUser: (id: string) => activateUser(id),
+    updateUser: (id: string, b: unknown) => updateUser(id, b),
   },
 }));
 
@@ -66,6 +68,61 @@ describe("Spark section page", () => {
     });
     createInternalUser.mockReset();
     activateUser.mockReset().mockResolvedValue({ user_id: "u4", status: "active" });
+    updateUser.mockReset();
+  });
+
+  it("offers Edit on company admins only, and saves just the changed email", async () => {
+    listUsers.mockResolvedValue(USERS.map((u) => ({ ...u, can_edit: u.role === "admin" })));
+    updateUser.mockResolvedValue({ user_id: "u1", full_name: "Sara Haddad", email: "sara.h@aramco.com" });
+    landOn("/spark/users");
+    await screen.findByText("Aramco");
+    fireEvent.click(screen.getByText("Aramco"));
+    fireEvent.click(screen.getByText("Zain KSA"));
+
+    // Sara is the admin; Lina and Omar (IR) get no Edit.
+    expect(screen.getAllByRole("button", { name: /^Edit / })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Sara Haddad" }));
+
+    const save = screen.getByText("Save").closest("button")!;
+    expect(save.disabled).toBe(true); // nothing changed yet
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "sara.h@aramco.com" } });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(updateUser).toHaveBeenCalledWith("u1", { email: "sara.h@aramco.com" }));
+    expect(await screen.findByText("sara.h@aramco.com")).toBeTruthy();
+    expect(screen.queryByText("sara@aramco.com")).toBeNull();
+  });
+
+  it("keeps the Edit popup open with the server's message when the email is taken", async () => {
+    listUsers.mockResolvedValue(USERS.map((u) => ({ ...u, can_edit: u.role === "admin" })));
+    updateUser.mockRejectedValue(new Error("Email already registered"));
+    landOn("/spark/users");
+    await screen.findByText("Aramco");
+    fireEvent.click(screen.getByText("Aramco"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Sara Haddad" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "omar@zain.com" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(await screen.findByText("Email already registered")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Edit Sara Haddad" })).toBeTruthy();
+  });
+
+  it("edits a Spark staff member's name from the Internal users tab", async () => {
+    listInternalUsers.mockResolvedValue({
+      users: [{ user_id: "s1", full_name: "Sam Doe", email: "sam@wearespark.me", role: "spark_internal",
+                status: "active", can_edit: true }],
+      total: 1, page: 1, limit: 25,
+    });
+    updateUser.mockResolvedValue({ user_id: "s1", full_name: "Samuel Doe", email: "sam@wearespark.me" });
+    landOn("/spark/users");
+    await screen.findByText("Aramco");
+    fireEvent.click(screen.getByRole("tab", { name: /^Internal users/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Sam Doe" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Samuel Doe" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => expect(updateUser).toHaveBeenCalledWith("s1", { full_name: "Samuel Doe" }));
+    expect(await screen.findByText("Samuel Doe")).toBeTruthy();
   });
 
   it("marks a collapsed company that has a user waiting for activation", async () => {

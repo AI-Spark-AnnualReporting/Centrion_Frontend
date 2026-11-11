@@ -5370,6 +5370,14 @@ export const spark = {
       noActingCompany: true,
     }).then((res) => res.data),
 
+  // Name and/or email of a company admin or Spark staff member. Send only
+  // the fields that changed.
+  updateUser: (userId: string, body: { full_name?: string; email?: string }) =>
+    request<{ data: { user_id: string; full_name: string; email: string } }>(
+      `/api/v1/spark/users/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body, noActingCompany: true },
+    ).then((res) => res.data),
+
   // Let a client admin stuck on the signup email code in, without the code.
   activateUser: (userId: string) =>
     request<{ data: { user_id: string; status: string } }>(

@@ -47,6 +47,8 @@ export interface SparkUserRow {
   last_active?: string | null;
   // Signed up but never entered the email code — the row gets an Activate button.
   awaiting_email_code?: boolean;
+  // Company admins only: the Spark admin may edit their name and email.
+  can_edit?: boolean;
 }
 
 // ── Internal users (GET /api/v1/spark/internal-users) ──────────────────────
@@ -58,6 +60,7 @@ export interface InternalUserRow {
   role: BackendRole;
   status?: string | null;
   last_active?: string | null;
+  can_edit?: boolean;
 }
 
 export interface InternalUsersPage {
