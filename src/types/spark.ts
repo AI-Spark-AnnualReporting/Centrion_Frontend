@@ -45,6 +45,26 @@ export interface SparkUserRow {
   company_id: string;
   company_name: string;
   last_active?: string | null;
+  // Signed up but never entered the email code — the row gets an Activate button.
+  awaiting_email_code?: boolean;
+}
+
+// ── Internal users (GET /api/v1/spark/internal-users) ──────────────────────
+// Spark staff (`spark_internal`): no company, so no company fields.
+export interface InternalUserRow {
+  user_id: string;
+  full_name: string;
+  email: string;
+  role: BackendRole;
+  status?: string | null;
+  last_active?: string | null;
+}
+
+export interface InternalUsersPage {
+  users: InternalUserRow[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 // ── Report trends (GET /api/v1/spark/report-trends) ────────────────────────

@@ -12,10 +12,14 @@ import { Spinner } from '@/components/shared/Spinner';
 import { spark } from '@/lib/api';
 import { roleMeta } from '@/constants/roles';
 import type {
+  InternalUsersPage,
   SparkCompanyRow,
   SparkReportRow,
   SparkUserRow,
 } from '@/types/spark';
+import type { InviteUserResponse } from '@/types/admin';
+import { InviteResultModal } from '@/pages/admin/AdminUsersPage';
+import { useToast } from '@/hooks/use-toast';
 import { relativeTime, shortDateTime } from '@/lib/time';
 import { gradientFor, initialsOf } from '@/lib/avatar';
 import { titleCase as label } from '@/lib/utils';
@@ -26,6 +30,7 @@ const PRIMARY = '#4040C8';
 const STATUS_BADGE: Record<string, string> = {
   active: 'b-gn',
   invited: 'b-am',
+  pending: 'b-am',
   suspended: 'b-rd',
   draft: 'b-gy',
   in_review: 'b-am',
@@ -129,6 +134,8 @@ function GroupedTable<T>({
   colSpan,
   emptyText,
   unit,
+  searching,
+  groupBadge,
 }: {
   groups: Group<T>[];
   head: React.ReactNode;
@@ -136,12 +143,16 @@ function GroupedTable<T>({
   colSpan: number;
   emptyText: string;
   unit: string;
+  searching: boolean;
+  // Optional extra badge after a group's count (e.g. "1 pending" on Users).
+  groupBadge?: (rows: T[]) => React.ReactNode;
 }) {
-  // Collapsed ids rather than expanded ones: everything is open by default,
-  // which is the point of grouping by company.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Expanded ids: every group starts collapsed so a long list of companies
+  // fits on one screen (decision 2026-11-11). While a search is typed, every
+  // group opens, or matches would sit hidden inside closed groups.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (!next.delete(id)) next.add(id);
       return next;
@@ -153,7 +164,7 @@ function GroupedTable<T>({
     <table className="utable">
       <thead>{head}</thead>
       {groups.map((g) => {
-        const isCollapsed = collapsed.has(g.id);
+        const isCollapsed = !searching && !expanded.has(g.id);
         return (
           <tbody key={g.id}>
             <tr>
@@ -205,6 +216,7 @@ function GroupedTable<T>({
                     {g.name}
                   </span>
                   <span className="uhead-count">{g.rows.length}</span>
+                  {groupBadge?.(g.rows)}
                   <span
                     style={{ marginLeft: 'auto', fontSize: 10.5, color: '#9BA3C4', fontWeight: 600 }}
                   >
@@ -304,8 +316,606 @@ function CompaniesTable({ rows }: { rows: SparkCompanyRow[] }) {
   );
 }
 
+// ── Internal users (Spark staff) ───────────────────────────────────────────
+// Its own server-side paged list (GET /spark/internal-users), unlike the other
+// sections which load everything once and filter in the browser.
+
+const INTERNAL_PAGE_SIZE = 25;
+
+/** One radio card in the "How should they get in?" choice. */
+function AccessChoice({
+  checked,
+  onSelect,
+  title,
+  hint,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <label
+      style={{
+        display: 'flex',
+        gap: 10,
+        alignItems: 'flex-start',
+        border: `1.5px solid ${checked ? PRIMARY : '#E2E4F0'}`,
+        background: checked ? '#F5F5FE' : '#fff',
+        borderRadius: 12,
+        padding: 12,
+        cursor: 'pointer',
+      }}
+    >
+      <input
+        type="radio"
+        name="internal-access"
+        checked={checked}
+        onChange={onSelect}
+        style={{ marginTop: 2, accentColor: PRIMARY }}
+      />
+      <span>
+        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#1A1D2E' }}>
+          {title}
+        </span>
+        <span style={{ display: 'block', fontSize: 11, color: '#5A6080', marginTop: 2 }}>
+          {hint}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** Popup that creates one spark_internal account from a name and an email. */
+function AddInternalUserModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (res: InviteUserResponse) => void;
+}) {
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  // 'invite' = temp password by email (default); 'password' = the Spark admin types it.
+  const [mode, setMode] = useState<'invite' | 'password'>('invite');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const usesOwnPassword = mode === 'password';
+
+  const submit = async () => {
+    if (busy) return;
+    setErr('');
+    if (!fullName.trim()) return setErr('Full name is required');
+    if (!/.+@.+\..+/.test(email)) return setErr('A valid email is required');
+    if (usesOwnPassword && password.length < 8) {
+      return setErr('Password must be at least 8 characters');
+    }
+    setBusy(true);
+    try {
+      const body: { full_name: string; email: string; password?: string } = {
+        full_name: fullName.trim(),
+        email: email.trim(),
+      };
+      if (usesOwnPassword) body.password = password;
+      const res = await spark.createInternalUser(body);
+      onCreated(res);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to add internal user.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    // No background click-to-close: it would throw away a half-filled form.
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ width: 440 }} role="dialog" aria-label="Add internal user">
+        <div
+          style={{
+            padding: '20px 24px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>Add internal user</div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            type="button"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              border: '1.5px solid #E2E4F0',
+              background: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ padding: '4px 24px 8px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="fl">
+            <label className="fl-label" htmlFor="internal-full-name">Full name</label>
+            <input
+              id="internal-full-name"
+              className="inp"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="e.g. Sara Haddad"
+            />
+          </div>
+          <div className="fl">
+            <label className="fl-label" htmlFor="internal-email">Email</label>
+            <input
+              id="internal-email"
+              className="inp"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@wearespark.me"
+            />
+          </div>
+          <fieldset style={{ border: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <legend className="fl-label" style={{ padding: 0, marginBottom: 6 }}>
+              How should they get in?
+            </legend>
+            <AccessChoice
+              checked={!usesOwnPassword}
+              onSelect={() => setMode('invite')}
+              title="Send invite email"
+              hint="A temporary password is emailed. They change it on first login."
+            />
+            <AccessChoice
+              checked={usesOwnPassword}
+              onSelect={() => setMode('password')}
+              title="Set password myself"
+              hint="No email. You type the password and give it to them."
+            />
+          </fieldset>
+
+          {usesOwnPassword && (
+            <div className="fl">
+              <label className="fl-label" htmlFor="internal-password">Password</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="internal-password"
+                  className="inp"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  style={{ paddingRight: 64 }}
+                />
+                <button
+                  type="button"
+                  className="btn bs bsm"
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={{ position: 'absolute', right: 5, top: 5 }}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <div style={{ fontSize: 10.5, color: '#5A6080', marginTop: 4 }}>
+                At least 8 characters.
+              </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  background: 'rgba(245,158,11,.1)',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  color: '#B45309',
+                }}
+              >
+                ⚠ They won&apos;t be asked to change it. Share it with them securely. No email is sent.
+              </div>
+            </div>
+          )}
+
+          <div
+            style={{
+              padding: '8px 10px',
+              background: '#F2F3FA',
+              borderRadius: 8,
+              fontSize: 11,
+              color: '#5A6080',
+            }}
+          >
+            ⓘ Gets Spark Internal access: can open and work inside every company.
+          </div>
+          {err && (
+            <div style={{ fontSize: 11, color: '#E5484D' }} role="alert">
+              {err}
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            padding: '14px 24px 18px',
+            borderTop: '1px solid #ECEEF8',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 8,
+          }}
+        >
+          <button className="btn bs" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="btn bp"
+            onClick={submit}
+            type="button"
+            disabled={busy || !fullName.trim() || !email.trim()}
+          >
+            {busy ? 'Adding…' : usesOwnPassword ? 'Create user' : 'Send invite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The "Internal users" tab: search, list, pager and the add button. */
+function InternalUsersPanel({
+  tabs,
+  onTotal,
+}: {
+  tabs: React.ReactNode;
+  onTotal: (total: number) => void;
+}) {
+  const { toast } = useToast();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [searchSent, setSearchSent] = useState('');
+  const [data, setData] = useState<InternalUsersPage | null>(null);
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [addOpen, setAddOpen] = useState(false);
+  const [result, setResult] = useState<InviteUserResponse | null>(null);
+
+  // Wait for a short pause in typing so we don't call the server on every key.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchSent(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    let alive = true;
+    setError('');
+    spark
+      .listInternalUsers({ page, limit: INTERNAL_PAGE_SIZE, search: searchSent || undefined })
+      .then((res) => {
+        if (!alive) return;
+        setData(res);
+        onTotal(res.total);
+      })
+      .catch(
+        (e) => alive && setError(e instanceof Error ? e.message : 'Failed to load internal users.'),
+      );
+    return () => {
+      alive = false;
+    };
+  }, [page, searchSent, reloadKey]);
+
+  const handleCreated = (res: InviteUserResponse) => {
+    setAddOpen(false);
+    // Delivered → a toast is enough. Not delivered → the Spark admin has to
+    // hand the password over, so show it. No temp password → the Spark admin
+    // typed it themselves and already knows it.
+    if (!res.temp_password) {
+      toast({
+        title: 'Internal user added',
+        description: 'Share the password you set with them.',
+        variant: 'success',
+      });
+    } else if (res.email_sent) {
+      toast({
+        title: 'Internal user added',
+        description: res.email_message ?? `Invite sent to ${res.email}.`,
+        variant: 'success',
+      });
+    } else {
+      setResult(res);
+    }
+    setPage(1);
+    setReloadKey((k) => k + 1);
+  };
+
+  const total = data?.total ?? 0;
+  const lastPage = Math.max(1, Math.ceil(total / INTERNAL_PAGE_SIZE));
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="uhead">
+        {tabs}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ position: 'relative', width: 240 }}>
+            <input
+              className="inp"
+              placeholder="Search internal users"
+              aria-label="Search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 30 }}
+            />
+            <svg
+              viewBox="0 0 13 13"
+              width="13"
+              height="13"
+              fill="none"
+              style={{ position: 'absolute', left: 11, top: 11, color: '#9BA3C4' }}
+            >
+              <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8.5 8.5l3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </div>
+          <button className="btn bp" type="button" onClick={() => setAddOpen(true)}>
+            + Add internal user
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: '#5A6080' }}>
+          {error}
+        </div>
+      ) : data === null ? (
+        <Spinner />
+      ) : data.users.length === 0 ? (
+        <EmptyState
+          text={searchSent ? 'No internal users match this search' : 'No internal users yet'}
+        />
+      ) : (
+        <table className="utable">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Last active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.users.map((u) => (
+              <tr key={u.user_id} className="urow">
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                    <Tile seed={u.user_id} text={initialsOf(u.full_name)} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: '#1A1D2E', fontSize: 12.5 }}>
+                        {u.full_name}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 1 }}>{u.email}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className={`badge ${roleMeta(u.role).badgeClass}`}>
+                    ● {roleMeta(u.role).label}
+                  </span>
+                </td>
+                <td>
+                  <span className={`badge ${STATUS_BADGE[u.status ?? ''] ?? 'b-gy'}`}>
+                    {label(u.status)}
+                  </span>
+                </td>
+                <td style={{ color: '#5A6080' }}>
+                  {u.last_active ? relativeTime(u.last_active) : <Dash />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {lastPage > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 16px',
+            borderTop: '1px solid #ECEEF8',
+            fontSize: 11.5,
+            color: '#5A6080',
+          }}
+        >
+          <span>
+            Page {page} of {lastPage}
+          </span>
+          <button
+            className="btn bs bsm"
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Previous
+          </button>
+          <button
+            className="btn bs bsm"
+            type="button"
+            disabled={page >= lastPage}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {addOpen && (
+        <AddInternalUserModal onClose={() => setAddOpen(false)} onCreated={handleCreated} />
+      )}
+      {result && <InviteResultModal result={result} onClose={() => setResult(null)} />}
+    </div>
+  );
+}
+
+/** "Activate <name>?" — lets a client admin stuck on the signup email code in. */
+function ActivateUserModal({
+  user,
+  onClose,
+  onActivated,
+}: {
+  user: SparkUserRow;
+  onClose: () => void;
+  onActivated: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const activate = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await spark.activateUser(user.user_id);
+      onActivated();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to activate user.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div
+        className="modal-content"
+        style={{ width: 440, padding: 24 }}
+        role="dialog"
+        aria-label={`Activate ${user.full_name}`}
+      >
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#1A1D2E' }}>
+          Activate {user.full_name}?
+        </div>
+        <div style={{ fontSize: 12.5, color: '#5A6080', marginTop: 8, lineHeight: 1.55 }}>
+          <strong style={{ color: '#1A1D2E' }}>{user.email}</strong> never entered the code from the
+          verification email. Activating skips the code. They log in with the password they chose at
+          sign-up.
+        </div>
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: 11,
+            color: '#5A6080',
+            background: '#F2F3FA',
+            borderRadius: 8,
+            padding: '8px 10px',
+          }}
+        >
+          Saved in the audit log.
+        </div>
+        {err && (
+          <div style={{ marginTop: 10, fontSize: 11, color: '#E5484D' }} role="alert">
+            {err}
+          </div>
+        )}
+        <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn bs" type="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button className="btn bp" type="button" onClick={activate} disabled={busy}>
+            {busy ? 'Activating…' : 'Activate'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Amber "N pending" on a company row: users there wait for activation. */
+function PendingBadge({ rows }: { rows: SparkUserRow[] }) {
+  let waiting = 0;
+  for (const u of rows) {
+    if (u.awaiting_email_code) waiting += 1;
+  }
+  if (waiting === 0) return null;
+  return (
+    <span
+      className="badge b-am"
+      title="Signed up but never entered the email code"
+      style={{ fontSize: 10 }}
+    >
+      {waiting} pending
+    </span>
+  );
+}
+
+type UsersTab = 'company' | 'internal';
+
+/** The "Users by company" / "Internal users" switch on the Users section. */
+function UsersTabs({
+  value,
+  onChange,
+  companyCount,
+  internalCount,
+}: {
+  value: UsersTab;
+  onChange: (tab: UsersTab) => void;
+  companyCount: number | null;
+  internalCount: number | null;
+}) {
+  return (
+    <div className="tabs" role="tablist" aria-label="Users" style={{ marginBottom: 0 }}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'company'}
+        className={`tab ${value === 'company' ? 'act' : ''}`}
+        onClick={() => onChange('company')}
+      >
+        Users by company{companyCount !== null ? ` (${companyCount})` : ''}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'internal'}
+        className={`tab ${value === 'internal' ? 'act' : ''}`}
+        onClick={() => onChange('internal')}
+      >
+        Internal users{internalCount !== null ? ` (${internalCount})` : ''}
+      </button>
+    </div>
+  );
+}
+
 export default function SparkSectionPage() {
   const { section } = useParams<{ section: string }>();
+  const [usersTab, setUsersTab] = useState<UsersTab>('company');
+  const [activating, setActivating] = useState<SparkUserRow | null>(null);
+  const [internalCount, setInternalCount] = useState<number | null>(null);
+
+  // limit=1: only the total is needed for the tab label. A failure just
+  // leaves the label without a number.
+  useEffect(() => {
+    if (section !== 'users') return;
+    let alive = true;
+    spark
+      .listInternalUsers({ page: 1, limit: 1 })
+      .then((res) => alive && setInternalCount(res.total))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [section]);
+  const { toast } = useToast();
+
+  // Flip the activated row in place: no reload, the list keeps its scroll and
+  // open groups.
+  const markUserActive = (userId: string) => {
+    setUsers((rows) =>
+      (rows ?? []).map((u) =>
+        u.user_id === userId ? { ...u, status: 'active', awaiting_email_code: false } : u,
+      ),
+    );
+  };
   const [companies, setCompanies] = useState<SparkCompanyRow[] | null>(null);
   const [users, setUsers] = useState<SparkUserRow[] | null>(null);
   const [reports, setReports] = useState<SparkReportRow[] | null>(null);
@@ -393,12 +1003,30 @@ export default function SparkSectionPage() {
         : reportGroups.reduce((n, g) => n + g.rows.length, 0);
   const groupCount = key === 'users' ? userGroups.length : reportGroups.length;
 
+  const usersTabs =
+    key === 'users' ? (
+      <UsersTabs
+        value={usersTab}
+        onChange={setUsersTab}
+        companyCount={loaded ? count : null}
+        internalCount={internalCount}
+      />
+    ) : null;
+
+  if (key === 'users' && usersTab === 'internal') {
+    return <InternalUsersPanel tabs={usersTabs} onTotal={setInternalCount} />;
+  }
+
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="uhead">
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
-          <span className="uhead-title">{meta.listTitle}</span>
-          <span className="uhead-count">{count}</span>
+          {usersTabs ?? (
+            <>
+              <span className="uhead-title">{meta.listTitle}</span>
+              <span className="uhead-count">{count}</span>
+            </>
+          )}
           {key !== 'companies' && groupCount > 0 && (
             <span style={{ fontSize: 11, color: '#9BA3C4', marginLeft: 10 }}>
               in {groupCount} {groupCount === 1 ? 'company' : 'companies'}
@@ -441,6 +1069,8 @@ export default function SparkSectionPage() {
           colSpan={4}
           unit="user"
           emptyText="No users match this search"
+          searching={q !== ''}
+          groupBadge={(rows: SparkUserRow[]) => <PendingBadge rows={rows} />}
           head={
             <tr>
               <th>User</th>
@@ -468,8 +1098,20 @@ export default function SparkSectionPage() {
                 </span>
               </td>
               <td>
-                <span className={`badge ${STATUS_BADGE[u.status ?? ''] ?? 'b-gy'}`}>
-                  {label(u.status)}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span className={`badge ${STATUS_BADGE[u.status ?? ''] ?? 'b-gy'}`}>
+                    {label(u.status)}
+                  </span>
+                  {u.awaiting_email_code && (
+                    <button
+                      type="button"
+                      className="btn bs bsm"
+                      onClick={() => setActivating(u)}
+                      aria-label={`Activate ${u.full_name}`}
+                    >
+                      Activate
+                    </button>
+                  )}
                 </span>
               </td>
               <td style={{ color: '#5A6080' }}>
@@ -484,6 +1126,7 @@ export default function SparkSectionPage() {
           colSpan={4}
           unit="report"
           emptyText="No reports match this search"
+          searching={q !== ''}
           head={
             <tr>
               <th>Report</th>
@@ -526,6 +1169,20 @@ export default function SparkSectionPage() {
               </td>
             </tr>
           )}
+        />
+      )}
+      {activating && (
+        <ActivateUserModal
+          user={activating}
+          onClose={() => setActivating(null)}
+          onActivated={() => {
+            markUserActive(activating.user_id);
+            toast({
+              title: `${activating.full_name} can now log in`,
+              variant: 'success',
+            });
+            setActivating(null);
+          }}
         />
       )}
     </div>

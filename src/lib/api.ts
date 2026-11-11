@@ -7,7 +7,7 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
-import type { SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
+import type { InternalUsersPage, SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
 import { normalizeTrends } from "@/types/spark";
 import type {
   CompanyLicense,
@@ -5353,6 +5353,29 @@ export const spark = {
     request<unknown>("/api/v1/spark/report-trends", { query: params, noActingCompany: true }).then(
       normalizeTrends,
     ),
+
+  // Spark staff (`spark_internal`). These two use the {success, message, data}
+  // envelope; we hand back `data` only.
+  listInternalUsers: (params: { page: number; limit: number; search?: string }) =>
+    request<{ data: InternalUsersPage }>("/api/v1/spark/internal-users", {
+      query: params,
+      noActingCompany: true,
+    }).then((res) => res.data),
+
+  // `password` set → the Spark admin chose it: no email, no forced change.
+  createInternalUser: (body: { full_name: string; email: string; password?: string }) =>
+    request<{ data: InviteUserResponse }>("/api/v1/spark/internal-users", {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }).then((res) => res.data),
+
+  // Let a client admin stuck on the signup email code in, without the code.
+  activateUser: (userId: string) =>
+    request<{ data: { user_id: string; status: string } }>(
+      `/api/v1/spark/users/${encodeURIComponent(userId)}/activation`,
+      { method: "POST", noActingCompany: true },
+    ).then((res) => res.data),
 };
 
 // ---------------------------------------------------------------------------
