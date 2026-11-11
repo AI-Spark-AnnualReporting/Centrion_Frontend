@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup — Modules card grouped (Reports / Validators / Other)</title>
+<style>
+  body { margin: 0; padding: 32px; background: #F4F5FB; font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; color: #1A1D2E; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .note { font-size: 12px; color: #5A6080; margin-bottom: 20px; max-width: 760px; }
+  .row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .label { font-size: 11px; font-weight: 700; color: #9BA3C4; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+
+  /* Copied from src/components/subscriptions/subscriptions.css */
+  .card { background: #fff; border-radius: 18px; border: 1px solid #ECEEF8; box-shadow: 0 2px 10px rgba(26,29,46,.04); }
+  .sub-ec { padding: 14px 16px; display: flex; flex-direction: column; width: 400px; height: 560px; }
+  .sub-ec-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .sub-ec-ic { width: 26px; height: 26px; border-radius: 8px; background: #EEEEFF; color: #4040C8; display: grid; place-items: center; font-size: 13px; font-weight: 800; flex: none; }
+  .sub-ec-t { font-size: 13px; font-weight: 800; }
+  .sub-ec-s { font-size: 10.5px; color: #9BA3C4; font-weight: 500; }
+  .sub-ec-count { margin-left: auto; font-size: 10.5px; font-weight: 700; color: #4040C8; background: #EEEEFF; border-radius: 20px; padding: 3px 9px; white-space: nowrap; }
+  .sub-mods { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; padding-right: 4px; }
+  .sub-mt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1.5px solid #ECEEF8; border-radius: 12px; background: #fff; cursor: pointer; transition: .15s; min-height: 44px; }
+  .sub-mt:hover { border-color: #C9CBF5; }
+  .sub-mt.on { border-color: #4040C8; background: linear-gradient(90deg, #F5F5FF, #fff); box-shadow: 0 3px 10px rgba(64,64,200,.08); }
+  .sub-mt-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800; flex: none; background: #F2F3FA; color: #9BA3C4; }
+  .sub-mt.on .sub-mt-ic { background: #4040C8; color: #fff; }
+  .sub-mt-tx { flex: 1; min-width: 0; }
+  .sub-mt-nm { font-size: 12px; font-weight: 700; }
+  .sub-mt:not(.on) .sub-mt-nm { color: #5A6080; font-weight: 600; }
+  .sub-mt-cap { font-size: 10px; color: #9BA3C4; margin-top: 1px; }
+  .sub-step { display: flex; align-items: center; border: 1.5px solid #DCDDF5; border-radius: 9px; overflow: hidden; background: #fff; }
+  .sub-step button { width: 24px; height: 26px; border: none; background: #F5F5FF; color: #4040C8; font-weight: 800; font-size: 13px; cursor: pointer; }
+  .sub-step input { width: 38px; height: 26px; border: none; text-align: center; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; outline: none; }
+  .sub-step-l { font-size: 10px; color: #9BA3C4; font-weight: 600; margin-left: -4px; }
+  .sub-incl { font-size: 10px; font-weight: 700; color: #16A34A; background: rgba(34,197,94,.12); border-radius: 20px; padding: 3px 9px; }
+  .sub-sw { width: 32px; height: 18px; border-radius: 20px; background: #DDE0EE; position: relative; flex: none; transition: .15s; }
+  .sub-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: .15s; }
+  .sub-mt.on .sub-sw { background: #4040C8; }
+  .sub-mt.on .sub-sw::after { left: 16px; }
+
+  /* NEW: group heading */
+  .sub-grp { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; padding: 6px 8px; border-radius: 9px;
+    cursor: pointer; user-select: none; background: #F7F8FC; border: none; font-family: inherit; width: 100%; text-align: left; }
+  .sub-grp:hover { background: #EEEEFF; }
+  .sub-grp:first-child { margin-top: 0; }
+  .sub-grp-chev { font-size: 10px; color: #5A6080; width: 10px; transition: transform .15s; }
+  .sub-grp.closed .sub-grp-chev { transform: rotate(-90deg); }
+  .sub-grp-sum { font-size: 10px; color: #9BA3C4; margin: 2px 8px 0 26px; }
+  .sub-grp-gap { border-top: 1px solid #ECEEF8; margin-top: 4px; }
+  .sub-grp-sum b { color: #4040C8; font-weight: 700; }
+  .sub-grp-t { font-size: 10.5px; font-weight: 800; color: #5A6080; text-transform: uppercase; letter-spacing: .07em; }
+  .sub-grp-line { flex: 1; height: 1px; background: #ECEEF8; }
+  .sub-grp-c { font-size: 10px; font-weight: 700; color: #9BA3C4; }
+  .sub-grp-c.some { color: #4040C8; }
+</style>
+</head>
+<body>
+  <h1>Modules card — grouped</h1>
+  <div class="note">
+    Spark → Subscriptions → plan editor. Same tiles, switches and steppers as today; the only change is the
+    two groups: <b>Reports</b> (4) and <b>Validators</b> (3). Board Meetings and Leadership have no group — always shown, below.
+    A group starts open only if something in it is on (here: Reports open, Validators closed); this is not remembered.
+    Each heading shows how many in that group are on; the "x of 9 on" at the top stays. Click a heading to
+    open or close its group — a closed group shows one line with what's switched on. Click tiles to try it.
+  </div>
+
+  <div class="row">
+    <div>
+      <div class="label">Before (today)</div>
+      <div class="card sub-ec" id="before"></div>
+    </div>
+    <div>
+      <div class="label">After (grouped)</div>
+      <div class="card sub-ec" id="after"></div>
+    </div>
+  </div>
+
+<script>
+  // Same 9 modules as Centriton/constants.py (LICENSABLE_MODULES), with the new group.
+  const MODULES = [
+    { key: 'quarterly_report', label: 'Quarterly Report', icon: 'Q', counts: true, group: 'Reports' },
+    { key: 'earnings_report', label: 'Earnings Report', icon: 'E', counts: true, group: 'Reports' },
+    { key: 'annual_report', label: 'Annual Report', icon: 'A', counts: true, group: 'Reports' },
+    { key: 'board_report', label: 'Board Report', icon: 'B', counts: true, group: 'Reports' },
+    { key: 'esg_validator', label: 'ESG Validator', icon: 'ESG', counts: true, group: 'Validators' },
+    { key: 'compliance_validation', label: 'Compliance Validation', icon: '✓', counts: false, group: 'Validators' },
+    { key: 'board_meetings', label: 'Board Meetings', icon: 'M', counts: false, group: null },
+    { key: 'leadership', label: 'Leadership', icon: 'L', counts: false, group: null },
+    { key: 'annual_report_validator', label: 'Annual Report Validator', icon: 'AV', counts: true, group: 'Validators' },
+  ];
+  const GROUPS = ['Reports', 'Validators'];
+
+  function makeState() {
+    const on = { quarterly_report: 4, annual_report: 1 };
+    // A group starts open only if something in it is switched on. Not remembered: every visit starts this way.
+    const closed = new Set();
+    for (const group of GROUPS) {
+      const anyOn = MODULES.some((m) => m.group === group && m.key in on);
+      if (!anyOn) closed.add(group);
+    }
+    return { on, closed };
+  }
+
+  function tileHtml(module, state) {
+    const on = module.key in state.on;
+    let right = '<span class="sub-mt-cap">Off</span>';
+    if (on && module.counts) {
+      right = `<div class="sub-step" onclick="event.stopPropagation()">
+          <button data-step="-1" data-key="${module.key}">−</button>
+          <input value="${state.on[module.key]}" readonly>
+          <button data-step="1" data-key="${module.key}">+</button>
+        </div><span class="sub-step-l">reports</span>`;
+    } else if (on) {
+      right = '<span class="sub-incl">Included</span>';
+    }
+    return `<div class="sub-mt ${on ? 'on' : ''}" data-key="${module.key}">
+        <div class="sub-mt-ic">${module.icon}</div>
+        <div class="sub-mt-tx">
+          <div class="sub-mt-nm">${module.label}</div>
+          <div class="sub-mt-cap">${module.counts ? 'Reports per plan period' : 'Access only — no report count'}</div>
+        </div>
+        ${right}
+        <div class="sub-sw"></div>
+      </div>`;
+  }
+
+  function cardHtml(state, grouped) {
+    const total = Object.keys(state.on).length;
+    let body = '';
+    if (!grouped) {
+      for (const module of MODULES) body += tileHtml(module, state);
+    } else {
+      for (const group of GROUPS) {
+        const inGroup = MODULES.filter((m) => m.group === group);
+        const onCount = inGroup.filter((m) => m.key in state.on).length;
+        const closed = state.closed.has(group);
+        body += `<button type="button" class="sub-grp ${closed ? 'closed' : ''}" data-group="${group}" aria-expanded="${!closed}">
+            <span class="sub-grp-chev">▼</span>
+            <span class="sub-grp-t">${group}</span><span class="sub-grp-line"></span>
+            <span class="sub-grp-c ${onCount ? 'some' : ''}">${onCount} of ${inGroup.length} on</span>
+          </button>`;
+        if (closed) {
+          // Closed: one line saying what's switched on, so nothing is hidden by surprise.
+          const onModules = inGroup.filter((m) => m.key in state.on);
+          const parts = onModules.map((m) => m.counts ? `<b>${m.label} · ${state.on[m.key]}</b>` : `<b>${m.label}</b>`);
+          body += `<div class="sub-grp-sum">${parts.length ? parts.join(', ') : 'Nothing switched on'}</div>`;
+        } else {
+          for (const module of inGroup) body += tileHtml(module, state);
+        }
+      }
+      // Board Meetings and Leadership: no group, no heading, always shown.
+      const ungrouped = MODULES.filter((m) => m.group === null);
+      if (ungrouped.length) body += '<div class="sub-grp-gap"></div>';
+      for (const module of ungrouped) body += tileHtml(module, state);
+    }
+    return `<div class="sub-ec-h">
+        <div class="sub-ec-ic">▦</div>
+        <div><div class="sub-ec-t">Modules</div>
+        <div class="sub-ec-s">Switch a module on · reports start at 1 (never 0 or unlimited)</div></div>
+        <span class="sub-ec-count">${total} of ${MODULES.length} on</span>
+      </div>
+      <div class="sub-mods">${body}</div>`;
+  }
+
+  function mount(id, grouped) {
+    const el = document.getElementById(id);
+    const state = makeState();
+    const draw = () => { el.innerHTML = cardHtml(state, grouped); };
+    el.addEventListener('click', (e) => {
+      const header = e.target.closest('[data-group]');
+      if (header) {
+        const group = header.dataset.group;
+        if (state.closed.has(group)) state.closed.delete(group);
+        else state.closed.add(group);
+        return draw();
+      }
+      const step = e.target.closest('[data-step]');
+      if (step) {
+        const key = step.dataset.key;
+        state.on[key] = Math.max(1, state.on[key] + Number(step.dataset.step));
+        return draw();
+      }
+      const tile = e.target.closest('.sub-mt');
+      if (!tile) return;
+      const module = MODULES.find((m) => m.key === tile.dataset.key);
+      if (module.key in state.on) delete state.on[module.key];
+      else state.on[module.key] = module.counts ? 1 : true;
+      draw();
+    });
+    draw();
+  }
+
+  mount('before', false);
+  mount('after', true);
+</script>
+</body>
+</html>

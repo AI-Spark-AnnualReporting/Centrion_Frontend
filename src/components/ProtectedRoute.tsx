@@ -9,6 +9,8 @@ import type { AuthUser } from "@/types/auth";
 const CHANGE_PASSWORD_PATH = "/change-password";
 const ONBOARDING_PATH = "/onboarding";
 export const SPARK_COMPANIES_PATH = "/companies";
+// Home of the platform owner (`spark_admin`): dashboard + licenses.
+export const SPARK_ADMIN_PATH = "/spark";
 
 export function ProtectedRoute({
   children,
@@ -32,7 +34,8 @@ export function ProtectedRoute({
     );
   }
 
-  if (!user) return <Navigate to="/login" replace />;
+  // Remember the page asked for (e.g. a link in an email) so login can return to it.
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
 
   // Force first-login users to set a permanent password before they can
   // see any other authenticated page. The change-password screen itself is
@@ -55,6 +58,19 @@ export function ProtectedRoute({
   if (!shouldStayInCentriton(user) && !user.must_change_password) {
     redirectToApp(user.default_app!);
     return null; // render nothing while the hard redirect happens
+  }
+
+  // Spark's platform owner (`spark_admin`) belongs to no company, so every
+  // other page — all of which read a company off the JWT — has nothing to show
+  // them. Pin them to /spark here so login, a bookmark and a refresh all land
+  // the same place. The change-password page is exempt: the rotation gate
+  // above sends them there, and pinning it back would loop forever.
+  if (
+    user.role === "spark_admin" &&
+    !onChangePasswordPage &&
+    !location.pathname.startsWith(SPARK_ADMIN_PATH)
+  ) {
+    return <Navigate to={SPARK_ADMIN_PATH} replace />;
   }
 
   // Onboarding gate — only self-registered admins who haven't finished it.

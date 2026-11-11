@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quote offer v2 — mockup (Centriyon theme)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ── Copied from Centrion_Frontend/src/index.css so it looks like the app ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: 'Plus Jakarta Sans', sans-serif; }
+  body { background: #F2F3FA; color: #1A1D2E; }
+  .app-shell { position: fixed; inset: 0; display: flex; }
+  .sb { width: 210px; background: #3535B5; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+  .sb-header { padding: 20px 16px 14px; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .sb-logo { display: flex; align-items: center; gap: 9px; }
+  .sb-lmark { width: 30px; height: 30px; background: #4040C8; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+  .sb-lname { font-size: 13px; font-weight: 800; color: #fff; }
+  .sb-sec { font-size: 9px; font-weight: 700; color: rgba(255,255,255,.3); text-transform: uppercase; letter-spacing: .8px; padding: 14px 16px 5px; }
+  .sb-item { display: flex; align-items: center; gap: 9px; padding: 9px 14px; font-size: 12px; font-weight: 500; color: rgba(255,255,255,.65); cursor: pointer; border: none; background: transparent; text-align: left; font-family: inherit; border-radius: 10px; position: relative; margin: 1px 8px; width: calc(100% - 16px); }
+  .sb-item:hover { background: rgba(255,255,255,.1); color: rgba(255,255,255,.9); }
+  .sb-item.act { background: #3D3DC0; color: #fff; font-weight: 700; }
+  .sb-item.act::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; background: #fff; border-radius: 0 3px 3px 0; }
+  .sb-item.sub { padding-left: 34px; font-size: 11.5px; }
+  .sb-user { padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.12); display: flex; align-items: center; gap: 9px; margin-top: auto; }
+  .sb-uav { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #fff; }
+  .sb-uname { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.8); } .sb-urole { font-size: 9px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { height: 56px; background: #fff; border-bottom: 1px solid #E2E4F0; display: flex; align-items: center; padding: 0 22px; gap: 8px; box-shadow: 0 2px 12px rgba(64,64,200,.06); }
+  .tb-page { font-size: 14px; font-weight: 800; } .tb-sep { color: #9BA3C4; font-size: 12px; } .tb-sub { font-size: 12px; color: #9BA3C4; font-weight: 500; }
+  .tb-link { cursor: pointer; } .tb-link:hover { color: #4040C8; }
+  .content { flex: 1; overflow-y: auto; padding: 20px 22px 40px; }
+  .card { background: #fff; border: 1px solid #E2E4F0; border-radius: 16px; box-shadow: 0 2px 12px rgba(64,64,200,.06); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; border: none; transition: .15s; }
+  .btn:hover { transform: translateY(-1px); }
+  .bp { background: #4040C8; color: #fff; box-shadow: 0 4px 14px rgba(64,64,200,.3); } .bp:hover { background: #3333A8; }
+  .bs { background: #fff; color: #5A6080; border: 1.5px solid #E2E4F0; } .bs:hover { border-color: #4040C8; color: #4040C8; }
+  .bsm { padding: 5px 11px; font-size: 11px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  .badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 700; }
+  .b-or { background: #EEEEFF; color: #4040C8; } .b-am { background: rgba(245,158,11,.12); color: #B45309; } .b-gn { background: rgba(34,197,94,.12); color: #16A34A; } .b-gy { background: #E8EAF5; color: #5A6080; }
+  .tabs { display: flex; background: #F2F3FA; border-radius: 22px; padding: 4px; width: fit-content; border: 1px solid #E2E4F0; }
+  .tab { padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; cursor: pointer; color: #5A6080; border: none; background: transparent; font-family: inherit; }
+  .tab.act { background: #4040C8; color: #fff; box-shadow: 0 4px 12px rgba(64,64,200,.25); font-weight: 700; }
+  .inp { width: 100%; padding: 10px 13px; border: 1.5px solid #E2E4F0; border-radius: 10px; font-size: 12px; color: #1A1D2E; font-family: inherit; outline: none; background: #fff; }
+  .inp:focus { border-color: #4040C8; box-shadow: 0 0 0 3px rgba(64,64,200,.1); }
+
+  /* ── Mockup bits ── */
+  .demo { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 40; background: #1A1D2E; border-radius: 999px; padding: 4px; display: flex; gap: 2px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  .demo button { border: none; background: none; color: rgba(255,255,255,.7); font-family: inherit; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  .demo button.on { background: #fff; color: #1A1D2E; }
+  .phead { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .ptitle { font-size: 15px; font-weight: 800; } .psub { font-size: 12px; color: #9BA3C4; margin-top: 2px; }
+  .muted { color: #9BA3C4; } .mono { font-family: 'DM Mono', monospace; }
+
+  /* Pricing cards (like the picture): a coloured band behind them, a name tab, big price, ✓/✗ list, Buy now */
+  .stage { position: relative; border-radius: 18px; overflow: hidden; padding: 34px 24px 30px; background: linear-gradient(#3535B5 0, #3535B5 150px, transparent 150px); }
+  .stage-title { color: #fff; font-size: 13px; font-weight: 700; opacity: .85; margin-bottom: 26px; text-align: center; }
+  .cards { display: flex; flex-wrap: wrap; gap: 22px; justify-content: center; }
+  .pc { width: 250px; background: #fff; border-radius: 22px 22px 46px 46px; box-shadow: 0 14px 34px rgba(26,29,46,.14); position: relative; padding: 38px 22px 20px; display: flex; flex-direction: column; align-items: center; transition: .15s; }
+  .pc.clickable { cursor: pointer; } .pc.clickable:hover { transform: translateY(-3px); box-shadow: 0 18px 40px rgba(64,64,200,.22); }
+  .pc.sel { outline: 3px solid #4040C8; outline-offset: 3px; }
+  .pc.current { outline: 3px solid #16A34A; outline-offset: 3px; }
+  .pc-tab { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); min-width: 150px; text-align: center; color: #fff; font-weight: 800; font-size: 14px; padding: 9px 18px; border-radius: 12px 12px 18px 18px; white-space: nowrap; }
+  .pc-flag { position: absolute; top: 10px; right: 12px; }
+  .pc-price { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; }
+  .pc-price b { font-size: 34px; font-weight: 800; letter-spacing: -1px; color: #3A3F55; line-height: 1; }
+  .pc-price small { font-size: 10px; font-weight: 700; color: #5A6080; line-height: 1.2; margin-top: 3px; }
+  .pc-cur { font-size: 12px; font-weight: 800; color: #3A3F55; margin-top: 3px; }
+  .pc-line { width: 90px; height: 1px; background: #D5D8E6; margin: 16px 0; }
+  .pc ul { list-style: none; width: 100%; font-size: 11.5px; font-weight: 600; color: #3A3F55; }
+  .pc li { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; }
+  .pc li .ic { width: 16px; flex: none; font-weight: 900; font-size: 13px; line-height: 1.1; text-align: center; }
+  .ok { color: #16A34A; } .no { color: #EF4444; } .pc li.off { color: #A3A8BF; }
+  .pc-buy { border: none; background: none; font-family: inherit; font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #3A3F55; cursor: pointer; padding: 6px 12px; border-radius: 10px; }
+  .pc-buy:hover { color: #4040C8; background: #F5F5FF; }
+  .pc-buy:disabled { color: #A3A8BF; cursor: default; background: none; }
+  .pc-ent { text-align: center; font-size: 12px; color: #5A6080; line-height: 1.6; padding: 4px 6px; }
+  .pc-ent b { display: block; font-size: 26px; color: #3A3F55; margin-bottom: 6px; letter-spacing: -.5px; }
+  .pc-actions { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; background: #fff; padding: 6px; border-radius: 12px; box-shadow: 0 8px 22px rgba(26,29,46,.18); }
+
+  /* Create / edit page */
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+  .sec { padding: 18px 20px; border-top: 1px solid #ECEEF8; } .sec:first-child { border-top: none; }
+  .sec-t { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #9BA3C4; margin-bottom: 10px; }
+  .sec-t i { text-transform: none; letter-spacing: 0; font-weight: 500; font-style: normal; }
+  .row3 { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; }
+  label.f { font-size: 11px; font-weight: 700; color: #5A6080; display: block; } label.f .inp { margin-top: 5px; }
+  .lst { width: 100%; border-collapse: collapse; font-size: 12px; } .lst td { padding: 6px 0; border-top: 1px solid #F2F3FA; } .lst tr:first-child td { border-top: none; }
+  .lst label { display: flex; gap: 8px; align-items: center; cursor: pointer; } .lst input[type=checkbox] { accent-color: #4040C8; }
+  .num { width: 80px; text-align: right; font-family: 'DM Mono', monospace; padding: 7px 10px; }
+  .r { text-align: right; }
+  .lock { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #5A6080; background: #F2F3FA; border-radius: 8px; padding: 6px 10px; }
+  .depts { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+  .dept { border: 1.5px solid #E2E4F0; border-radius: 12px; padding: 10px 12px; font-size: 11.5px; background: #FAFBFF; }
+  .dept-n { font-weight: 800; font-size: 12px; margin-bottom: 6px; color: #3535B5; }
+  .dept div { display: flex; justify-content: space-between; padding: 2px 0; } .dept span:last-child { font-family: 'DM Mono', monospace; font-weight: 700; }
+  .total { margin-top: 12px; font-size: 12px; color: #5A6080; background: #F2F3FA; border-radius: 10px; padding: 9px 12px; }
+  .ent-box { background: #EEEEFF; color: #3535B5; border-radius: 12px; padding: 16px 18px; font-size: 12.5px; line-height: 1.6; }
+  .ent-box b { font-size: 14px; display: block; margin-bottom: 2px; }
+  .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid #ECEEF8; }
+  .preview-t { font-size: 11px; font-weight: 700; color: #5A6080; margin-bottom: 26px; }
+  .sticky { position: sticky; top: 0; }
+
+  /* Create page v2: everything on one screen — a top bar card + side-by-side cards */
+  .content.fit { overflow: hidden; padding: 16px 22px; }
+  .ed { display: flex; flex-direction: column; gap: 14px; height: 100%; }
+  .ed-top { display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 12px; align-items: end; padding: 14px 18px; }
+  .ed-top .btns { display: flex; gap: 8px; }
+  .ed-cards { display: grid; grid-template-columns: 1.15fr 1fr 290px; gap: 14px; flex: 1; min-height: 0; }
+  .ed-col { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .ec { padding: 14px 16px; display: flex; flex-direction: column; min-height: 0; }
+  .ec-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .ec-ic { width: 26px; height: 26px; border-radius: 8px; background: #EEEEFF; color: #4040C8; display: grid; place-items: center; font-size: 13px; font-weight: 800; }
+  .ec-t { font-size: 13px; font-weight: 800; } .ec-s { font-size: 10.5px; color: #9BA3C4; font-weight: 500; }
+  .mods { display: flex; flex-direction: column; gap: 6px; }
+  .mt { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1.5px solid #ECEEF8; border-radius: 12px; background: #fff; cursor: pointer; transition: .15s; min-height: 44px; }
+  .mt:hover { border-color: #C9CBF5; }
+  .mt.on { border-color: #4040C8; background: linear-gradient(90deg, #F5F5FF, #fff); box-shadow: 0 3px 10px rgba(64,64,200,.08); }
+  .mt-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; font-weight: 800; flex: none; background: #F2F3FA; color: #9BA3C4; transition: .15s; }
+  .mt.on .mt-ic { background: #4040C8; color: #fff; }
+  .mt-tx { flex: 1; min-width: 0; }
+  .mt-nm { font-size: 12px; font-weight: 700; color: #1A1D2E; }
+  .mt:not(.on) .mt-nm { color: #5A6080; font-weight: 600; }
+  .mt-cap { font-size: 10px; color: #9BA3C4; margin-top: 1px; }
+  .step { display: flex; align-items: center; border: 1.5px solid #DCDDF5; border-radius: 9px; overflow: hidden; background: #fff; }
+  .step button { width: 24px; height: 26px; border: none; background: #F5F5FF; color: #4040C8; font-weight: 800; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .step button:hover { background: #EEEEFF; } .step button:disabled { color: #C9CBF5; cursor: default; background: #FAFAFF; }
+  .step input { width: 38px; height: 26px; border: none; text-align: center; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; color: #1A1D2E; outline: none; }
+  .step-l { font-size: 10px; color: #9BA3C4; font-weight: 600; margin-left: 6px; }
+  .incl { font-size: 10px; font-weight: 700; color: #16A34A; background: rgba(34,197,94,.12); border-radius: 20px; padding: 3px 9px; }
+  .sw { width: 32px; height: 18px; border-radius: 20px; background: #DDE0EE; position: relative; flex: none; transition: .15s; }
+  .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: .15s; }
+  .mt.on .sw { background: #4040C8; } .mt.on .sw::after { left: 16px; }
+  .ec-count { margin-left: auto; font-size: 10.5px; font-weight: 700; color: #4040C8; background: #EEEEFF; border-radius: 20px; padding: 3px 9px; }
+  .mod { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; border: 1.5px solid #ECEEF8; border-radius: 9px; font-size: 11.5px; min-height: 34px; }
+  .mod.on { border-color: #C9CBF5; background: #FAFAFF; }
+  .mod label { display: flex; gap: 8px; align-items: center; cursor: pointer; font-weight: 600; } .mod input[type=checkbox] { accent-color: #4040C8; }
+  .mod .num { width: 64px; padding: 4px 8px; font-size: 11px; }
+  .prow2 { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; font-size: 12px; border-top: 1px solid #F2F3FA; } .prow2:first-of-type { border-top: none; }
+  .prow2 .num { width: 70px; padding: 5px 9px; }
+  .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-top: 10px; overflow-y: auto; min-height: 0; flex: 1; align-content: start; padding: 2px; }
+  .dc { border: 1.5px solid #DCDDF5; border-radius: 12px; padding: 8px 10px; background: linear-gradient(180deg, #F7F7FF, #fff); }
+  .dc-n { font-size: 11px; font-weight: 800; color: #3535B5; margin-bottom: 6px; }
+  .dc-r { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #5A6080; padding: 2px 0; }
+  .dc-r b { font-family: 'DM Mono', monospace; color: #1A1D2E; }
+  .dc .step button { width: 22px; height: 22px; font-size: 12px; } .dc .step input { width: 28px; height: 22px; font-size: 11px; }
+  .chip { border: 1.5px solid #E2E4F0; border-radius: 9px; padding: 5px 8px; font-size: 10.5px; background: #FAFBFF; line-height: 1.35; }
+  .chip b { color: #3535B5; display: block; font-size: 11px; }
+  .chip.more { display: grid; place-items: center; color: #5A6080; font-weight: 700; }
+  .tot { margin-top: auto; font-size: 11.5px; color: #5A6080; background: #F2F3FA; border-radius: 10px; padding: 8px 11px; }
+  .ed-prev { display: flex; flex-direction: column; align-items: center; padding-top: 22px; min-height: 0; }
+  .ed-prev .pc { transform: scale(.86); transform-origin: top center; }
+  .ent-wide { grid-column: 1 / 3; }
+  .cfields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cfields .wide { grid-column: 1 / 3; }
+  .chint { font-size: 11.5px; color: #3535B5; background: #EEEEFF; border-radius: 10px; padding: 9px 12px; margin-top: 12px; line-height: 1.55; }
+  .pc-contact { width: 100%; font-size: 11.5px; font-weight: 600; color: #3A3F55; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .pc-contact div { display: flex; gap: 8px; align-items: center; } .pc-contact span:first-child { width: 16px; text-align: center; }
+
+  .ov { position: fixed; inset: 0; background: rgba(26,29,46,.5); display: none; justify-content: center; align-items: flex-start; padding: 6vh 16px; z-index: 30; }
+  .ov.open { display: flex; }
+  .modal { width: 100%; max-width: 520px; padding: 20px 24px; position: relative; }
+  .x { position: absolute; top: 14px; right: 16px; border: none; background: none; font-size: 15px; color: #9BA3C4; cursor: pointer; }
+  .note { font-size: 11.5px; color: #5A6080; margin-top: 18px; line-height: 1.6; }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px); background: #1A1D2E; color: #fff; font-size: 12px; font-weight: 600; padding: 10px 16px; border-radius: 10px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 50; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  /* ── Added for the offer ── */
+  .price-in { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: #9BA3C4; font-weight: 600; margin-left: 6px; }
+  .price-in input { width: 70px; padding: 5px 8px; border: 1.5px solid #DCDDF5; border-radius: 9px; font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 700; text-align: right; outline: none; color: #1A1D2E; }
+  .req { font-size: 12px; color: #5A6080; margin-top: -6px; }
+  .brk { width: 100%; margin-top: 6px; padding: 0 4px; }
+  .brk-t { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #9BA3C4; margin: 0 0 4px; }
+  .ln { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #ECEEF8; color: #3A3F55; }
+  .ln span:last-child { font-family: 'DM Mono', monospace; font-weight: 700; white-space: nowrap; }
+  .ln.t { border-bottom: none; font-weight: 800; font-size: 12px; } .ln.t span:last-child { color: #3535B5; }
+  .bg { background: #16A34A; color: #fff; box-shadow: 0 4px 14px rgba(22,163,74,.25); }
+  .mailwrap { display: grid; place-items: center; height: 100%; }
+  .mail { width: 580px; overflow: hidden; }
+  .mail-meta { padding: 12px 18px; font-size: 11.5px; color: #5A6080; border-bottom: 1px solid #ECEEF8; line-height: 1.7; }
+  .mail-hero { padding: 20px 24px; color: #fff; background: linear-gradient(135deg, #1A1D2E, #3535B5); }
+  .mail-hero b { font-size: 18px; display: block; margin-top: 6px; }
+  .mail-body { padding: 16px 24px 22px; font-size: 12.5px; line-height: 1.7; color: #3A3F55; }
+  .mail-box { margin: 12px 0; border: 1px solid #ECEEF8; border-radius: 12px; padding: 10px 14px; }
+  .reply { margin-top: 12px; background: #EEEEFF; color: #3535B5; border-radius: 10px; padding: 10px 12px; font-size: 12px; font-weight: 600; }
+  .stage2 { border-radius: 18px; padding: 34px 24px 40px; background: linear-gradient(#3535B5 0, #3535B5 150px, transparent 150px); }
+  /* Send popup */
+  .modal.wide { max-width: 640px; }
+  .to-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1.5px solid #E2E4F0; border-radius: 10px; padding: 6px 8px; margin-top: 5px; }
+  .to-row:focus-within { border-color: #4040C8; }
+  .chip-mail { display: inline-flex; align-items: center; gap: 6px; background: #EEEEFF; color: #3535B5; font-size: 11.5px; font-weight: 700; border-radius: 20px; padding: 4px 6px 4px 10px; }
+  .chip-mail button { border: none; background: #fff; color: #5A6080; border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 11px; line-height: 18px; padding: 0; }
+  .to-row input { border: none; outline: none; flex: 1; min-width: 160px; font-family: inherit; font-size: 12px; padding: 4px; }
+  .to-hint { font-size: 10.5px; color: #9BA3C4; margin-top: 4px; }
+  .to-err { font-size: 10.5px; color: #DC2626; margin-top: 4px; font-weight: 600; }
+  .preview-mail { margin-top: 12px; border: 1px solid #ECEEF8; border-radius: 12px; max-height: 260px; overflow-y: auto; }
+  .preview-mail .mail-hero { padding: 12px 16px; } .preview-mail .mail-hero b { font-size: 14px; }
+  .preview-mail .mail-body { padding: 10px 16px 14px; font-size: 11.5px; }
+  .qtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .qtable th { text-align: left; font-size: 10.5px; color: #9BA3C4; padding: 10px 14px; border-bottom: 1px solid #ECEEF8; }
+  .qtable td { padding: 12px 14px; border-bottom: 1px solid #F2F3FA; vertical-align: top; }
+</style>
+</head>
+<body>
+<div class="demo" id="demo">
+  <button data-v="spark" class="on">1 · Spark: offer page</button>
+  <button data-v="send">2 · Send offer: email popup</button>
+  <button data-v="email">3 · The email the client gets</button>
+  <button data-v="quotes">4 · Spark: client replied → Approve</button>
+  <button data-v="client">5 · Client: after Spark approves</button>
+</div>
+<div class="app-shell">
+  <aside class="sb" id="sb"></aside>
+  <div class="main"><div class="topbar" id="topbar"></div><div class="content fit" id="page"></div></div>
+</div>
+<div class="ov" id="ov"><div class="card modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 2400); }
+const LOGO = `<svg width="14" height="14" viewBox="0 0 14 14"><rect x=".5" y=".5" width="5.5" height="5.5" rx="1" fill="white"/><rect x="8" y=".5" width="5.5" height="5.5" rx="1" fill="white" opacity=".4"/><rect x=".5" y="8" width="5.5" height="5.5" rx="1" fill="white" opacity=".4"/><rect x="8" y="8" width="5.5" height="5.5" rx="1" fill="white"/></svg>`;
+const MODULES = [
+  ["quarterly", "Quarterly Report", true], ["earnings", "Earnings Report", true], ["annual", "Annual Report", true],
+  ["board", "Board Report", true], ["esg", "ESG Validator", true], ["compliance", "Compliance Validation", true],
+  ["meetings", "Board Meetings", false], ["leadership", "Leadership", false], ["arv", "Annual Report Validator", true],
+];
+const ICON = { quarterly: "Q", earnings: "E", annual: "A", board: "B", esg: "ESG", compliance: "✓", meetings: "M", leadership: "L", arv: "AV" };
+const unit = (k, n) => (k === "compliance" ? "validation" : "report") + (n === 1 ? "" : "s");
+const LENGTHS = { quarterly: ["Enterprise · 3 months", "per quarter"], half: ["Enterprise · 6 months", "per 6 months"], year: ["Enterprise · 1 year", "per year"] };
+const f = {
+  name: "Custom plan for Client Co", length: "year",
+  mods: { quarterly: { n: 3, price: 500 }, annual: { n: 1, price: 3000 }, compliance: { n: 10, price: 200 }, leadership: { price: 1500 } },
+  pm: 3, ir: 1, deptUsers: [4, 2, 2], usersPrice: 3000, departmentsPrice: 4000, typedTotal: null,
+};
+// Who the email goes to: filled with the company's admin, Spark can change it.
+let recipients = ["admin@clientco.example"];
+let view = "spark", sent = false, approved = false;
+const money = (n) => Number(n).toLocaleString("en-US");
+const deptUsers = () => f.deptUsers.reduce((a, b) => a + b, 0);
+const people = () => 1 + f.pm + f.ir + f.deptUsers.length + deptUsers();
+const lineTotal = (k, counted) => counted ? f.mods[k].n * f.mods[k].price : f.mods[k].price;
+const on = () => MODULES.filter(([k]) => k in f.mods);
+const addedUp = () => on().reduce((s, [k, , c]) => s + lineTotal(k, c), 0) + f.usersPrice + f.departmentsPrice;
+const total = () => f.typedTotal ?? addedUp();
+const isEmail = (t) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t);
+
+function frame() {
+  const client = view === "client";
+  $("sb").innerHTML = `<div class="sb-header"><div class="sb-logo"><div class="sb-lmark">${LOGO}</div><div class="sb-lname">Centriyon</div></div></div>
+    ${client ? `<div class="sb-sec">IR System</div><button class="sb-item">Command Center</button><button class="sb-item">Reports</button>
+      <div class="sb-sec">Admin</div><button class="sb-item">Admin Console</button><button class="sb-item sub act">Subscription</button><button class="sb-item sub">Users &amp; Roles</button>`
+    : `<div class="sb-sec">Spark</div><button class="sb-item">Overview</button><button class="sb-item sub">Companies</button>
+      <button class="sb-item sub">Licenses (on-premises)</button><button class="sb-item sub">Subscriptions</button><button class="sb-item sub act">Quotes</button>`}
+    <div class="sb-user"><div class="sb-uav">${client ? "CA" : "SA"}</div><div><div class="sb-uname">${client ? "Client Admin" : "Spark Admin"}</div><div class="sb-urole">${client ? "Admin" : "Spark Admin"}</div></div></div>`;
+  $("topbar").innerHTML = view === "spark" || view === "send" ? `<span class="tb-page">Quotes</span><span class="tb-sep">›</span><span class="tb-sub">Offer for Client Co</span>`
+    : view === "email" ? `<span class="tb-page">Email</span><span class="tb-sep">›</span><span class="tb-sub">What the client receives</span>`
+    : view === "quotes" ? `<span class="tb-page">Quotes</span>`
+    : `<span class="tb-page">Subscription</span><span class="tb-sep">·</span><span class="tb-sub">Client Co</span>`;
+}
+
+function offerCard(opts) {
+  const lines = MODULES.map(([k, label, counted]) => {
+    const yes = k in f.mods;
+    return `<li class="${yes ? "" : "off"}"><span class="ic ${yes ? "ok" : "no"}">${yes ? "✓" : "✗"}</span><span>${label}${yes && counted ? ` · ${f.mods[k].n} ${unit(k, f.mods[k].n)}` : ""}</span></li>`;
+  }).join("") + `<li><span class="ic ok">✓</span><span>1 admin (included)</span></li>
+    <li><span class="ic ok">✓</span><span>${f.pm} project managers · ${f.ir} IR user${f.ir === 1 ? "" : "s"}</span></li>
+    <li><span class="ic ok">✓</span><span>${f.deptUsers.length} departments · 1 HOD each · ${deptUsers()} department users</span></li>`;
+  const flag = opts.mine ? '<span class="badge b-am">Made for you</span>' : "";
+  const foot = opts.mine ? `<div class="pc-line"></div><button class="pc-buy" onclick="toast('→ Payment page (the one we have)')">Buy now</button>` : '<div style="height:8px"></div>';
+  return `<div class="pc"><div class="pc-tab" style="background:#1A1D2E">${f.name}</div><span class="pc-flag">${flag}</span>
+    <div class="pc-price"><span class="pc-cur">$</span><b>${money(total())}</b><small>${LENGTHS[f.length][1].replace(" ", "<br>")}</small></div>
+    <div class="pc-line"></div><ul>${lines}</ul>${foot}</div>`;
+}
+function breakdownLines() {
+  return `${on().map(([k, label, c]) => `<div class="ln"><span>${label}${c ? ` · ${f.mods[k].n} × $${money(f.mods[k].price)}` : ""}</span><span>$${money(lineTotal(k, c))}</span></div>`).join("")}
+    <div class="ln"><span>1 admin</span><span style="color:#16A34A">Included</span></div>
+    <div class="ln"><span>Users · ${f.pm} PMs · ${f.ir} IR user${f.ir === 1 ? "" : "s"}</span><span>$${money(f.usersPrice)}</span></div>
+    <div class="ln"><span>Departments · ${f.deptUsers.length} (1 HOD each) · ${deptUsers()} department users</span><span>$${money(f.departmentsPrice)}</span></div>
+    ${f.typedTotal != null && f.typedTotal !== addedUp() ? `<div class="ln"><span>Added up</span><span>$${money(addedUp())}</span></div>
+      <div class="ln t"><span>Your price ${LENGTHS[f.length][1]}</span><span>$${money(total())}</span></div>`
+      : `<div class="ln t"><span>Total ${LENGTHS[f.length][1]}</span><span>$${money(total())}</span></div>`}`;
+}
+function breakdown() { return `<div class="brk"><div class="brk-t">How the price adds up</div>${breakdownLines()}</div>`; }
+
+// The email itself (also shown inside the Send popup as a preview).
+function emailBody() {
+  return `<div class="mail-hero"><div style="font-size:10px;font-weight:800;letter-spacing:.1em;opacity:.7">CENTRIYON</div><b>Your Enterprise offer from Centriyon</b></div>
+    <div class="mail-body">Hello,<br>Centriyon made a plan for <b>Client Co</b>, based on your request: <b>${f.name}</b> · ${LENGTHS[f.length][0]}.
+      <div class="mail-box"><div class="brk-t" style="margin-top:4px">Modules and prices</div>${breakdownLines()}</div>
+      <div class="reply">↩ Reply to this email to accept the offer or to ask for changes. Once Centriyon approves it, it will be on your Subscription page, ready to subscribe.</div></div>`;
+}
+
+// ── 1. Spark: the offer page ──
+function sparkView() {
+  const modules = MODULES.map(([k, label, counted]) => {
+    const yes = k in f.mods, m = f.mods[k];
+    const right = !yes ? '<span class="mt-cap">Off</span>'
+      : counted ? `<div class="step" onclick="event.stopPropagation()"><button ${m.n <= 1 ? "disabled" : ""} onclick="f.mods.${k}.n--;render()">−</button><input value="${m.n}" onchange="f.mods.${k}.n=Math.max(1,+this.value||1);render()"><button onclick="f.mods.${k}.n++;render()">+</button></div>
+          <span class="price-in" onclick="event.stopPropagation()">× $<input value="${m.price}" onchange="f.mods.${k}.price=Math.max(0,+this.value||0);render()">/ ${unit(k, 1)}</span>`
+      : `<span class="price-in" onclick="event.stopPropagation()">$<input value="${m.price}" onchange="f.mods.${k}.price=Math.max(0,+this.value||0);render()">flat</span>`;
+    return `<div class="mt ${yes ? "on" : ""}" onclick="toggle('${k}', ${counted})"><div class="mt-ic">${ICON[k]}</div>
+      <div class="mt-tx"><div class="mt-nm">${label}</div><div class="mt-cap">${counted ? `${unit(k, 2)[0].toUpperCase() + unit(k, 2).slice(1)} × price per ${unit(k, 1)}` : "Access only — one flat price"}</div></div>${right}<div class="sw"></div></div>`;
+  }).join("");
+  const chips = f.deptUsers.map((n, i) => `<div class="dc"><div class="dc-n">Department ${i + 1}</div><div class="dc-r"><span>HOD</span><b>1</b></div>
+      <div class="dc-r"><span>Users</span><div class="step"><button ${n <= 1 ? "disabled" : ""} onclick="f.deptUsers[${i}]--;render()">−</button><input value="${n}"><button onclick="f.deptUsers[${i}]++;render()">+</button></div></div></div>`).join("");
+  return `<div class="ed">
+    <div class="card ed-top">
+      <label class="f">Plan name<input class="inp" value="${f.name}" oninput="f.name=this.value"></label>
+      <label class="f">Duration<select class="inp" onchange="f.length=this.value;render()">${Object.entries(LENGTHS).map(([k, [l]]) => `<option value="${k}" ${f.length === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f">Price (USD) <span class="muted">${LENGTHS[f.length][1]}</span><input class="inp mono" value="${total()}" onchange="f.typedTotal=this.value===''?null:Math.max(0,+this.value||0);render()"></label>
+      <div class="btns"><button class="btn bs">Cancel</button><button class="btn bs" onclick="toast('Saved as draft')">Save draft</button>
+        <button class="btn bs" onclick="openSend()">✉ Send offer</button>
+        <button class="btn bg" onclick="approve()">✓ Approve for Client Co</button></div>
+    </div>
+    <div class="req">Their request: <b>Sara Khan</b> · +966 50 000 0000 — “We need quarterly and board reports for 3 PMs and 3 departments.”
+      ${sent ? '<span style="color:#4040C8;font-weight:700;margin-left:8px">· Offer sent 9 Nov 2026 to admin@clientco.example</span>' : ""}</div>
+    <div class="ed-cards">
+      <div class="card ec">
+        <div class="ec-h"><div class="ec-ic">▦</div><div><div class="ec-t">Modules</div><div class="ec-s">Type the price per report / per validation (or one flat price)</div></div><span class="ec-count">${on().length} of ${MODULES.length} on</span></div>
+        <div class="mods" style="overflow-y:auto;min-height:0">${modules}</div>
+      </div>
+      <div class="ed-col">
+        <div class="card ec">
+          <div class="ec-h"><div class="ec-ic">👤</div><div><div class="ec-t">Users</div><div class="ec-s">The admin is always included</div></div></div>
+          <div class="prow2"><span>Admin</span><span class="lock">🔒 1 · included</span></div>
+          <div class="prow2"><span>Project managers (PMs)</span><input class="inp num" value="${f.pm}" onchange="f.pm=Math.max(0,+this.value||0);render()"></div>
+          <div class="prow2"><span>IR users</span><input class="inp num" value="${f.ir}" onchange="f.ir=Math.max(0,+this.value||0);render()"></div>
+          <div class="tot" style="margin-top:6px;display:flex;align-items:center;justify-content:space-between"><span>Price for <b>${f.pm + f.ir} users</b></span>
+            <span class="price-in" style="color:#5A6080">$<input value="${f.usersPrice}" onchange="f.usersPrice=Math.max(0,+this.value||0);render()"></span></div>
+        </div>
+        <div class="card ec" style="flex:1;min-height:0">
+          <div class="ec-h"><div class="ec-ic">▤</div><div><div class="ec-t">Departments</div><div class="ec-s">Each has 1 HOD and at least 1 user</div></div></div>
+          <div class="prow2"><span>Number of departments</span><input class="inp num" value="${f.deptUsers.length}" onchange="setDepts(this.value)"></div>
+          <div class="chips">${chips}</div>
+          <div class="tot" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between"><span>Price for <b>${f.deptUsers.length} departments</b> · ${f.deptUsers.length} HODs · ${deptUsers()} users</span>
+            <span class="price-in" style="color:#5A6080">$<input value="${f.departmentsPrice}" onchange="f.departmentsPrice=Math.max(0,+this.value||0);render()"></span></div>
+        </div>
+      </div>
+      <div class="card ed-prev" style="overflow-y:auto"><div class="preview-t" style="margin-bottom:22px">Preview — what Client Co sees once approved</div>${offerCard({})}${breakdown()}</div>
+    </div>
+  </div>`;
+}
+function toggle(k, counted) { if (k in f.mods) delete f.mods[k]; else f.mods[k] = counted ? { n: 1, price: 0 } : { price: 0 }; render(); }
+function setDepts(t) { const n = Math.max(0, Math.min(50, Math.floor(+t) || 0)); const next = f.deptUsers.slice(0, n); while (next.length < n) next.push(1); f.deptUsers = next; render(); }
+
+// ── 2. The Send offer popup: who it goes to (can be changed), then the email ──
+function sendPopup() {
+  const bad = recipients.filter((r) => !isEmail(r));
+  return `<button class="x" onclick="closeModal()">✕</button>
+    <div style="font-size:15px;font-weight:800">Send the offer to Client Co</div>
+    <div style="font-size:11.5px;color:#5A6080;margin-top:4px">The client reads it and replies by email. Nothing changes on their side until you approve it.</div>
+    <label class="f" style="margin-top:14px">To</label>
+    <div class="to-row">${recipients.map((r, i) => `<span class="chip-mail" style="${isEmail(r) ? "" : "background:#FEE2E2;color:#B91C1C"}">${r}<button title="Remove" onclick="recipients.splice(${i},1);showSend()">✕</button></span>`).join("")}
+      <input id="addMail" placeholder="${recipients.length ? "Add another email…" : "name@company.com"}" onkeydown="if(event.key==='Enter'||event.key===','){event.preventDefault();addMail()}" onblur="addMail()"></div>
+    <div class="to-hint">Filled in with Client Co's admin. Change it, or add a second email (Enter to add).</div>
+    ${bad.length ? `<div class="to-err">${bad[0]} isn't an email address.</div>` : ""}
+    ${recipients.length === 0 ? '<div class="to-err">Add at least one email.</div>' : ""}
+    <label class="f" style="margin-top:12px">Subject<input class="inp" value="Your Enterprise offer from Centriyon"></label>
+    <div class="f" style="margin-top:12px">The email</div>
+    <div class="preview-mail">${emailBody()}</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn bs" onclick="closeModal()">Back</button>
+      <button class="btn bp" ${recipients.length === 0 || bad.length ? "disabled" : ""} onclick="doSend()">Send offer</button></div>`;
+}
+function addMail() { const el = $("addMail"); const v = (el?.value || "").trim().replace(/,$/, ""); if (!v) return; recipients.push(v); showSend(); setTimeout(() => $("addMail")?.focus(), 0); }
+function showSend() { $("modal").className = "card modal wide"; $("modal").innerHTML = sendPopup(); $("ov").classList.add("open"); }
+function openSend() { recipients = ["admin@clientco.example"]; showSend(); }
+function doSend() { sent = true; closeModal(); toast(`Offer emailed to ${recipients.join(", ")}`); render(); }
+function approve() {
+  $("modal").className = "card modal";
+  $("modal").innerHTML = `<div style="font-size:15px;font-weight:800">Approve this plan for Client Co?</div>
+    <div style="font-size:11.5px;color:#5A6080;margin-top:4px;line-height:1.6">${LENGTHS[f.length][0]} · <b>$${money(total())}</b>.<br>It's published for Client Co only. Their admin gets "Your plan is ready" and can subscribe on the Subscription page.</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn bs" onclick="closeModal()">Back</button>
+    <button class="btn bg" onclick="closeModal();approved=true;go('client');toast('Approved — Client Co can subscribe now')">Approve</button></div>`;
+  $("ov").classList.add("open");
+}
+function closeModal() { $("ov").classList.remove("open"); }
+
+// ── 3. The email (no button: the client replies) ──
+function emailView() {
+  return `<div class="mailwrap"><div class="card mail">
+    <div class="mail-meta"><b>From:</b> Centriyon &lt;sales@centriyon.com&gt; (replies come back to Centriyon)<br><b>To:</b> ${recipients.join(", ")}<br><b>Subject:</b> Your Enterprise offer from Centriyon</div>
+    ${emailBody()}</div></div>`;
+}
+
+// ── 4. Spark: the Quotes page, after the client replied ──
+function quotesView() {
+  const state = approved ? '<span class="badge b-gn">Approved</span>' : sent ? '<span class="badge b-or">Offer sent</span>' : '<span class="badge b-am">Quote received</span>';
+  return `<div class="phead"><div><div class="ptitle">Quotes</div><div class="psub">Enterprise requests. Make an offer, email it, and approve it once the client agrees.</div></div></div>
+    <div class="card" style="overflow:hidden"><table class="qtable"><thead><tr><th>Company</th><th>Name</th><th>Phone</th><th>Message</th><th>Sent</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+    <tbody><tr><td><b>Client Co</b></td><td>Sara Khan</td><td class="mono">+966 50 000 0000</td><td>We need quarterly and board reports for 3 PMs and 3 departments.</td><td>2026-11-08</td>
+      <td>${state}${sent && !approved ? '<div style="font-size:11px;color:#9BA3C4;margin-top:4px">Emailed 9 Nov to admin@clientco.example</div>' : ""}</td>
+      <td style="text-align:right;white-space:nowrap">${approved ? "" : `<button class="btn bs bsm" onclick="go('spark')">Edit offer</button> <button class="btn bsm bg" onclick="approve()">✓ Approve</button> <button class="btn bs bsm" onclick="toast('Deleted')">Delete</button>`}</td></tr></tbody></table></div>
+    <div class="note">The client accepted by replying to the email. Spark presses <b>✓ Approve</b> here or on the offer page.</div>`;
+}
+
+// ── 5. Client: after Spark approved, a normal Made-for-you card ──
+function clientView() {
+  const others = [["Basic", 4500, "per quarter", "#4F7BE8"], ["Standard", 12000, "per 6 months", "#14B8A6"]].map(([n, p, per, colour]) => `<div class="pc"><div class="pc-tab" style="background:${colour}">${n}</div>
+      <div class="pc-price"><span class="pc-cur">$</span><b>${money(p)}</b><small>${per.replace(" ", "<br>")}</small></div><div class="pc-line"></div>
+      <ul><li><span class="ic ok">✓</span><span>Quarterly Report · 4 reports</span></li><li><span class="ic ok">✓</span><span>2 PMs · 1 IR user</span></li></ul><div class="pc-line"></div><button class="pc-buy">Buy now</button></div>`).join("");
+  return `<div class="phead"><div><div class="ptitle">Subscription</div><div class="psub">No subscription yet. Choose a plan below. (No offer card before Spark approves.)</div></div></div>
+    <div class="stage2"><div class="cards">${offerCard({ mine: true })}${others}</div></div>`;
+}
+
+function go(v) {
+  if (v === "send") { view = "spark"; render(); openSend(); document.querySelectorAll("#demo button").forEach((x) => x.classList.toggle("on", x.dataset.v === "send")); return; }
+  if (v === "client") approved = true;
+  if (v === "quotes" || v === "email") sent = true;
+  view = v; closeModal(); document.querySelectorAll("#demo button").forEach((x) => x.classList.toggle("on", x.dataset.v === v)); render();
+}
+function render() {
+  frame();
+  $("page").className = view === "spark" || view === "email" ? "content fit" : "content";
+  $("page").innerHTML = view === "spark" ? sparkView() : view === "email" ? emailView() : view === "quotes" ? quotesView() : clientView();
+}
+document.querySelectorAll("#demo button").forEach((b) => b.onclick = () => go(b.dataset.v));
+render();
+</script>
+</body>
+</html>

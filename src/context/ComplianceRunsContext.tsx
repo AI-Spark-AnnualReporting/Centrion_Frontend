@@ -33,6 +33,7 @@ import { useNavigate } from 'react-router-dom';
 import { ApiError, complianceValidation } from '@/lib/api';
 import { dismissRun, isDismissed, runHref } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
+import { canReadFeature } from '@/lib/features';
 import { toast } from '@/hooks/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import {
@@ -190,6 +191,9 @@ const ComplianceRunsContext = createContext<ComplianceRunsContextValue>(EMPTY);
 export function ComplianceRunsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  // Without Compliance Validation (not in the plan, or not for this role) the
+  // server answers 403 to every sweep — so don't ask.
+  const canSeeRuns = canReadFeature(user, 'compliance_validation');
   const navigate = useNavigate();
 
   const [runs, setRuns] = useState<RunMap>({});
@@ -392,7 +396,7 @@ export function ComplianceRunsProvider({ children }: { children: ReactNode }) {
     // Belt and braces: this provider unmounts with the authenticated shell on
     // logout, but a company change must never carry runs across with it.
     commit({});
-    if (!companyId) return;
+    if (!companyId || !canSeeRuns) return;
 
     let stopped = false;
     const sweep = async () => {
@@ -430,7 +434,7 @@ export function ComplianceRunsProvider({ children }: { children: ReactNode }) {
       stopped = true;
       window.clearInterval(id);
     };
-  }, [companyId, commit, report]);
+  }, [companyId, canSeeRuns, commit, report]);
 
   const claimForeground = useCallback((runId: string) => {
     const map = foregroundRef.current;

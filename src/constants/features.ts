@@ -165,6 +165,9 @@ export const ROLE_FEATURE_DEFAULTS: Record<BackendRole, Record<string, FeaturePe
   // Everything on, both apps. Mirrors ROLE_FEATURE_DEFAULTS["spark_internal"]
   // in the backend's constants.py. Note these client-side defaults are only a
   // fallback — the authoritative permissions arrive baked into the JWT.
+  // Spark's platform owner works only on /spark, which needs no feature
+  // permission, so nothing here.
+  spark_admin: {},
   spark_internal: {
     command_center: { read: true },
     quarterly_report: { read: true, create: true },

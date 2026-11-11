@@ -1,3 +1,4 @@
+import { LicenseBanner, PageLimitBanner } from '@/components/license/LicenseBanner';
 import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -36,6 +37,7 @@ const PAGE_NAMES: Record<string, string> = {
   '/spark/companies': 'Companies',
   '/spark/reports': 'Reports',
   '/spark/users': 'Users',
+  '/spark/licenses': 'Licenses',
 };
 
 // Centered spinner shown while a lazily-loaded page's chunk downloads.
@@ -62,6 +64,7 @@ function PageLoader() {
 // shorter prefix added later would otherwise silently shadow a longer one.
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
+  ['/spark/licenses', 'Licenses'],
   ['/annual-report', 'Annual Report'],
   ['/earnings', 'Earnings Report'],
   ['/communications', 'Communication Hub'],
@@ -117,6 +120,12 @@ export function AppLayout() {
   // just relaunch the page you're already on. The page also runs full-height,
   // same as the report flow, so it needs the launcher's clearance freed up too.
   const aiPage = location.pathname === '/ai';
+  // The subscription pages are one screen that never scrolls: spark_admin's
+  // plan cards and editor, and the client's Subscription page. The launcher
+  // (client side) floats over the cards' band instead of getting clearance.
+  const fitPage = /^\/spark\/subscriptions(\/new|\/[^/]+\/edit)?$/.test(location.pathname)
+    || /^\/spark\/licenses\/[^/]+\/key$/.test(location.pathname)
+    || location.pathname === '/admin-console/subscription';
   // The directory is company-less, and the chatbot answers questions about a
   // company's data — on this page it would be a dead button (it routes to /ai,
   // which the spark gate bounces straight back here). Only Spark reaches
@@ -150,7 +159,9 @@ export function AppLayout() {
               launcher — dead space on a page that doesn't scroll. */}
           <div
             className={
-              boardBuilder || aiPage
+              fitPage
+                ? 'content no-fab content--fit'
+                : boardBuilder || aiPage
                 ? 'content no-fab'
                 : reportFlow
                   ? 'content content--flush'
@@ -161,6 +172,9 @@ export function AppLayout() {
                 its own way back — a thread's report card. One bar above every
                 page beats teaching each module page about threads. */}
             <BackToOrigin />
+            {/* Client admins only: shown when the license isn't active. */}
+            <LicenseBanner />
+            <PageLimitBanner />
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

@@ -7,6 +7,35 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
+import type { SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
+import { normalizeTrends } from "@/types/spark";
+import type {
+  CompanyLicense,
+  LicenseUsage,
+  GeneratedLicense,
+  GenerateLicensePayload,
+  LicensableModule,
+  SparkLicenseRow,
+  SparkUpgradeRequest,
+  UpgradeRequestPayload,
+} from "@/types/license";
+import type {
+  CompanySubscription,
+  CustomPlanCompanyPage,
+  Duration,
+  CurrentSubscription,
+  PlanChanges,
+  PlanDeleteResult,
+  PlanForClient,
+  PlanForm,
+  PlanKind,
+  PlanPage,
+  PlanStatus,
+  PlanSubscriber,
+  OfferEmailForm,
+  QuoteRequestForm,
+  SubscriptionPlan,
+} from "@/types/subscription";
 import { checkAiCreditsHeader, showAiCreditsPausedToast } from './aiCreditsToast';
 import type {
   AuthUser,
@@ -761,6 +790,18 @@ export const auth = {
 
   me: <T = unknown>() => request<T>("/api/v1/auth/me"),
 
+  // A fresh token with permissions re-read from the server. Called after Spark
+  // issues or changes the company's license, so new modules appear without
+  // logging out.
+  refreshToken: () =>
+    request<{
+      access_token: string;
+      permissions: AuthUser["permissions"];
+      visible_features: AuthUser["visible_features"];
+      apps: AuthUser["apps"];
+      default_app: AuthUser["default_app"];
+    }>("/api/v1/auth/refresh-token", { method: "POST" }),
+
   // Self-service reset, for users who can't log in at all (so no JWT — unlike
   // changePassword above). Query params, same as login/register: that's what
   // the backend reads.
@@ -782,6 +823,15 @@ export const auth = {
     request<{ reset: boolean }>("/api/v1/auth/reset-password", {
       method: "POST",
       query: { token, new_password: newPassword },
+      auth: false,
+    }),
+
+  // On-premises only: reset with a one-use code from Spark (for servers with no
+  // email server). The code is tied to this email and this server.
+  resetPasswordWithCode: (email: string, resetCode: string, newPassword: string) =>
+    request<{ reset: boolean }>("/api/v1/auth/reset-password-with-code", {
+      method: "POST",
+      body: { email, reset_code: resetCode, new_password: newPassword },
       auth: false,
     }),
 
@@ -5419,6 +5469,202 @@ export const sparkInternal = {
       `/api/v1/spark/companies/${encodeURIComponent(companyId)}/users/${encodeURIComponent(userId)}/reset-password`,
       { method: "POST", noActingCompany: true },
     ),
+};
+
+// ---------------------------------------------------------------------------
+// Spark admin console — the platform owner's (`spark_admin`) cross-tenant
+// view at /spark. Restored from ba6bdc5 (removed in merge 621cc27). Not scoped
+// to the caller's company: spark_admin belongs to none.
+// ---------------------------------------------------------------------------
+
+function listOrEnvelope<T>(raw: T[] | Record<string, T[]>, key: string): T[] {
+  return Array.isArray(raw) ? raw : (raw?.[key] ?? []);
+}
+
+export const spark = {
+  // Cards + the Companies tab in one call.
+  overview: () => request<SparkOverview>("/api/v1/spark/overview", { noActingCompany: true }),
+
+  listUsers: () =>
+    request<SparkUserRow[] | { users: SparkUserRow[] }>("/api/v1/spark/users", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "users")),
+
+  listReports: () =>
+    request<SparkReportRow[] | { reports: SparkReportRow[] }>("/api/v1/spark/reports", {
+      noActingCompany: true,
+    }).then((raw) => listOrEnvelope(raw, "reports")),
+
+  // Report counts by type over time. `year` buckets by month; omitting it buckets by year.
+  reportTrends: (params: { year?: number; company_id?: string } = {}) =>
+    request<unknown>("/api/v1/spark/report-trends", { query: params, noActingCompany: true }).then(
+      normalizeTrends,
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Licensing (plan: Centriton/.claude/plans/company-licensing.md)
+// `sparkLicenses` — spark_admin only: make keys and unlock codes for every company.
+// `license` — the client admin: see the license, paste a key or unlock code
+// (on-premises), ask for an upgrade (cloud).
+// ---------------------------------------------------------------------------
+
+export const sparkLicenses = {
+  list: () =>
+    request<{ licenses: SparkLicenseRow[]; modules: LicensableModule[]; upgrade_requests?: SparkUpgradeRequest[] }>("/api/v1/spark/licenses", {
+      noActingCompany: true,
+    }),
+
+  get: (companyId: string) =>
+    request<SparkLicenseRow & { modules_catalogue: LicensableModule[] }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`,
+      { noActingCompany: true },
+    ),
+
+  generate: (companyId: string, body: GenerateLicensePayload) =>
+    request<GeneratedLicense>(`/api/v1/spark/companies/${encodeURIComponent(companyId)}/license`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  unlockCode: (companyId: string, body: { lock_id: string; server_id?: string }) =>
+    request<{ unlock_code: string; valid_days: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/unlock-code`,
+      { method: "POST", body, noActingCompany: true },
+    ),
+
+  passwordResetCode: (companyId: string, email: string) =>
+    request<{ reset_code: string; valid_hours: number }>(
+      `/api/v1/spark/companies/${encodeURIComponent(companyId)}/password-reset-code`,
+      { method: "POST", body: { email }, noActingCompany: true },
+    ),
+
+  addOnPremClient: (name: string) =>
+    request<{ company: { id: string; name: string; deployment: "on_prem" } }>(
+      "/api/v1/spark/on-prem-clients",
+      { method: "POST", body: { name }, noActingCompany: true },
+    ),
+};
+
+export const license = {
+  get: () => request<CompanyLicense>("/api/v1/admin/license"),
+
+  // Any company user: room left per limit (create buttons).
+  usage: () => request<LicenseUsage>("/api/v1/license/usage"),
+
+  activate: (licenseKey: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/activate", {
+      method: "POST",
+      body: { license_key: licenseKey },
+    }),
+
+  unlock: (unlockCode: string) =>
+    request<CompanyLicense>("/api/v1/admin/license/unlock", {
+      method: "POST",
+      body: { unlock_code: unlockCode },
+    }),
+
+  requestUpgrade: (body: UpgradeRequestPayload) =>
+    request<{ requested: boolean; details: string }>("/api/v1/admin/license/upgrade-request", {
+      method: "POST",
+      body,
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Cloud subscriptions (plan: Centriton/.claude/plans/cloud-subscriptions.md)
+// `sparkPlans` — spark_admin: the plans and the quotes clients sent.
+// `subscriptions` — the client admin: choose, pay for, or ask for a plan.
+// Checkout and payment send an Idempotency-Key, so a repeated click (or a
+// retry after a lost answer) never buys or pays twice.
+// ---------------------------------------------------------------------------
+
+export interface PlanListQuery {
+  status?: PlanStatus;
+  duration?: Duration;
+  with_enterprise?: boolean;          // keep Enterprise next to a duration filter
+  kind?: PlanKind;                    // public = for every company, custom = for one
+  company_id?: string;
+  quotes_only?: boolean;
+  offer_state?: "received" | "sent";   // open quotes in that state
+  page?: number;
+  limit?: number;
+  sort_by?: "name" | "price" | "created_at" | "updated_at";
+  order?: "asc" | "desc";
+}
+
+export const sparkPlans = {
+  list: (query: PlanListQuery = {}) =>
+    request<PlanPage>("/api/v1/spark/subscription-plans", { query, noActingCompany: true }),
+
+  get: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, { noActingCompany: true }),
+
+  create: (body: PlanForm) =>
+    request<SubscriptionPlan>("/api/v1/spark/subscription-plans", { method: "POST", body, noActingCompany: true }),
+
+  update: (planId: string, body: PlanChanges) =>
+    request<SubscriptionPlan & { updated_subscriptions: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`,
+      { method: "PATCH", body, noActingCompany: true },
+    ),
+
+  subscribers: (planId: string) =>
+    request<{ items: PlanSubscriber[]; total: number }>(
+      `/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/subscribers`,
+      { noActingCompany: true },
+    ),
+
+  // Never-bought plans are removed; bought ones are hidden (see PlanDeleteResult).
+  remove: (planId: string) =>
+    request<PlanDeleteResult>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}`, {
+      method: "DELETE",
+      noActingCompany: true,
+    }),
+
+  // Email a quote's offer to the chosen addresses (the plan stays a draft).
+  sendOffer: (planId: string, body: OfferEmailForm) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/offers`, {
+      method: "POST",
+      body,
+      noActingCompany: true,
+    }),
+
+  // Approve a quote's plan: published for that company ("Made for you").
+  approveOffer: (planId: string) =>
+    request<SubscriptionPlan>(`/api/v1/spark/subscription-plans/${encodeURIComponent(planId)}/approvals`, {
+      method: "POST",
+      noActingCompany: true,
+    }),
+
+  // Custom plans → the companies table (companies with a plan made for them).
+  companies: (query: { search?: string; page?: number; limit?: number } = {}) =>
+    request<CustomPlanCompanyPage>("/api/v1/spark/subscription-plans/companies", { query, noActingCompany: true }),
+};
+
+export const subscriptions = {
+  plans: () => request<{ items: PlanForClient[]; modules_catalogue: LicensableModule[] }>("/api/v1/subscription-plans"),
+
+  current: () => request<CurrentSubscription>("/api/v1/subscriptions/current"),
+
+  // The plan's own duration and price are used; Enterprise can't be bought.
+  // accept_lost_modules: the admin confirmed the modules the new plan doesn't include.
+  startCheckout: (body: { plan_id: string; accept_lost_modules?: boolean }, idempotencyKey: string) =>
+    request<CompanySubscription>("/api/v1/subscriptions/checkouts", {
+      method: "POST",
+      body,
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  pay: (checkoutId: string, idempotencyKey: string) =>
+    request<CompanySubscription>(`/api/v1/subscriptions/checkouts/${encodeURIComponent(checkoutId)}/payments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  requestQuote: (body: QuoteRequestForm) =>
+    request<SubscriptionPlan>("/api/v1/quote-requests", { method: "POST", body }),
 };
 
 // ---------------------------------------------------------------------------

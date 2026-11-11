@@ -44,6 +44,14 @@ vi.mock("@/lib/appRouting", () => ({
   sparkStudioUrl: (path: string) => sparkStudioUrl(path),
 }));
 
+// The admin's Annual Report Validator item follows the company's license.
+let licensedModules: string[] = ["annual_report_validator"];
+let licenseStatus = "active";
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  license: { get: () => Promise.resolve({ status: licenseStatus, modules: licensedModules }) },
+}));
+
 const { Sidebar } = await import("@/components/layout/Sidebar");
 
 const SPARK = { user_id: "usr_s", full_name: "Spark", email: "spark@wearespark.me", role: "spark_internal" };
@@ -194,6 +202,32 @@ describe("sidebar for spark_internal", () => {
 describe("sidebar for everyone else", () => {
   beforeEach(() => {
     mockAuth = { user: ADMIN, logout: vi.fn(), leaveCompany, actingCompany: null };
+    licensedModules = ["annual_report_validator"];
+    licenseStatus = "active";
+  });
+
+  it("hides the Annual Report Validator when the license doesn't include it", async () => {
+    licensedModules = ["board_report"];
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    await screen.findByText("ESG Validator");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+  });
+
+  it("hides the Annual Report Validator when there's no license yet", async () => {
+    licenseStatus = "none";
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
+  });
+
+  it("keeps it for an expired license that has it, so old validations open", async () => {
+    licenseStatus = "expired";
+    renderSidebar();
+    fireEvent.click(screen.getByText("Reports Validator"));
+    expect(await screen.findByText("Annual Report Validator")).toBeInTheDocument();
   });
 
   it("still shows the full nav for an admin", () => {
@@ -225,19 +259,19 @@ describe("sidebar for everyone else", () => {
     expect(screen.getByText("Departments")).toBeInTheDocument();
   });
 
-  it("gives an admin the Annual Report Validator, under Reports Validator", () => {
+  it("gives an admin the Annual Report Validator, under Reports Validator", async () => {
     renderSidebar();
     // Collapsed behind the accordion by default, same as ESG Validator and
     // Compliance Validation sitting next to it.
     expect(screen.queryByText("Annual Report Validator")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Reports Validator"));
-    expect(screen.getByText("Annual Report Validator")).toBeInTheDocument();
+    expect(await screen.findByText("Annual Report Validator")).toBeInTheDocument();
   });
 
-  it("opens the validator page in-app for an admin, not a hand-off", () => {
+  it("opens the validator page in-app for an admin, not a hand-off", async () => {
     renderSidebar();
     fireEvent.click(screen.getByText("Reports Validator"));
-    fireEvent.click(screen.getByText("Annual Report Validator"));
+    fireEvent.click(await screen.findByText("Annual Report Validator"));
 
     // Unlike Spark's link, this one stays inside Centriyon.
     expect(sparkStudioUrl).not.toHaveBeenCalled();

@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
+import { LimitHint } from '@/components/license/LimitHint';
+import { useLicenseRoom } from '@/components/license/useLicenseRoom';
 import { ApiError, companies, complianceValidation } from '@/lib/api';
 import { rememberScreen } from '@/lib/compliance-runs';
 import { useAuth } from '@/context/AuthContext';
@@ -1089,7 +1091,10 @@ export default function ComplianceSetupPage() {
 
   // An empty `enabled_frameworks` means "no filter" to the API — every rule
   // runs, the opposite of switching them all off. So block the submit instead.
-  const canRun = sourceReady && enabled.length > 0 && !starting && !preRulesSelected;
+  // License: each run counts as one validation of the period (the server checks too).
+  // Plan: Centriton/.claude/plans/compliance-validation-limit.md
+  const validationRoom = useLicenseRoom('compliance_validation', 'Compliance validations');
+  const canRun = sourceReady && enabled.length > 0 && !starting && !preRulesSelected && !validationRoom.blocked;
 
   // The acknowledgement is the end of the road — /compliance is this page, so
   // there is nowhere to send the user except back to picking something newer.
@@ -1463,6 +1468,7 @@ export default function ComplianceSetupPage() {
             className="btn bp"
             onClick={runValidation}
             disabled={!canRun}
+            title={validationRoom.blocked ? validationRoom.reason : undefined}
             style={{
               fontSize: 13,
               padding: '10px 20px',
@@ -1472,6 +1478,7 @@ export default function ComplianceSetupPage() {
           >
             {starting ? 'Starting…' : '▶ Run validation'}
           </button>
+          <LimitHint room={validationRoom} />
           {!sourceReady && (
             <span style={{ fontSize: 11.5, color: MUTED }}>
               {sourceMode !== 'upload'

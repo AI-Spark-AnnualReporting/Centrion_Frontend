@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLicenseRoom, type LicenseRoom } from '@/components/license/useLicenseRoom';
+import { LimitHint } from '@/components/license/LimitHint';
 import { Spinner } from '@/components/shared/Spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { admin, adminConsole, adminUserPermissions } from '@/lib/api';
@@ -676,6 +678,9 @@ export default function AdminUsersPage() {
 
   const { toast } = useToast();
   const [inviteOpen, setInviteOpen] = useState(false);
+  // License: room left for users. Greys out Invite / Reactivate when full
+  // (the server still checks). Refreshed every time the user list reloads.
+  const seats = useLicenseRoom('seats');
   // Only set when the invite email failed and the temp password needs handing
   // over in person; a successful invite just toasts.
   const [inviteResult, setInviteResult] = useState<InviteUserResponse | null>(null);
@@ -700,6 +705,7 @@ export default function AdminUsersPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load users.'))
       .finally(() => setLoading(false));
+    seats.refresh();
   };
 
   useEffect(() => {
@@ -837,7 +843,8 @@ export default function AdminUsersPage() {
             Manage who has access to Centriyon and what they can do.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <LimitHint room={seats} />
           <button
             className="btn bs"
             type="button"
@@ -845,9 +852,11 @@ export default function AdminUsersPage() {
           >
             {view === 'users' ? 'Permission matrix' : 'View users'}
           </button>
-          <button className="btn bp" type="button" onClick={() => setInviteOpen(true)}>
-            + Invite user
-          </button>
+          <span title={seats.blocked ? seats.reason : undefined}>
+            <button className="btn bp" type="button" disabled={seats.blocked} onClick={() => setInviteOpen(true)}>
+              + Invite user
+            </button>
+          </span>
         </div>
       </div>
 
@@ -876,6 +885,7 @@ export default function AdminUsersPage() {
           departments={departments}
           onChangeRole={changeRole}
           onChangeStatus={changeStatus}
+          seats={seats}
           onChangeDepartment={changeDepartment}
           users={users}
           permsCache={permsCache}
@@ -938,6 +948,7 @@ function UsersView(props: {
   departments: Department[];
   onChangeRole: (u: AdminUserRow, role: BackendRole) => void;
   onChangeStatus: (u: AdminUserRow, status: UserStatus) => void;
+  seats: LicenseRoom;
   onChangeDepartment: (u: AdminUserRow, departmentId: string) => void;
   users: AdminUserRow[];
   permsCache: Record<string, UserPermissionsResponse>;
@@ -963,6 +974,7 @@ function UsersView(props: {
     departments,
     onChangeRole,
     onChangeStatus,
+    seats,
     onChangeDepartment,
     users,
     permsCache,
@@ -1274,16 +1286,18 @@ function UsersView(props: {
                                 Suspend user
                               </button>
                             ) : (
-                              <button
-                                className="btn bs bsm"
-                                disabled={rowBusy === u.user_id}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onChangeStatus(u, 'active');
-                                }}
-                              >
-                                Reactivate user
-                              </button>
+                              <span title={seats.blocked ? seats.reason : undefined}>
+                                <button
+                                  className="btn bs bsm"
+                                  disabled={rowBusy === u.user_id || seats.blocked}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onChangeStatus(u, 'active');
+                                  }}
+                                >
+                                  Reactivate user
+                                </button>
+                              </span>
                             ))}
 
                             {/* Until they activate. `has_temp_password` alone
