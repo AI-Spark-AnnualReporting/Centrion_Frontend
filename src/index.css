@@ -1453,3 +1453,37 @@ section:hover .fig-remove,
 .btn:disabled:hover, .btn[disabled]:hover { transform: none; }
 .bp:disabled:hover, .bp[disabled]:hover { background: #4040C8; box-shadow: none; }
 .bs:disabled:hover, .bs[disabled]:hover { background: #fff; border-color: #E2E4F0; color: #5A6080; }
+
+/* ── Error popup (components/shared/ErrorPopup.tsx, 2026-11-11) ─────── */
+@keyframes err-pop-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes err-pop-rise {
+  0% { opacity: 0; transform: translate(-50%, calc(-50% + 18px)) scale(.94); }
+  60% { opacity: 1; transform: translate(-50%, calc(-50% - 3px)) scale(1.01); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes err-pop-icon-in { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes err-pop-ring { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .45); } 100% { box-shadow: 0 0 0 16px rgba(220, 38, 38, 0); } }
+.err-pop-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(26, 29, 46, .45); animation: err-pop-fade .25s ease-out both; }
+.err-pop {
+  position: fixed; left: 50%; top: 50%; z-index: 61; transform: translate(-50%, -50%);
+  width: calc(100% - 32px); max-width: 400px; box-sizing: border-box;
+  background: #FFFFFF; border-radius: 20px; box-shadow: 0 24px 60px rgba(30, 27, 75, .28);
+  padding: 28px 24px 26px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
+  animation: err-pop-rise .42s cubic-bezier(.2, .8, .2, 1) both;
+}
+.err-pop:focus { outline: none; }
+.err-pop-x {
+  position: absolute; top: 10px; right: 10px; width: 44px; height: 44px; border-radius: 12px; border: 0;
+  background: transparent; color: #4B5068; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.err-pop-x:hover { background: #F3F4FA; }
+.err-pop-x:focus-visible { outline: 2px solid #4338CA; outline-offset: 2px; }
+.err-pop-icon {
+  width: 56px; height: 56px; border-radius: 50%; background: #FEE2E2; display: inline-flex; align-items: center; justify-content: center;
+  animation: err-pop-icon-in .4s .15s ease-out both, err-pop-ring 1.2s .35s ease-out 2;
+}
+.err-pop-title { margin: 4px 0 0; font-size: 17px; font-weight: 800; color: #1A1D2E; }
+.err-pop-text { margin: 0; font-size: 13px; color: #4B5068; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) {
+  .err-pop-backdrop, .err-pop, .err-pop-icon { animation: none; }
+}

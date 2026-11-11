@@ -28,14 +28,14 @@ const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) 
 const NEW_CLIENT = {
   company_id: "cmp_1", company_name: "omn prem", deployment: "on_prem", status: "none",
   starts_at: null, expires_at: null, issued_at: null, modules: [], report_limits: {},
-  max_seats: null, max_pms: null, max_ir_users: null, department_sizes: null,
+  max_seats: null,
   server_id: null, seats_used: null, reports_counted: {}, lock: null, open_upgrade_requests: 0,
   reports_used: null, modules_catalogue: MODULES,
 };
 const ACTIVE = {
   ...NEW_CLIENT, status: "active", starts_at: addDays(today, -10), expires_at: addDays(today, 200),
   modules: ["board_report"], report_limits: { board_report: 4 },
-  max_pms: 2, max_ir_users: 1, department_sizes: [5, 2, 1], server_id: "SRV-7K2M-9QXA-4T8P",
+  max_seats: 15, server_id: "SRV-7K2M-9QXA-4T8P",
 };
 
 function openPage() {
@@ -69,20 +69,20 @@ describe("License key page — generate", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reports/ }));      // nothing on yet: the group starts closed
     fireEvent.click(screen.getByRole("switch", { name: "Board Report" }));
     fireEvent.click(screen.getByRole("button", { name: "More Board Report reports" }));
-    fireEvent.click(screen.getByRole("button", { name: "More Project managers (PMs)" }));
-    fireEvent.click(screen.getByRole("button", { name: "More Department 1 users" }));
+    fireEvent.click(screen.getByRole("button", { name: "More Users" }));                // 4 → 5 besides the admin = 6
+    expect(screen.queryByText(/Department/)).not.toBeInTheDocument();
     expect(review).toBeEnabled();
 
     fireEvent.click(review);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("2 PM · 1 IR · 1 departments · 2 department users");
+    expect(dialog).toHaveTextContent("6 users (admin included)");
     expect(dialog).toHaveTextContent("Board Report · 2 reports");
     fireEvent.click(within(dialog).getByRole("button", { name: "Generate key" }));
 
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
     expect(generate.mock.calls[0][1]).toEqual({
       modules: ["board_report"], report_limits: { board_report: 2 },
-      max_pms: 2, max_ir_users: 1, department_sizes: [2],
+      max_users: 6,
       starts_at: today, expires_at: addDays(today, 364), server_id: "SRV-AAAA-BBBB-CCCC",
     });
     expect(await screen.findByText("eyJ.KEY.sig")).toBeInTheDocument();   // shown once, to copy
@@ -103,7 +103,7 @@ describe("License key page — generate", () => {
 });
 
 describe("License key page — upgrade", () => {
-  it("can't remove a module or go below the current people", async () => {
+  it("can't remove a module or go below the current users", async () => {
     get.mockResolvedValue(ACTIVE);
     openPage();
     expect(await screen.findByText("Upgrade license")).toBeInTheDocument();
@@ -112,30 +112,26 @@ describe("License key page — upgrade", () => {
     fireEvent.click(board);
     expect(board).toHaveAttribute("aria-checked", "true");        // locked on
     expect(screen.getByRole("button", { name: "Fewer Board Report reports" })).toBeDisabled();   // at 4 now
-    expect(screen.getByRole("button", { name: "Fewer Project managers (PMs)" })).toBeDisabled(); // at 2 now
-    expect(screen.getByLabelText("Number of departments")).toHaveValue("3");
-    fireEvent.change(screen.getByLabelText("Number of departments"), { target: { value: "1" } });
-    expect(screen.getByLabelText("Number of departments")).toHaveValue("3");                     // can't drop
+    expect(screen.getByLabelText("Users")).toHaveValue("14");                                    // 15 people = admin + 14
+    expect(screen.getByRole("button", { name: "Fewer Users" })).toBeDisabled();                  // at the current 15
     expect(screen.getByPlaceholderText("SRV-7K2M-9QXA-4T8P")).toHaveAttribute("readonly");
   });
 
-  it("department users can move between cards but the total can't drop", async () => {
+  it("users can go up on an upgrade", async () => {
     get.mockResolvedValue(ACTIVE);
     openPage();
     const review = await screen.findByRole("button", { name: "Review upgrade" });
-    fireEvent.click(screen.getByRole("button", { name: "Fewer Department 1 users" }));          // 8 → 7
-    expect(screen.getByRole("alert")).toHaveTextContent("can't lower department users (8 now)");
-    expect(review).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "More Department 2 users" }));           // back to 8
+    fireEvent.click(screen.getByRole("button", { name: "More Users" }));                       // 15 → 16 people
+    expect(screen.getByLabelText("Users")).toHaveValue("15");
     expect(review).toBeEnabled();
   });
 
   it("the review lists only what goes up", () => {
     const current = limitsOfKey(ACTIVE as never);
-    const form = { ...current, max_pms: 4, department_sizes: [5, 2, 1, 1], modules: ["board_report", "leadership"],
+    const form = { ...current, max_users: 20, modules: ["board_report", "leadership"],
       report_limits: { board_report: 10 } };
     expect(describeChanges("upgrade", form, current, ACTIVE.starts_at, ACTIVE.expires_at, ACTIVE.expires_at, MODULES as never))
-      .toEqual(["PMs 2 → 4", "Departments 3 → 4", "Department users 8 → 9", "Board Report 4 → 10 reports", "Leadership added"]);
+      .toEqual(["Users 15 → 20", "Board Report 4 → 10 reports", "Leadership added"]);
   });
 });
 
@@ -146,7 +142,7 @@ describe("License key page — renew", () => {
     expect(await screen.findByText("Renew license")).toBeInTheDocument();
     expect(screen.getByText(/^Today,/)).toBeInTheDocument();
     // A renewal may lower anything.
-    expect(screen.getByRole("button", { name: "Fewer Project managers (PMs)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Fewer Users" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Review renewal" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Report counts start again from 0");

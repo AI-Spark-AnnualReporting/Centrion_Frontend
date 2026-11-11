@@ -1,12 +1,13 @@
 // The parts of a plan spark_admin fills in on the editor page (and a client in
-// "Get a quote"): the Modules, Users and Departments cards, the Enterprise
+// "Get a quote"): the Modules and Users cards, the Enterprise
 // contact card, and the small helpers both sides use. The License key page
 // uses the same cards; for an upgrade it passes `floor` (the current key), so
 // nothing can go below it and each change gets a small mark (+2, New).
 //
 // Rules: a module that counts reports always has at least 1 report (no
-// unlimited, no 0). The one admin is always included. Each department card has
-// 1 HOD and its own users (at least 1); the plan's limits use the totals.
+// unlimited, no 0). People: one number for any roles and departments (since
+// 2026-11-11, plan Centriton/.claude/plans/one-user-total.md). The Users card
+// shows the users besides the admin (10 = 11 people); max_users is the total.
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
@@ -18,9 +19,7 @@ import './subscriptions.css';
 export const EMPTY_LIMITS: PlanLimits = {
   modules: [],
   report_limits: {},
-  max_pms: 1,
-  max_ir_users: 1,
-  department_sizes: [1],
+  max_users: 5,
 };
 
 export const DURATIONS: { key: Duration; label: string; per: string }[] = [
@@ -43,34 +42,9 @@ export function formatMoney(value: number | null | undefined): string {
   return value == null ? '—' : `$${Number(value).toLocaleString('en-US')}`;
 }
 
-/** All department users, added up from the cards: [5, 2, 1] → 8. */
-export function departmentUsersTotal(limits: PlanLimits): number {
-  let total = 0;
-  for (const size of limits.department_sizes) total += size;
-  return total;
-}
-
-/** Everyone the plan allows, the one admin included: 1 + PMs + IR + HODs + department users. */
-export function peopleTotal(limits: PlanLimits): number {
-  return 1 + limits.max_pms + limits.max_ir_users + limits.department_sizes.length + departmentUsersTotal(limits);
-}
-
-/** "2 project managers · 6 IR users" (the plan card's words) */
-export function usersSummary(limits: Pick<PlanLimits, 'max_pms' | 'max_ir_users'>): string {
-  const pms = `${limits.max_pms} project manager${limits.max_pms === 1 ? '' : 's'}`;
-  return `${pms} · ${limits.max_ir_users} IR user${limits.max_ir_users === 1 ? '' : 's'}`;
-}
-
-/** "3 departments · 1 HOD each · 8 department users" */
-export function departmentsSummary(limits: PlanLimits): string {
-  const count = limits.department_sizes.length;
-  const users = departmentUsersTotal(limits);
-  return `${count} department${count === 1 ? '' : 's'} · 1 HOD each · ${users} department user${users === 1 ? '' : 's'}`;
-}
-
-/** "5 PM · 2 IR · 3 departments · 1 HOD each · 12 department users" */
-export function peopleSummary(limits: PlanLimits): string {
-  return `${limits.max_pms} PM · ${limits.max_ir_users} IR · ${departmentsSummary(limits)}`;
+/** "25 users (admin included)" — the plan card's and summaries' words. */
+export function usersSummary(limits: Pick<PlanLimits, 'max_users'>): string {
+  return `${limits.max_users} user${limits.max_users === 1 ? '' : 's'} (admin included)`;
 }
 
 /** Small tags for a list: "Quarterly Report · 4", or the name alone for access-only modules. */
@@ -362,24 +336,27 @@ function CurrentHint({ count }: { count?: number }) {
 
 export function UsersCard({ value, onChange, floor, cardPrice, current }: {
   value: PlanLimits; onChange: (next: PlanLimits) => void;
-  // Key page only: − n + steppers instead of boxes, never below the current key (null = from 0).
+  // Key page only: − n + steppers instead of boxes, never below the current key (null = from 1).
   floor?: PlanLimits | null;
-  // Quote offers: one price for all the card's users (the admin is free).
+  // Quote offers: one price for all the card's users.
   cardPrice?: CardPrice;
-  // Quote offers: the client's current plan, shown as "current 2" next to each number.
-  current?: Pick<PlanLimits, 'max_pms' | 'max_ir_users'>;
+  // Quote offers: the client's current plan, shown as "current 25" next to the number.
+  current?: Pick<PlanLimits, 'max_users'>;
 }) {
-  const useSteppers = floor !== undefined;
-  const numberField = (label: string, field: 'max_pms' | 'max_ir_users') => {
-    if (useSteppers) {
-      return <Stepper value={value[field]} label={label} min={floor ? floor[field] : 0}
-        onChange={(n) => onChange({ ...value, [field]: n })} />;
-    }
-    return <input className="inp sub-num" aria-label={label} inputMode="numeric" value={value[field]}
-      onChange={(e) => onChange({ ...value, [field]: readWholeNumber(e.target.value, 0) })} />;
-  };
+  // The card shows the admin on its own row, so the number typed here is the
+  // users BESIDES the admin (10 = 11 people). max_users keeps the total, the
+  // admin included — what the backend checks (decided 2026-11-11).
+  const others = Math.max(0, value.max_users - 1);
+  const setOthers = (count: number) => onChange({ ...value, max_users: count + 1 });
+  const lowest = floor ? Math.max(0, floor.max_users - 1) : 0;
+  const numberField = floor !== undefined
+    ? <Stepper value={others} label="Users" min={lowest} onChange={setOthers} />
+    : <input className="inp sub-num" aria-label="Users" inputMode="numeric" value={others}
+        onChange={(e) => setOthers(readWholeNumber(e.target.value, 0))} />;
   return (
-    <div className="card sub-ec">
+    // Fills its column, so it ends level with the Modules and Preview cards
+    // (the Departments card used to fill the space under it).
+    <div className="card sub-ec" style={{ flex: 1 }}>
       <div className="sub-ec-h">
         <div className="sub-ec-ic">👤</div>
         <div>
@@ -389,99 +366,15 @@ export function UsersCard({ value, onChange, floor, cardPrice, current }: {
       </div>
       <div className="sub-prow"><span>Admin</span><span className="sub-lock">🔒 1 · included</span></div>
       <div className="sub-prow">
-        <span>Project managers (PMs)<CurrentHint count={current?.max_pms} /></span>
-        {numberField('Project managers (PMs)', 'max_pms')}
-      </div>
-      <div className="sub-prow">
-        <span>IR users<CurrentHint count={current?.max_ir_users} /></span>
-        {numberField('IR users', 'max_ir_users')}
+        <span>Users<CurrentHint count={current ? Math.max(0, current.max_users - 1) : undefined} /></span>
+        {numberField}
       </div>
       {cardPrice && (
         <div className="sub-tot sub-card-price">
-          <span>Price for <b>{value.max_pms + value.max_ir_users} users</b></span>
+          <span>Price for <b>{others} users</b></span>
           <PriceBox value={cardPrice.price} onChange={cardPrice.onPriceChange} label="Price for the users" />
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Departments ─────────────────────────────────────────────────────
-
-const MAX_DEPARTMENTS = 50;
-
-/** The cards for a new number of departments: kept cards stay as they are,
- *  new ones start at 1 user, extra ones are removed from the end. */
-export function resizeDepartments(sizes: number[], count: number): number[] {
-  const next = sizes.slice(0, count);
-  while (next.length < count) next.push(1);
-  return next;
-}
-
-export function DepartmentsCard({ value, onChange, flex = true, floor = null, cardPrice, current }: {
-  value: PlanLimits; onChange: (next: PlanLimits) => void; flex?: boolean;
-  // Key page, upgrade: the current key. Departments can't go below its number,
-  // and all department users together can't go below its total.
-  floor?: PlanLimits | null;
-  // Quote offers: one price for all the departments, their HODs and users.
-  cardPrice?: CardPrice;
-  // Quote offers: the client's current plan's department sizes ("current 4", "current 3").
-  current?: number[];
-}) {
-  const sizes = value.department_sizes;
-  const fewestDepartments = floor ? floor.department_sizes.length : 0;
-  const usersBefore = floor ? departmentUsersTotal(floor) : 0;
-  const tooFewUsers = !!floor && departmentUsersTotal(value) < usersBefore;
-  const setCount = (text: string) => {
-    const count = Math.min(MAX_DEPARTMENTS, Math.max(fewestDepartments, readWholeNumber(text, 0)));
-    onChange({ ...value, department_sizes: resizeDepartments(sizes, count) });
-  };
-  const setSize = (index: number, users: number) => {
-    const next = [...sizes];
-    next[index] = Math.max(1, users);
-    onChange({ ...value, department_sizes: next });
-  };
-
-  return (
-    <div className="card sub-ec" style={flex ? { flex: 1, minHeight: 0 } : undefined}>
-      <div className="sub-ec-h">
-        <div className="sub-ec-ic">▤</div>
-        <div>
-          <div className="sub-ec-t">Departments</div>
-          <div className="sub-ec-s">Each has 1 HOD and at least 1 user</div>
-        </div>
-      </div>
-      <div className="sub-prow">
-        <span>Number of departments<CurrentHint count={current?.length} /></span>
-        <input className="inp sub-num" aria-label="Number of departments" inputMode="numeric" value={sizes.length}
-          onChange={(e) => setCount(e.target.value)} />
-      </div>
-      <div className="sub-depts">
-        {sizes.length === 0 && <span style={{ fontSize: 11, color: '#9BA3C4' }}>No departments.</span>}
-        {sizes.map((users, index) => (
-          <div key={index} className="sub-dc">
-            <div className="sub-dc-n">Department {index + 1}<CurrentHint count={current?.[index]} /></div>
-            <div className="sub-dc-r"><span>HOD</span><b>1</b></div>
-            <div className="sub-dc-r">
-              <span>Users</span>
-              <Stepper value={users} label={`Department ${index + 1} users`} onChange={(n) => setSize(index, n)} />
-            </div>
-          </div>
-        ))}
-      </div>
-      {cardPrice ? (
-        <div className="sub-tot sub-card-price">
-          <span>Price for <b>{sizes.length} departments</b> · {sizes.length} HODs · {departmentUsersTotal(value)} users</span>
-          <PriceBox value={cardPrice.price} onChange={cardPrice.onPriceChange} label="Price for the departments" />
-        </div>
-      ) : (
-        <div className="sub-tot">
-          Total <b>{peopleTotal(value)} people</b>
-          {floor && <span style={{ color: '#9BA3C4' }}> · now {peopleTotal(floor)}</span>}
-        </div>
-      )}
-      {tooFewUsers && <div className="sub-err" role="alert">An upgrade can&apos;t lower department users ({usersBefore} now).</div>}
-      {floor && !tooFewUsers && <div className="sub-hint">An upgrade can add departments and users, never remove them.</div>}
     </div>
   );
 }

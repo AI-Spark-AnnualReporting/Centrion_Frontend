@@ -17,15 +17,16 @@
 // Routes: /spark/subscriptions/new, /spark/subscriptions/:planId/edit
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ErrorPopup, isNameTaken } from '@/components/shared/ErrorPopup';
 import { Spinner } from '@/components/shared/Spinner';
 import { FormDialog } from '@/components/subscriptions/FormDialog';
 import { NO_PRICES, OfferBreakdown, dollars, offerAddedUp } from '@/components/subscriptions/OfferBreakdown';
 import { OfferEmailDialog } from '@/components/subscriptions/OfferEmailDialog';
 import { PlanCard } from '@/components/subscriptions/PlanCard';
 import {
-  ContactCard, DepartmentsCard, DURATIONS, EMPTY_LIMITS, ModulesCard, UsersCard, countWord, durationPer,
+  ContactCard, DURATIONS, EMPTY_LIMITS, ModulesCard, UsersCard, countWord, durationPer,
 } from '@/components/subscriptions/PlanFields';
 import { useToast } from '@/hooks/use-toast';
 import { sparkPlans } from '@/lib/api';
@@ -47,7 +48,7 @@ const OFFER_LENGTHS: { key: PaidDuration; label: string; per: string }[] = [
 // A stable empty list, so the Send popup doesn't start again on every render.
 const NO_EMAILS: string[] = [];
 
-const LIMIT_KEYS: (keyof PlanLimits)[] = ['modules', 'report_limits', 'max_pms', 'max_ir_users', 'department_sizes'];
+const LIMIT_KEYS: (keyof PlanLimits)[] = ['modules', 'report_limits', 'max_users'];
 
 function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -59,7 +60,7 @@ function sortedLimits(limits: Record<string, number>): [string, number][] {
 }
 
 /** True if the form changes what subscriptions copy from the plan
- *  (modules, report limits, people, departments) — not the name or price. */
+ *  (modules, report limits, users) — not the name or price. */
 export function limitsChanged(plan: SubscriptionPlan, form: PlanForm): boolean {
   for (const key of LIMIT_KEYS) {
     let before: unknown = plan[key];
@@ -86,10 +87,7 @@ function formFromPlan(plan?: SubscriptionPlan): PlanForm {
     contact: plan.contact,
     modules: plan.modules,
     report_limits: plan.report_limits,
-    max_pms: plan.max_pms,
-    max_ir_users: plan.max_ir_users,
-    // A plan made before department cards may have none; give it one to edit.
-    department_sizes: plan.duration === 'enterprise' ? [] : plan.department_sizes,
+    max_users: plan.max_users,
   };
 }
 
@@ -105,8 +103,8 @@ function readPrice(text: string): number | null {
 function offerSnapshot(form: PlanForm, prices: OfferPrices, total: number): string {
   return JSON.stringify([
     form.name.trim(), form.duration, [...form.modules].sort(), sortedLimits(form.report_limits),
-    form.max_pms, form.max_ir_users, form.department_sizes,
-    sortedLimits(prices.modules), prices.users, prices.departments, total,
+    form.max_users,
+    sortedLimits(prices.modules), prices.users, total,
   ]);
 }
 
@@ -156,7 +154,10 @@ export default function SparkPlanEditorPage() {
   const [form, setForm] = useState<PlanForm>(() => formFromPlan());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState('');          // the plan didn't load
+  // A save the server refused, shown in the error popup.
+  const [saveError, setSaveError] = useState<{ title: string; message: string } | null>(null);
+  const nameBox = useRef<HTMLInputElement>(null);
   // Set = asking "Apply to everyone / Only new subscriptions" before saving.
   const [confirm, setConfirm] = useState<{ status: PlanStatus; subscribers: PlanSubscriber[] } | null>(null);
   const [applyTo, setApplyTo] = useState<'everyone' | 'new'>('new');
@@ -214,9 +215,20 @@ export default function SparkPlanEditorPage() {
     return true;
   };
 
+  /** Open the error popup. A name clash gets its own title. */
+  const showSaveError = (message: string, title = "Couldn't save the plan") => {
+    setSaveError({ title: isNameTaken(message) ? 'This name is already taken' : title, message });
+  };
+
+  /** Close the popup; after a name clash the cursor goes to the name box. */
+  const closeSaveError = () => {
+    const wasName = !!saveError && isNameTaken(saveError.message);
+    setSaveError(null);
+    if (wasName) setTimeout(() => nameBox.current?.focus(), 0);
+  };
+
   const save = async (status: PlanStatus, apply?: 'everyone' | 'new') => {
     setSaving(true);
-    setError('');
     const body = bodyFrom(form, status);
     try {
       if (!plan) {
@@ -230,10 +242,10 @@ export default function SparkPlanEditorPage() {
       // Someone subscribed since the page loaded: ask now.
       if (plan && !apply && err instanceof Error && err.message.includes('use this plan')) {
         const asked = await askWhoGetsIt(status).catch(() => false);
-        if (!asked) setError(err.message);
+        if (!asked) showSaveError(err.message);
         return;
       }
-      setError(err instanceof Error ? err.message : 'Could not save the plan.');
+      showSaveError(err instanceof Error ? err.message : 'Could not save the plan.');
     } finally {
       setSaving(false);
     }
@@ -247,7 +259,9 @@ export default function SparkPlanEditorPage() {
   /** Save the offer as a draft (prices included). True when it saved. The
    *  error goes where it can be seen: the page, or the Send offer popup
    *  (it covers the page) when saving before sending. */
-  const saveOffer = async (showError: (message: string) => void = setError): Promise<boolean> => {
+  const saveOffer = async (
+    showError: (message: string) => void = (message) => showSaveError(message, "Couldn't save the offer"),
+  ): Promise<boolean> => {
     try {
       await sparkPlans.update(plan!.id, { ...bodyFrom(form, 'draft'), offer_prices: prices });
       return true;
@@ -259,7 +273,6 @@ export default function SparkPlanEditorPage() {
 
   const saveOfferDraft = async () => {
     setSaving(true);
-    setError('');
     if (await saveOffer()) {
       toast({ title: 'Saved as draft' });
       navigate(backTo);
@@ -290,7 +303,6 @@ export default function SparkPlanEditorPage() {
   const approveOffer = async () => {
     setApproveOpen(false);
     setSaving(true);
-    setError('');
     try {
       if (await saveOffer()) {
         await sparkPlans.approveOffer(plan!.id);
@@ -298,7 +310,7 @@ export default function SparkPlanEditorPage() {
         navigate(backTo);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not approve the plan.');
+      showSaveError(err instanceof Error ? err.message : 'Could not approve the plan.', "Couldn't approve the offer");
     } finally {
       setSaving(false);
     }
@@ -318,9 +330,7 @@ export default function SparkPlanEditorPage() {
     && (plan?.offer_state === 'changed' || offerSnapshot(form, prices, offerTotal) !== sentSnapshot);
   const canApprove = !!sentOffer?.sent_at && !changedSinceSent;
   const changeDuration = (duration: Duration) => {
-    // Coming back from Enterprise: start with one department card again.
-    const department_sizes = duration !== 'enterprise' && form.department_sizes.length === 0 ? [1] : form.department_sizes;
-    setForm({ ...form, duration, department_sizes });
+    setForm({ ...form, duration });
   };
   const canSave = !saving && form.name.trim() !== '';
 
@@ -329,7 +339,7 @@ export default function SparkPlanEditorPage() {
       <div className="card sub-ed-top">
         <label>
           Plan name
-          <input className="inp" value={form.name} maxLength={120} placeholder="e.g. Standard"
+          <input ref={nameBox} className="inp" value={form.name} maxLength={120} placeholder="e.g. Standard"
             onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </label>
         <label>
@@ -382,6 +392,7 @@ export default function SparkPlanEditorPage() {
         )}
       </div>
       {error && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: -6 }}>{error}</div>}
+      <ErrorPopup open={!!saveError} title={saveError?.title ?? ''} message={saveError?.message ?? ''} onClose={closeSaveError} />
       {isQuote && plan?.quote && (
         <div style={{ fontSize: 12, color: '#5A6080', marginTop: -6 }}>
           Their request: <b>{plan.quote.name}</b> · {plan.quote.phone} — “{plan.quote.message}”
@@ -412,8 +423,6 @@ export default function SparkPlanEditorPage() {
             <div className="sub-ed-col">
               <UsersCard value={form} onChange={setLimits} current={current ?? undefined}
                 cardPrice={isQuote ? { price: prices.users, onPriceChange: (users) => setPrices({ ...prices, users }) } : undefined} />
-              <DepartmentsCard value={form} onChange={setLimits} current={current?.department_sizes}
-                cardPrice={isQuote ? { price: prices.departments, onPriceChange: (departments) => setPrices({ ...prices, departments }) } : undefined} />
             </div>
           </>
         )}

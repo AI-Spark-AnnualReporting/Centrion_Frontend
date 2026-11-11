@@ -13,14 +13,12 @@ export type PaidDuration = Exclude<Duration, "enterprise">;
 export type PlanStatus = "draft" | "published" | "archived";
 
 // What a plan allows. Report limits are keyed by report type ("quarterly");
-// every report module has a number ≥ 1. Each department card has 1 HOD and
-// its own users (department_sizes, e.g. [5, 2, 1]); limits use the totals.
+// every report module has a number ≥ 1. max_users = everyone who can log in,
+// the admin included (any roles, any departments).
 export interface PlanLimits {
   modules: string[];
   report_limits: Record<string, number>;
-  max_pms: number;
-  max_ir_users: number;
-  department_sizes: number[];
+  max_users: number;
 }
 
 // What an Enterprise card shows instead of a price.
@@ -32,12 +30,11 @@ export interface PlanContact {
 }
 
 // The prices spark_admin types on a quote's offer: a price per report (report
-// modules) or one flat price (other modules), one price for the Users card
-// and one for the Departments card. Plan: Centriton/.claude/plans/quote-offers.md
+// modules) or one flat price (other modules), and one price for the Users card.
+// Plan: Centriton/.claude/plans/quote-offers.md
 export interface OfferPrices {
   modules: Record<string, number>;
   users: number;
-  departments: number;
 }
 
 // Where a quote's offer is: received (not emailed yet), sent (emailed, waiting
@@ -49,9 +46,7 @@ export interface CurrentPlan {
   ends_at: string;
   modules: string[];
   report_limits: Record<string, number>;
-  max_pms: number;
-  max_ir_users: number;
-  department_sizes: number[];
+  max_users: number;
 }
 
 // "changed" = edited after it was emailed: send it again before Approve.
@@ -92,7 +87,6 @@ export interface SubscriptionPlan extends PlanLimits {
   duration: Duration;
   price: number | null;               // USD for the duration; null for Enterprise / not set yet
   contact: PlanContact | null;        // Enterprise only
-  max_departments: number;            // = department_sizes.length
   company_id: string | null;          // set = made for that one company
   status: PlanStatus;
   quote: PlanQuote | null;            // set = made from a client's quote
@@ -167,7 +161,6 @@ export interface PlanForClient extends PlanLimits {
   duration: Duration;
   price: number | null;
   contact: PlanContact | null;
-  max_departments: number;
   made_for_you: boolean;
   // Changing plan (shown in a popup on Buy now):
   too_small: string[];        // why it can't take the company's people — can't be bought
@@ -182,7 +175,6 @@ export interface CompanySubscription extends PlanLimits {
   plan_name: string;
   billing_period: PaidDuration;       // the plan's duration
   price: number;
-  max_departments: number;
   starts_at: string;
   ends_at: string;
   status: "pending_payment" | "active" | "replaced" | "cancelled";
