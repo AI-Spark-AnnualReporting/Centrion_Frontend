@@ -936,6 +936,25 @@ section:hover .fig-remove,
 @keyframes onb-sheen { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @keyframes onb-ring { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
 
+/* Live extraction table (Upload Previous Reports). Rows change state while the
+   report is read: the running row breathes, a finished one pops its icon in and
+   fades its value in. The words carry the meaning, so reduced motion drops it all. */
+@keyframes xlive-glow { 0%, 100% { background-color: #F8F9FE; } 50% { background-color: #EFF0FC; } }
+.xlive-row { transition: background-color .3s ease, border-color .3s ease; }
+.xlive-row:last-child { border-bottom: none !important; }
+button.xlive-row:hover, button.xlive-row:focus-visible { background-color: #FAFBFE !important; }
+button.xlive-row:focus-visible { outline: 2px solid #4040C8; outline-offset: -2px; }
+.xlive-row-running { animation: xlive-glow 1.8s ease-in-out infinite; }
+.xlive-pop { animation: onb-pop .38s cubic-bezier(.22, .61, .36, 1) both; }
+.xlive-fade { animation: fade-in .32s ease-out both; }
+.xlive-bar { transition: width .6s ease; }
+.xlive-banner { transition: background-color .3s ease, border-color .3s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .xlive-row, .xlive-bar, .xlive-banner { transition: none; }
+  .xlive-row-running { animation: none; background-color: #F8F9FE; }
+  .xlive-pop, .xlive-fade, .xlive .skel { animation: none; }
+}
+
 /* Skeleton placeholder — used in place of spinners while content loads */
 .skel {
   background: linear-gradient(90deg, #ECEEF8 0%, #F5F6FB 50%, #ECEEF8 100%);

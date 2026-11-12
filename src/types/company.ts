@@ -302,11 +302,64 @@ export interface ExtractedReport {
   financials: ExtractedFinancials | null;
 }
 
+// The live table on Upload Previous Reports: one step per thing the ingest reads.
+// `key` is one of read, tone, themes, highlights, profile, outline, revenue,
+// net_profit, departments, index, frameworks. It is typed as a plain string so a
+// step added by a newer backend still renders as a row.
+export type LiveStepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+export interface LiveStep {
+  key: string;
+  label: string;
+  state: LiveStepState;
+  reason: string | null;   // machine code, e.g. "older_year"
+  message: string | null;  // the same reason as one plain sentence
+  value: string | null;    // short result text, e.g. "168 pages"
+}
+
+export interface LiveRunFile {
+  document_id: string;
+  filename: string;
+  doc_type: string;
+  period: string | null;
+}
+
+export type OverruleReason =
+  | 'first_report'
+  | 'newest_year'
+  | 'same_year_reupload'
+  | 'older_year'
+  | 'unknown_year';
+
+// What the last (or current) upload run was reading, and whether it replaces the
+// company-wide results under the "latest year wins" rule.
+export interface LiveRun {
+  files: LiveRunFile[];
+  lead_period: string | null;
+  latest_period_before: string | null;
+  overrules: boolean;
+  overrule_reason: OverruleReason | null;
+}
+
+export interface ExtractionLive {
+  running: boolean;
+  run: LiveRun | null;   // null when no run was ever recorded (older companies)
+  steps: LiveStep[];     // always the full ordered list
+}
+
 export interface AnnualReportExtraction {
   status: {
     report_extraction_status: string | null;
-    onboarding_progress: { stage?: string; detail?: string; percent?: number } | null;
+    onboarding_progress: {
+      stage?: string;
+      detail?: string;
+      percent?: number;
+      started_at?: string;
+    } | null;
   };
+  // Missing on a backend that predates the live table; the panel then falls back
+  // to ticks and crosses worked out from the stored data below.
+  live?: ExtractionLive | null;
   company: {
     profile: ExtractionProfile;
     tone: string | null;

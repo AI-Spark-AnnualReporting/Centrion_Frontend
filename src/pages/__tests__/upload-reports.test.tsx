@@ -45,6 +45,43 @@ describe('UploadReportsStep — slot filtering', () => {
   });
 });
 
+describe('UploadReportsStep: locked while a run is going', () => {
+  it('disables the upload buttons, the file inputs and the submit, and shows the locked label', () => {
+    const onProcess = vi.fn();
+    const { container } = render(
+      <UploadReportsStep
+        onProcess={onProcess}
+        docTypes={['annual', 'esg']}
+        submitLabel="Process Reports"
+        disabled
+        disabledLabel="Reading your reports"
+      />,
+    );
+    const uploadButtons = screen.getAllByRole('button', { name: 'Upload' });
+    expect(uploadButtons).toHaveLength(2);
+    for (const button of uploadButtons) expect(button).toBeDisabled();
+    const fileInputs = container.querySelectorAll('input[type="file"]');
+    expect(fileInputs).toHaveLength(2);
+    for (const input of fileInputs) expect(input).toBeDisabled();
+
+    const submit = screen.getByRole('button', { name: 'Reading your reports' });
+    expect(submit).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Process Reports' })).not.toBeInTheDocument();
+    fireEvent.click(submit);
+    expect(onProcess).not.toHaveBeenCalled();
+  });
+
+  it('leaves the form usable when it is not locked (the onboarding run)', () => {
+    const onProcess = vi.fn();
+    render(<UploadReportsStep onProcess={onProcess} docTypes={['annual', 'esg']} submitLabel="Process Reports" />);
+    for (const button of screen.getAllByRole('button', { name: 'Upload' })) expect(button).toBeEnabled();
+    const submit = screen.getByRole('button', { name: 'Process Reports' });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    expect(onProcess).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('UploadReportsStep — file size', () => {
   beforeEach(() => {
     h.validateReport.mockReset();

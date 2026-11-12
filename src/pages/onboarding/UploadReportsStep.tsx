@@ -123,7 +123,7 @@ function StatusLine({
 }
 
 function UploadRow({
-  row, file, state, onPick, overridden, onOverride,
+  row, file, state, onPick, overridden, onOverride, disabled,
 }: {
   row: RowDef;
   file: File | null;
@@ -131,6 +131,7 @@ function UploadRow({
   onPick: (f: File | null) => void;
   overridden: boolean;
   onOverride: () => void;
+  disabled: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -151,13 +152,20 @@ function UploadRow({
           onOverride={onOverride}
         />
       </div>
-      <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
+      <button
+        type="button"
+        className="ob-upload-btn"
+        disabled={disabled}
+        style={disabled ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+        onClick={() => inputRef.current?.click()}
+      >
         {file ? 'Replace' : 'Upload'}
       </button>
       <input
         ref={inputRef}
         type="file"
         style={{ display: 'none' }}
+        disabled={disabled}
         onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
     </div>
@@ -175,6 +183,8 @@ export default function UploadReportsStep({
   onSkip,
   submitLabel,
   docTypes,
+  disabled = false,
+  disabledLabel,
 }: {
   onProcess: (files: UploadedReportFile[]) => void;
   onSkip?: () => void;
@@ -183,6 +193,11 @@ export default function UploadReportsStep({
   // ['annual','esg'] because the ingest only ever reads those two — the other slots
   // just bank a file nothing downstream looks at.
   docTypes?: ReportDocType[];
+  // Locks the whole form (the in-app page sets it while a run is in progress, so a
+  // second run cannot be started on top of the first). Onboarding never passes it.
+  disabled?: boolean;
+  // What the submit button says while locked.
+  disabledLabel?: string;
 }) {
   const rows = docTypes ? ROWS.filter((r) => docTypes.includes(r.docType)) : ROWS;
   const { user } = useAuth();
@@ -227,7 +242,7 @@ export default function UploadReportsStep({
   const blockingInvalid = rows.some(
     (r) => states[r.title]?.status === 'invalid' && !overridden[r.title],
   );
-  const canProcess = !!companyId && !anyValidating && !blockingInvalid;
+  const canProcess = !!companyId && !anyValidating && !blockingInvalid && !disabled;
 
   const collected: UploadedReportFile[] = rows
     .map((r) => {
@@ -264,6 +279,7 @@ export default function UploadReportsStep({
             onPick={(f) => handlePick(r, f)}
             overridden={!!overridden[r.title]}
             onOverride={() => setOverridden((prev) => ({ ...prev, [r.title]: true }))}
+            disabled={disabled}
           />
         ))}
       </div>
@@ -275,7 +291,9 @@ export default function UploadReportsStep({
         disabled={!canProcess}
         onClick={() => canProcess && onProcess(collected)}
       >
-        {anyValidating ? 'Checking your documents…' : submitLabel ?? 'Process Reports & Build Dashboard →'}
+        {disabled && disabledLabel
+          ? disabledLabel
+          : anyValidating ? 'Checking your documents…' : submitLabel ?? 'Process Reports & Build Dashboard →'}
       </button>
 
       {onSkip && (
