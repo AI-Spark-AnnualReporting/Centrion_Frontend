@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { documents as documentsApi, reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { CategoryTabs, ReportCard, categoryKey } from '@/components/docs/DocumentBankGroups';
@@ -132,9 +132,16 @@ function buildCategories(
   });
 }
 
-export default function UploadedReportsList() {
+/**
+ * The company's uploaded reports, grouped into category tabs.
+ * `refreshKey` is bumped by the page when an upload run ends, to reload the list.
+ */
+export default function UploadedReportsList({ refreshKey = 0 }: { refreshKey?: number }) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
+  // The company whose list is on screen, so a reload can tell "same company,
+  // new data" (keep the cards) from "different company" (start over).
+  const shownCompanyRef = useRef<string | null>(null);
 
   const [categories, setCategories] = useState<ReportCategory[] | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -146,6 +153,7 @@ export default function UploadedReportsList() {
       return;
     }
     let cancelled = false;
+    const isReload = shownCompanyRef.current === companyId;
 
     Promise.all([
       documentsApi.list<{ documents?: UploadedDoc[] }>(companyId),
@@ -158,17 +166,20 @@ export default function UploadedReportsList() {
         const periodById = new Map<string, string | null>(
           (repRes?.reports ?? []).map((r) => [r.id, r.period ?? null] as const),
         );
+        shownCompanyRef.current = companyId;
         setCategories(buildCategories(docRes?.documents ?? [], periodById));
         setLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
-        setCategories(null);   // supplementary section — stay silent on failure
+        // Supplementary section — stay silent on failure. A failed reload keeps
+        // the cards that are already showing instead of wiping them.
+        if (!isReload) setCategories(null);
         setLoading(false);
       });
 
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [companyId, refreshKey]);
 
   if (!loading && !categories) return null;
 

@@ -1,7 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { companies as companiesApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { CheckCircle2, X, XCircle } from 'lucide-react';
+import { X } from 'lucide-react';
 import type {
   AnnualReportExtraction as Extraction,
   ExtractedDepartments,
@@ -11,12 +10,42 @@ import type {
   ReportOutlineDetail,
   ReportOutlineEntry,
 } from '@/types/company';
+import { LiveStepsTable, RunBanner } from './ExtractionLiveTable';
+import {
+  endUnfinishedSteps,
+  isRunInProgress,
+  isRunStalled,
+  runPercent,
+  stepsToShow,
+  type SummaryKey,
+} from './extractionLive';
+import { useLiveExtraction, type LoadProblem } from './useLiveExtraction';
 
-// Everything the onboarding upload read out of the company's annual report(s),
-// printed as-is under the Uploaded Reports list. Empty parts say so instead of
+// Everything the upload read out of the company's annual report(s), shown under
+// the Uploaded Reports list as a live table: one row per step, filling in while
+// the report is being read. A step that found nothing says why instead of
 // disappearing, so it is visible what the ingest did NOT manage to read.
 
 const OUTLINE_FOLD_AT = 15;
+
+const PROBLEM_TEXT: Record<LoadProblem, string> = {
+  old_backend: 'This needs the latest backend version. Please try again after the next deploy.',
+  failed: 'Could not load what was extracted. Refresh to try again.',
+};
+const GAVE_UP_TEXT =
+  'This is taking longer than usual. Your report is still being read in the background. '
+  + 'Refresh this page in a few minutes to see the result.';
+
+const STALLED_TEXT =
+  'This run stopped before it finished, so some steps have no result. '
+  + 'If nothing changes in a few minutes, upload the report again.';
+
+const POPUP_TITLES: Record<SummaryKey, string> = {
+  tone: 'Tone',
+  dashboard: 'Dashboard data',
+  outline: 'Previous outline',
+  departments: 'Suggested departments',
+};
 
 const labelStyle: CSSProperties = {
   fontSize: 10.5,
@@ -42,31 +71,18 @@ const pillStyle: CSSProperties = {
   padding: '3px 10px',
 };
 
-/** Loads and prints everything extracted from the company's annual report(s). */
-export default function AnnualReportExtraction() {
+interface AnnualReportExtractionProps {
+  /** Bumped by the page when it starts a run, so the panel reloads and starts polling. */
+  refreshKey?: number;
+  /** Told true when a run is seen in progress and false when the panel stops watching. */
+  onRunningChange?: (running: boolean) => void;
+}
+
+/** Loads and shows, live, everything extracted from the company's annual report(s). */
+export default function AnnualReportExtraction({ refreshKey = 0, onRunningChange }: AnnualReportExtractionProps) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
-  const [data, setData] = useState<Extraction | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    setData(null);
-    setFailed(false);
-    async function loadExtraction(id: string) {
-      try {
-        const result = await companiesApi.getAnnualReportExtraction(id);
-        if (!cancelled) setData(result);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    }
-    loadExtraction(companyId);
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
+  const { data, problem, gaveUp } = useLiveExtraction(companyId, refreshKey, onRunningChange);
 
   if (!companyId) return null;
 
@@ -77,103 +93,54 @@ export default function AnnualReportExtraction() {
           What we extracted from your annual report
         </h2>
         <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
-          Everything we read out of the annual report you uploaded, exactly as it is stored.
+          Every step we run on the report you uploaded. Each row fills in as soon as it finishes.
         </p>
       </div>
-      {failed && <p style={emptyStyle}>Could not load what was extracted. Refresh to try again.</p>}
-      {!failed && !data && <p style={{ ...bodyStyle, color: '#9BA3C4' }}>Loading…</p>}
-      {data && <ExtractionBody data={data} />}
+      {problem && <p style={emptyStyle}>{PROBLEM_TEXT[problem]}</p>}
+      {!problem && !data && <LoadingRows />}
+      {data && <ExtractionBody data={data} gaveUp={gaveUp} />}
     </section>
   );
 }
 
-/** A tick/cross table; each part's details open in a popup. */
-function ExtractionBody({ data }: { data: Extraction }) {
+/** Shimmer bars in the shape of the table, shown until the first answer arrives. */
+function LoadingRows() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {data.errors.length > 0 && <PartialErrors errors={data.errors} />}
-      <ExtractionSummaryTable data={data} />
+    <div className="card xlive" role="status" aria-label="Loading what was extracted" style={{ padding: '6px 16px' }}>
+      {[160, 120, 140, 100].map((width) => (
+        <div key={width} style={{ display: 'flex', gap: 12, padding: '10px 0' }}>
+          <span className="skel" style={{ width: 16, height: 16, borderRadius: '50%' }} />
+          <span className="skel" style={{ width, height: 10, marginTop: 3 }} />
+        </div>
+      ))}
     </div>
   );
 }
 
-// ── Summary table: one tick or cross per part, each opening a popup ──
-
-type SummaryKey = 'tone' | 'dashboard' | 'outline' | 'departments';
-
-const SUMMARY_COLUMNS: { key: SummaryKey; label: string }[] = [
-  { key: 'tone', label: 'Tone' },
-  { key: 'dashboard', label: 'Dashboard data' },
-  { key: 'outline', label: 'Previous outline' },
-  { key: 'departments', label: 'Suggested departments' },
-];
-
-/** True when the tone paragraph, the tone settings or the example sentences exist. */
-function hasTone(data: Extraction): boolean {
-  const company = data.company;
-  return Boolean(company.tone)
-    || Object.keys(company.tone_dimensions ?? {}).length > 0
-    || (company.tone_exemplars ?? []).length > 0;
-}
-
-/** True when revenue/profit was read from at least one uploaded report. */
-function hasDashboardData(data: Extraction): boolean {
-  return data.reports.some((report) => Boolean(report.financials?.data));
-}
-
-/** True when the company has sections — what the cycle's "Previous" option shows. */
-function hasPreviousOutline(data: Extraction): boolean {
-  return data.sections.length > 0;
-}
-
-/** True when at least one department was suggested from the report. */
-function hasSuggestedDepartments(data: Extraction): boolean {
-  return (data.company.departments?.raw ?? []).length > 0;
-}
-
-function hasSummaryData(key: SummaryKey, data: Extraction): boolean {
-  if (key === 'tone') return hasTone(data);
-  if (key === 'dashboard') return hasDashboardData(data);
-  if (key === 'outline') return hasPreviousOutline(data);
-  return hasSuggestedDepartments(data);
-}
-
-/** A 4-column table of ticks and crosses; clicking a column opens that part's details. */
-function ExtractionSummaryTable({ data }: { data: Extraction }) {
+/** The banner, the live table, and the popup with one part's details. */
+function ExtractionBody({ data, gaveUp }: { data: Extraction; gaveUp: boolean }) {
   const [openKey, setOpenKey] = useState<SummaryKey | null>(null);
-  const openColumn = SUMMARY_COLUMNS.find((column) => column.key === openKey);
-  const buttonStyle: CSSProperties = {
-    width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '12px',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-  };
+  const running = isRunInProgress(data) && !gaveUp;
+  const run = data.live?.run ?? null;
+  // A stalled run is not being worked on, so its unfinished rows must not keep spinning.
+  const stalled = isRunStalled(data);
+  const steps = stalled ? endUnfinishedSteps(stepsToShow(data)) : stepsToShow(data);
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-        <tbody>
-          <tr>
-            {SUMMARY_COLUMNS.map((column) => {
-              const found = hasSummaryData(column.key, data);
-              return (
-                <td key={column.key} style={{ padding: 0, borderRight: '1px solid #EEF0F7' }}>
-                  <button
-                    type="button"
-                    onClick={() => setOpenKey(column.key)}
-                    aria-label={`${column.label}: ${found ? 'extracted' : 'not extracted'}`}
-                    style={buttonStyle}
-                  >
-                    <span style={labelStyle}>{column.label}</span>
-                    {found
-                      ? <CheckCircle2 size={22} color="#0F9D6B" />
-                      : <XCircle size={22} color="#DC2626" />}
-                  </button>
-                </td>
-              );
-            })}
-          </tr>
-        </tbody>
-      </table>
-      {openKey && openColumn && (
-        <SummaryPopup title={openColumn.label} onClose={() => setOpenKey(null)}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {(run || running) && (
+        <RunBanner
+          run={run}
+          running={running}
+          percent={runPercent(data)}
+          detail={data.status.onboarding_progress?.detail ?? null}
+        />
+      )}
+      {gaveUp && <p style={emptyStyle}>{GAVE_UP_TEXT}</p>}
+      {stalled && <p role="status" style={emptyStyle}>{STALLED_TEXT}</p>}
+      {data.errors.length > 0 && <PartialErrors errors={data.errors} />}
+      <LiveStepsTable steps={steps} onOpen={setOpenKey} />
+      {openKey && (
+        <SummaryPopup title={POPUP_TITLES[openKey]} onClose={() => setOpenKey(null)}>
           <SummaryDetails summaryKey={openKey} data={data} />
         </SummaryPopup>
       )}
@@ -259,7 +226,7 @@ function SummaryDetails({ summaryKey, data }: { summaryKey: SummaryKey; data: Ex
           <Sections sections={data.sections} />
         </PopupPart>
         <PopupPart title="Contents page"><ContentsPagesPerReport reports={data.reports} /></PopupPart>
-        <PopupPart title="Report outline (from the first upload)">
+        <PopupPart title="Report outline (company-wide)">
           <FlatOutline outline={company.outline} />
         </PopupPart>
       </div>

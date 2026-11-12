@@ -926,6 +926,8 @@ export const companies = {
   // Everything onboarding read out of the uploaded annual report(s): tone, themes,
   // highlights, profile, outline, sections, departments, and per file its chunks,
   // contents page and revenue/profit. Read-only; shown on Upload Previous Reports.
+  // Also carries `live` (is a run going, what it is reading, one state per step),
+  // which is why that page polls this same call while a run is in progress.
   getAnnualReportExtraction: (companyId: string) =>
     request<AnnualReportExtraction>(`/api/v1/companies/${companyId}/annual-report-extraction`),
 
