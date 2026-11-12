@@ -32,7 +32,7 @@ export function AppSwitcher() {
   return (
     <button
       type="button"
-      onClick={() => redirectToApp(other)}
+      onClick={() => void redirectToApp(other)}
       style={{
         padding: '6px 12px',
         fontSize: 11,

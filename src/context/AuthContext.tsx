@@ -15,6 +15,7 @@ import {
   login as apiLogin,
   logout as apiLogout,
   setAuthToken,
+  setRefreshToken,
   setStoredUser,
 } from "@/lib/api";
 import {
@@ -212,9 +213,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const changePassword = useCallback(
     async (newPassword: string) => {
-      await authApi.changePassword({
+      const changed = await authApi.changePassword({
         new_password: newPassword,
       });
+      // The server ended every session (all devices) and started a new one
+      // for this browser — keep it, or this user is signed out 15 minutes later.
+      if (changed?.refresh_token) setRefreshToken(changed.refresh_token);
       // Optimistically clear the gate before the /me round-trip so the next
       // navigation doesn't bounce back to /change-password.
       setUser((prev) => {

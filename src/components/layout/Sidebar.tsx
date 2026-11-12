@@ -362,8 +362,8 @@ export function Sidebar() {
               link carries no company. It lives in the spark_studio app. */}
           <button
             className="sb-item"
-            onClick={() => {
-              const url = sparkStudioUrl('/pm/annual-report-validator');
+            onClick={async () => {
+              const url = await sparkStudioUrl('/pm/annual-report-validator');
               if (url) window.location.href = url;
             }}
           >

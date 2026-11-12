@@ -7,7 +7,7 @@
 // answer is not offered here — the head's workspace is where that work is done,
 // and the row read "Nobody" until someone was routed a question.
 //
-// Open does NOT log you in as anyone. It hands over your own token, which is why
+// Open does NOT log you in as anyone. It hands over your own session, which is why
 // you arrive as yourself with your own permissions. A new tab, not a redirect,
 // because a same-tab hop loses the acting company (the same reason AppSwitcher
 // hides itself for this role). The link also carries this page's URL, so the SAR
@@ -17,6 +17,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { getToken } from "@/lib/api";
+import { openSarInNewTab, type SarLinkOptions } from "@/lib/appRouting";
 import type { Cycle, CycleDepartmentProgress, SessionStatus } from "@/types/cycles";
 import { ProgressBar, SessionStatusBadge } from "./cycle-ui";
 
@@ -49,22 +50,24 @@ const th: React.CSSProperties = {
 
 const td: React.CSSProperties = { fontSize: 12, color: "#1A1D2E", padding: "14px 16px" };
 
-/** `null` when we can't build a working link — the caller disables Open. */
-function workspaceUrl(path: string | null, companyId?: string | null): string | null {
-  const token = getToken();
-  if (!token || !path) return null;
-  const qs = new URLSearchParams({ token, next: path });
-  // Spark carries no company of its own; without this every scoped route in the
-  // SAR app answers "Select a company first".
-  if (companyId) qs.set("company", companyId);
-  // Where the SAR tab's nav button should return to. Without it that button
-  // resolves to the client's own dashboard, which this role must never see.
-  if (typeof window !== "undefined") qs.set("back", window.location.href);
-  return `${SAR_APP_URL}/auth/token?${qs.toString()}`;
+/** What Open should hand over to the SAR app, or `null` when it can't — the
+ *  caller disables Open. The link itself is only built on click, because it
+ *  needs a fresh SAR session from the server (see lib/appRouting.ts). */
+function workspaceLink(path: string | null, companyId?: string | null): SarLinkOptions | null {
+  if (!getToken() || !path || !SAR_APP_URL) return null;
+  return {
+    next: path,
+    // Spark carries no company of its own; without this every scoped route in
+    // the SAR app answers "Select a company first".
+    company: companyId ?? null,
+    // Where the SAR tab's nav button should return to. Without it that button
+    // resolves to the client's own dashboard, which this role must never see.
+    back: typeof window !== "undefined" ? window.location.href : null,
+  };
 }
 
-function OpenButton({ href, title }: { href: string | null; title: string }) {
-  if (!href) {
+function OpenButton({ link, title }: { link: SarLinkOptions | null; title: string }) {
+  if (!link) {
     return (
       <span
         className="btn bs bsm"
@@ -76,15 +79,19 @@ function OpenButton({ href, title }: { href: string | null; title: string }) {
     );
   }
   return (
-    <a
+    <button
+      type="button"
       className="btn bs bsm"
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ textDecoration: "none", padding: "4px 12px" }}
+      title={title}
+      onClick={(event) => {
+        // The rows above open/close on click; Open must not toggle them.
+        event.stopPropagation();
+        void openSarInNewTab(link);
+      }}
+      style={{ padding: "4px 12px" }}
     >
       Open ↗
-    </a>
+    </button>
   );
 }
 
@@ -94,14 +101,14 @@ function RoleLine({
   blurb,
   who,
   sub,
-  href,
+  link,
   disabledReason,
 }: {
   role: string;
   blurb: string;
   who: string | null | undefined;
   sub?: string | null;
-  href: string | null;
+  link: SarLinkOptions | null;
   disabledReason: string;
 }) {
   return (
@@ -130,7 +137,7 @@ function RoleLine({
           <span style={{ color: "#C4C9DD", fontSize: 12 }}>Nobody</span>
         )}
       </div>
-      <OpenButton href={href} title={href ? "Opens in a new tab" : disabledReason} />
+      <OpenButton link={link} title={link ? "Opens in a new tab" : disabledReason} />
     </div>
   );
 }
@@ -148,7 +155,7 @@ export default function ReportTeamCard({
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const companyId = actingCompany?.id ?? cycle.company_id;
-  const pmHref = useMemo(() => workspaceUrl("/pm", companyId), [companyId]);
+  const pmLink = useMemo(() => workspaceLink("/pm", companyId), [companyId]);
 
   const noSession = "This department has no session yet — activate the cycle first";
   const muted = (text: string) => <span style={{ color: "#C4C9DD" }}>{text}</span>;
@@ -194,7 +201,7 @@ export default function ReportTeamCard({
         <span style={{ fontSize: 11, color: MUTED }}>
           {departments.length} {departments.length === 1 ? "department" : "departments"}
         </span>
-        <OpenButton href={pmHref} title={pmHref ? "Opens in a new tab" : "No session token"} />
+        <OpenButton link={pmLink} title={pmLink ? "Opens in a new tab" : "No session token"} />
       </div>
 
       {departments.length === 0 ? (
@@ -215,7 +222,7 @@ export default function ReportTeamCard({
           <tbody>
             {departments.map((d) => {
               const isOpen = expanded === d.department_id;
-              const hodHref = workspaceUrl(
+              const hodLink = workspaceLink(
                 d.session_id ? `/hod/sessions/${d.session_id}` : null,
                 companyId,
               );
@@ -292,7 +299,7 @@ export default function ReportTeamCard({
                           blurb="Curates questions, reviews answers"
                           who={d.hod_name}
                           sub={d.department_name}
-                          href={hodHref}
+                          link={hodLink}
                           disabledReason={noSession}
                         />
                       </td>

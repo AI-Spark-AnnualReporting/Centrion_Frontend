@@ -233,6 +233,9 @@ export const publicReportDownloadUrl = (reportId: string) =>
   `${API_BASE_URL}/api/public/reports/${reportId}/download`;
 
 const TOKEN_STORAGE_KEY = "centriton_token";
+// The "stay signed in" key (7 days). Swapped for a new access token when the
+// access token (15 minutes) runs out. Plan: Centriton/.claude/plans/refresh-token.md
+const REFRESH_TOKEN_STORAGE_KEY = "centriton_refresh_token";
 const USER_STORAGE_KEY = "centriton_user";
 
 // `ngrok-skip-browser-warning` bypasses ngrok's HTML interstitial on the free
@@ -263,6 +266,124 @@ export function setAuthToken(token: string | null): void {
   if (typeof localStorage === "undefined") return;
   if (token == null) localStorage.removeItem(TOKEN_STORAGE_KEY);
   else localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+}
+
+export function setRefreshToken(token: string | null): void {
+  if (typeof localStorage === "undefined") return;
+  if (token == null) localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  else localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+}
+
+// ── Refresh-then-retry ──────────────────────────────────────────
+// What a refresh attempt ended in:
+//   "ok"          — a fresh access token is saved; retry the request.
+//   "expired"     — the server refused the refresh token (401/403); sign out.
+//   "unavailable" — network error or 5xx; keep the session, show the error.
+export type RefreshOutcome = "ok" | "expired" | "unavailable";
+
+// Several requests in this tab can 401 at the same moment; they share one refresh.
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+/** Get a new access token with the saved refresh token. `failedToken` is the
+ *  access token the 401'd request carried. */
+export function refreshAccessToken(failedToken: string | null): Promise<RefreshOutcome> {
+  if (!refreshInFlight) {
+    refreshInFlight = runWithRefreshLock(() => refreshOnce(failedToken)).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+// Every refresh swaps the refresh token, and the old one stops working. Two TABS
+// refreshing at once would therefore knock each other out, so the browser's
+// Web Locks API lets only one tab refresh at a time. Old browsers without it
+// still get the in-tab sharing above and the re-checks in refreshOnce().
+function runWithRefreshLock(work: () => Promise<RefreshOutcome>): Promise<RefreshOutcome> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks?.request) return work();
+  return locks.request("centriton-token-refresh", work);
+}
+
+// The answer to one POST /auth/refresh: the new pair, or why there is none.
+type ExchangeResult =
+  | { outcome: "ok"; accessToken: string; refreshToken: string }
+  | { outcome: "expired" | "unavailable" };
+
+/** Send a refresh token to the server and return the new pair (or why not).
+ *  Plain fetch, not authorizedFetch — this call must never refresh itself. */
+async function exchangeRefreshToken(refreshToken: string): Promise<ExchangeResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { ...STATIC_REQUEST_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch {
+    return { outcome: "unavailable" };
+  }
+  if (res.ok) {
+    const data = (await res.json()) as { access_token: string; refresh_token: string };
+    return { outcome: "ok", accessToken: data.access_token, refreshToken: data.refresh_token };
+  }
+  if (res.status === 401 || res.status === 403) return { outcome: "expired" };
+  return { outcome: "unavailable" };
+}
+
+async function refreshOnce(failedToken: string | null): Promise<RefreshOutcome> {
+  // Another tab (or an earlier call) already refreshed while we waited.
+  const current = getAuthToken();
+  if (current && current !== failedToken) return "ok";
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return "expired";
+
+  const result = await exchangeRefreshToken(refreshToken);
+  if (result.outcome === "ok") {
+    setAuthToken(result.accessToken);
+    setRefreshToken(result.refreshToken);
+    return "ok";
+  }
+  // Without Web Locks, another tab may have won the race with this same
+  // refresh token — its new tokens are already saved, so use them.
+  if (result.outcome === "expired" && getRefreshToken() !== refreshToken) return "ok";
+  return result.outcome;
+}
+
+/** The token a request carried, read back from its Authorization header. */
+function bearerTokenOf(headers: Headers): string | null {
+  const value = headers.get("Authorization");
+  if (!value || !value.startsWith("Bearer ")) return null;
+  return value.slice("Bearer ".length);
+}
+
+/** fetch() that renews an expired access token once and retries.
+ *
+ *  Returns the original 401 when the session really is over, so each caller's
+ *  existing `if (res.status === 401) handleUnauthorized()` still signs out.
+ *  Throws (without signing out) when the server can't be reached to renew.
+ *  Bodies must be re-sendable (string or FormData — not a stream). */
+async function authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, init);
+
+  const sentToken = bearerTokenOf(new Headers(init.headers));
+  if (res.status !== 401 || !sentToken) return res;
+
+  const outcome = await refreshAccessToken(sentToken);
+  if (outcome === "expired") return res;
+  if (outcome === "unavailable") {
+    throw new Error("Could not reach the server to renew your session. Please try again.");
+  }
+
+  const retryHeaders = new Headers(init.headers);
+  retryHeaders.set("Authorization", `Bearer ${getAuthToken()}`);
+  return fetch(url, { ...init, headers: retryHeaders });
 }
 
 // Decode the base64url-encoded payload of a JWT. Returns null on any failure.
@@ -457,7 +578,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, {
+  const res = await authorizedFetch(url, {
     method: opts.method ?? "GET",
     headers,
     body,
@@ -482,7 +603,7 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { method: "POST", headers, body: form });
+  const res = await authorizedFetch(url, { method: "POST", headers, body: form });
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -506,7 +627,7 @@ async function postPipeline(
   const token = getAuthToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { method: "POST", headers, body: form });
+  const res = await authorizedFetch(url, { method: "POST", headers, body: form });
   const ct = res.headers.get("content-type") ?? "";
   const parsed: unknown = ct.includes("application/json")
     ? await res.json().catch(() => null)
@@ -731,6 +852,9 @@ export interface ChangePasswordParams {
 
 export interface ChangePasswordResponse {
   changed: boolean;
+  // Changing the password ends every session; this is the new one for this
+  // browser. Missing from a backend older than refresh tokens.
+  refresh_token?: string | null;
 }
 
 export const auth = {
@@ -795,6 +919,14 @@ export const auth = {
       apps: AuthUser["apps"];
       default_app: AuthUser["default_app"];
     }>("/api/v1/auth/refresh-token", { method: "POST" }),
+
+  // A separate session for the other app (SAR). Its refresh token goes after
+  // `#` in the hand-off link; SAR swaps it on arrival. See lib/appRouting.ts.
+  handoff: (app: "sar") =>
+    request<{ refresh_token: string }>("/api/v1/auth/handoff", {
+      method: "POST",
+      body: { app },
+    }),
 
   // Self-service reset, for users who can't log in at all (so no JWT — unlike
   // changePassword above). Query params, same as login/register: that's what
@@ -1705,7 +1837,7 @@ export const complianceValidation = {
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const res = await fetch(full, { headers });
+    const res = await authorizedFetch(full, { headers });
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) {
       const parsed: unknown = await res.json().catch(() => null);
@@ -5033,7 +5165,7 @@ export const communications = {
     const headers: Record<string, string> = {};
     const token = getAuthToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(url, { headers });
+    const res = await authorizedFetch(url, { headers });
     if (res.status === 401) handleUnauthorized();
     if (!res.ok) throw new ApiError(res.status, res.statusText, null, url);
     return res.blob();
@@ -6049,6 +6181,7 @@ export async function login(
 ): Promise<LoginResponse> {
   const res = await auth.login<LoginResponse>({ email, password });
   setAuthToken(res.access_token);
+  setRefreshToken(res.refresh_token ?? null);
 
   // Every user belongs to a company. If the login payload's user object didn't
   // surface company_id, read it from the JWT claims so the rest of the app can
@@ -6082,9 +6215,29 @@ export async function login(
   return { ...res, user };
 }
 
+// Tell the server to end this browser's session, so the refresh token stops
+// working even if someone copied it. Fire-and-forget: signing out locally must
+// never wait on (or fail because of) the network. `keepalive` lets it finish
+// while the page navigates to /login.
+function endServerSession(refreshToken: string): void {
+  try {
+    fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+      method: "POST",
+      headers: { ...STATIC_REQUEST_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // fetch itself unavailable — nothing to do, the local sign-out still happens.
+  }
+}
+
 export function logout(): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  const refreshToken = getRefreshToken();
+  if (refreshToken) endServerSession(refreshToken);
+  setAuthToken(null);
+  setRefreshToken(null);
   localStorage.removeItem(USER_STORAGE_KEY);
   // Otherwise the next person to log in on this browser inherits a Spark
   // session's acting company and silently sends it on every request.
@@ -6172,7 +6325,7 @@ export async function fetchWithAuth(
     if (!headers.has(k)) headers.set(k, v);
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const res = await authorizedFetch(`${API_BASE_URL}${path}`, { ...options, headers });
   if (res.status === 401) handleUnauthorized();
   return res;
 }

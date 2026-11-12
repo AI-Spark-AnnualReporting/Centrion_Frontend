@@ -14,7 +14,7 @@
 //      drift — which is why the company-less test names them one by one.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 
 let mockAuth: Record<string, unknown> = {};
@@ -37,9 +37,9 @@ vi.mock("@/lib/features", () => ({
   isFeatureVisible: () => true,
 }));
 
-// The handoff link is built from the stored token and the app URL; here it only
-// has to say which page it was asked for.
-const sparkStudioUrl = vi.fn((path: string) => `http://sar.test/auth/token?next=${path}`);
+// The handoff link is built from a fresh SAR session (async) and the app URL;
+// here it only has to say which page it was asked for.
+const sparkStudioUrl = vi.fn(async (path: string) => `http://sar.test/auth/token?next=${path}`);
 vi.mock("@/lib/appRouting", () => ({
   sparkStudioUrl: (path: string) => sparkStudioUrl(path),
 }));
@@ -277,7 +277,7 @@ describe("Annual Report Validator link for spark_internal", () => {
     expect(screen.getByText("Annual Report Validator")).toBeInTheDocument();
   });
 
-  it("opens the validator page in the annual reporting app", () => {
+  it("opens the validator page in the annual reporting app", async () => {
     mockAuth = { user: SPARK, logout: vi.fn(), leaveCompany, actingCompany: null };
     const original = window.location;
     const visited: string[] = [];
@@ -288,12 +288,14 @@ describe("Annual Report Validator link for spark_internal", () => {
     try {
       renderSidebar();
       fireEvent.click(screen.getByText("Annual Report Validator"));
+      await waitFor(() =>
+        expect(visited).toEqual(["http://sar.test/auth/token?next=/pm/annual-report-validator"]),
+      );
     } finally {
       Object.defineProperty(window, "location", { configurable: true, value: original });
     }
 
     expect(sparkStudioUrl).toHaveBeenCalledWith("/pm/annual-report-validator");
-    expect(visited).toEqual(["http://sar.test/auth/token?next=/pm/annual-report-validator"]);
     // Leaving for the other app must not drop the client Spark was working in.
     expect(leaveCompany).not.toHaveBeenCalled();
   });
