@@ -949,7 +949,19 @@ button.xlive-row:focus-visible { outline: 2px solid #4040C8; outline-offset: -2p
 .xlive-fade { animation: fade-in .32s ease-out both; }
 .xlive-bar { transition: width .6s ease; }
 .xlive-banner { transition: background-color .3s ease, border-color .3s ease; }
+/* The 4 extraction chips on the latest report's row (DocumentExtractionChips). */
+.xchip { transition: filter .15s ease, box-shadow .15s ease, transform .15s ease; }
+.xchip:hover { filter: brightness(.97); box-shadow: 0 2px 8px rgba(20, 22, 40, .08); }
+.xchip:active { transform: scale(.97); }
+.xchip:focus-visible { outline: 2px solid #4040C8; outline-offset: 2px; }
+/* On a narrower screen the chips move to their own full-width line under the file
+   name (48px = the file icon + gap), and Download stays on the top line beside it. */
+@media (max-width: 1180px) {
+  .docrow-extra { order: 3; flex-basis: 100%; padding-inline-start: 48px; }
+}
 @media (prefers-reduced-motion: reduce) {
+  .xchip { transition: none; }
+  .xchip:active { transform: none; }
   .xlive-row, .xlive-bar, .xlive-banner { transition: none; }
   .xlive-row-running { animation: none; background-color: #F8F9FE; }
   .xlive-pop, .xlive-fade, .xlive .skel { animation: none; }

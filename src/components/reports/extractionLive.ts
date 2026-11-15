@@ -11,6 +11,14 @@ import type {
 /** The popup a row opens; rows that are not listed here are not clickable. */
 export type SummaryKey = 'tone' | 'dashboard' | 'outline' | 'departments';
 
+/** The heading of each detail popup. */
+export const POPUP_TITLES: Record<SummaryKey, string> = {
+  tone: 'Tone',
+  dashboard: 'Dashboard data',
+  outline: 'Previous outline',
+  departments: 'Suggested departments',
+};
+
 const POPUP_FOR_STEP: Record<string, SummaryKey> = {
   tone: 'tone',
   revenue: 'dashboard',
@@ -188,6 +196,115 @@ export function endUnfinishedSteps(steps: LiveStep[]): LiveStep[] {
     if (!isUnfinished(step)) return step;
     return { ...step, state: 'skipped', reason: 'run_stopped', message: STEP_DID_NOT_FINISH_TEXT };
   });
+}
+
+// ── The 4 categories on the latest report's row in the Uploaded Reports list ──
+
+export type CategoryKey = 'contents' | 'departments' | 'esg' | 'general';
+
+/** What a category's chip shows: spinner, green tick, amber (partly), red cross or grey dash. */
+export type CategoryState = 'running' | 'done' | 'partial' | 'failed' | 'none';
+
+export interface ExtractionCategory {
+  key: CategoryKey;
+  label: string;
+  stepKeys: string[];
+}
+
+// Contents, Departments and ESG are one step each; everything else is General info.
+export const EXTRACTION_CATEGORIES: ExtractionCategory[] = [
+  { key: 'contents', label: 'Contents', stepKeys: ['outline'] },
+  { key: 'departments', label: 'Departments', stepKeys: ['departments'] },
+  { key: 'esg', label: 'ESG', stepKeys: ['frameworks'] },
+  {
+    key: 'general',
+    label: 'General info',
+    stepKeys: ['read', 'tone', 'themes', 'highlights', 'profile', 'revenue', 'net_profit', 'index'],
+  },
+];
+
+const CATEGORY_STATE_WORDS: Record<CategoryState, string> = {
+  running: 'in progress',
+  done: 'extracted',
+  partial: 'partly extracted',
+  failed: 'not extracted',
+  none: 'skipped',
+};
+
+/** The steps that make up one category, in the order the backend sent them. */
+export function stepsForCategory(steps: LiveStep[], category: ExtractionCategory): LiveStep[] {
+  return steps.filter((step) => category.stepKeys.includes(step.key));
+}
+
+/**
+ * One state for a category, from how many of its steps were extracted:
+ * - a spinner while any step is waiting or running
+ * - green when every step was extracted
+ * - amber when some, but not all, were extracted
+ * - red when none were extracted and at least one failed
+ * - grey when none were even attempted (all skipped)
+ */
+export function categoryState(steps: LiveStep[]): CategoryState {
+  if (steps.some((step) => step.state === 'running' || step.state === 'pending')) return 'running';
+  const doneCount = steps.filter((step) => step.state === 'done').length;
+  if (steps.length > 0 && doneCount === steps.length) return 'done';
+  if (doneCount > 0) return 'partial';
+  if (steps.some((step) => step.state === 'failed')) return 'failed';
+  return 'none';
+}
+
+/** The words read out after a chip's label, e.g. "Contents: not extracted". */
+export function categoryStateWords(state: CategoryState): string {
+  return CATEGORY_STATE_WORDS[state];
+}
+
+/** "6/8": how many of a category's steps were done. Null for a one-step category. */
+export function categoryCount(steps: LiveStep[]): string | null {
+  if (steps.length <= 1) return null;
+  const done = steps.filter((step) => step.state === 'done').length;
+  return `${done}/${steps.length}`;
+}
+
+/**
+ * Which uploaded files get the chips, and which categories each one shows.
+ *
+ * Results are only kept for the last run, so only the files that run read get chips:
+ * the annual report gets all four, a sustainability report read alongside it gets ESG
+ * only. A company onboarded before runs were recorded has no run, so its newest
+ * annual report gets all four (its rows come from the stored data).
+ */
+export function latestReadDocuments(data: Extraction): Map<string, CategoryKey[]> {
+  const result = new Map<string, CategoryKey[]>();
+  const allKeys = EXTRACTION_CATEGORIES.map((category) => category.key);
+  const files = data.live?.run?.files ?? [];
+  if (files.length > 0) {
+    for (const file of files) {
+      result.set(file.document_id, file.doc_type === 'esg' ? ['esg'] : allKeys);
+    }
+    return result;
+  }
+  const newest = newestReport(data);
+  if (newest) result.set(newest, allKeys);
+  return result;
+}
+
+/** The document id of the most recently uploaded annual report, or null. */
+function newestReport(data: Extraction): string | null {
+  let newestId: string | null = null;
+  let newestTime = -Infinity;
+  for (const report of data.reports) {
+    const time = Date.parse(report.document.created_at ?? '');
+    if (Number.isNaN(time) || time < newestTime) continue;
+    newestTime = time;
+    newestId = report.document.id;
+  }
+  return newestId;
+}
+
+/** The steps the chips draw: the stored ones, with a stalled run's unfinished rows ended. */
+export function chipSteps(data: Extraction): LiveStep[] {
+  const steps = stepsToShow(data);
+  return isRunStalled(data) ? endUnfinishedSteps(steps) : steps;
 }
 
 /** True when the run included an annual report (only those decide company-wide results). */

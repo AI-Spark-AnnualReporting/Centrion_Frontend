@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { X } from 'lucide-react';
 import type {
@@ -10,21 +10,19 @@ import type {
   ReportOutlineDetail,
   ReportOutlineEntry,
 } from '@/types/company';
-import { LiveStepsTable, RunBanner } from './ExtractionLiveTable';
+import { RunBanner } from './ExtractionLiveTable';
 import {
-  endUnfinishedSteps,
   isRunInProgress,
   isRunStalled,
   runPercent,
-  stepsToShow,
   type SummaryKey,
 } from './extractionLive';
 import { useLiveExtraction, type LoadProblem } from './useLiveExtraction';
 
-// Everything the upload read out of the company's annual report(s), shown under
-// the Uploaded Reports list as a live table: one row per step, filling in while
-// the report is being read. A step that found nothing says why instead of
-// disappearing, so it is visible what the ingest did NOT manage to read.
+// The "Last report we read" strip on Upload Previous Reports (with live progress while
+// a report is being read), plus the detail blocks the chip popups reuse. What was
+// extracted is shown as chips on the file's row (DocumentExtractionChips); this
+// component loads and polls that data and hands it up through `onData`.
 
 const OUTLINE_FOLD_AT = 15;
 
@@ -39,13 +37,6 @@ const GAVE_UP_TEXT =
 const STALLED_TEXT =
   'This run stopped before it finished, so some steps have no result. '
   + 'If nothing changes in a few minutes, upload the report again.';
-
-const POPUP_TITLES: Record<SummaryKey, string> = {
-  tone: 'Tone',
-  dashboard: 'Dashboard data',
-  outline: 'Previous outline',
-  departments: 'Suggested departments',
-};
 
 const labelStyle: CSSProperties = {
   fontSize: 10.5,
@@ -76,57 +67,43 @@ interface AnnualReportExtractionProps {
   refreshKey?: number;
   /** Told true when a run is seen in progress and false when the panel stops watching. */
   onRunningChange?: (running: boolean) => void;
+  /** Told every result the panel loads, so the page can share it with the uploaded
+   *  list without a second request. */
+  onData?: (data: Extraction) => void;
 }
 
 /** Loads and shows, live, everything extracted from the company's annual report(s). */
-export default function AnnualReportExtraction({ refreshKey = 0, onRunningChange }: AnnualReportExtractionProps) {
+export default function AnnualReportExtraction({ refreshKey = 0, onRunningChange, onData }: AnnualReportExtractionProps) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   const { data, problem, gaveUp } = useLiveExtraction(companyId, refreshKey, onRunningChange);
 
+  // A ref, so a parent re-render (new callback) does not send the same data again.
+  const onDataRef = useRef(onData);
+  onDataRef.current = onData;
+  useEffect(() => {
+    if (data) onDataRef.current?.(data);
+  }, [data]);
+
   if (!companyId) return null;
 
+  // Only the "Last report we read" strip is drawn here. What was extracted is shown as
+  // chips on that file's row in the uploaded list, which this component feeds via onData.
   return (
-    <section style={{ marginTop: 28 }} aria-label="What we extracted from your annual report">
-      <div style={{ marginBottom: 12 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>
-          What we extracted from your annual report
-        </h2>
-        <p style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>
-          Every step we run on the report you uploaded. Each row fills in as soon as it finishes.
-        </p>
-      </div>
+    <section style={{ marginTop: 18 }} aria-label="Last report we read">
       {problem && <p style={emptyStyle}>{PROBLEM_TEXT[problem]}</p>}
-      {!problem && !data && <LoadingRows />}
       {data && <ExtractionBody data={data} gaveUp={gaveUp} />}
     </section>
   );
 }
 
-/** Shimmer bars in the shape of the table, shown until the first answer arrives. */
-function LoadingRows() {
-  return (
-    <div className="card xlive" role="status" aria-label="Loading what was extracted" style={{ padding: '6px 16px' }}>
-      {[160, 120, 140, 100].map((width) => (
-        <div key={width} style={{ display: 'flex', gap: 12, padding: '10px 0' }}>
-          <span className="skel" style={{ width: 16, height: 16, borderRadius: '50%' }} />
-          <span className="skel" style={{ width, height: 10, marginTop: 3 }} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** The banner, the live table, and the popup with one part's details. */
+/** The "Last report we read" strip (progress while a run is going) and any warnings. */
 function ExtractionBody({ data, gaveUp }: { data: Extraction; gaveUp: boolean }) {
-  const [openKey, setOpenKey] = useState<SummaryKey | null>(null);
   const running = isRunInProgress(data) && !gaveUp;
   const run = data.live?.run ?? null;
-  // A stalled run is not being worked on, so its unfinished rows must not keep spinning.
   const stalled = isRunStalled(data);
-  const steps = stalled ? endUnfinishedSteps(stepsToShow(data)) : stepsToShow(data);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {(run || running) && (
         <RunBanner
           run={run}
@@ -138,12 +115,6 @@ function ExtractionBody({ data, gaveUp }: { data: Extraction; gaveUp: boolean })
       {gaveUp && <p style={emptyStyle}>{GAVE_UP_TEXT}</p>}
       {stalled && <p role="status" style={emptyStyle}>{STALLED_TEXT}</p>}
       {data.errors.length > 0 && <PartialErrors errors={data.errors} />}
-      <LiveStepsTable steps={steps} onOpen={setOpenKey} />
-      {openKey && (
-        <SummaryPopup title={POPUP_TITLES[openKey]} onClose={() => setOpenKey(null)}>
-          <SummaryDetails summaryKey={openKey} data={data} />
-        </SummaryPopup>
-      )}
     </div>
   );
 }
@@ -152,7 +123,7 @@ function ExtractionBody({ data, gaveUp }: { data: Extraction; gaveUp: boolean })
  * The popup shell, same as the app's other modals (e.g. ApproveConfirmDialog).
  * The shared ui/dialog sits at z-index 50, under the app shell, so it never showed.
  */
-function SummaryPopup({ title, onClose, children }: {
+export function SummaryPopup({ title, onClose, children }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
@@ -203,7 +174,7 @@ function SummaryPopup({ title, onClose, children }: {
 }
 
 /** The popup body: the same blocks the section draws below, for one column. */
-function SummaryDetails({ summaryKey, data }: { summaryKey: SummaryKey; data: Extraction }) {
+export function SummaryDetails({ summaryKey, data }: { summaryKey: SummaryKey; data: Extraction }) {
   const company = data.company;
   if (summaryKey === 'tone') {
     return (
@@ -235,7 +206,7 @@ function SummaryDetails({ summaryKey, data }: { summaryKey: SummaryKey; data: Ex
   return <PopupPart title="Suggested departments"><Departments departments={company.departments} /></PopupPart>;
 }
 
-function PopupPart({ title, children }: { title: string; children: ReactNode }) {
+export function PopupPart({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
       <div style={{ ...labelStyle, marginBottom: 8 }}>{title}</div>
@@ -365,7 +336,7 @@ function ContentsPagesPerReport({ reports }: { reports: ExtractedReport[] }) {
   );
 }
 
-function ContentsPage({ detail }: { detail: ReportOutlineDetail | null }) {
+export function ContentsPage({ detail }: { detail: ReportOutlineDetail | null }) {
   if (!detail) return <Empty text="No contents page was stored for this report." />;
   return (
     <div>
@@ -429,7 +400,7 @@ function FlatOutline({ outline }: { outline: string[] }) {
   );
 }
 
-function Sections({ sections }: { sections: ExtractedSection[] }) {
+export function Sections({ sections }: { sections: ExtractedSection[] }) {
   if (sections.length === 0) return <Empty text="No sections were created from this report." />;
   return (
     <div>
@@ -448,7 +419,7 @@ function Sections({ sections }: { sections: ExtractedSection[] }) {
   );
 }
 
-function Departments({ departments }: { departments: ExtractedDepartments | null }) {
+export function Departments({ departments }: { departments: ExtractedDepartments | null }) {
   const raw = departments?.raw ?? [];
   if (raw.length === 0) return <Empty text="No departments were suggested from this report." />;
   const mapped = departments?.mapped ?? [];

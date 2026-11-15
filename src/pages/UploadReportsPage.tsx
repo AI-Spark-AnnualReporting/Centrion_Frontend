@@ -4,6 +4,7 @@ import UploadedReportsList from '@/components/reports/UploadedReportsList';
 import AnnualReportExtraction from '@/components/reports/AnnualReportExtraction';
 import { companies as companiesApi } from '@/lib/api';
 import type { OnboardingIngestItem } from '@/lib/api';
+import type { AnnualReportExtraction as Extraction } from '@/types/company';
 import { useAuth } from '@/context/AuthContext';
 
 // The onboarding upload step, reachable from inside the app.
@@ -48,6 +49,8 @@ export default function UploadReportsPage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [runKey, setRunKey] = useState(0);
   const [listKey, setListKey] = useState(0);
+  // What the panel below last loaded; the uploaded list draws its chips from it.
+  const [extraction, setExtraction] = useState<Extraction | null>(null);
   const runActiveRef = useRef(false);
   const tableRef = useRef<HTMLDivElement>(null);
   const busy = starting || runActive;
@@ -77,6 +80,9 @@ export default function UploadReportsPage() {
       sessionStorage.setItem('centriyon:freshUpload', '1');
       handleRunningChange(true);
       setRunKey((key) => key + 1);
+      // The run files the new upload under a report straight away, so reload the list
+      // now: otherwise the file only appears once the whole run has ended.
+      setListKey((key) => key + 1);
       scrollToTable(tableRef.current);
     } catch {
       setStartError(START_FAILED_TEXT);
@@ -118,11 +124,17 @@ export default function UploadReportsPage() {
         )}
       </div>
 
-      <UploadedReportsList refreshKey={listKey} />
-
+      {/* "Last report we read" sits right under the form, above the list, so the
+          user sees which report is in use (and the progress of a run) first. */}
       <div ref={tableRef} style={{ scrollMarginTop: 16 }}>
-        <AnnualReportExtraction refreshKey={runKey} onRunningChange={handleRunningChange} />
+        <AnnualReportExtraction
+          refreshKey={runKey}
+          onRunningChange={handleRunningChange}
+          onData={setExtraction}
+        />
       </div>
+
+      <UploadedReportsList refreshKey={listKey} extraction={extraction} />
     </div>
   );
 }
