@@ -74,7 +74,7 @@ export function LoginPage() {
         navigate('/change-password', { replace: true });
       } else if (
         !shouldStayInCentriton(loggedIn) &&
-        redirectToApp(loggedIn.default_app!)
+        (await redirectToApp(loggedIn.default_app!))
       ) {
         // This user's default app is the other workspace (spark_studio), not
         // Centriyon. redirectToApp() navigates away; stop here.

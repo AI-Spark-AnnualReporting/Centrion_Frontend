@@ -6,8 +6,8 @@
 // Three modes, picked from the client's current key (rule decided 2026-11-03):
 //   - Generate: no valid key yet. Starts today.
 //   - Upgrade:  the key is active (or not started yet). Same period, so the
-//               start stays. Nothing goes down: modules, reports, PMs, IR users,
-//               departments, all department users together, the end date.
+//               start stays. Nothing goes down: modules, reports, users, the
+//               end date.
 //   - Renew:    the key has expired. A new period from today; report counts
 //               start again from 0. Anything may change.
 // The server checks the same rules.
@@ -21,7 +21,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { FormDialog } from '@/components/subscriptions/FormDialog';
 import {
-  DepartmentsCard, EMPTY_LIMITS, ModulesCard, UsersCard, departmentUsersTotal,
+  EMPTY_LIMITS, ModulesCard, UsersCard, usersSummary,
 } from '@/components/subscriptions/PlanFields';
 import { sparkLicenses } from '@/lib/api';
 import type { GeneratedLicense, LicensableModule, SparkLicenseRow } from '@/types/license';
@@ -64,20 +64,18 @@ export function modeFor(row: SparkLicenseRow): KeyMode {
   return 'upgrade';
 }
 
-/** The current key's modules, reports and people, in the cards' shape. */
+/** The current key's modules, reports and users, in the cards' shape. */
 export function limitsOfKey(row: SparkLicenseRow): PlanLimits {
   return {
     modules: [...row.modules],
     report_limits: { ...row.report_limits },
-    max_pms: row.max_pms ?? EMPTY_LIMITS.max_pms,
-    max_ir_users: row.max_ir_users ?? EMPTY_LIMITS.max_ir_users,
-    department_sizes: [...(row.department_sizes ?? EMPTY_LIMITS.department_sizes)],
+    max_users: row.max_seats ?? EMPTY_LIMITS.max_users,
   };
 }
 
-/** What the page starts with: the current key (upgrade, renew) or 1 PM / 1 IR / one department. */
+/** What the page starts with: the current key (upgrade, renew) or the new-plan default. */
 function startingLimits(row: SparkLicenseRow, mode: KeyMode): PlanLimits {
-  if (mode === 'generate') return { ...EMPTY_LIMITS, modules: [], report_limits: {}, department_sizes: [1] };
+  if (mode === 'generate') return { ...EMPTY_LIMITS, modules: [], report_limits: {} };
   return limitsOfKey(row);
 }
 
@@ -94,10 +92,9 @@ function reportCaptions(row: KeyRow, mode: KeyMode): Record<string, string> {
   return captions;
 }
 
-/** "2 PM · 1 IR · 3 departments · 8 department users" */
+/** "25 users (admin included)" */
 function peopleLine(limits: PlanLimits): string {
-  return `${limits.max_pms} PM · ${limits.max_ir_users} IR · ${limits.department_sizes.length} departments · `
-    + `${departmentUsersTotal(limits)} department users`;
+  return usersSummary(limits);
 }
 
 /** "Quarterly Report · 4 reports", or the name alone for access-only modules. */
@@ -111,16 +108,7 @@ function upgradeChanges(form: PlanLimits, current: PlanLimits, endsAt: string, c
                         catalogue: LicensableModule[]): string[] {
   const lines: string[] = [];
   if (endsAt !== currentEnd) lines.push(`End date ${formatDate(currentEnd)} → ${formatDate(endsAt)}`);
-  if (form.max_pms !== current.max_pms) lines.push(`PMs ${current.max_pms} → ${form.max_pms}`);
-  if (form.max_ir_users !== current.max_ir_users) lines.push(`IR users ${current.max_ir_users} → ${form.max_ir_users}`);
-  const departmentsBefore = current.department_sizes.length;
-  if (form.department_sizes.length !== departmentsBefore) {
-    lines.push(`Departments ${departmentsBefore} → ${form.department_sizes.length}`);
-  }
-  const usersBefore = departmentUsersTotal(current);
-  if (departmentUsersTotal(form) !== usersBefore) {
-    lines.push(`Department users ${usersBefore} → ${departmentUsersTotal(form)}`);
-  }
+  if (form.max_users !== current.max_users) lines.push(`Users ${current.max_users} → ${form.max_users}`);
   for (const module of catalogue) {
     if (!form.modules.includes(module.key)) continue;
     if (!current.modules.includes(module.key)) {
@@ -205,8 +193,8 @@ function KeyEditor({ row }: { row: KeyRow }) {
   const clientIdOk = !onPrem || CLIENT_ID_PATTERN.test(clientId.trim().toUpperCase());
   const earliestEnd = mode === 'upgrade' ? currentEnd : addDays(startsAt, 1);
   const endOk = endsAt >= earliestEnd;
-  const departmentUsersOk = !floor || departmentUsersTotal(form) >= departmentUsersTotal(floor);
-  const ready = clientIdOk && endOk && departmentUsersOk && form.modules.length > 0;
+  const usersOk = !floor || form.max_users >= floor.max_users;
+  const ready = clientIdOk && endOk && usersOk && form.modules.length > 0;
   const changes = describeChanges(mode, form, current, startsAt, endsAt, currentEnd, catalogue);
 
   const makeKey = async () => {
@@ -216,9 +204,7 @@ function KeyEditor({ row }: { row: KeyRow }) {
       const result = await sparkLicenses.generate(row.company_id, {
         modules: [...form.modules].sort(),
         report_limits: reportLimitsToSend(form, catalogue),
-        max_pms: form.max_pms,
-        max_ir_users: form.max_ir_users,
-        department_sizes: form.department_sizes,
+        max_users: form.max_users,
         starts_at: startsAt,
         expires_at: endsAt,
         ...(onPrem ? { server_id: clientId.trim().toUpperCase() } : {}),
@@ -282,7 +268,6 @@ function KeyEditor({ row }: { row: KeyRow }) {
           captions={reportCaptions(row, mode)} subtitle={modulesSubtitle} />
         <div className="sub-ed-col">
           <UsersCard value={form} onChange={setForm} floor={floor} />
-          <DepartmentsCard value={form} onChange={setForm} floor={floor} />
         </div>
       </div>
 

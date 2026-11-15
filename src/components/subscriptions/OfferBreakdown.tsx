@@ -1,5 +1,5 @@
-// A quote's offer, priced: "How the price adds up" (each module, Users,
-// Departments, the admin, then the total — or "Added up" + "Your price" when
+// A quote's offer, priced: "How the price adds up" (each module, Users (the
+// admin included), then the total — or "Added up" + "Your price" when
 // spark_admin typed its own total). Shown on spark_admin's offer page
 // (Preview) and in the Send offer popup's email preview. The same sums and
 // words as the backend's offer email (subscriptions.offer_added_up, offer_rows).
@@ -8,9 +8,9 @@
 
 import type { LicensableModule } from '@/types/license';
 import type { OfferPrices, PaidDuration, PlanLimits } from '@/types/subscription';
-import { countWord, departmentUsersTotal } from './PlanFields';
+import { countWord } from './PlanFields';
 
-export const NO_PRICES: OfferPrices = { modules: {}, users: 0, departments: 0 };
+export const NO_PRICES: OfferPrices = { modules: {}, users: 0 };
 
 // "per year" etc., as the offer's length.
 const PER: Record<PaidDuration, string> = { quarterly: 'per quarter', half_year: 'per 6 months', yearly: 'per year' };
@@ -27,9 +27,9 @@ export function moduleAmount(module: LicensableModule, limits: PlanLimits, price
   return (limits.report_limits[module.report_type] ?? 1) * price;
 }
 
-/** Every module that's switched on, plus the Users and Departments card prices. */
+/** Every module that's switched on, plus the Users card price. */
 export function offerAddedUp(limits: PlanLimits, prices: OfferPrices, catalogue: LicensableModule[]): number {
-  let total = prices.users + prices.departments;
+  let total = prices.users;
   for (const module of catalogue) {
     if (limits.modules.includes(module.key)) total += moduleAmount(module, limits, prices);
   }
@@ -53,7 +53,6 @@ export function OfferBreakdown({ limits, prices, price, duration, catalogue }: {
 }) {
   const addedUp = offerAddedUp(limits, prices, catalogue);
   const chosen = catalogue.filter((module) => limits.modules.includes(module.key));
-  const departments = limits.department_sizes.length;
   return (
     <div className="sub-brk">
       <div className="sub-brk-t">How the price adds up</div>
@@ -62,14 +61,9 @@ export function OfferBreakdown({ limits, prices, price, duration, catalogue }: {
           <span>{moduleLabel(module, limits, prices)}</span><span>{dollars(moduleAmount(module, limits, prices))}</span>
         </div>
       ))}
-      <div className="sub-ln"><span>1 admin</span><span className="sub-ln-free">Included</span></div>
       <div className="sub-ln">
-        <span>Users · {limits.max_pms} PMs · {limits.max_ir_users} IR user{limits.max_ir_users === 1 ? '' : 's'}</span>
+        <span>Users · {limits.max_users} (admin included)</span>
         <span>{dollars(prices.users)}</span>
-      </div>
-      <div className="sub-ln">
-        <span>Departments · {departments} (1 HOD each) · {departmentUsersTotal(limits)} department users</span>
-        <span>{dollars(prices.departments)}</span>
       </div>
       {price !== addedUp ? (
         <>

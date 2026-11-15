@@ -56,7 +56,9 @@ export function ProtectedRoute({
   // freshly-invited user can still complete the forced rotation above before
   // being handed off.
   if (!shouldStayInCentriton(user) && !user.must_change_password) {
-    redirectToApp(user.default_app!);
+    // Async (it asks the server for a SAR session first); it guards itself
+    // against running once per render.
+    void redirectToApp(user.default_app!);
     return null; // render nothing while the hard redirect happens
   }
 
@@ -105,6 +107,9 @@ export function ProtectedRoute({
     user.role === "spark_internal" &&
     !actingCompany &&
     location.pathname !== SPARK_COMPANIES_PATH &&
+    // Same exemption as spark_admin above: the rotation gate sends a new Spark
+    // staff member here, and bouncing them to /companies would loop forever.
+    !onChangePasswordPage &&
     !onOnboardingPage
   ) {
     return <Navigate to={SPARK_COMPANIES_PATH} replace />;

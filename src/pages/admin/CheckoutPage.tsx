@@ -14,8 +14,9 @@
 import { useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { SUBSCRIPTION_PAGE, formatLicenseDate } from '@/components/license/LicenseBanner';
+import { ErrorPopup } from '@/components/shared/ErrorPopup';
 import { FormDialog } from '@/components/subscriptions/FormDialog';
-import { departmentUsersTotal, durationLabel, durationPer, formatMoney } from '@/components/subscriptions/PlanFields';
+import { durationLabel, durationPer, formatMoney } from '@/components/subscriptions/PlanFields';
 import { useAuth } from '@/context/AuthContext';
 import { subscriptions } from '@/lib/api';
 import type { LicensableModule } from '@/types/license';
@@ -152,11 +153,7 @@ export default function CheckoutPage() {
               {chips.map((chip) => <span key={chip} className="sub-co-chip">✓ {chip}</span>)}
             </div>
             <div className="sub-co-people">
-              <div className="sub-co-pbox"><b>1 + {checkout.max_pms}</b><span>admin + PMs</span></div>
-              <div className="sub-co-pbox"><b>{checkout.max_ir_users}</b><span>IR users</span></div>
-              <div className="sub-co-pbox">
-                <b>{checkout.department_sizes.length} · {departmentUsersTotal(checkout)}</b><span>departments · users</span>
-              </div>
+              <div className="sub-co-pbox"><b>{checkout.max_users}</b><span>users (admin included)</span></div>
             </div>
           </div>
 
@@ -206,7 +203,7 @@ export default function CheckoutPage() {
             <span aria-hidden="true">ⓘ</span>
             <span>No payment gateway yet — &quot;Pay&quot; always succeeds. Report counts start again from 0; your people stay.</span>
           </div>
-          {error && <div role="alert" style={{ fontSize: 12, color: '#DC2626', margin: '10px 20px 0' }}>{error}</div>}
+          <ErrorPopup open={error !== ''} title="The payment didn't go through" message={error} onClose={() => setError('')} />
           <div className="sub-co-pay-f">
             <button type="button" className="btn bp sub-co-pay-btn" disabled={paying || paid !== null} onClick={pay}>
               {paying ? 'Paying…' : `🔒 Pay ${price}`}
