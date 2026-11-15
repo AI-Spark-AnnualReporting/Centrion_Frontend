@@ -143,14 +143,6 @@ export function LicenseCard() {
       {data.status !== 'none' && data.starts_at && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10, marginTop: 14 }}>
           <Usage label="Users" used={data.seats_used} limit={data.max_seats} />
-          {data.people && (
-            <>
-              <Usage label="PMs" used={data.people.pms.used} limit={data.people.pms.max} />
-              <Usage label="IR users" used={data.people.ir_users.used} limit={data.people.ir_users.max} />
-              <Usage label="Departments" used={data.people.departments.used} limit={data.people.departments.max} />
-              <Usage label="Department users" used={data.people.department_users.used} limit={data.people.department_users.max} />
-            </>
-          )}
           {Object.entries(data.reports_used).map(([type, used]) => (
             <Usage key={type} label={reportLabel(data, type)} used={used} limit={data.report_limits[type] ?? null} />
           ))}

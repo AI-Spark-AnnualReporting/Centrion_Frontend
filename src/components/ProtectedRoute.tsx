@@ -105,6 +105,9 @@ export function ProtectedRoute({
     user.role === "spark_internal" &&
     !actingCompany &&
     location.pathname !== SPARK_COMPANIES_PATH &&
+    // Same exemption as spark_admin above: the rotation gate sends a new Spark
+    // staff member here, and bouncing them to /companies would loop forever.
+    !onChangePasswordPage &&
     !onOnboardingPage
   ) {
     return <Navigate to={SPARK_COMPANIES_PATH} replace />;

@@ -20,7 +20,7 @@ vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions }));
 
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");
-const { peopleTotal, departmentUsersTotal, resizeDepartments } = await import("@/components/subscriptions/PlanFields");
+const { usersSummary } = await import("@/components/subscriptions/PlanFields");
 const { CardStrip, PlanCard, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
 const { default: SparkQuotesPage } = await import("@/pages/spark/SparkQuotesPage");
 const { QuoteForm } = await import("@/components/subscriptions/QuoteForm");
@@ -35,16 +35,16 @@ const CATALOGUE = [
 ];
 const LIMITS = {
   modules: ["quarterly_report"], report_limits: { quarterly: 4 },
-  max_pms: 2, max_ir_users: 1, department_sizes: [5, 2, 1],
+  max_users: 15,
 };
 const GOLD = {
   ...LIMITS, id: "plan_gold", name: "Gold", duration: "yearly" as const, price: 40000, contact: null,
-  max_departments: 3, company_id: null, status: "published" as const, quote: null, created_at: "", updated_at: "",
+  company_id: null, status: "published" as const, quote: null, created_at: "", updated_at: "",
   subscriber_count: 2,
 };
 const ENTERPRISE = {
   ...GOLD, id: "plan_ent", name: "Enterprise", duration: "enterprise" as const, price: null, modules: [],
-  report_limits: {}, max_pms: 0, max_ir_users: 0, department_sizes: [], max_departments: 0, subscriber_count: 0,
+  report_limits: {}, max_users: 1, subscriber_count: 0,
   contact: { message: "Sized for you", person: "Centriyon Sales", email: "sales@centriyon.com", phone: "+966 1" },
 };
 
@@ -61,21 +61,15 @@ function Where() {
 // ── Plan numbers ─────────────────────────────────────────────────────
 
 describe("plan numbers", () => {
-  it("adds up the department cards, and the total counts the admin", () => {
-    expect(departmentUsersTotal(LIMITS)).toBe(8);
-    expect(peopleTotal(LIMITS)).toBe(1 + 2 + 1 + 3 + 8);
+  it("says the users total with the admin included", () => {
+    expect(usersSummary(LIMITS)).toBe("15 users (admin included)");
+    expect(usersSummary({ max_users: 1 })).toBe("1 user (admin included)");
   });
 
-  it("new department cards start at 1 user; fewer departments drop the last cards", () => {
-    expect(resizeDepartments([5, 2], 4)).toEqual([5, 2, 1, 1]);
-    expect(resizeDepartments([5, 2, 1], 1)).toEqual([5]);
-  });
-
-  it("only modules, reports, people and departments count as a change — not name or price", () => {
+  it("only modules, reports and users count as a change — not name or price", () => {
     const form = { ...LIMITS, name: "Gold 2", duration: "yearly" as const, price: 1, contact: null };
     expect(limitsChanged(GOLD, form)).toBe(false);
-    expect(limitsChanged(GOLD, { ...form, max_pms: 3 })).toBe(true);
-    expect(limitsChanged(GOLD, { ...form, department_sizes: [5, 2, 2] })).toBe(true);
+    expect(limitsChanged(GOLD, { ...form, max_users: 16 })).toBe(true);
     expect(limitsChanged(GOLD, { ...form, modules: ["leadership", "quarterly_report"] })).toBe(true);
   });
 });
@@ -98,8 +92,8 @@ describe("PlanCard", () => {
     expect(screen.getByText("$")).toBeInTheDocument();
     expect(screen.getByText("Quarterly Report · 4 reports")).toBeInTheDocument();
     expect(screen.getByText("Earnings Report").closest("li")).toHaveClass("off");
-    expect(screen.getByText("1 admin (included)")).toBeInTheDocument();
-    expect(screen.getByText("3 departments · 1 HOD each · 8 department users")).toBeInTheDocument();
+    expect(screen.getByText("15 users (admin included)")).toBeInTheDocument();
+    expect(screen.queryByText(/department/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();      // no Buy now unless given one
   });
 
@@ -107,7 +101,7 @@ describe("PlanCard", () => {
     render(<PlanCard plan={ENTERPRISE} position={0} catalogue={CATALOGUE} />);
     expect(screen.getByText("Let's talk")).toBeInTheDocument();
     expect(screen.getByText("sales@centriyon.com")).toBeInTheDocument();
-    expect(screen.queryByText("1 admin (included)")).not.toBeInTheDocument();
+    expect(screen.queryByText(/admin included/)).not.toBeInTheDocument();
   });
 });
 
@@ -283,17 +277,16 @@ describe("SparkPlanEditorPage", () => {
     expect(screen.getByRole("button", { name: "Fewer Quarterly Report reports" })).toBeDisabled();   // never below 1
     fireEvent.click(screen.getByRole("button", { name: "More Quarterly Report reports" }));
 
-    fireEvent.change(screen.getByLabelText("Number of departments"), { target: { value: "3" } });
-    expect(screen.getByText("Department 3")).toBeInTheDocument();                         // cards appear by themselves
-    fireEvent.click(screen.getByRole("button", { name: "More Department 1 users" }));
-    expect(screen.getByText("10 people")).toBeInTheDocument();     // 1 admin + 1 PM + 1 IR + 3 HODs + (2 + 1 + 1) users
+    expect(screen.queryByText("Departments")).not.toBeInTheDocument();                   // no Departments card any more
+    fireEvent.change(screen.getByLabelText("Users"), { target: { value: "25" } });       // besides the admin
+    expect(screen.getByText("26 users (admin included)")).toBeInTheDocument();           // the preview: + the admin
     expect(screen.queryByText(/×/)).not.toBeInTheDocument();                              // no calculation
 
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     await waitFor(() => expect(sparkPlans.create).toHaveBeenCalled());
     expect(sparkPlans.create.mock.calls[0][0]).toMatchObject({
       name: "Standard", duration: "half_year", price: 12000, status: "published",
-      modules: ["quarterly_report"], report_limits: { quarterly: 2 }, department_sizes: [2, 1, 1],
+      modules: ["quarterly_report"], report_limits: { quarterly: 2 }, max_users: 26,
     });
     expect(screen.getByTestId("where")).toHaveTextContent("/spark/subscriptions");
   });
@@ -326,11 +319,39 @@ describe("SparkPlanEditorPage", () => {
     expect(reports).toHaveTextContent("0 of 2 on");
   });
 
-  it("typing 0 users in a department keeps it at 1", async () => {
+  it("Users is besides the admin: 0 means only the admin, below 0 stays 0", async () => {
     renderEditor();
-    const users = await screen.findByLabelText("Department 1 users");
+    const users = await screen.findByLabelText("Users");
+    expect(users).toHaveValue("4");                                // a new plan: 5 people = admin + 4
     fireEvent.change(users, { target: { value: "0" } });
-    expect(users).toHaveValue("1");
+    expect(users).toHaveValue("0");
+    expect(screen.getByText("1 user (admin included)")).toBeInTheDocument();
+    fireEvent.change(users, { target: { value: "-3" } });
+    expect(users).toHaveValue("0");
+  });
+
+  it("a name that's taken opens the error popup; × closes it and puts the cursor in the name box", async () => {
+    sparkPlans.create.mockRejectedValue(new Error("There's already a plan called Standard v1. Choose another name."));
+    renderEditor();
+    fireEvent.change(await screen.findByLabelText("Plan name"), { target: { value: "standard v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    const popup = await screen.findByRole("alertdialog");
+    expect(popup).toHaveTextContent("This name is already taken");
+    expect(popup).toHaveTextContent("There's already a plan called Standard v1. Choose another name.");
+    expect(within(popup).getAllByRole("button")).toHaveLength(1);                  // only the ×
+    fireEvent.click(within(popup).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Plan name")).toHaveFocus());
+  });
+
+  it("any other save error opens the popup with a general title", async () => {
+    sparkPlans.create.mockRejectedValue(new Error("Pick at least one module before publishing"));
+    renderEditor();
+    fireEvent.change(await screen.findByLabelText("Plan name"), { target: { value: "Gold 2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const popup = await screen.findByRole("alertdialog");
+    expect(popup).toHaveTextContent("Couldn't save the plan");
+    expect(popup).toHaveTextContent("Pick at least one module before publishing");
   });
 
   it("Enterprise shows only the contact details, and the preview has no button", async () => {
@@ -358,7 +379,7 @@ describe("SparkPlanEditorPage", () => {
     });
     sparkPlans.update.mockResolvedValue({});
     renderEditor("/spark/subscriptions/plan_gold/edit");
-    fireEvent.change(await screen.findByLabelText("Project managers (PMs)"), { target: { value: "5" } });
+    fireEvent.change(await screen.findByLabelText("Users"), { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     const dialog = await screen.findByRole("dialog");
@@ -367,7 +388,7 @@ describe("SparkPlanEditorPage", () => {
     fireEvent.click(within(dialog).getByLabelText(/Apply to everyone on Gold/));
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(sparkPlans.update).toHaveBeenCalledWith("plan_gold",
-      expect.objectContaining({ max_pms: 5, apply_to: "everyone" })));
+      expect.objectContaining({ max_users: 21, apply_to: "everyone" })));
   });
 
   it("a price change saves without asking", async () => {
@@ -396,10 +417,10 @@ describe("SparkPlanEditorPage", () => {
     expect(screen.getByRole("option", { name: "Enterprise · 1 year" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
 
-    // Quarterly: 4 reports × $500; Users $300; Departments $200 → $2,500.
+    // Quarterly: 4 reports × $500; Users $500 → $2,500. No Departments price any more.
     fireEvent.change(screen.getByLabelText("Quarterly Report price per report"), { target: { value: "500" } });
-    fireEvent.change(screen.getByLabelText("Price for the users"), { target: { value: "300" } });
-    fireEvent.change(screen.getByLabelText("Price for the departments"), { target: { value: "200" } });
+    fireEvent.change(screen.getByLabelText("Price for the users"), { target: { value: "500" } });
+    expect(screen.queryByLabelText("Price for the departments")).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Price \(USD\)/)).toHaveValue("2500");
 
     // The popup starts with the company's admin; a second email can be added.
@@ -415,7 +436,7 @@ describe("SparkPlanEditorPage", () => {
       recipients: ["admin@aramco.test", "cfo@aramco.test"], subject: "Your Enterprise offer from Centriyon",
     }));
     expect(sparkPlans.update).toHaveBeenCalledWith("plan_gold", expect.objectContaining({
-      status: "draft", price: null, offer_prices: { modules: { quarterly_report: 500 }, users: 300, departments: 200 },
+      status: "draft", price: null, offer_prices: { modules: { quarterly_report: 500 }, users: 500 },
     }));
     expect(toast).toHaveBeenCalledWith({ title: "Offer emailed to admin@aramco.test, cfo@aramco.test" });
     expect(await screen.findByText(/Offer sent 2026-11-09 to admin@aramco.test, cfo@aramco.test/)).toBeInTheDocument();
@@ -436,22 +457,19 @@ describe("SparkPlanEditorPage", () => {
   it("shows the client's current plan as small 'Current' words in the cards", async () => {
     sparkPlans.get.mockResolvedValue({ ...QUOTE, current_plan: {
       name: "QA Fit Plus", ends_at: "2027-11-08", modules: ["quarterly_report", "leadership"], report_limits: { quarterly: 2 },
-      max_pms: 2, max_ir_users: 6, department_sizes: [3, 3, 3, 3] } });
+      max_users: 25 } });
     renderEditor("/spark/subscriptions/plan_gold/edit");
     expect(await screen.findByText(/Their request:/)).toHaveTextContent("Current plan: QA Fit Plus (ends 2027-11-08)");
     expect(screen.getByRole("switch", { name: "Quarterly Report" })).toHaveTextContent("Current: 2 reports");
     expect(screen.getByRole("switch", { name: "Leadership" })).toHaveTextContent("Current: included");
     expect(screen.getByRole("switch", { name: "Earnings Report" })).not.toHaveTextContent("Current");   // not in their plan
-    expect(screen.getByText("Project managers (PMs)")).toHaveTextContent("current 2");
-    expect(screen.getByText("IR users", { selector: "span" })).toHaveTextContent("current 6");
-    expect(screen.getByText("Number of departments")).toHaveTextContent("current 4");
-    expect(screen.getByText("Department 1")).toHaveTextContent("current 3");
+    expect(screen.getByText("Users", { selector: "span" })).toHaveTextContent("current 24");
   });
 
   it("a new offer with nothing on still opens the group of a current module, so its 'Current' words show", async () => {
     sparkPlans.get.mockResolvedValue({ ...QUOTE, modules: [], report_limits: {}, current_plan: {
       name: "Standard", ends_at: "2027-02-08", modules: ["quarterly_report"], report_limits: { quarterly: 3 },
-      max_pms: 10, max_ir_users: 10, department_sizes: [1] } });
+      max_users: 41 } });
     renderEditor("/spark/subscriptions/plan_gold/edit");
     const tile = await screen.findByRole("switch", { name: "Quarterly Report" });
     expect(tile).toHaveAttribute("aria-checked", "false");          // still off: only shown, not switched on
@@ -523,7 +541,7 @@ describe("SparkPlanEditorPage", () => {
   });
 
   it("a typed total replaces the added-up one, and the preview shows both", async () => {
-    sparkPlans.get.mockResolvedValue({ ...QUOTE, quote: { ...QUOTE.quote, prices: { modules: { quarterly_report: 500 }, users: 0, departments: 0 } } });
+    sparkPlans.get.mockResolvedValue({ ...QUOTE, quote: { ...QUOTE.quote, prices: { modules: { quarterly_report: 500 }, users: 0 } } });
     renderEditor("/spark/subscriptions/plan_gold/edit");
     const price = await screen.findByLabelText(/Price \(USD\)/);
     expect(price).toHaveValue("2000");
@@ -532,10 +550,10 @@ describe("SparkPlanEditorPage", () => {
     expect(screen.getByText(/^Your price/).nextSibling).toHaveTextContent("$1,800");
   });
 
-  it("adds up reports × price per report, flat prices and the two cards", () => {
+  it("adds up reports × price per report, flat prices and the Users card", () => {
     const limits = { ...LIMITS, modules: ["quarterly_report", "leadership"] };
-    const prices = { modules: { quarterly_report: 500, leadership: 1500, earnings_report: 99 }, users: 3000, departments: 4000 };
-    expect(offerAddedUp(limits, prices, CATALOGUE)).toBe(4 * 500 + 1500 + 3000 + 4000);
+    const prices = { modules: { quarterly_report: 500, leadership: 1500, earnings_report: 99 }, users: 7000 };
+    expect(offerAddedUp(limits, prices, CATALOGUE)).toBe(4 * 500 + 1500 + 7000);
   });
 });
 
@@ -544,7 +562,7 @@ describe("SparkPlanEditorPage", () => {
 const CURRENT = {
   status: "active", reason: null,
   subscription: { ...LIMITS, id: "sub_1", plan_id: "plan_gold", plan_name: "Gold", billing_period: "yearly",
-                  ends_at: "2027-11-03", starts_at: "2026-11-04", status: "active", max_departments: 3 },
+                  ends_at: "2027-11-03", starts_at: "2026-11-04", status: "active" },
 };
 
 function renderSubscriptionPage() {
@@ -581,7 +599,7 @@ describe("SubscriptionPage", () => {
         { ...GOLD, id: "plan_custom", name: "Custom plan for Aramco", duration: "quarterly", price: 9000, made_for_you: true,
           too_small: [], lost_modules: [] },
         { ...GOLD, id: "plan_small", name: "Starter", duration: "half_year", price: 66, made_for_you: false,
-          too_small: ["You have 5 PMs; this plan allows 2."], lost_modules: [] },
+          too_small: ["You have 16 users; this plan allows 15."], lost_modules: [] },
         { ...GOLD, id: "plan_std", name: "Standard", duration: "yearly", price: 250, made_for_you: false,
           too_small: [], lost_modules: ["Board Report"] },
         { ...ENTERPRISE, made_for_you: false, too_small: [], lost_modules: [] },
@@ -634,7 +652,7 @@ describe("SubscriptionPage", () => {
     fireEvent.click(within(starter).getByRole("button", { name: "Buy now" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Starter is too small for your team")).toBeInTheDocument();
-    expect(within(dialog).getByText("• You have 5 PMs; this plan allows 2.")).toBeInTheDocument();
+    expect(within(dialog).getByText("• You have 16 users; this plan allows 15.")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: /payment/ })).not.toBeInTheDocument();
     expect(subscriptions.startCheckout).not.toHaveBeenCalled();
   });
@@ -659,7 +677,7 @@ describe("SubscriptionPage", () => {
 describe("CheckoutPage", () => {
   const CHECKOUT = {
     ...LIMITS, id: "chk_1", plan_name: "Standard", billing_period: "half_year", price: 12000,
-    starts_at: "2026-11-04", ends_at: "2027-05-03", status: "pending_payment", max_departments: 3,
+    starts_at: "2026-11-04", ends_at: "2027-05-03", status: "pending_payment",
     modules: ["quarterly_report", "leadership"], report_limits: { quarterly: 4 },
   };
 
@@ -683,8 +701,7 @@ describe("CheckoutPage", () => {
     expect(screen.getByText("3 May 2027")).toBeInTheDocument();
     expect(screen.getByText("✓ Quarterly Report · 4 reports")).toBeInTheDocument();
     expect(screen.getByText("✓ Leadership")).toBeInTheDocument();
-    expect(screen.getByText("1 + 2")).toBeInTheDocument();                        // admin + PMs
-    expect(screen.getByText("3 · 8")).toBeInTheDocument();                        // departments · users
+    expect(screen.getByText("users (admin included)").previousSibling).toHaveTextContent("15");
     expect(screen.getByText("TEST MODE")).toBeInTheDocument();
     expect(screen.queryByText("Changing plan")).not.toBeInTheDocument();          // first subscription
   });
@@ -713,7 +730,11 @@ describe("CheckoutPage", () => {
     subscriptions.pay.mockRejectedValue(new Error("This checkout can't be paid any more. Start a new one."));
     renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE });
     fireEvent.click(screen.getByRole("button", { name: "🔒 Pay $12,000" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("can't be paid any more");
+    const popup = await screen.findByRole("alertdialog");
+    expect(popup).toHaveTextContent("The payment didn't go through");
+    expect(popup).toHaveTextContent("can't be paid any more");
+    fireEvent.click(within(popup).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "🔒 Pay $12,000" })).toBeEnabled();
   });
 
