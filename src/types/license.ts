@@ -124,4 +124,6 @@ export interface LicenseUsage {
   upgrade_requested_at?: string | null;
   seats?: { used: number; max: number | null };
   reports?: Record<string, { module_on: boolean; used: number; limit: number | null }>;
+  // Cloud with an active plan only (null otherwise): this period's AI credits.
+  ai_credits?: { balance: number; total: number; low: boolean } | null;
 }

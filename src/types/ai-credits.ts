@@ -1,0 +1,122 @@
+// AI credits — shapes returned by Centriton's AI credit endpoints.
+// Backend: Centriton routes/ai_credit_routes.py (company admin + spark_admin).
+// Cloud companies pay for AI by the real tokens used (1 credit = $0.02 of
+// OpenAI cost to start with). Nothing is held; a job starts while the balance
+// is above zero and at least the action's minimum; the balance may go below zero.
+// Plan: Centriton/.claude/plans/ai-credits.md
+
+// The extra credits a company admin can buy: this many credits for this many dollars.
+export interface CreditPack {
+  size: number;
+  price: number;
+}
+
+// This period's credits. total = included + packs; balance = total + carried − used.
+export interface CreditBalance {
+  included: number;
+  packs: number;
+  carried: number;          // the minus brought in from the last period (≤ 0)
+  used: number;
+  total: number;
+  balance: number;          // may be below zero
+  low: boolean;             // under the low-balance percent of total
+}
+
+// One action's credits in a period (or a month, for Spark).
+export interface ActionUsage {
+  action: string;
+  jobs: number;
+  credits: number;          // what clients were charged
+  cost_usd: number;         // what OpenAI charged Spark
+}
+
+export interface PackPurchase {
+  id: string;
+  credits: number;
+  price: number;
+  paid_at: string | null;
+}
+
+// GET /ai-credits (company admin). subscription null = no active plan.
+export interface AiCreditsSummary {
+  subscription: {
+    subscription_id: string;
+    period: { starts_at: string; ends_at: string };
+    balance: CreditBalance;
+    credit_pack: CreditPack | null;
+    packs: PackPurchase[];
+    by_action: ActionUsage[];
+  } | null;
+}
+
+// A pack waiting for payment, or paid.
+export interface PackCheckout {
+  id: string;
+  credits: number;
+  price: number;
+  status: "pending_payment" | "paid" | "cancelled";
+  payment_reference?: string | null;
+}
+
+// Spark: the price OpenAI charges per 1 million tokens.
+export interface ModelPrice {
+  model: string;
+  input_price_per_million: number;
+  output_price_per_million: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface CreditSettings {
+  credit_value_usd: number;
+  low_balance_percent: number;
+  action_minimums: Record<string, number>;
+}
+
+export type SettingsChanges = Partial<{
+  credit_value_usd: number;
+  low_balance_percent: number;
+  action_minimums: Record<string, number>;   // 0 removes that action's minimum
+}>;
+
+export type ActionArea = "design" | "writing" | "documents" | "chat";
+
+// Spark's minimums table: one AI action, its minimum, and the last 30 days.
+export interface ActionRow {
+  key: string;
+  area: ActionArea;
+  per: "section" | "job" | "document" | "message";
+  label: string;
+  line: string;
+  minimum: number;
+  jobs: number;
+  usual_credits: number | null;   // null = hasn't run in the last 30 days
+  most_credits: number | null;
+}
+
+export interface OpenAiBill {
+  connected: boolean;             // false = no OpenAI admin key set
+  cost_usd: number | null;
+  error: string | null;
+}
+
+export interface CompanyUsageRow {
+  company_id: string | null;
+  company_name: string;
+  plan_name: string | null;
+  balance: CreditBalance | null;
+  credits: number;
+  cost_usd: number;
+}
+
+// GET /spark/ai-credits/usage?month=YYYY-MM
+export interface MonthlyUsage {
+  month: string;
+  credits: number;
+  cost_usd: number;
+  openai_bill: OpenAiBill;
+  by_action: ActionUsage[];
+  by_model: { model: string; input_tokens: number; output_tokens: number; cost_usd: number }[];
+  unpriced_models: string[];
+  companies: { items: CompanyUsageRow[]; total: number; page: number; limit: number };
+}

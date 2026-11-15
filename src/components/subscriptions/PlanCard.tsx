@@ -10,7 +10,7 @@
 
 import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LicensableModule } from '@/types/license';
-import type { Duration, PlanContact, PlanLimits } from '@/types/subscription';
+import type { Duration, PlanContact, PlanCredits, PlanLimits } from '@/types/subscription';
 import { countWord, durationPer, usersSummary } from './PlanFields';
 import './subscriptions.css';
 
@@ -18,7 +18,7 @@ import './subscriptions.css';
 const TAB_COLOURS = ['#4F7BE8', '#14B8A6', '#3535B5'];
 const ENTERPRISE_COLOUR = '#1A1D2E';
 
-export interface CardPlan extends PlanLimits {
+export interface CardPlan extends PlanLimits, PlanCredits {
   name: string;
   duration: Duration;
   price: number | null;
@@ -73,6 +73,12 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
           <span className="sub-ic sub-ok">✓</span>
           <span>{usersSummary(plan)}</span>
         </li>
+        {(plan.ai_credits ?? 0) > 0 && (
+          <li>
+            <span className="sub-ic sub-ok">✓</span>
+            <span>{(plan.ai_credits ?? 0).toLocaleString('en-US')} AI credits {durationPer(plan.duration).replace('per ', '/ ')}</span>
+          </li>
+        )}
       </ul>
     </>
   );

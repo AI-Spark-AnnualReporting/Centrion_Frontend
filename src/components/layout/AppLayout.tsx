@@ -1,4 +1,5 @@
 import { LicenseBanner, PageLimitBanner } from '@/components/license/LicenseBanner';
+import { AiCreditsBanner } from '@/components/ai-credits/AiCreditsBanner';
 import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -175,6 +176,8 @@ export function AppLayout() {
             {/* Client admins only: shown when the license isn't active. */}
             <LicenseBanner />
             <PageLimitBanner />
+            {/* Company admins only (cloud): AI credits running low, or AI paused. */}
+            <AiCreditsBanner />
             <Suspense fallback={<PageLoader />}>
               <Outlet />
             </Suspense>

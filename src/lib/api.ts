@@ -48,6 +48,9 @@ import type {
 import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
+import type {
+  ActionRow, AiCreditsSummary, CreditSettings, ModelPrice, MonthlyUsage, PackCheckout, SettingsChanges,
+} from "@/types/ai-credits";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
 import type {
@@ -5830,6 +5833,54 @@ export const subscriptions = {
 
   requestQuote: (body: QuoteRequestForm) =>
     request<SubscriptionPlan>("/api/v1/quote-requests", { method: "POST", body }),
+};
+
+// ---------------------------------------------------------------------------
+// AI credits (plan: Centriton/.claude/plans/ai-credits.md)
+// `aiCredits` — the company admin: this period's balance, and buying a pack
+// (Idempotency-Key, so a repeated click never buys or pays twice).
+// `sparkAiCredits` — spark_admin: model prices, settings, minimums, usage.
+// ---------------------------------------------------------------------------
+
+export const aiCredits = {
+  summary: () => request<AiCreditsSummary>("/api/v1/ai-credits"),
+
+  startPackCheckout: (idempotencyKey: string) =>
+    request<PackCheckout>("/api/v1/ai-credits/pack-checkouts", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  payPack: (checkoutId: string, idempotencyKey: string) =>
+    request<PackCheckout>(`/api/v1/ai-credits/pack-checkouts/${encodeURIComponent(checkoutId)}/payments`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+};
+
+export const sparkAiCredits = {
+  modelPrices: () =>
+    request<{ items: ModelPrice[]; settings: CreditSettings }>("/api/v1/spark/ai-credits/model-prices", {
+      noActingCompany: true,
+    }),
+
+  saveModelPrice: (model: string, body: { input_price_per_million: number; output_price_per_million: number }) =>
+    request<ModelPrice>(`/api/v1/spark/ai-credits/model-prices/${encodeURIComponent(model)}`, {
+      method: "PUT",
+      body,
+      noActingCompany: true,
+    }),
+
+  settings: () => request<CreditSettings>("/api/v1/spark/ai-credits/settings", { noActingCompany: true }),
+
+  changeSettings: (body: SettingsChanges) =>
+    request<CreditSettings>("/api/v1/spark/ai-credits/settings", { method: "PATCH", body, noActingCompany: true }),
+
+  actions: () =>
+    request<{ items: ActionRow[]; days: number }>("/api/v1/spark/ai-credits/actions", { noActingCompany: true }),
+
+  usage: (query: { month: string; page?: number; limit?: number; sort?: "cost" | "credits" }) =>
+    request<MonthlyUsage>("/api/v1/spark/ai-credits/usage", { query, noActingCompany: true }),
 };
 
 // ---------------------------------------------------------------------------

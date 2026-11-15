@@ -48,12 +48,20 @@ beforeEach(() => {
 describe("spark_admin sidebar", () => {
   it("lists Licenses before Subscriptions and Quotes, in a Licensing & billing group", () => {
     renderAt("/spark");
-    expect(menuOrder()).toEqual(["Overview", "Companies", "Reports", "Users", "Licenses", "Subscriptions", "Quotes"]);
+    expect(menuOrder()).toEqual(["Overview", "Companies", "Reports", "Users", "Licenses", "Subscriptions", "Quotes",
+      "AI credits", "AI usage"]);
     const group = document.querySelector(".sb-spark-group") as HTMLElement;
     expect(screen.getByText("Licensing & billing")).toBeInTheDocument();
     expect(within(group).getByText("On-premises keys")).toBeInTheDocument();
     expect(within(group).getByText("Cloud plans")).toBeInTheDocument();
     expect(within(group).getByText("Enterprise requests")).toBeInTheDocument();
+  });
+
+  it("lights up only AI usage on the usage page, not AI credits too", () => {
+    renderAt("/spark/ai-credits/usage");
+    const active = Array.from(document.querySelectorAll(".sb-spark-item.act")).map((item) => item.textContent);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toContain("AI usage");
   });
 
   it("gives every item an icon", () => {

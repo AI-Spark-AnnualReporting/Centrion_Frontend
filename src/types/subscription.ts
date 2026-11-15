@@ -5,6 +5,7 @@
 // cloud-subscriptions-v2-redesign.md (one duration + price in USD, Enterprise,
 // department cards).
 
+import type { CreditPack } from "@/types/ai-credits";
 import type { LicensableModule } from "@/types/license";
 
 // One plan = one duration. Enterprise is never bought: it shows Contact us.
@@ -22,6 +23,13 @@ export interface PlanLimits {
 }
 
 // What an Enterprise card shows instead of a price.
+// AI credits a plan gives each period, and the extra pack it sells (null = none).
+// Not part of PlanLimits: on-premises keys have no AI credits.
+export interface PlanCredits {
+  ai_credits?: number;
+  credit_pack?: CreditPack | null;
+}
+
 export interface PlanContact {
   message?: string | null;
   person?: string | null;
@@ -81,7 +89,7 @@ export interface PlanQuote {
 }
 
 // spark_admin's view of a plan.
-export interface SubscriptionPlan extends PlanLimits {
+export interface SubscriptionPlan extends PlanLimits, PlanCredits {
   id: string;
   name: string;
   duration: Duration;
@@ -133,7 +141,7 @@ export interface CustomPlanCompanyPage {
   limit: number;
 }
 
-export interface PlanForm extends PlanLimits {
+export interface PlanForm extends PlanLimits, PlanCredits {
   name: string;
   duration: Duration;
   price: number | null;
@@ -155,7 +163,7 @@ export interface PlanSubscriber {
 }
 
 // A client admin's view of a plan they can buy (or Contact us for Enterprise).
-export interface PlanForClient extends PlanLimits {
+export interface PlanForClient extends PlanLimits, PlanCredits {
   id: string;
   name: string;
   duration: Duration;
@@ -168,7 +176,7 @@ export interface PlanForClient extends PlanLimits {
 }
 
 // One row of company_subscriptions: a checkout waiting for payment, or a paid period.
-export interface CompanySubscription extends PlanLimits {
+export interface CompanySubscription extends PlanLimits, PlanCredits {
   id: string;
   company_id: string;
   plan_id: string;

@@ -16,7 +16,11 @@ vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 
 const sparkPlans = { get: vi.fn(), create: vi.fn(), update: vi.fn(), subscribers: vi.fn(), list: vi.fn(), remove: vi.fn(), companies: vi.fn(), sendOffer: vi.fn(), approveOffer: vi.fn() };
 const subscriptions = { plans: vi.fn(), current: vi.fn(), startCheckout: vi.fn(), pay: vi.fn(), requestQuote: vi.fn() };
-vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions }));
+// The plan editor reads the credit value for its AI credits card.
+const sparkAiCredits = {
+  settings: vi.fn(() => Promise.resolve({ credit_value_usd: 0.02, low_balance_percent: 20, action_minimums: {} })),
+};
+vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions, sparkAiCredits }));
 
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");

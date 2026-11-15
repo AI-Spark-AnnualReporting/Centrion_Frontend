@@ -26,10 +26,10 @@ import { NO_PRICES, OfferBreakdown, dollars, offerAddedUp } from '@/components/s
 import { OfferEmailDialog } from '@/components/subscriptions/OfferEmailDialog';
 import { PlanCard } from '@/components/subscriptions/PlanCard';
 import {
-  ContactCard, DURATIONS, EMPTY_LIMITS, ModulesCard, UsersCard, countWord, durationPer,
+  ContactCard, CreditsCard, DURATIONS, EMPTY_LIMITS, ModulesCard, UsersCard, countWord, durationPer,
 } from '@/components/subscriptions/PlanFields';
 import { useToast } from '@/hooks/use-toast';
-import { sparkPlans } from '@/lib/api';
+import { sparkAiCredits, sparkPlans } from '@/lib/api';
 import type { LicensableModule } from '@/types/license';
 import type {
   CurrentPlan, Duration, OfferPrices, PaidDuration, PlanForm, PlanLimits, PlanStatus, PlanSubscriber, SubscriptionPlan,
@@ -48,7 +48,8 @@ const OFFER_LENGTHS: { key: PaidDuration; label: string; per: string }[] = [
 // A stable empty list, so the Send popup doesn't start again on every render.
 const NO_EMAILS: string[] = [];
 
-const LIMIT_KEYS: (keyof PlanLimits)[] = ['modules', 'report_limits', 'max_users'];
+// What subscriptions copy from the plan (changing them asks "Apply to everyone?").
+const LIMIT_KEYS: (keyof PlanForm)[] = ['modules', 'report_limits', 'max_users', 'ai_credits', 'credit_pack'];
 
 function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -60,11 +61,19 @@ function sortedLimits(limits: Record<string, number>): [string, number][] {
 }
 
 /** True if the form changes what subscriptions copy from the plan
- *  (modules, report limits, users) — not the name or price. */
+ *  (modules, report limits, users, AI credits) — not the name or price. */
 export function limitsChanged(plan: SubscriptionPlan, form: PlanForm): boolean {
   for (const key of LIMIT_KEYS) {
     let before: unknown = plan[key];
     let after: unknown = form[key];
+    if (key === 'ai_credits') {
+      before = plan.ai_credits ?? 0;
+      after = form.ai_credits ?? 0;
+    }
+    if (key === 'credit_pack') {
+      before = plan.credit_pack ?? null;
+      after = form.credit_pack ?? null;
+    }
     if (key === 'modules') {
       before = [...plan.modules].sort();
       after = [...form.modules].sort();
@@ -79,7 +88,7 @@ export function limitsChanged(plan: SubscriptionPlan, form: PlanForm): boolean {
 }
 
 function formFromPlan(plan?: SubscriptionPlan): PlanForm {
-  if (!plan) return { ...EMPTY_LIMITS, name: '', duration: 'yearly', price: null, contact: null };
+  if (!plan) return { ...EMPTY_LIMITS, name: '', duration: 'yearly', price: null, contact: null, ai_credits: 0, credit_pack: null };
   return {
     name: plan.name,
     duration: plan.duration,
@@ -88,6 +97,8 @@ function formFromPlan(plan?: SubscriptionPlan): PlanForm {
     modules: plan.modules,
     report_limits: plan.report_limits,
     max_users: plan.max_users,
+    ai_credits: plan.ai_credits ?? 0,
+    credit_pack: plan.credit_pack ?? null,
   };
 }
 
@@ -168,6 +179,16 @@ export default function SparkPlanEditorPage() {
   const [approveOpen, setApproveOpen] = useState(false);
   // What the last emailed offer said, to spot edits made since (they need sending again).
   const [sentSnapshot, setSentSnapshot] = useState('');
+  // The AI cost one credit covers, for "Spark keeps $x per credit" (null = couldn't load).
+  const [creditValue, setCreditValue] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    sparkAiCredits.settings()
+      .then((settings) => { if (!cancelled) setCreditValue(settings.credit_value_usd); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -423,6 +444,7 @@ export default function SparkPlanEditorPage() {
             <div className="sub-ed-col">
               <UsersCard value={form} onChange={setLimits} current={current ?? undefined}
                 cardPrice={isQuote ? { price: prices.users, onPriceChange: (users) => setPrices({ ...prices, users }) } : undefined} />
+              <CreditsCard value={form} onChange={(credits) => setForm({ ...form, ...credits })} creditValue={creditValue} />
             </div>
           </>
         )}

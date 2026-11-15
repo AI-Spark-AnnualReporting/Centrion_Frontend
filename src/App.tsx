@@ -65,6 +65,10 @@ const SparkPlanEditorPage = lazy(() => import("./pages/spark/SparkPlanEditorPage
 const SparkLicenseKeyPage = lazy(() => import("./pages/spark/SparkLicenseKeyPage"));
 const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
 const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
+// AI credits (plan: Centriton/.claude/plans/ai-credits.md) — cloud only.
+const AiCreditsPage = lazy(() => import("./pages/admin/AiCreditsPage"));
+const SparkAiCreditsPage = lazy(() => import("./pages/spark/SparkAiCreditsPage"));
+const SparkAiUsagePage = lazy(() => import("./pages/spark/SparkAiUsagePage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
@@ -194,6 +198,8 @@ const App = () => (
             <Route path="/spark/subscriptions/new" element={<SparkPlanEditorPage />} />
             <Route path="/spark/subscriptions/:planId/edit" element={<SparkPlanEditorPage />} />
             <Route path="/spark/quotes" element={<SparkQuotesPage />} />
+            <Route path="/spark/ai-credits" element={<SparkAiCreditsPage />} />
+            <Route path="/spark/ai-credits/usage" element={<SparkAiUsagePage />} />
             {/* One page for the three lists; an unknown section redirects back. */}
             <Route path="/spark/:section" element={<SparkSectionPage />} />
           </Route>
@@ -331,6 +337,7 @@ const App = () => (
             <Route element={<ProtectedRoute requiredRole="admin" />}>
               <Route path="/admin-console/subscription" element={<SubscriptionPage />} />
               <Route path="/admin-console/subscription/checkout" element={<CheckoutPage />} />
+              <Route path="/admin-console/ai-credits" element={<AiCreditsPage />} />
             </Route>
           )}
           {/* Annual Report (Cycles) — admin + IR, inside the main shell so the
