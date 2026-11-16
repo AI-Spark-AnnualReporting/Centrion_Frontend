@@ -34,8 +34,6 @@ export interface CompanyLicense {
   report_limits: Record<string, number>;
   max_seats: number | null;
   seats_used: number;
-  // Each people limit: used now and the most allowed (max null = no valid license).
-  people?: PeopleUsage;
   reports_used: Record<string, number>;
   lock_id: string | null;
   lock_reason: string | null;
@@ -64,11 +62,7 @@ export interface SparkLicenseRow {
   issued_at: string | null;
   modules: string[];
   report_limits: Record<string, number>;
-  max_seats: number | null;
-  // The key's people (null until there's a valid key).
-  max_pms?: number | null;
-  max_ir_users?: number | null;
-  department_sizes?: number[] | null;
+  max_seats: number | null;            // users, the admin included (null until there's a valid key)
   server_id: string | null;           // shown as "Client ID"
   seats_used: number | null;          // null for on-premises (lives on their server)
   reports_counted: Record<string, number>;
@@ -106,9 +100,7 @@ export interface SparkUpgradeRequest {
 export interface GenerateLicensePayload {
   modules: string[];
   report_limits: Record<string, number>;   // every chosen module that counts reports: at least 1
-  max_pms: number;
-  max_ir_users: number;
-  department_sizes: number[];              // users per department card, besides its HOD
+  max_users: number;                       // everyone who can log in, the admin included
   starts_at: string;
   expires_at: string;
   server_id?: string;
@@ -118,13 +110,6 @@ export interface GeneratedLicense {
   license_key: string;
   activated: boolean;   // false for on-premises: copy the key and send it
   claims: Record<string, unknown>;
-}
-
-export interface PeopleUsage {
-  pms: { used: number; max: number | null };
-  ir_users: { used: number; max: number | null };
-  departments: { used: number; max: number | null };
-  department_users: { used: number; max: number | null };
 }
 
 // GET /license/usage — any company user. How much room is left per limit, so
@@ -138,6 +123,5 @@ export interface LicenseUsage {
   is_admin?: boolean;
   upgrade_requested_at?: string | null;
   seats?: { used: number; max: number | null };
-  people?: PeopleUsage;
   reports?: Record<string, { module_on: boolean; used: number; limit: number | null }>;
 }

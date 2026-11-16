@@ -48,6 +48,7 @@ function renderAt(path: string) {
           <Route path="/dashboard" element={<div>DASHBOARD</div>} />
           <Route path="/companies" element={<div>DIRECTORY</div>} />
           <Route path="/onboarding" element={<div>WIZARD</div>} />
+          <Route path="/change-password" element={<div>CHANGE PASSWORD</div>} />
           <Route path="/annual-report" element={<div>CYCLES</div>} />
         </Route>
       </Routes>
@@ -73,6 +74,21 @@ describe("spark_internal routing", () => {
   it("does not trap them on the directory itself", () => {
     renderAt("/companies");
     expect(screen.getByText("DIRECTORY")).toBeInTheDocument();
+  });
+
+  // A Spark staff member made from the Spark Admin's Internal users tab must
+  // change their temp password first. The company gate used to bounce
+  // /change-password → /companies → /change-password for ever (blank page).
+  it("lets a new Spark user with a temp password stay on change-password", () => {
+    mockAuth = { user: { ...SPARK, must_change_password: true }, loading: false, actingCompany: null };
+    renderAt("/change-password");
+    expect(screen.getByText("CHANGE PASSWORD")).toBeInTheDocument();
+  });
+
+  it("sends a new Spark user with a temp password to change-password first", () => {
+    mockAuth = { user: { ...SPARK, must_change_password: true }, loading: false, actingCompany: null };
+    renderAt("/dashboard");
+    expect(screen.getByText("CHANGE PASSWORD")).toBeInTheDocument();
   });
 
   it("lets them reach the wizard with no company yet — that is Add Company", () => {

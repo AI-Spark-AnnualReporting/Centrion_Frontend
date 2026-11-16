@@ -55,27 +55,25 @@ export function RunBanner({ run, running, percent, detail }: {
         padding: '12px 16px',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* One line: what this is, which file and year, and whether it replaced the
+          company-wide results. It wraps on a narrow screen. */}
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         {running && (
           <span className="proc-ring" aria-hidden="true" style={{ width: 13, height: 13, borderWidth: 2, flexShrink: 0 }} />
         )}
         <span style={{ fontSize: 12.5, fontWeight: 800, color: '#1A1D2E' }}>
           {bannerHeading(running, files.length)}
         </span>
+        {files.map((file) => (
+          <FileChip key={file.document_id} file={file} />
+        ))}
+        {overrule && run && <OverruleLine text={overrule} overrules={run.overrules} />}
         {running && percent !== null && (
           <span style={{ marginInlineStart: 'auto', fontSize: 11, fontWeight: 700, color: '#4040C8' }}>
             {percent}%
           </span>
         )}
       </div>
-      {files.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {files.map((file) => (
-            <FileChip key={file.document_id} file={file} />
-          ))}
-        </div>
-      )}
-      {overrule && run && <OverruleLine text={overrule} overrules={run.overrules} />}
       {running && detail && (
         <div style={{ fontSize: 11, color: '#5A6080', marginTop: 8 }}>{detail}</div>
       )}
@@ -109,7 +107,7 @@ function OverruleLine({ text, overrules }: { text: string; overrules: boolean })
   return (
     <div
       style={{
-        display: 'inline-block', marginTop: 8, borderRadius: 8, padding: '4px 10px',
+        display: 'inline-block', borderRadius: 8, padding: '4px 10px',
         fontSize: 11.5, fontWeight: 700,
         color: overrules ? '#0F9D6B' : '#B45309',
         background: overrules ? '#E9F7F1' : '#FDF3E2',

@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import type {
   AnnualReportExtraction as Extraction,
   LiveRun,
   LiveStep,
   LiveStepState,
 } from '@/types/company';
+
+// The "Last report we read" strip on Upload Previous Reports (AnnualReportExtraction),
+// the loading / polling it does for the page, and the detail blocks the chip popups
+// reuse. The 11-row table is no longer on the page; it only appears inside the
+// General info popup, so it is tested on its own here (LiveStepsTable).
 
 const getExtraction = vi.fn();
 
@@ -17,7 +22,13 @@ vi.mock('@/lib/api', () => ({
   companies: { getAnnualReportExtraction: getExtraction },
 }));
 
-const { default: AnnualReportExtraction } = await import('@/components/reports/AnnualReportExtraction');
+const {
+  default: AnnualReportExtraction,
+  SummaryDetails,
+  SummaryPopup,
+} = await import('@/components/reports/AnnualReportExtraction');
+const { LiveStepsTable } = await import('@/components/reports/ExtractionLiveTable');
+const { chipSteps } = await import('@/components/reports/extractionLive');
 
 const EMPTY_PROFILE = {
   description: null, sector_id: null, sector_name: null, employee_count: null, founded_year: null,
@@ -68,13 +79,6 @@ function fullExtraction(): Extraction {
   return data;
 }
 
-// The rows drawn when the backend sends no `live` block (worked out from stored data).
-const FALLBACK_LABELS = [
-  'Reading the report', 'Writing tone', 'Themes', 'Key highlights', 'Company profile',
-  'Contents page (previous outline)', 'Revenue', 'Net profit', 'Suggested departments',
-  'Search index for the assistant',
-];
-
 const STEP_LABELS: [string, string][] = [
   ['read', 'Reading the report'], ['tone', 'Writing tone'], ['themes', 'Themes'],
   ['highlights', 'Key highlights'], ['profile', 'Company profile'],
@@ -112,173 +116,39 @@ function liveExtraction(running: boolean, steps: LiveStep[], run: LiveRun | null
   return data;
 }
 
-describe('AnnualReportExtraction', () => {
+/** The state of one step in the last result handed to the page through onData. */
+function lastState(onData: ReturnType<typeof vi.fn>, key: string): LiveStepState | undefined {
+  const data = onData.mock.lastCall?.[0] as Extraction | undefined;
+  if (!data) return undefined;
+  return chipSteps(data).find((step) => step.key === key)?.state;
+}
+
+describe('the "Last report we read" strip', () => {
   // Braces matter: a function returned from beforeEach is run as a cleanup step,
   // and mockReset() returns the mock — vitest would call the fake request again.
   beforeEach(() => {
     getExtraction.mockReset();
   });
 
-  async function openPopup(label: string) {
-    fireEvent.click(await screen.findByLabelText(label));
-    return screen.findByRole('dialog');
-  }
-
-  it('shows only the table on the page, not the long list', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    await screen.findByLabelText('Writing tone: extracted');
-    expect(getExtraction).toHaveBeenCalledWith('co-1');
-    // The tone row prints the first words of the tone; the rest stays in the popups.
-    expect(screen.getByText('Use formal language.')).toBeInTheDocument();
-    expect(screen.queryByText('brief, then pivot')).not.toBeInTheDocument();
-    expect(screen.queryByText('strategic growth')).not.toBeInTheDocument();
-    expect(screen.queryByText('Revenue rose.')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('shows the revenue and profit in the dashboard popup', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Revenue: extracted');
-    expect(within(popup).getByText('398')).toBeInTheDocument();
-    expect(within(popup).getByText('مليار')).toBeInTheDocument();
-  });
-
-  it('shows the departments in their popup', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Suggested departments: extracted');
-    expect(within(popup).getByText('Matches an existing department')).toBeInTheDocument();
-  });
-
-  it('keeps an Arabic quote in its own direction', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Writing tone: extracted');
-    expect(within(popup).getByText('تتمثل رؤية أرامكو السعودية')).toHaveAttribute('dir', 'auto');
-  });
-
-  it('folds a long contents page', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Contents page (previous outline): extracted');
-    expect(within(popup).getByText('Entry 15')).toBeInTheDocument();
-    expect(within(popup).queryByText('Entry 16')).not.toBeInTheDocument();
-    fireEvent.click(within(popup).getByText('Show all 20'));
-    expect(within(popup).getByText('Entry 20')).toBeInTheDocument();
-  });
-
-  it('says what is missing instead of hiding it', async () => {
-    getExtraction.mockResolvedValue(emptyExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Contents page (previous outline): not extracted');
-    expect(within(popup).getByText('No sections were created from this report.')).toBeInTheDocument();
-  });
-
-  it('closes the popup with the close button', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    const popup = await openPopup('Writing tone: extracted');
-    fireEvent.click(within(popup).getByLabelText('Close'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('shows the parts the server could not read', async () => {
-    const data = fullExtraction();
-    data.errors = ['Could not count a report\'s searchable chunks.'];
-    getExtraction.mockResolvedValue(data);
-    render(<AnnualReportExtraction />);
-    expect(await screen.findByText('Could not count a report\'s searchable chunks.')).toBeInTheDocument();
-  });
-
-  it('shows one quiet line when the request fails', async () => {
-    getExtraction.mockRejectedValue(new Error('down'));
-    render(<AnnualReportExtraction />);
-    expect(await screen.findByText(/Could not load what was extracted/)).toBeInTheDocument();
-  });
-
-  it('shows a tick for every part of a full extraction', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    expect(await screen.findByLabelText('Writing tone: extracted')).toBeInTheDocument();
-    for (const label of FALLBACK_LABELS) {
-      expect(screen.getByLabelText(`${label}: extracted`)).toBeInTheDocument();
-    }
-  });
-
-  it('shows a cross for every part when nothing was extracted', async () => {
-    getExtraction.mockResolvedValue(emptyExtraction());
-    render(<AnnualReportExtraction />);
-    expect(await screen.findByLabelText('Writing tone: not extracted')).toBeInTheDocument();
-    for (const label of FALLBACK_LABELS) {
-      expect(screen.getByLabelText(`${label}: not extracted`)).toBeInTheDocument();
-    }
-  });
-
-  it('opens the tone details in a popup', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    fireEvent.click(await screen.findByLabelText('Writing tone: extracted'));
-    const popup = await screen.findByRole('dialog');
-    expect(within(popup).getByText('Use formal language.')).toBeInTheDocument();
-    expect(within(popup).queryByText('strategic growth')).not.toBeInTheDocument();
-  });
-
-  it('opens the previous outline sections in a popup', async () => {
-    getExtraction.mockResolvedValue(fullExtraction());
-    render(<AnnualReportExtraction />);
-    fireEvent.click(await screen.findByLabelText('Contents page (previous outline): extracted'));
-    const popup = await screen.findByRole('dialog');
-    expect(within(popup).getByText('generate (confirmed)')).toBeInTheDocument();
-  });
-});
-
-describe('AnnualReportExtraction live table', () => {
-  beforeEach(() => {
-    getExtraction.mockReset();
-  });
-
-  it('draws every live state with its own label, value and reason', async () => {
-    const steps = liveSteps('pending', {
-      read: { state: 'done', value: '168 pages' },
-      tone: { state: 'running' },
-      outline: { state: 'failed', reason: 'no_contents_page_found', message: 'We could not find a contents page in the first 25 pages.' },
-      departments: { state: 'skipped', reason: 'older_year', message: 'Older than your FY-2024 report, so this was not replaced.' },
-    });
-    getExtraction.mockResolvedValue(liveExtraction(true, steps));
-    const { unmount } = render(<AnnualReportExtraction />);
-
-    const done = await screen.findByLabelText('Reading the report: extracted');
-    expect(within(done).getByText('168 pages')).toBeInTheDocument();
-    expect(screen.getByLabelText('Writing tone: in progress')).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByLabelText('Themes: waiting')).toBeInTheDocument();
-    const failed = screen.getByLabelText('Contents page (previous outline): not extracted');
-    expect(within(failed).getByText('We could not find a contents page in the first 25 pages.')).toBeInTheDocument();
-    const skipped = screen.getByLabelText('Suggested departments: skipped');
-    expect(within(skipped).getByText('Older than your FY-2024 report, so this was not replaced.')).toBeInTheDocument();
-    expect(screen.getByLabelText('ESG frameworks: waiting')).toBeInTheDocument();
-    expect(screen.getByText('3 of 11 finished')).toBeInTheDocument();
-    unmount();
-  });
-
-  it('keeps a row closed while it is still being worked on', async () => {
-    getExtraction.mockResolvedValue(liveExtraction(true, liveSteps('done', { tone: { state: 'running' } })));
-    const { unmount } = render(<AnnualReportExtraction />);
-    fireEvent.click(await screen.findByLabelText('Writing tone: in progress'));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    unmount();
-  });
-
-  it('opens the details popup from a finished live row', async () => {
+  it('shows only the strip, with no table of steps on the page', async () => {
     getExtraction.mockResolvedValue(liveExtraction(false, liveSteps('done')));
     render(<AnnualReportExtraction />);
-    fireEvent.click(await screen.findByLabelText('Net profit: extracted'));
-    const popup = await screen.findByRole('dialog');
-    expect(within(popup).getByText('398')).toBeInTheDocument();
+    expect(await screen.findByText('Last report we read')).toBeInTheDocument();
+    expect(getExtraction).toHaveBeenCalledWith('co-1');
+    expect(screen.queryByText('What we extracted from your annual report')).not.toBeInTheDocument();
+    expect(screen.queryByText('What we read')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Writing tone: extracted')).not.toBeInTheDocument();
   });
 
-  it('shows the file, the year and the newest-report line in the banner', async () => {
+  it('hands every loaded result to the page, for the chips on the file row', async () => {
+    const onData = vi.fn();
+    getExtraction.mockResolvedValue(liveExtraction(false, liveSteps('done')));
+    render(<AnnualReportExtraction onData={onData} />);
+    await waitFor(() => expect(onData).toHaveBeenCalled());
+    expect(lastState(onData, 'tone')).toBe('done');
+  });
+
+  it('shows the file, the year and the newest-report line, with progress while reading', async () => {
     getExtraction.mockResolvedValue(liveExtraction(true, liveSteps('pending')));
     const { unmount } = render(<AnnualReportExtraction />);
     expect(await screen.findByText('Reading your report now')).toBeInTheDocument();
@@ -294,7 +164,7 @@ describe('AnnualReportExtraction live table', () => {
     ['same_year_reupload', true, 'Same year uploaded again: replaces the earlier FY-2024 results'],
     ['older_year', false, 'Older than your FY-2024 report: kept for reference, company-wide results unchanged'],
     ['unknown_year', false, "We could not tell this report's year, so company-wide results were left unchanged"],
-  ] as const)('words the banner for %s', async (reason, overrules, sentence) => {
+  ] as const)('words the strip for %s', async (reason, overrules, sentence) => {
     const run = liveRun({
       overrule_reason: reason,
       overrules,
@@ -336,41 +206,53 @@ describe('AnnualReportExtraction live table', () => {
     expect(await screen.findByText('First report: sets your company-wide results')).toBeInTheDocument();
   });
 
-  it('ends the unfinished rows and says so when the run stopped half way', async () => {
-    // The backend stops calling a run "running" 15 minutes after it started, or
+  it('says so when a run stopped half way, and ends its unfinished steps', async () => {
+    // The backend stops calling a run "running" 15 minutes after its last save, or
     // after a restart, while the recorded steps still say running / pending.
+    const onData = vi.fn();
     const steps = liveSteps('pending', {
       read: { state: 'done', value: '168 pages' },
       tone: { state: 'running' },
     });
     getExtraction.mockResolvedValue(liveExtraction(false, steps));
-    render(<AnnualReportExtraction />);
-
+    render(<AnnualReportExtraction onData={onData} />);
     expect(await screen.findByText(/This run stopped before it finished/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Reading the report: extracted')).toBeInTheDocument();
-    const tone = screen.getByLabelText('Writing tone: skipped');
-    expect(within(tone).getByText('This step did not finish.')).toBeInTheDocument();
-    expect(tone).not.toHaveAttribute('aria-busy');
-    expect(screen.getByLabelText('Themes: skipped')).toBeInTheDocument();
-    expect(screen.queryByText('Working on it…')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/: (in progress|waiting)$/)).not.toBeInTheDocument();
+    expect(lastState(onData, 'read')).toBe('done');
+    expect(lastState(onData, 'tone')).toBe('skipped');
+    expect(lastState(onData, 'themes')).toBe('skipped');
   });
 
-  it('shows no banner for a company with no recorded run', async () => {
+  it('shows no strip for a company with no recorded run', async () => {
+    const onData = vi.fn();
     getExtraction.mockResolvedValue(liveExtraction(false, liveSteps('done'), null));
-    render(<AnnualReportExtraction />);
-    await screen.findByLabelText('Writing tone: extracted');
+    render(<AnnualReportExtraction onData={onData} />);
+    await waitFor(() => expect(onData).toHaveBeenCalled());
     expect(screen.queryByText(/Last report we read|Reading your report now/)).not.toBeInTheDocument();
   });
 
-  it('falls back to waiting bars from the status when "live" is missing mid-run', async () => {
+  it('falls back to the status when "live" is missing mid-run', async () => {
+    const onData = vi.fn();
     const data = emptyExtraction();
     data.status.report_extraction_status = 'processing';
     getExtraction.mockResolvedValue(data);
-    const { unmount } = render(<AnnualReportExtraction />);
-    expect(await screen.findByLabelText('Writing tone: waiting')).toBeInTheDocument();
-    expect(screen.getByText('Reading your report now')).toBeInTheDocument();
+    const { unmount } = render(<AnnualReportExtraction onData={onData} />);
+    expect(await screen.findByText('Reading your report now')).toBeInTheDocument();
+    expect(lastState(onData, 'tone')).toBe('pending');
     unmount();
+  });
+
+  it('shows the parts the server could not read', async () => {
+    const data = liveExtraction(false, liveSteps('done'));
+    data.errors = ['Could not count a report\'s searchable chunks.'];
+    getExtraction.mockResolvedValue(data);
+    render(<AnnualReportExtraction />);
+    expect(await screen.findByText('Could not count a report\'s searchable chunks.')).toBeInTheDocument();
+  });
+
+  it('shows one quiet line when the request fails', async () => {
+    getExtraction.mockRejectedValue(new Error('down'));
+    render(<AnnualReportExtraction />);
+    expect(await screen.findByText(/Could not load what was extracted/)).toBeInTheDocument();
   });
 
   it('says the backend is too old on a 404', async () => {
@@ -382,7 +264,99 @@ describe('AnnualReportExtraction live table', () => {
   });
 });
 
-describe('AnnualReportExtraction polling', () => {
+describe('steps worked out from stored data (no "live" block)', () => {
+  it('is a tick for every part of a full extraction', () => {
+    const steps = chipSteps(fullExtraction());
+    expect(steps).toHaveLength(10);
+    for (const step of steps) expect(step.state).toBe('done');
+  });
+
+  it('is a cross for every part when nothing was extracted', () => {
+    for (const step of chipSteps(emptyExtraction())) expect(step.state).toBe('failed');
+  });
+});
+
+describe('the detail popups the chips open', () => {
+  function renderDetails(summaryKey: 'tone' | 'dashboard' | 'outline' | 'departments', data = fullExtraction()) {
+    const onClose = vi.fn();
+    render(
+      <SummaryPopup title="Details" onClose={onClose}>
+        <SummaryDetails summaryKey={summaryKey} data={data} />
+      </SummaryPopup>,
+    );
+    return { popup: screen.getByRole('dialog'), onClose };
+  }
+
+  it('shows the revenue and profit', () => {
+    const { popup } = renderDetails('dashboard');
+    expect(within(popup).getByText('398')).toBeInTheDocument();
+    expect(within(popup).getByText('مليار')).toBeInTheDocument();
+  });
+
+  it('shows the departments', () => {
+    const { popup } = renderDetails('departments');
+    expect(within(popup).getByText('Matches an existing department')).toBeInTheDocument();
+  });
+
+  it('shows the tone and keeps an Arabic quote in its own direction', () => {
+    const { popup } = renderDetails('tone');
+    expect(within(popup).getByText('Use formal language.')).toBeInTheDocument();
+    expect(within(popup).getByText('تتمثل رؤية أرامكو السعودية')).toHaveAttribute('dir', 'auto');
+    expect(within(popup).queryByText('strategic growth')).not.toBeInTheDocument();
+  });
+
+  it('shows the outline sections and folds a long contents page', () => {
+    const { popup } = renderDetails('outline');
+    expect(within(popup).getByText('generate (confirmed)')).toBeInTheDocument();
+    expect(within(popup).getByText('Entry 15')).toBeInTheDocument();
+    expect(within(popup).queryByText('Entry 16')).not.toBeInTheDocument();
+    fireEvent.click(within(popup).getByText('Show all 20'));
+    expect(within(popup).getByText('Entry 20')).toBeInTheDocument();
+  });
+
+  it('says what is missing instead of hiding it', () => {
+    const { popup } = renderDetails('outline', emptyExtraction());
+    expect(within(popup).getByText('No sections were created from this report.')).toBeInTheDocument();
+  });
+
+  it('closes with the close button and with Escape', () => {
+    const { popup, onClose } = renderDetails('tone');
+    fireEvent.click(within(popup).getByLabelText('Close'));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the step list inside the General info popup', () => {
+  it('draws every state with its own label, value and reason', () => {
+    const steps = liveSteps('pending', {
+      read: { state: 'done', value: '168 pages' },
+      tone: { state: 'running' },
+      outline: { state: 'failed', reason: 'no_contents_page_found', message: 'We could not find a contents page in the first 25 pages.' },
+      departments: { state: 'skipped', reason: 'older_year', message: 'Older than your FY-2024 report, so this was not replaced.' },
+    });
+    render(<LiveStepsTable steps={steps} onOpen={vi.fn()} />);
+    expect(within(screen.getByLabelText('Reading the report: extracted')).getByText('168 pages')).toBeInTheDocument();
+    expect(screen.getByLabelText('Writing tone: in progress')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByLabelText('Themes: waiting')).toBeInTheDocument();
+    const failed = screen.getByLabelText('Contents page (previous outline): not extracted');
+    expect(within(failed).getByText('We could not find a contents page in the first 25 pages.')).toBeInTheDocument();
+    const skipped = screen.getByLabelText('Suggested departments: skipped');
+    expect(within(skipped).getByText('Older than your FY-2024 report, so this was not replaced.')).toBeInTheDocument();
+    expect(screen.getByText('3 of 11 finished')).toBeInTheDocument();
+  });
+
+  it('opens a finished row with details, but not one still being worked on', () => {
+    const onOpen = vi.fn();
+    render(<LiveStepsTable steps={liveSteps('done', { tone: { state: 'running' } })} onOpen={onOpen} />);
+    fireEvent.click(screen.getByLabelText('Writing tone: in progress'));
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('Net profit: extracted'));
+    expect(onOpen).toHaveBeenCalledWith('dashboard');
+  });
+});
+
+describe('polling for the page', () => {
   beforeEach(() => {
     getExtraction.mockReset();
     vi.useFakeTimers();
@@ -399,28 +373,30 @@ describe('AnnualReportExtraction polling', () => {
     });
   }
 
-  it('polls every 2 s while running, updates the rows, then stops', async () => {
+  it('polls every 2 s while running, passes each result on, then stops', async () => {
     const onRunningChange = vi.fn();
+    const onData = vi.fn();
     getExtraction
       .mockResolvedValueOnce(liveExtraction(true, liveSteps('pending', { read: { state: 'running' } })))
       .mockResolvedValueOnce(liveExtraction(true, liveSteps('pending', { read: { state: 'done', value: '168 pages' }, tone: { state: 'running' } })))
       .mockResolvedValue(liveExtraction(false, liveSteps('done')));
-    render(<AnnualReportExtraction onRunningChange={onRunningChange} />);
+    render(<AnnualReportExtraction onRunningChange={onRunningChange} onData={onData} />);
 
     await advance(0);
     expect(getExtraction).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(lastState(onData, 'read')).toBe('running');
     expect(onRunningChange).toHaveBeenLastCalledWith(true);
 
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText('Reading the report: extracted')).toBeInTheDocument();
-    expect(screen.getByLabelText('Writing tone: in progress')).toBeInTheDocument();
+    expect(lastState(onData, 'read')).toBe('done');
+    expect(lastState(onData, 'tone')).toBe('running');
 
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(3);
-    expect(screen.getByLabelText('Writing tone: extracted')).toBeInTheDocument();
+    expect(lastState(onData, 'tone')).toBe('done');
     expect(onRunningChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByText('Last report we read')).toBeInTheDocument();
 
     await advance(20000);
     expect(getExtraction).toHaveBeenCalledTimes(3);
@@ -445,24 +421,25 @@ describe('AnnualReportExtraction polling', () => {
     expect(getExtraction).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the last rows and slows down when a poll fails', async () => {
+  it('keeps the last result and slows down when a poll fails', async () => {
+    const onData = vi.fn();
     getExtraction
       .mockResolvedValueOnce(liveExtraction(true, liveSteps('pending', { read: { state: 'done', value: '168 pages' } })))
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValue(liveExtraction(false, liveSteps('done')));
-    render(<AnnualReportExtraction />);
+    render(<AnnualReportExtraction onData={onData} />);
     await advance(0);
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(2);
     // The failed poll changes nothing on screen.
-    expect(screen.getByText('168 pages')).toBeInTheDocument();
+    expect(screen.getByText('Reading your report now')).toBeInTheDocument();
     expect(screen.queryByText(/Could not load/)).not.toBeInTheDocument();
     // The next try waits 4 s, not 2 s.
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(2);
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(3);
-    expect(screen.getByLabelText('Writing tone: extracted')).toBeInTheDocument();
+    expect(lastState(onData, 'tone')).toBe('done');
   });
 
   it('gives up calmly after 15 minutes', async () => {
@@ -516,8 +493,11 @@ describe('AnnualReportExtraction polling', () => {
 
   it('does not unlock the form when the polls right after Process fail', async () => {
     const onRunningChange = vi.fn();
+    const onData = vi.fn();
     getExtraction.mockResolvedValue(liveExtraction(false, liveSteps('done')));
-    const { rerender } = render(<AnnualReportExtraction refreshKey={0} onRunningChange={onRunningChange} />);
+    const { rerender } = render(
+      <AnnualReportExtraction refreshKey={0} onRunningChange={onRunningChange} onData={onData} />,
+    );
     await advance(0);
 
     // Three failures (at 0 s, 4 s and 12 s) take the loop well past the 6 s start grace.
@@ -527,18 +507,18 @@ describe('AnnualReportExtraction polling', () => {
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValue(liveExtraction(true, liveSteps('pending', { read: { state: 'running' } })));
     onRunningChange.mockClear();
-    rerender(<AnnualReportExtraction refreshKey={1} onRunningChange={onRunningChange} />);
+    rerender(<AnnualReportExtraction refreshKey={1} onRunningChange={onRunningChange} onData={onData} />);
     await advance(0);
     await advance(4000);
     await advance(8000);
     expect(getExtraction).toHaveBeenCalledTimes(4);
-    // No answer yet, so nothing was concluded and the old rows are still there.
+    // No answer yet, so nothing was concluded and the old result is still shown.
     expect(onRunningChange).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Writing tone: extracted')).toBeInTheDocument();
+    expect(screen.getByText('Last report we read')).toBeInTheDocument();
     await advance(10000);
     expect(getExtraction).toHaveBeenCalledTimes(5);
     expect(onRunningChange).toHaveBeenLastCalledWith(true);
-    expect(screen.getByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(lastState(onData, 'read')).toBe('running');
   });
 
   it('retries after Process even when the first page load had failed', async () => {
@@ -559,11 +539,12 @@ describe('AnnualReportExtraction polling', () => {
     expect(screen.queryByText(/Could not load what was extracted/)).not.toBeInTheDocument();
     await advance(4000);
     expect(onRunningChange).toHaveBeenLastCalledWith(true);
-    expect(screen.getByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(screen.getByText('Reading your report now')).toBeInTheDocument();
   });
 
   it('unlocks the form but keeps looking slowly when a recent run stalled', async () => {
     const onRunningChange = vi.fn();
+    const onData = vi.fn();
     const stalled = liveExtraction(false, liveSteps('pending', { read: { state: 'done', value: '168 pages' }, tone: { state: 'running' } }));
     // Started 20 minutes ago: past the backend's 15-minute window, but maybe still alive.
     stalled.status.onboarding_progress = {
@@ -573,16 +554,16 @@ describe('AnnualReportExtraction polling', () => {
     getExtraction
       .mockResolvedValueOnce(stalled)
       .mockResolvedValue(liveExtraction(false, liveSteps('done')));
-    render(<AnnualReportExtraction onRunningChange={onRunningChange} />);
+    render(<AnnualReportExtraction onRunningChange={onRunningChange} onData={onData} />);
     await advance(0);
     expect(onRunningChange).toHaveBeenLastCalledWith(false);
-    expect(screen.getByLabelText('Writing tone: skipped')).toBeInTheDocument();
+    expect(lastState(onData, 'tone')).toBe('skipped');
 
     await advance(2000);
     expect(getExtraction).toHaveBeenCalledTimes(1);
     await advance(8000);
     expect(getExtraction).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText('Writing tone: extracted')).toBeInTheDocument();
+    expect(lastState(onData, 'tone')).toBe('done');
     expect(screen.queryByText(/This run stopped before it finished/)).not.toBeInTheDocument();
     // The run finished, so there is nothing left to look for.
     await advance(30000);
@@ -597,15 +578,15 @@ describe('AnnualReportExtraction polling', () => {
     expect(getExtraction).toHaveBeenCalledTimes(1);
   });
 
-  it('reloads without blanking the rows when the page starts a new run', async () => {
+  it('reloads without blanking the strip when the page starts a new run', async () => {
     getExtraction.mockResolvedValue(liveExtraction(false, liveSteps('done')));
     const { rerender } = render(<AnnualReportExtraction refreshKey={0} />);
     await advance(0);
     getExtraction.mockResolvedValue(liveExtraction(true, liveSteps('pending', { read: { state: 'running' } })));
     rerender(<AnnualReportExtraction refreshKey={1} />);
-    // Still showing the old rows while the reload is in flight.
-    expect(screen.getByLabelText('Writing tone: extracted')).toBeInTheDocument();
+    // Still showing the old strip while the reload is in flight.
+    expect(screen.getByText('Last report we read')).toBeInTheDocument();
     await advance(0);
-    expect(screen.getByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(screen.getByText('Reading your report now')).toBeInTheDocument();
   });
 });

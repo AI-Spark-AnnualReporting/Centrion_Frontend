@@ -134,24 +134,20 @@ describe("Create Cycle button", () => {
   });
 });
 
-describe("roomFor with the per-role limits", () => {
-  const people = {
-    pms: { used: 1, max: 2 }, ir_users: { used: 1, max: 1 },
-    departments: { used: 2, max: 3 }, department_users: { used: 5, max: 8 },
-  };
-
-  it("shows each limit, and warns when one is full (the total still has room)", () => {
-    expect(roomFor(usageOf({ people }), "seats")).toMatchObject({
-      blocked: false, tone: "low", hint: "PMs 1/2 · IR users 1/1 · Departments 2/3 · Department users 5/8",
+describe("roomFor users: one total, the admin included", () => {
+  it("shows used of max when there's room", () => {
+    expect(roomFor(usageOf({ seats: { used: 10, max: 25 } }), "seats")).toMatchObject({
+      blocked: false, tone: "ok", hint: "10 of 25 users",
     });
   });
 
-  it("is ok when every limit has room", () => {
-    const roomy = { ...people, ir_users: { used: 0, max: 1 } };
-    expect(roomFor(usageOf({ people: roomy }), "seats")).toMatchObject({ blocked: false, tone: "ok" });
+  it("warns when only a few are left", () => {
+    expect(roomFor(usageOf({ seats: { used: 23, max: 25 } }), "seats")).toMatchObject({ blocked: false, tone: "low" });
   });
 
   it("is blocked when the total is full", () => {
-    expect(roomFor(usageOf({ people, seats: { used: 16, max: 16 } }), "seats")).toMatchObject({ blocked: true });
+    expect(roomFor(usageOf({ seats: { used: 25, max: 25 } }), "seats")).toMatchObject({
+      blocked: true, hint: "User limit reached (25 / 25)",
+    });
   });
 });

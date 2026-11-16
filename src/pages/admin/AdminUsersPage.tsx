@@ -381,7 +381,8 @@ function InviteModal({
 // Only shown when the backend couldn't email the invite: the admin becomes the
 // delivery mechanism, so the temp password needs copying before this closes. A
 // delivered invite gets a toast instead — nothing to interact with.
-function InviteResultModal({
+// Exported for the Spark Internal users tab, which shows the same popup.
+export function InviteResultModal({
   result,
   onClose,
 }: {

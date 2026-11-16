@@ -98,7 +98,7 @@ describe('UploadReportsPage', () => {
   it('starts the ingest itself and stays on the page', async () => {
     h.getExtraction.mockResolvedValueOnce(extraction(false));
     render(<UploadReportsPage />);
-    await screen.findByLabelText('Reading the report: extracted');
+    await screen.findByText('Last report we read');
 
     h.ingestOnboarding.mockResolvedValue({ status: 'processing' });
     // Never-ending "running" answers would keep the poll alive; answer once as
@@ -114,7 +114,7 @@ describe('UploadReportsPage', () => {
       ),
     );
     // The page is still here: heading, form and the live table, now mid-run.
-    expect(await screen.findByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(await screen.findByText('Reading your report now')).toBeInTheDocument();
     expect(screen.getByText('Upload Reports')).toBeInTheDocument();
     expect(screen.getByText('Process')).toBeDisabled();
     expect(screen.queryByText('Building your intelligence dashboard')).not.toBeInTheDocument();
@@ -125,23 +125,25 @@ describe('UploadReportsPage', () => {
   it('unlocks the form and reloads the uploaded list when the run ends', async () => {
     h.getExtraction.mockResolvedValueOnce(extraction(false));
     render(<UploadReportsPage />);
-    await screen.findByLabelText('Reading the report: extracted');
+    await screen.findByText('Last report we read');
     expect(h.listDocuments).toHaveBeenCalledTimes(1);
 
     h.ingestOnboarding.mockResolvedValue({ status: 'processing' });
     h.getExtraction.mockResolvedValueOnce(extraction(true)).mockResolvedValue(extraction(false));
     fireEvent.click(screen.getByText('Process'));
 
-    await screen.findByLabelText('Reading the report: in progress');
-    // The next poll (2 s later) says the run has ended.
-    await waitFor(() => expect(screen.getByText('Process')).not.toBeDisabled(), { timeout: 4000 });
+    await screen.findByText('Reading your report now');
+    // Reloaded as the run starts, so the new file shows up straight away.
     await waitFor(() => expect(h.listDocuments).toHaveBeenCalledTimes(2));
+    // The next poll (2 s later) says the run has ended: reloaded once more.
+    await waitFor(() => expect(screen.getByText('Process')).not.toBeDisabled(), { timeout: 4000 });
+    await waitFor(() => expect(h.listDocuments).toHaveBeenCalledTimes(3));
   });
 
   it('resumes a run that was already going when the page opened', async () => {
     h.getExtraction.mockResolvedValueOnce(extraction(true)).mockResolvedValue(extraction(false));
     render(<UploadReportsPage />);
-    expect(await screen.findByLabelText('Reading the report: in progress')).toBeInTheDocument();
+    expect(await screen.findByText('Reading your report now')).toBeInTheDocument();
     expect(screen.getByText('Reading your report now')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Process')).toBeDisabled());
     expect(h.ingestOnboarding).not.toHaveBeenCalled();
@@ -151,7 +153,7 @@ describe('UploadReportsPage', () => {
     h.getExtraction.mockResolvedValue(extraction(false));
     h.ingestOnboarding.mockRejectedValue(new Error('down'));
     render(<UploadReportsPage />);
-    await screen.findByLabelText('Reading the report: extracted');
+    await screen.findByText('Last report we read');
 
     fireEvent.click(screen.getByText('Process'));
 
@@ -163,7 +165,7 @@ describe('UploadReportsPage', () => {
   it('asks for a report instead of starting an empty run', async () => {
     h.getExtraction.mockResolvedValue(extraction(false));
     render(<UploadReportsPage />);
-    await screen.findByLabelText('Reading the report: extracted');
+    await screen.findByText('Last report we read');
 
     fireEvent.click(screen.getByText('Process nothing'));
 

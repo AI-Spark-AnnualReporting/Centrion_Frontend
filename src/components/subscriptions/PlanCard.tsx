@@ -11,7 +11,7 @@
 import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LicensableModule } from '@/types/license';
 import type { Duration, PlanContact, PlanLimits } from '@/types/subscription';
-import { countWord, departmentsSummary, durationPer, usersSummary } from './PlanFields';
+import { countWord, durationPer, usersSummary } from './PlanFields';
 import './subscriptions.css';
 
 // Tab colours by position (blue, teal, indigo); Enterprise is dark.
@@ -69,12 +69,10 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
         })}
       </ul>
       <ul>
-        <li><span className="sub-ic sub-ok">✓</span><span>1 admin (included)</span></li>
         <li>
           <span className="sub-ic sub-ok">✓</span>
           <span>{usersSummary(plan)}</span>
         </li>
-        <li><span className="sub-ic sub-ok">✓</span><span>{departmentsSummary(plan)}</span></li>
       </ul>
     </>
   );

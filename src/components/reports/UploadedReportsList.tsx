@@ -3,6 +3,9 @@ import { documents as documentsApi, reports as reportsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { CategoryTabs, ReportCard, categoryKey } from '@/components/docs/DocumentBankGroups';
 import type { BankDocument, ReportGroup, ReportCategory } from '@/types/report';
+import type { AnnualReportExtraction as Extraction } from '@/types/company';
+import DocumentExtractionChips from './DocumentExtractionChips';
+import { latestReadDocuments, type CategoryKey } from './extractionLive';
 
 // The Annual / ESG reports already uploaded for this company, shown with the
 // same category tabs → expandable report card → downloadable document rows as
@@ -134,9 +137,14 @@ function buildCategories(
 
 /**
  * The company's uploaded reports, grouped into category tabs.
- * `refreshKey` is bumped by the page when an upload run ends, to reload the list.
+ * `refreshKey` is bumped by the page when an upload run starts or ends, to reload the list.
+ * `extraction` is what the panel below loaded; the file(s) its last run read get the
+ * Contents / Departments / ESG / General info chips.
  */
-export default function UploadedReportsList({ refreshKey = 0 }: { refreshKey?: number }) {
+export default function UploadedReportsList({ refreshKey = 0, extraction = null }: {
+  refreshKey?: number;
+  extraction?: Extraction | null;
+}) {
   const { user } = useAuth();
   const companyId = user?.company_id ?? null;
   // The company whose list is on screen, so a reload can tell "same company,
@@ -187,6 +195,20 @@ export default function UploadedReportsList({ refreshKey = 0 }: { refreshKey?: n
   // Active tab: the selected category if it still exists, else the first one.
   const activeCategory = cats.find((c) => categoryKey(c) === activeKey) ?? cats[0] ?? null;
   const totalDocs = cats.reduce((n, c) => n + c.document_count, 0);
+  const chipsFor = extraction ? latestReadDocuments(extraction) : new Map<string, CategoryKey[]>();
+
+  /** The chips for one row, or nothing for a file the last run did not read. */
+  function renderChips(doc: BankDocument, categoryKeys: CategoryKey[] | undefined) {
+    if (!extraction || !categoryKeys) return null;
+    return (
+      <DocumentExtractionChips
+        data={extraction}
+        documentId={doc.id}
+        filename={doc.filename}
+        categoryKeys={categoryKeys}
+      />
+    );
+  }
 
   return (
     <div style={{ marginTop: 22 }}>
@@ -223,9 +245,19 @@ export default function UploadedReportsList({ refreshKey = 0 }: { refreshKey?: n
           />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {activeCategory.reports.map((report) => (
-              <ReportCard key={report.report_id} report={report} />
-            ))}
+            {activeCategory.reports.map((report) => {
+              const hasChips = report.documents.some((doc) => chipsFor.has(doc.id));
+              return (
+                <ReportCard
+                  // Keyed on hasChips too: the extraction usually arrives after the list,
+                  // and a card only reads `defaultExpanded` when it first mounts.
+                  key={`${report.report_id}-${hasChips ? 'latest' : 'other'}`}
+                  report={report}
+                  defaultExpanded={hasChips}
+                  renderDocumentExtra={(doc) => renderChips(doc, chipsFor.get(doc.id))}
+                />
+              );
+            })}
           </div>
         </div>
       )}

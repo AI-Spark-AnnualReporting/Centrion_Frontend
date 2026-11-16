@@ -314,18 +314,16 @@ describe("LicenseCard always shows the license message", () => {
     localStorage.clear();
   });
 
-  it("shows each people limit as used / max", async () => {
+  it("shows the users total as used / max, and no per-role numbers", async () => {
     const { LicenseCard } = await import("@/components/license/LicenseCard");
     mockAuth = { user: CLIENT_ADMIN, refreshPermissions: vi.fn() };
     licenseGet.mockReset().mockResolvedValue(licenseOf("active", {
       starts_at: "2026-01-01", expires_at: "2027-12-31", modules: ["board_report"], max_seats: 15, seats_used: 9,
-      people: { pms: { used: 2, max: 2 }, ir_users: { used: 1, max: 1 },
-                departments: { used: 2, max: 3 }, department_users: { used: 3, max: 8 } },
     }));
     render(<MemoryRouter><LicenseCard /></MemoryRouter>);
-    expect(await screen.findByText("Department users")).toBeInTheDocument();
-    expect(screen.getByText("PMs").nextElementSibling).toHaveTextContent("2 / 2");
-    expect(screen.getByText("Department users").nextElementSibling).toHaveTextContent("3 / 8");
+    expect((await screen.findByText("Users")).nextElementSibling).toHaveTextContent("9 / 15");
+    expect(screen.queryByText("PMs")).not.toBeInTheDocument();
+    expect(screen.queryByText("Department users")).not.toBeInTheDocument();
   });
 
   it("on the cloud, renewing is on the Subscription page (not 'Contact Centriyon')", () => {
