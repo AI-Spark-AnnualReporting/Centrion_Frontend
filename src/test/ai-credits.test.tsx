@@ -19,12 +19,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 const {
-  actionName, formatCredits, formatDollars, isNotEnoughCreditsMessage, monthOf, packMargin,
+  actionName, formatCredits, formatCreditsDetail, formatDollars, formatPaidDate, isNotEnoughCreditsMessage, monthOf,
+  packMinimumPrice, packSavingPercent,
 } = await import("@/components/ai-credits/creditFormat");
 const { AiCreditsBanner, bannerText } = await import("@/components/ai-credits/AiCreditsBanner");
 const { CreditsCard } = await import("@/components/subscriptions/PlanFields");
-const { balanceText } = await import("@/pages/admin/AiCreditsPage");
-const { changedMinimums, priceBoxState, readAmount } = await import("@/pages/spark/SparkAiCreditsPage");
+const { balanceText, creditsLeftPercent } = await import("@/pages/admin/UsagePage");
+const { packTileLine } = await import("@/pages/admin/BuyCreditsPage");
+const { changedMinimums, packRowProblem, priceBoxState, readAmount } = await import("@/pages/spark/SparkAiCreditsPage");
 const { billDifference } = await import("@/pages/spark/SparkAiUsagePage");
 const { limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 
@@ -46,13 +48,33 @@ describe("credit helpers", () => {
     expect(formatDollars(0.08, 3)).toBe("$0.080");
   });
 
-  it("works out what Spark keeps per credit on a pack", () => {
-    // 500 for $50 = $0.10 a credit; it covers $0.02 of AI → Spark keeps $0.08 (80%).
-    const margin = packMargin({ size: 500, price: 50 }, 0.02)!;
-    expect(margin.pricePerCredit).toBeCloseTo(0.1);
-    expect(margin.keeps).toBeCloseTo(0.08);
-    expect(margin.percent).toBe(80);
-    expect(packMargin(null, 0.02)).toBeNull();
+  it("shows small credit amounts with one decimal, so light use isn't 0", () => {
+    expect(formatCreditsDetail(0.2)).toBe("0.2");
+    expect(formatCreditsDetail(3.05)).toBe("3.0");
+    expect(formatCreditsDetail(-3.05)).toBe("−3.0");
+    expect(formatCreditsDetail(1250.4)).toBe("1,250");
+  });
+
+  it("works out a pack's lowest price and its saving against the smallest pack", () => {
+    // 500 credits at $0.02 of AI each → at least $10.00; $0.05 → $25.00.
+    expect(packMinimumPrice(500, 0.02)).toBe(10);
+    expect(packMinimumPrice(500, 0.05)).toBe(25);
+    const packs = [
+      { id: "a", credits: 500, price: 50 },
+      { id: "b", credits: 1000, price: 90 },
+      { id: "c", credits: 2500, price: 200 },
+    ];
+    expect(packSavingPercent(packs[0], packs)).toBe(0);
+    expect(packSavingPercent(packs[1], packs)).toBe(10);
+    expect(packSavingPercent(packs[2], packs)).toBe(20);
+    expect(packTileLine(packs[0], packs)).toBe("$50.00 · $0.100 a credit");
+    expect(packTileLine(packs[1], packs)).toBe("$90.00 · save 10%");
+  });
+
+  it("shows a paid date without 'Invalid Date' (full timestamps)", () => {
+    expect(formatPaidDate("2026-11-18T12:11:00.123+00:00")).toBe("18 Nov 2026");
+    expect(formatPaidDate(null)).toBe("—");
+    expect(formatPaidDate("not a date")).toBe("—");
   });
 
   it("recognises the backend's not-enough-credits refusals", () => {
@@ -75,40 +97,30 @@ describe("credit helpers", () => {
 describe("plan editor", () => {
   const plan = {
     id: "p1", name: "Gold", duration: "yearly" as const, price: 1000, contact: null, modules: ["board_report"],
-    report_limits: { board_report: 2 }, max_users: 5, ai_credits: 5000, credit_pack: { size: 500, price: 50 },
+    report_limits: { board_report: 2 }, max_users: 5, ai_credits: 5000,
     company_id: null, status: "published" as const, quote: null, created_at: "", updated_at: "",
   };
   const form = { name: "Gold", duration: "yearly" as const, price: 1000, contact: null, modules: ["board_report"],
-    report_limits: { board_report: 2 }, max_users: 5, ai_credits: 5000, credit_pack: { size: 500, price: 50 } };
+    report_limits: { board_report: 2 }, max_users: 5, ai_credits: 5000 };
 
-  it("asks 'Apply to everyone?' when the AI credits or the pack change", () => {
+  it("asks 'Apply to everyone?' when the AI credits change", () => {
     expect(limitsChanged(plan, form)).toBe(false);
     expect(limitsChanged(plan, { ...form, ai_credits: 8000 })).toBe(true);
-    expect(limitsChanged(plan, { ...form, credit_pack: null })).toBe(true);
   });
 
-  it("treats a plan saved before AI credits existed as 0 credits and no pack", () => {
-    const older = { ...plan, ai_credits: undefined, credit_pack: undefined };
-    expect(limitsChanged(older, { ...form, ai_credits: 0, credit_pack: null })).toBe(false);
+  it("treats a plan saved before AI credits existed as 0 credits", () => {
+    const older = { ...plan, ai_credits: undefined };
+    expect(limitsChanged(older, { ...form, ai_credits: 0 })).toBe(false);
   });
 
-  it("shows what Spark keeps, and warns when a pack sells at a loss", () => {
+  it("keeps only the included credits: packs are Spark's, for every client", () => {
     const onChange = vi.fn();
-    const { rerender } = render(
-      <CreditsCard value={{ ai_credits: 5000, credit_pack: { size: 500, price: 50 } }} onChange={onChange} creditValue={0.02} />,
-    );
-    expect(screen.getByText(/Spark keeps \$0\.080 \(80%\)/)).toBeInTheDocument();
-    rerender(<CreditsCard value={{ ai_credits: 5000, credit_pack: { size: 500, price: 5 } }} onChange={onChange} creditValue={0.02} />);
-    expect(screen.getByText(/you lose \$0\.010 on every credit/)).toBeInTheDocument();
-  });
-
-  it("changes the included credits and switches packs on and off", () => {
-    const onChange = vi.fn();
-    render(<CreditsCard value={{ ai_credits: 0, credit_pack: null }} onChange={onChange} creditValue={0.02} />);
+    render(<CreditsCard value={{ ai_credits: 0 }} onChange={onChange} />);
     fireEvent.change(screen.getByLabelText("Included AI credits"), { target: { value: "5000" } });
-    expect(onChange).toHaveBeenLastCalledWith({ ai_credits: 5000, credit_pack: null });
-    fireEvent.click(screen.getByRole("checkbox"));
-    expect(onChange).toHaveBeenLastCalledWith({ ai_credits: 0, credit_pack: { size: 500, price: 50 } });
+    expect(onChange).toHaveBeenLastCalledWith({ ai_credits: 5000 });
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText(/Sell extra packs/)).toBeNull();
+    expect(screen.getByText(/set them on Spark → AI credits/)).toBeInTheDocument();
   });
 });
 
@@ -117,6 +129,8 @@ describe("admin's AI credits", () => {
     expect(balanceText(405, 1000)).toBe("405 of 1,000 credits left this period.");
     expect(balanceText(0, 1000)).toMatch(/AI is paused/);
     expect(balanceText(-95, 1000)).toBe("95 credits below zero — AI is paused until you buy more.");
+    expect(creditsLeftPercent(250, 1000)).toBe(25);
+    expect(creditsLeftPercent(-95, 1000)).toBe(0);
   });
 
   it("only says something when credits are low or gone", () => {
@@ -131,7 +145,7 @@ describe("admin's AI credits", () => {
     usage.mockResolvedValue({ unlimited: false, ai_credits: { balance: 180, total: 1000, low: true } });
     render(<MemoryRouter initialEntries={["/dashboard"]}><AiCreditsBanner /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText(/running low: 180 left/)).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: "Buy more" })).toHaveAttribute("href", "/admin-console/ai-credits");
+    expect(screen.getByRole("link", { name: "Buy more" })).toHaveAttribute("href", "/admin-console/usage");
   });
 
   it("never shows the banner to other roles", async () => {
@@ -145,6 +159,19 @@ describe("admin's AI credits", () => {
 });
 
 describe("Spark's pages", () => {
+  it("checks a credit pack row like the backend does", () => {
+    const row = (rowKey: number, creditsText: string, priceText: string) => ({ rowKey, creditsText, priceText });
+    const fine = [row(0, "500", "50"), row(1, "1000", "90")];
+    expect(packRowProblem(fine[0], fine, 0.02)).toBeNull();
+    expect(packRowProblem(row(0, "500", "5"), [row(0, "500", "5")], 0.02))
+      .toBe("At least $10.00 for 500 credits (the AI cost). Raise the price.");
+    expect(packRowProblem(row(0, "500", "50"), [row(0, "500", "50")], 0.15)).toMatch(/At least \$75\.00/);
+    const twins = [row(0, "500", "50"), row(1, "500", "60")];
+    expect(packRowProblem(twins[0], twins, 0.02)).toMatch(/Another pack also has 500 credits/);
+    expect(packRowProblem(row(0, "2.5", "50"), [], 0.02)).toMatch(/whole number/);
+    expect(packRowProblem(row(0, "500", ""), [], 0.02)).toMatch(/at least \$0\.01/);
+  });
+
   it("sends only the minimums that changed", () => {
     const saved = { "annual.design.custom_template": 60, "annual.design.sketch": 20 };
     const edited = { "annual.design.custom_template": 60, "annual.design.sketch": 0, "annual.translate": 100 };

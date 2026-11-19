@@ -1,6 +1,8 @@
 // Spark admin → AI credits. Three parts on one page:
 //   1. The AI cost one credit covers ($0.02). The low-balance warning % is
 //      set in the backend's .env, not here.
+//   1b. Credit packs: up to 5, the same for every cloud client; never below
+//      the AI cost (credits x the current credit value).
 //   2. Model prices: what OpenAI charges per 1 million tokens, for each model
 //      the apps use (the list comes from their .env files; Spark types prices).
 //   3. Minimum balance to start each action, next to what each action usually
@@ -13,11 +15,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ErrorPopup } from '@/components/shared/ErrorPopup';
 import { Spinner } from '@/components/shared/Spinner';
-import { formatCredits } from '@/components/ai-credits/creditFormat';
+import {
+  formatCredits, formatDollars, packMinimumPrice, pricePerCredit,
+} from '@/components/ai-credits/creditFormat';
 import { useToast } from '@/hooks/use-toast';
 import { sparkAiCredits } from '@/lib/api';
 import type {
-  ActionGroup, ActionGroupInfo, ActionRow, CreditSettings, ModelPrice, ModelUsedBy,
+  ActionGroup, ActionGroupInfo, ActionRow, CreditPack, CreditPackDraft, CreditSettings, ModelPrice, ModelUsedBy,
 } from '@/types/ai-credits';
 
 const PER_WORDS: Record<ActionRow['per'], string> = {
@@ -101,6 +105,10 @@ export default function SparkAiCreditsPage() {
         <CreditValueCard settings={settings}
           onSave={(changes) => saveThen(() => sparkAiCredits.changeSettings(changes), 'Settings saved')} />
       )}
+      {settings && (
+        <CreditPacksCard packs={settings.credit_packs ?? []} creditValue={settings.credit_value_usd}
+          onSave={(packs) => saveThen(() => sparkAiCredits.saveCreditPacks(packs), 'Credit packs saved')} />
+      )}
       <ModelPricesTable prices={prices} annualReportingReachable={annualReportingReachable}
         onSave={(model, body) => saveThen(() => sparkAiCredits.saveModelPrice(model, body), `${model} price saved`)} />
       {settings && (
@@ -150,6 +158,138 @@ function CreditValueCard({ settings, onSave }: {
         <button type="button" className="btn bp" disabled={!valid || !valueChanged} onClick={save}>
           Save settings
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 1b. Credit packs (one list for every cloud client) ──────────────
+// Spark sets up to 5 packs once; every cloud client's Buy credits screen
+// shows them. A pack can't be priced below its AI cost (credits x the
+// CURRENT credit value): the row says so and Save packs stays off. Prices
+// never change by themselves. Plan: Centriton/.claude/plans/admin-usage-page.md
+
+const MAX_PACKS = 5;
+
+/** One row of the packs editor: the typed text, and the pack's id if it's
+ *  already on sale. rowKey only keeps React's rows apart. */
+export type PackRow = { rowKey: number; id?: string; creditsText: string; priceText: string };
+
+/** What's wrong with one row, or null when it's fine (same rules as the backend). */
+export function packRowProblem(row: PackRow, rows: PackRow[], creditValue: number): string | null {
+  const credits = Number(row.creditsText);
+  const price = Number(row.priceText);
+  if (!Number.isInteger(credits) || credits < 1 || credits > 1_000_000) {
+    return 'Credits must be a whole number from 1 to 1,000,000.';
+  }
+  if (row.priceText.trim() === '' || !Number.isFinite(price) || price < 0.01 || price > 1_000_000) {
+    return 'Enter a price of at least $0.01.';
+  }
+  const sameSize = rows.filter((other) => Number(other.creditsText) === credits);
+  if (sameSize.length > 1) return `Another pack also has ${formatCredits(credits)} credits.`;
+  const minimum = packMinimumPrice(credits, creditValue);
+  if (price < minimum) {
+    return `At least ${formatDollars(minimum)} for ${formatCredits(credits)} credits (the AI cost). Raise the price.`;
+  }
+  return null;
+}
+
+function rowsFromPacks(packs: CreditPack[]): PackRow[] {
+  return packs.map((pack, index) => ({
+    rowKey: index, id: pack.id, creditsText: String(pack.credits), priceText: String(pack.price),
+  }));
+}
+
+/** The rows as plain values, to tell whether anything changed. */
+function rowValues(rows: PackRow[]): string {
+  return JSON.stringify(rows.map((row) => [row.id ?? '', row.creditsText, row.priceText]));
+}
+
+function CreditPacksCard({ packs, creditValue, onSave }: {
+  packs: CreditPack[];
+  creditValue: number;
+  onSave: (packs: CreditPackDraft[]) => void;
+}) {
+  const [rows, setRows] = useState<PackRow[]>(rowsFromPacks(packs));
+  const [nextKey, setNextKey] = useState(packs.length);
+  // After a save the page reloads: show what was saved.
+  useEffect(() => {
+    setRows(rowsFromPacks(packs));
+    setNextKey(packs.length);
+  }, [packs]);
+
+  const problems = rows.map((row) => packRowProblem(row, rows, creditValue));
+  const changed = rowValues(rows) !== rowValues(rowsFromPacks(packs));
+  const canSave = changed && problems.every((problem) => problem === null);
+
+  const setRow = (rowKey: number, field: 'creditsText' | 'priceText', text: string) =>
+    setRows(rows.map((row) => (row.rowKey === rowKey ? { ...row, [field]: text } : row)));
+  const addPack = () => {
+    setRows([...rows, { rowKey: nextKey, creditsText: '', priceText: '' }]);
+    setNextKey(nextKey + 1);
+  };
+  const removePack = (rowKey: number) => setRows(rows.filter((row) => row.rowKey !== rowKey));
+  const save = () => onSave(rows.map((row) => ({
+    ...(row.id ? { id: row.id } : {}), credits: Number(row.creditsText), price: Number(row.priceText),
+  })));
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '14px 18px' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800 }}>Credit packs</div>
+          <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
+            Every cloud client sees these packs on Buy credits. Up to {MAX_PACKS}. Packs already bought keep the price they were bought at.
+          </div>
+        </div>
+        <button type="button" className="btn bs" disabled={rows.length >= MAX_PACKS} onClick={addPack}>+ Add pack</button>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="utable">
+          <thead>
+            <tr><th>Credits</th><th>Price ($)</th><th>Per credit</th><th style={{ width: 90 }} /></tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr className="urow">
+                <td colSpan={4} style={{ color: '#B45309' }}>
+                  No packs: clients see &quot;Extra credits aren&apos;t on sale yet. Contact Centriyon.&quot;
+                </td>
+              </tr>
+            )}
+            {rows.map((row, index) => {
+              const problem = problems[index];
+              const credits = Number(row.creditsText);
+              const price = Number(row.priceText);
+              return (
+                <tr key={row.rowKey} className="urow">
+                  <td>
+                    <input className="inp" inputMode="numeric" aria-label={`Credits in pack ${index + 1}`} value={row.creditsText}
+                      onChange={(e) => setRow(row.rowKey, 'creditsText', e.target.value)} style={{ width: 110, padding: '6px 10px' }} />
+                  </td>
+                  <td>
+                    <input className="inp" inputMode="decimal" aria-label={`Price of pack ${index + 1}`} value={row.priceText}
+                      onChange={(e) => setRow(row.rowKey, 'priceText', e.target.value)}
+                      style={{ width: 110, padding: '6px 10px', borderColor: problem ? '#DC2626' : undefined }} />
+                    {problem && <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 4, maxWidth: 280 }}>{problem}</div>}
+                  </td>
+                  <td style={{ color: '#5A6080' }}>
+                    {credits > 0 && price > 0 ? formatDollars(pricePerCredit({ credits, price }), 3) : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button type="button" className="btn bs" onClick={() => removePack(row.rowKey)}>Remove</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: '1px solid #ECEEF8', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: '#9BA3C4' }}>
+          A pack can&apos;t sell below the AI cost: credits × {formatDollars(creditValue, 3)}. If the credit value goes up, raise any pack that falls below it first.
+        </span>
+        <button type="button" className="btn bp" disabled={!canSave} onClick={save}>Save packs</button>
       </div>
     </div>
   );

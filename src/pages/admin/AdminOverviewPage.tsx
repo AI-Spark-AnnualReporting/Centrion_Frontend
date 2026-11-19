@@ -11,6 +11,8 @@ import {
 } from 'recharts';
 import { adminConsole } from '@/lib/api';
 import { LicenseCard } from '@/components/license/LicenseCard';
+import { useAuth } from '@/context/AuthContext';
+import { IS_ON_PREM } from '@/lib/deployment';
 import type { ActivityType, AdminOverview } from '@/types/admin';
 import { shortDateTime } from '@/lib/time';
 
@@ -159,6 +161,9 @@ function SectionTitle({
 
 export default function AdminOverviewPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // A cloud company admin sees the plan on Admin Console → Usage instead.
+  const showLicenseCard = IS_ON_PREM || user?.role !== 'admin';
   const [data, setData] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -212,7 +217,9 @@ export default function AdminOverviewPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <LicenseCard />
+      {/* A cloud company's admin finds the plan on Usage now. On-premises keeps
+          it here (the license key box), and so do Spark staff (they can't open Usage). */}
+      {showLicenseCard && <LicenseCard />}
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 14 }}>
         <StatCard

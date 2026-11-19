@@ -1,6 +1,6 @@
 // The company admin's AI credits banner, above every page (cloud only):
 // "running low" under the low-balance percent, "AI is paused" at zero or
-// below, each with a Buy more link. Hidden on the AI credits page itself
+// below, each with a Buy more link. Hidden on the Usage page itself
 // (it says the same thing in full) and for everyone but the company admin.
 // Plan: Centriton/.claude/plans/ai-credits.md
 
@@ -12,7 +12,7 @@ import { IS_ON_PREM } from '@/lib/deployment';
 import type { LicenseUsage } from '@/types/license';
 import { formatCredits } from './creditFormat';
 
-export const AI_CREDITS_PAGE = '/admin-console/ai-credits';
+export const AI_CREDITS_PAGE = '/admin-console/usage';
 
 /** The banner's sentence, or null when there's nothing to say. */
 export function bannerText(credits: LicenseUsage['ai_credits']): string | null {
@@ -48,7 +48,8 @@ export function AiCreditsBanner() {
   }, [refresh]);
 
   const text = bannerText(credits);
-  if (!shown || !text || location.pathname === AI_CREDITS_PAGE) return null;
+  // Usage and its Buy credits screen already say this in full.
+  if (!shown || !text || location.pathname.startsWith(AI_CREDITS_PAGE)) return null;
   const paused = (credits?.balance ?? 0) <= 0;
   return (
     <div role="status" className="card" style={{

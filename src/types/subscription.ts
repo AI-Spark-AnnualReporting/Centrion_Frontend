@@ -5,7 +5,6 @@
 // cloud-subscriptions-v2-redesign.md (one duration + price in USD, Enterprise,
 // department cards).
 
-import type { CreditPack } from "@/types/ai-credits";
 import type { LicensableModule } from "@/types/license";
 
 // One plan = one duration. Enterprise is never bought: it shows Contact us.
@@ -23,11 +22,11 @@ export interface PlanLimits {
 }
 
 // What an Enterprise card shows instead of a price.
-// AI credits a plan gives each period, and the extra pack it sells (null = none).
-// Not part of PlanLimits: on-premises keys have no AI credits.
+// AI credits a plan gives each period. Extra packs are Spark's, one list for
+// every cloud client (not per plan). Not part of PlanLimits: on-premises keys
+// have no AI credits.
 export interface PlanCredits {
   ai_credits?: number;
-  credit_pack?: CreditPack | null;
 }
 
 export interface PlanContact {

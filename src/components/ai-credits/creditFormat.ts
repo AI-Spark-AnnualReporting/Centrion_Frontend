@@ -18,15 +18,44 @@ export function formatDollars(value: number | null | undefined, decimals = 2): s
   return `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
-/** What one credit earns Spark on a pack: the client's price per credit minus
- *  the AI cost one credit covers. null when there's no pack. */
-export function packMargin(pack: CreditPack | null | undefined, creditValue: number):
-  { pricePerCredit: number; keeps: number; percent: number } | null {
-  if (!pack || pack.size <= 0) return null;
-  const pricePerCredit = pack.price / pack.size;
-  const keeps = pricePerCredit - creditValue;
-  const percent = pricePerCredit > 0 ? Math.round((keeps / pricePerCredit) * 100) : 0;
-  return { pricePerCredit, keeps, percent };
+/** Credits with one decimal under 10, so small uses don't look like nothing
+ *  ("0.2", "3.5", "1,250"). */
+export function formatCreditsDetail(value: number | null | undefined): string {
+  if (value == null) return '—';
+  if (Math.abs(value) >= 10) return formatCredits(value);
+  const text = Math.abs(value).toFixed(1);
+  return value < 0 ? `−${text}` : text;
+}
+
+/** What a pack charges per credit: $50 for 500 → 0.1. */
+export function pricePerCredit(pack: { credits: number; price: number }): number {
+  return pack.credits > 0 ? pack.price / pack.credits : 0;
+}
+
+/** The lowest price a pack may have: its credits' AI cost, rounded up to the
+ *  cent (500 credits at $0.02 → $10). Same rule as the backend. */
+export function packMinimumPrice(credits: number, creditValue: number): number {
+  return Math.ceil(Number((credits * creditValue * 100).toFixed(6))) / 100;
+}
+
+/** How much cheaper per credit a pack is than the smallest pack, in whole
+ *  percent ("save 10%"); 0 for the smallest pack itself or a dearer one. */
+export function packSavingPercent(pack: CreditPack, packs: CreditPack[]): number {
+  if (packs.length === 0) return 0;
+  const smallest = packs.reduce((a, b) => (b.credits < a.credits ? b : a));
+  const base = pricePerCredit(smallest);
+  if (base <= 0 || pack.id === smallest.id) return 0;
+  const saving = Math.round((1 - pricePerCredit(pack) / base) * 100);
+  return saving > 0 ? saving : 0;
+}
+
+/** A date and time as people read them: "18 Nov 2026" (no "Invalid Date" for
+ *  full timestamps). '—' when empty or unreadable. */
+export function formatPaidDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** True for the backend's "can't start, not enough credits" refusals (403). */

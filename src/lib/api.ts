@@ -49,7 +49,7 @@ import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type {
-  ActionList, AiCreditsSummary, CreditSettings, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
+  ActionList, AiCreditsSummary, CreditPack, CreditPackDraft, CreditSettings, InvoicePage, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
 } from "@/types/ai-credits";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -5857,11 +5857,17 @@ export const subscriptions = {
 export const aiCredits = {
   summary: () => request<AiCreditsSummary>("/api/v1/ai-credits"),
 
-  startPackCheckout: (idempotencyKey: string) =>
+  // Buy one of Spark's packs by id; the price comes from the server.
+  startPackCheckout: (idempotencyKey: string, packId: string) =>
     request<PackCheckout>("/api/v1/ai-credits/pack-checkouts", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
+      body: { pack_id: packId },
     }),
+
+  // Every paid plan and paid credit pack, newest first.
+  invoices: (page = 1, limit = 20) =>
+    request<InvoicePage>("/api/v1/invoices", { query: { page, limit } }),
 
   payPack: (checkoutId: string, idempotencyKey: string) =>
     request<PackCheckout>(`/api/v1/ai-credits/pack-checkouts/${encodeURIComponent(checkoutId)}/payments`, {
@@ -5884,6 +5890,14 @@ export const sparkAiCredits = {
     }),
 
   settings: () => request<CreditSettings>("/api/v1/spark/ai-credits/settings", { noActingCompany: true }),
+
+  // Replace Spark's credit packs (up to 5), shown to every cloud client.
+  saveCreditPacks: (packs: CreditPackDraft[]) =>
+    request<{ packs: CreditPack[] }>("/api/v1/spark/ai-credits/credit-packs", {
+      method: "PUT",
+      body: { packs },
+      noActingCompany: true,
+    }),
 
   changeSettings: (body: SettingsChanges) =>
     request<CreditSettings>("/api/v1/spark/ai-credits/settings", { method: "PATCH", body, noActingCompany: true }),

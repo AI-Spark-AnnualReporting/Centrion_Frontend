@@ -13,9 +13,7 @@
 
 import { useState } from 'react';
 import type { LicensableModule } from '@/types/license';
-import type { CreditPack } from '@/types/ai-credits';
 import type { Duration, PlanContact, PlanCredits, PlanLimits } from '@/types/subscription';
-import { formatDollars, packMargin } from '@/components/ai-credits/creditFormat';
 import './subscriptions.css';
 
 export const EMPTY_LIMITS: PlanLimits = {
@@ -383,17 +381,13 @@ export function UsersCard({ value, onChange, floor, cardPrice, current }: {
 
 // ── AI credits ──────────────────────────────────────────────────────
 
-/** AI credits the plan gives each period, and the extra pack a company admin
- *  can buy. creditValue = the AI cost one credit covers (Spark's setting), to
- *  show what Spark keeps per credit sold in a pack. Cloud plans only. */
-export function CreditsCard({ value, onChange, creditValue }: {
+/** AI credits the plan gives each period. Extra credit packs aren't set per
+ *  plan: Spark sets them once for every cloud client on Spark → AI credits.
+ *  Cloud plans only. Plan: Centriton/.claude/plans/admin-usage-page.md */
+export function CreditsCard({ value, onChange }: {
   value: PlanCredits;
   onChange: (next: PlanCredits) => void;
-  creditValue: number | null;
 }) {
-  const pack = value.credit_pack ?? null;
-  const setPack = (next: CreditPack | null) => onChange({ ...value, credit_pack: next });
-  const margin = creditValue != null ? packMargin(pack, creditValue) : null;
   return (
     <div className="card sub-ec">
       <div className="sub-ec-h">
@@ -408,28 +402,9 @@ export function CreditsCard({ value, onChange, creditValue }: {
         <input className="inp sub-num" aria-label="Included AI credits" inputMode="numeric" value={value.ai_credits ?? 0}
           onChange={(e) => onChange({ ...value, ai_credits: readWholeNumber(e.target.value, 0) })} />
       </div>
-      <label className="sub-prow" style={{ cursor: 'pointer' }}>
-        <span>Sell extra packs</span>
-        <input type="checkbox" checked={pack !== null} style={{ accentColor: '#4040C8' }}
-          onChange={(e) => setPack(e.target.checked ? { size: 500, price: 50 } : null)} />
-      </label>
-      {pack && (
-        <div className="sub-prow">
-          <span>
-            <input className="inp sub-num" aria-label="Credits in a pack" inputMode="numeric" value={pack.size}
-              onChange={(e) => setPack({ ...pack, size: readWholeNumber(e.target.value, 1) })} />
-            {' '}credits for
-          </span>
-          <PriceBox value={pack.price} onChange={(price) => setPack({ ...pack, price })} label="Price of a pack" />
-        </div>
-      )}
-      {margin && (
-        <div style={{ fontSize: 11, lineHeight: 1.6, color: margin.keeps < 0 ? '#DC2626' : '#5A6080', marginTop: 6 }}>
-          {margin.keeps < 0
-            ? <>⚠ At this price you lose {formatDollars(-margin.keeps, 3)} on every credit.</>
-            : <>Client pays {formatDollars(margin.pricePerCredit, 3)} per credit · it covers {formatDollars(creditValue, 3)} of AI · <b>Spark keeps {formatDollars(margin.keeps, 3)} ({margin.percent}%)</b></>}
-        </div>
-      )}
+      <div style={{ fontSize: 11, lineHeight: 1.6, color: '#9BA3C4', marginTop: 6 }}>
+        Extra credit packs are the same for every client: set them on Spark → AI credits.
+      </div>
     </div>
   );
 }

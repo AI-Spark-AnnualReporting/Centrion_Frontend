@@ -5,9 +5,19 @@
 // is above zero and at least the action's minimum; the balance may go below zero.
 // Plan: Centriton/.claude/plans/ai-credits.md
 
-// The extra credits a company admin can buy: this many credits for this many dollars.
+// One of Spark's credit packs: this many credits for this many dollars. Spark
+// sets up to 5 once; every cloud client sees the same ones.
+// Plan: Centriton/.claude/plans/admin-usage-page.md
 export interface CreditPack {
-  size: number;
+  id: string;
+  credits: number;
+  price: number;
+}
+
+// A pack in Spark's editor: no id yet for a new one.
+export interface CreditPackDraft {
+  id?: string;
+  credits: number;
   price: number;
 }
 
@@ -43,8 +53,8 @@ export interface AiCreditsSummary {
     subscription_id: string;
     period: { starts_at: string; ends_at: string };
     balance: CreditBalance;
-    credit_pack: CreditPack | null;
-    packs: PackPurchase[];
+    credit_packs: CreditPack[];     // Spark's packs on sale (the same for every client)
+    packs: PackPurchase[];          // bought this period
     by_action: ActionUsage[];
   } | null;
 }
@@ -82,6 +92,24 @@ export interface CreditSettings {
   credit_value_usd: number;
   low_balance_percent: number;   // read-only: set in the backend's .env, not by Spark
   action_minimums: Record<string, number>;
+  credit_packs: CreditPack[];
+}
+
+// The company admin's invoices: every paid plan and every paid credit pack.
+export interface Invoice {
+  id: string;
+  kind: "plan" | "ai_credits";
+  description: string;           // "Gold · 1 year", "500 AI credits"
+  total: number;
+  status: "paid";
+  paid_at: string;
+}
+
+export interface InvoicePage {
+  items: Invoice[];
+  page: number;
+  limit: number;
+  total: number;
 }
 
 export type SettingsChanges = Partial<{

@@ -1,0 +1,182 @@
+// Admin Console → Usage and Buy credits, and Spark's Credit packs card.
+// Plan: Centriton/.claude/plans/admin-usage-page.md
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import type { AiCreditsSummary, CreditSettings, InvoicePage } from "@/types/ai-credits";
+
+vi.mock("@/context/AuthContext", () => ({
+  useAuth: () => ({ refreshPermissions: vi.fn(), user: { role: "admin" } }),
+}));
+const toast = vi.fn();
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
+// The plan card has its own tests (licensing.test.tsx); here it's a stand-in.
+vi.mock("@/components/license/LicenseCard", () => ({ LicenseCard: () => <div>Plan card</div> }));
+
+const summary = vi.fn();
+const invoices = vi.fn();
+const startPackCheckout = vi.fn();
+const payPack = vi.fn();
+const modelPrices = vi.fn();
+const saveCreditPacks = vi.fn();
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    aiCredits: {
+      summary: () => summary(),
+      invoices: (page: number, limit: number) => invoices(page, limit),
+      startPackCheckout: (key: string, packId: string) => startPackCheckout(key, packId),
+      payPack: (id: string, key: string) => payPack(id, key),
+    },
+    sparkAiCredits: {
+      ...actual.sparkAiCredits,
+      modelPrices: () => modelPrices(),
+      actions: () => Promise.resolve({ items: [], groups: [], days: 30 }),
+      saveCreditPacks: (packs: unknown) => saveCreditPacks(packs),
+    },
+  };
+});
+
+const { default: UsagePage } = await import("@/pages/admin/UsagePage");
+const { default: BuyCreditsPage } = await import("@/pages/admin/BuyCreditsPage");
+const { default: SparkAiCreditsPage } = await import("@/pages/spark/SparkAiCreditsPage");
+
+const PACKS = [
+  { id: "pk_small", credits: 500, price: 50 },
+  { id: "pk_mid", credits: 1000, price: 90 },
+  { id: "pk_big", credits: 2500, price: 200 },
+];
+
+function creditsSummary(overrides: Partial<NonNullable<AiCreditsSummary["subscription"]>> = {}): AiCreditsSummary {
+  return {
+    subscription: {
+      subscription_id: "sub1",
+      period: { starts_at: "2026-11-16", ends_at: "2027-11-15" },
+      balance: { included: 1, packs: 500, carried: 0, used: 4.05, total: 501, balance: 496.95, low: false },
+      credit_packs: PACKS,
+      packs: [],
+      by_action: [{ action: "annual.brief", jobs: 1, credits: 0.2, cost_usd: 0.004 }],
+      ...overrides,
+    },
+  };
+}
+
+function invoicePage(total: number, page = 1): InvoicePage {
+  return {
+    items: [{ id: "p1", kind: "ai_credits", description: "500 AI credits", total: 50, status: "paid",
+      paid_at: "2026-11-18T12:11:00.123+00:00" }],
+    page, limit: 20, total,
+  };
+}
+
+beforeEach(() => {
+  for (const mock of [summary, invoices, startPackCheckout, payPack, modelPrices, saveCreditPacks, toast]) mock.mockReset();
+});
+
+describe("Usage page", () => {
+  it("shows the plan, AI credits, greyed-out payment and invoices with real dates", async () => {
+    summary.mockResolvedValue(creditsSummary());
+    invoices.mockResolvedValue(invoicePage(1));
+    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    expect(screen.getByText("Plan card")).toBeInTheDocument();
+    expect(await screen.findByText("Generate brief")).toBeInTheDocument();
+    expect(screen.getByText("0.2")).toBeInTheDocument();                    // small use isn't shown as 0
+    expect(screen.getByRole("link", { name: "Buy credits" })).toHaveAttribute("href", "/admin-console/usage/buy-credits");
+    expect(screen.getByRole("button", { name: "Add payment method" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update" })).toBeDisabled();
+    expect(screen.getByText(/Card payments are coming soon/)).toBeInTheDocument();
+    expect(await screen.findByText("18 Nov 2026")).toBeInTheDocument();     // not "Invalid Date"
+    expect(screen.getByText("500 AI credits")).toBeInTheDocument();
+  });
+
+  it("turns invoice pages", async () => {
+    summary.mockResolvedValue(creditsSummary());
+    invoices.mockImplementation((page: number) => Promise.resolve(invoicePage(45, page)));
+    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+    expect(invoices).toHaveBeenLastCalledWith(2, 20);
+  });
+
+  it("says when nothing is on sale", async () => {
+    summary.mockResolvedValue(creditsSummary({ credit_packs: [] }));
+    invoices.mockResolvedValue(invoicePage(0));
+    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText(/Extra credits aren't on sale yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Buy credits" })).toBeNull();
+  });
+});
+
+describe("Buy credits", () => {
+  function showBuy() {
+    render(
+      <MemoryRouter initialEntries={["/admin-console/usage/buy-credits"]}>
+        <Routes>
+          <Route path="/admin-console/usage/buy-credits" element={<BuyCreditsPage />} />
+          <Route path="/admin-console/usage" element={<div>Usage page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows Spark's packs, works out the total and pays by pack id", async () => {
+    summary.mockResolvedValue(creditsSummary());
+    startPackCheckout.mockResolvedValue({ id: "chk1", credits: 1000, price: 90, status: "pending_payment" });
+    payPack.mockResolvedValue({ id: "chk1", credits: 1000, price: 90, status: "paid" });
+    showBuy();
+    const middle = await screen.findByRole("radio", { name: /1,000 credits/ });
+    expect(screen.getByText("$90.00 · save 10%")).toBeInTheDocument();
+    fireEvent.click(middle);
+    expect(middle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("1,497 credits")).toBeInTheDocument();          // 496.95 + 1,000
+    fireEvent.click(screen.getByRole("button", { name: "Pay $90.00 now" }));
+    await waitFor(() => expect(screen.getByText("Usage page")).toBeInTheDocument());
+    expect(startPackCheckout).toHaveBeenCalledWith(expect.any(String), "pk_mid");
+    expect(toast).toHaveBeenCalledWith({ title: "Added 1,000 AI credits" });
+  });
+
+  it("shows the backend's message when a pack was removed meanwhile", async () => {
+    summary.mockResolvedValue(creditsSummary());
+    startPackCheckout.mockRejectedValue(new Error("This pack is no longer on sale. Refresh and pick again."));
+    showBuy();
+    fireEvent.click(await screen.findByRole("button", { name: "Pay $50.00 now" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no longer on sale");
+  });
+});
+
+describe("Spark credit packs", () => {
+  function settings(packs = PACKS): CreditSettings {
+    return { credit_value_usd: 0.02, low_balance_percent: 20, action_minimums: {}, credit_packs: packs };
+  }
+
+  it("blocks Save while a pack is below its AI cost, then saves the list", async () => {
+    modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings([PACKS[0]]) });
+    saveCreditPacks.mockResolvedValue({ packs: PACKS });
+    render(<MemoryRouter><SparkAiCreditsPage /></MemoryRouter>);
+    const price = await screen.findByLabelText("Price of pack 1");
+    const save = screen.getByRole("button", { name: "Save packs" });
+    expect(save).toBeDisabled();                                           // nothing changed yet
+    fireEvent.change(price, { target: { value: "5" } });
+    expect(screen.getByText("At least $10.00 for 500 credits (the AI cost). Raise the price.")).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    fireEvent.change(price, { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add pack" }));
+    fireEvent.change(screen.getByLabelText("Credits in pack 2"), { target: { value: "1000" } });
+    fireEvent.change(screen.getByLabelText("Price of pack 2"), { target: { value: "90" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(saveCreditPacks).toHaveBeenCalledWith([
+      { id: "pk_small", credits: 500, price: 60 },
+      { credits: 1000, price: 90 },
+    ]));
+  });
+
+  it("allows at most 5 packs", async () => {
+    const five = [1, 2, 3, 4, 5].map((n) => ({ id: `pk_${n}`, credits: n * 100, price: n * 10 }));
+    modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings(five) });
+    render(<MemoryRouter><SparkAiCreditsPage /></MemoryRouter>);
+    expect(await screen.findByRole("button", { name: "+ Add pack" })).toBeDisabled();
+  });
+});

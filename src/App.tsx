@@ -65,8 +65,9 @@ const SparkPlanEditorPage = lazy(() => import("./pages/spark/SparkPlanEditorPage
 const SparkLicenseKeyPage = lazy(() => import("./pages/spark/SparkLicenseKeyPage"));
 const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
 const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
-// AI credits (plan: Centriton/.claude/plans/ai-credits.md) — cloud only.
-const AiCreditsPage = lazy(() => import("./pages/admin/AiCreditsPage"));
+// AI credits (plans: Centriton/.claude/plans/ai-credits.md, admin-usage-page.md) — cloud only.
+const UsagePage = lazy(() => import("./pages/admin/UsagePage"));
+const BuyCreditsPage = lazy(() => import("./pages/admin/BuyCreditsPage"));
 const SparkAiCreditsPage = lazy(() => import("./pages/spark/SparkAiCreditsPage"));
 const SparkAiUsagePage = lazy(() => import("./pages/spark/SparkAiUsagePage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
@@ -337,7 +338,10 @@ const App = () => (
             <Route element={<ProtectedRoute requiredRole="admin" />}>
               <Route path="/admin-console/subscription" element={<SubscriptionPage />} />
               <Route path="/admin-console/subscription/checkout" element={<CheckoutPage />} />
-              <Route path="/admin-console/ai-credits" element={<AiCreditsPage />} />
+              <Route path="/admin-console/usage" element={<UsagePage />} />
+              <Route path="/admin-console/usage/buy-credits" element={<BuyCreditsPage />} />
+              {/* The old address, so bookmarks and older links still work. */}
+              <Route path="/admin-console/ai-credits" element={<Navigate to="/admin-console/usage" replace />} />
             </Route>
           )}
           {/* Annual Report (Cycles) — admin + IR, inside the main shell so the

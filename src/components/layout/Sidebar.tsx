@@ -115,7 +115,7 @@ const ADMIN_CHILDREN: {
   // Cloud only: on-premises installs use license keys (the License card).
   ...(IS_ON_PREM ? [] : [
     { key: 'subscription', label: 'Subscription', path: '/admin-console/subscription', allowedRoles: ['admin'] as BackendRole[] },
-    { key: 'ai-credits', label: 'AI credits', path: '/admin-console/ai-credits', allowedRoles: ['admin'] as BackendRole[] },
+    { key: 'usage', label: 'Usage', path: '/admin-console/usage', allowedRoles: ['admin'] as BackendRole[] },
   ]),
 ];
 
@@ -209,7 +209,7 @@ const SPARK_LICENSING_ITEMS: SparkMenuItem[] = [
   { key: 'licenses', label: 'Licenses', hint: 'On-premises keys', path: '/spark/licenses', icon: 'server' },
   { key: 'subscriptions', label: 'Subscriptions', hint: 'Cloud plans', path: '/spark/subscriptions', icon: 'plans' },
   { key: 'quotes', label: 'Quotes', hint: 'Enterprise requests', path: '/spark/quotes', icon: 'chat' },
-  { key: 'ai-credits', label: 'AI credits', hint: 'Prices and minimums', path: '/spark/ai-credits', icon: 'plans' },
+  { key: 'ai-credits', label: 'AI credits', hint: 'Prices, packs and minimums', path: '/spark/ai-credits', icon: 'plans' },
   { key: 'ai-usage', label: 'AI usage', hint: 'vs OpenAI bill', path: '/spark/ai-credits/usage', icon: 'chart' },
 ];
 
