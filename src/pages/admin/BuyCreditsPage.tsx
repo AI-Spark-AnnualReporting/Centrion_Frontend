@@ -66,7 +66,7 @@ export default function BuyCreditsPage() {
   const packs = period?.credit_packs ?? [];
   const picked = packs.find((pack) => pack.id === pickedId) ?? null;
   return (
-    <div className="card" style={{ padding: 28, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="card" style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
         <Link to={USAGE_PAGE} style={{ fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>← Back to Usage</Link>
         <div style={{ fontSize: 18, fontWeight: 800, marginTop: 6 }}>Buy AI credits</div>
@@ -89,7 +89,7 @@ export default function BuyCreditsPage() {
               const on = pack.id === pickedId;
               return (
                 <button key={pack.id} type="button" role="radio" aria-checked={on} onClick={() => setPickedId(pack.id)}
-                  style={{ textAlign: 'left', padding: 16, borderRadius: 12, cursor: 'pointer', minHeight: 80,
+                  style={{ textAlign: 'left', padding: '14px 16px', borderRadius: 12, cursor: 'pointer', minHeight: 76,
                     fontFamily: 'inherit', color: '#1A1D2E',
                     background: on ? '#EEF0FF' : '#FAFBFE', border: on ? '2px solid #4040C8' : '2px solid #ECEEF8' }}>
                   <span style={{ display: 'block', fontSize: 16, fontWeight: 800 }}>{formatCredits(pack.credits)} credits</span>
@@ -99,14 +99,14 @@ export default function BuyCreditsPage() {
             })}
           </div>
 
-          <div style={{ fontSize: 12, color: '#5A6080', border: '1px solid #ECEEF8', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontSize: 12, lineHeight: 1.5, color: '#5A6080', border: '2px solid #ECEEF8', borderRadius: 12, padding: '10px 16px' }}>
             Credits count straight away and end with this period on {formatLicenseDate(period.period.ends_at)}.
             Unused credits don&apos;t carry over.
             {period.balance.balance < 0 && <> The {formatCredits(-period.balance.balance)} below zero comes off them.</>}
           </div>
 
           {picked && (
-            <div style={{ background: '#FAFBFE', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+            <div style={{ background: '#FAFBFE', border: '2px solid #FAFBFE', borderRadius: 12, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
               <SummaryLine label="AI credits" value={formatCredits(picked.credits)} />
               <SummaryLine label="Price per credit" value={formatDollars(pricePerCredit(picked), 3)} />
               <SummaryLine label="Balance after buying"
@@ -116,12 +116,14 @@ export default function BuyCreditsPage() {
             </div>
           )}
 
-          <div style={{ fontSize: 11, color: '#9BA3C4' }}>Test mode: no real payment is taken.</div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Link to={USAGE_PAGE} className="btn bs" style={{ textDecoration: 'none' }}>Cancel</Link>
-            <button type="button" className="btn bp" disabled={!picked || paying} onClick={() => picked && pay(picked)}>
-              {paying ? 'Paying…' : `Pay ${picked ? formatDollars(picked.price) : ''} now`}
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#9BA3C4' }}>Test mode: no real payment is taken.</span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <Link to={USAGE_PAGE} className="btn bs" style={{ textDecoration: 'none' }}>Cancel</Link>
+              <button type="button" className="btn bp" disabled={!picked || paying} onClick={() => picked && pay(picked)}>
+                {paying ? 'Paying…' : `Pay ${picked ? formatDollars(picked.price) : ''} now`}
+              </button>
+            </span>
           </div>
         </>
       )}
