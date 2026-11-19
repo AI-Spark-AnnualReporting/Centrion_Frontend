@@ -63,11 +63,11 @@ function creditsSummary(overrides: Partial<NonNullable<AiCreditsSummary["subscri
   };
 }
 
-function invoicePage(total: number, page = 1): InvoicePage {
+function invoicePage(total: number, page = 1, limit = 10): InvoicePage {
   return {
     items: [{ id: "p1", kind: "ai_credits", description: "500 AI credits", total: 50, status: "paid",
       paid_at: "2026-11-18T12:11:00.123+00:00" }],
-    page, limit: 20, total,
+    page, limit, total,
   };
 }
 
@@ -91,14 +91,26 @@ describe("Usage page", () => {
     expect(screen.getByText("500 AI credits")).toBeInTheDocument();
   });
 
-  it("turns invoice pages", async () => {
+  it("shows invoices 10 to a page with the app's pager", async () => {
     summary.mockResolvedValue(creditsSummary());
-    invoices.mockImplementation((page: number) => Promise.resolve(invoicePage(45, page)));
+    invoices.mockImplementation((page: number, limit: number) => Promise.resolve(invoicePage(19, page, limit)));
     render(<MemoryRouter><UsagePage /></MemoryRouter>);
-    expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
-    expect(invoices).toHaveBeenLastCalledWith(2, 20);
+    expect(await screen.findByText("1–10")).toBeInTheDocument();     // "Showing 1–10 of 19"
+    expect(invoices).toHaveBeenLastCalledWith(1, 10);
+    expect(screen.getByRole("button", { name: "2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next ›" }));
+    await waitFor(() => expect(invoices).toHaveBeenLastCalledWith(2, 10));
+    expect(await screen.findByText("11–19")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "25" } });
+    await waitFor(() => expect(invoices).toHaveBeenLastCalledWith(1, 25));    // a new size starts at page 1
+  });
+
+  it("shows the pager even when everything fits on one page", async () => {
+    summary.mockResolvedValue(creditsSummary());
+    invoices.mockResolvedValue(invoicePage(3));
+    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText("1–3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next ›" })).toBeDisabled();
   });
 
   it("says when nothing is on sale", async () => {

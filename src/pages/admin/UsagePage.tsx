@@ -19,10 +19,10 @@ import {
   actionName, formatCredits, formatCreditsDetail, formatDollars, formatPaidDate,
 } from '@/components/ai-credits/creditFormat';
 import { aiCredits } from '@/lib/api';
+import { PAGE_SIZES, Pager } from '@/pages/spark/SparkLicensesPage';
 import type { AiCreditsSummary, InvoicePage } from '@/types/ai-credits';
 
 export const BUY_CREDITS_PAGE = '/admin-console/usage/buy-credits';
-const INVOICES_PER_PAGE = 20;
 
 /** The sentence under the balance. */
 export function balanceText(balance: number, total: number): string {
@@ -159,16 +159,23 @@ function PaymentSection() {
 
 function InvoicesSection() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);      // 10 rows at first
   const [data, setData] = useState<InvoicePage | null>(null);
   const [error, setError] = useState('');
 
-  const load = useCallback((pageNumber: number) => {
-    aiCredits.invoices(pageNumber, INVOICES_PER_PAGE)
+  const load = useCallback((pageNumber: number, size: number) => {
+    aiCredits.invoices(pageNumber, size)
       .then((next) => { setData(next); setError(''); })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load invoices.'));
   }, []);
 
-  useEffect(() => load(page), [load, page]);
+  useEffect(() => load(page, pageSize), [load, page, pageSize]);
+
+  /** A new page size starts again from page 1. */
+  const changePageSize = (size: number) => {
+    setPageSize(size);
+    setPage(1);
+  };
 
   const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
   return (
@@ -195,12 +202,9 @@ function InvoicesSection() {
               ))}
             </tbody>
           </table>
-          {pages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12 }}>
-              <button type="button" className="btn bs" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
-              <span>Page {page} of {pages}</span>
-              <button type="button" className="btn bs" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button>
-            </div>
+          {data.total > 0 && (
+            <Pager total={data.total} page={page} pages={pages} size={pageSize}
+              onPage={setPage} onSize={changePageSize} />
           )}
         </>
       )}
