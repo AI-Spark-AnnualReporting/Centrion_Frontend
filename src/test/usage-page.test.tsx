@@ -185,6 +185,30 @@ describe("Spark credit packs", () => {
     ]));
   });
 
+  it("puts each message under the box it's about", async () => {
+    modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings([PACKS[0]]) });
+    render(<MemoryRouter><SparkAiCreditsPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add pack" }));
+    const creditsBox = screen.getByLabelText("Credits in pack 2");
+    expect(creditsBox.closest("td")).toHaveTextContent("Credits must be a whole number");
+    expect(screen.getByLabelText("Price of pack 2").closest("td")).not.toHaveTextContent("Credits must be");
+    fireEvent.change(creditsBox, { target: { value: "1000" } });
+    expect(screen.getByLabelText("Price of pack 2").closest("td")).toHaveTextContent("Enter a price of at least $0.01.");
+  });
+
+  it("says Remove isn't saved yet, and saving an empty list takes packs off sale", async () => {
+    modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings([PACKS[0]]) });
+    saveCreditPacks.mockResolvedValue({ packs: [] });
+    render(<MemoryRouter><SparkAiCreditsPage /></MemoryRouter>);
+    await screen.findByLabelText("Price of pack 1");
+    expect(screen.queryByText(/Unsaved changes/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.getByText(/Unsaved changes — press Save packs/)).toBeInTheDocument();
+    expect(screen.getByText(/No packs\. After you save, clients see/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save packs" }));
+    await waitFor(() => expect(saveCreditPacks).toHaveBeenCalledWith([]));
+  });
+
   it("allows at most 5 packs", async () => {
     const five = [1, 2, 3, 4, 5].map((n) => ({ id: `pk_${n}`, credits: n * 100, price: n * 10 }));
     modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings(five) });

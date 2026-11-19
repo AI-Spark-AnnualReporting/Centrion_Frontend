@@ -175,23 +175,48 @@ const MAX_PACKS = 5;
  *  already on sale. rowKey only keeps React's rows apart. */
 export type PackRow = { rowKey: number; id?: string; creditsText: string; priceText: string };
 
-/** What's wrong with one row, or null when it's fine (same rules as the backend). */
-export function packRowProblem(row: PackRow, rows: PackRow[], creditValue: number): string | null {
+/** What's wrong with one row and which box it's about (so the message goes
+ *  under that box), or null when it's fine. Same rules as the backend. */
+export function packRowIssue(row: PackRow, rows: PackRow[], creditValue: number):
+  { field: 'credits' | 'price'; message: string } | null {
   const credits = Number(row.creditsText);
   const price = Number(row.priceText);
-  if (!Number.isInteger(credits) || credits < 1 || credits > 1_000_000) {
-    return 'Credits must be a whole number from 1 to 1,000,000.';
-  }
-  if (row.priceText.trim() === '' || !Number.isFinite(price) || price < 0.01 || price > 1_000_000) {
-    return 'Enter a price of at least $0.01.';
+  if (row.creditsText.trim() === '' || !Number.isInteger(credits) || credits < 1 || credits > 1_000_000) {
+    return { field: 'credits', message: 'Credits must be a whole number from 1 to 1,000,000.' };
   }
   const sameSize = rows.filter((other) => Number(other.creditsText) === credits);
-  if (sameSize.length > 1) return `Another pack also has ${formatCredits(credits)} credits.`;
+  if (sameSize.length > 1) {
+    return { field: 'credits', message: `Another pack also has ${formatCredits(credits)} credits.` };
+  }
+  if (row.priceText.trim() === '' || !Number.isFinite(price) || price < 0.01 || price > 1_000_000) {
+    return { field: 'price', message: 'Enter a price of at least $0.01.' };
+  }
   const minimum = packMinimumPrice(credits, creditValue);
   if (price < minimum) {
-    return `At least ${formatDollars(minimum)} for ${formatCredits(credits)} credits (the AI cost). Raise the price.`;
+    return {
+      field: 'price',
+      message: `At least ${formatDollars(minimum)} for ${formatCredits(credits)} credits (the AI cost). Raise the price.`,
+    };
   }
   return null;
+}
+
+/** Just the message of packRowIssue, or null when the row is fine. */
+export function packRowProblem(row: PackRow, rows: PackRow[], creditValue: number): string | null {
+  return packRowIssue(row, rows, creditValue)?.message ?? null;
+}
+
+// Every cell starts at the top of the row, so a message under one box never
+// pushes the other boxes down out of line.
+const PACK_CELL = { verticalAlign: 'top' as const };
+
+/** A pack box: red border when the row's message is about this box. */
+function packBoxStyle(hasIssue: boolean) {
+  return { width: 110, padding: '6px 10px', borderColor: hasIssue ? '#DC2626' : undefined };
+}
+
+function PackMessage({ text }: { text: string }) {
+  return <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 4, maxWidth: 240 }}>{text}</div>;
 }
 
 function rowsFromPacks(packs: CreditPack[]): PackRow[] {
@@ -218,9 +243,9 @@ function CreditPacksCard({ packs, creditValue, onSave }: {
     setNextKey(packs.length);
   }, [packs]);
 
-  const problems = rows.map((row) => packRowProblem(row, rows, creditValue));
+  const issues = rows.map((row) => packRowIssue(row, rows, creditValue));
   const changed = rowValues(rows) !== rowValues(rowsFromPacks(packs));
-  const canSave = changed && problems.every((problem) => problem === null);
+  const canSave = changed && issues.every((issue) => issue === null);
 
   const setRow = (rowKey: number, field: 'creditsText' | 'priceText', text: string) =>
     setRows(rows.map((row) => (row.rowKey === rowKey ? { ...row, [field]: text } : row)));
@@ -253,30 +278,32 @@ function CreditPacksCard({ packs, creditValue, onSave }: {
             {rows.length === 0 && (
               <tr className="urow">
                 <td colSpan={4} style={{ color: '#B45309' }}>
-                  No packs: clients see &quot;Extra credits aren&apos;t on sale yet. Contact Centriyon.&quot;
+                  No packs. After you save, clients see &quot;Extra credits aren&apos;t on sale yet. Contact Centriyon.&quot;
                 </td>
               </tr>
             )}
             {rows.map((row, index) => {
-              const problem = problems[index];
+              const issue = issues[index];
               const credits = Number(row.creditsText);
               const price = Number(row.priceText);
               return (
                 <tr key={row.rowKey} className="urow">
-                  <td>
+                  <td style={PACK_CELL}>
                     <input className="inp" inputMode="numeric" aria-label={`Credits in pack ${index + 1}`} value={row.creditsText}
-                      onChange={(e) => setRow(row.rowKey, 'creditsText', e.target.value)} style={{ width: 110, padding: '6px 10px' }} />
+                      onChange={(e) => setRow(row.rowKey, 'creditsText', e.target.value)}
+                      style={packBoxStyle(issue?.field === 'credits')} />
+                    {issue?.field === 'credits' && <PackMessage text={issue.message} />}
                   </td>
-                  <td>
+                  <td style={PACK_CELL}>
                     <input className="inp" inputMode="decimal" aria-label={`Price of pack ${index + 1}`} value={row.priceText}
                       onChange={(e) => setRow(row.rowKey, 'priceText', e.target.value)}
-                      style={{ width: 110, padding: '6px 10px', borderColor: problem ? '#DC2626' : undefined }} />
-                    {problem && <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 4, maxWidth: 280 }}>{problem}</div>}
+                      style={packBoxStyle(issue?.field === 'price')} />
+                    {issue?.field === 'price' && <PackMessage text={issue.message} />}
                   </td>
-                  <td style={{ color: '#5A6080' }}>
+                  <td style={{ ...PACK_CELL, color: '#5A6080', lineHeight: '34px' }}>
                     {credits > 0 && price > 0 ? formatDollars(pricePerCredit({ credits, price }), 3) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ ...PACK_CELL, textAlign: 'right' }}>
                     <button type="button" className="btn bs" onClick={() => removePack(row.rowKey)}>Remove</button>
                   </td>
                 </tr>
@@ -286,10 +313,17 @@ function CreditPacksCard({ packs, creditValue, onSave }: {
         </table>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: '1px solid #ECEEF8', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: '#9BA3C4' }}>
+        <span style={{ fontSize: 11, color: '#9BA3C4', flex: '1 1 320px' }}>
           A pack can&apos;t sell below the AI cost: credits × {formatDollars(creditValue, 3)}. If the credit value goes up, raise any pack that falls below it first.
         </span>
-        <button type="button" className="btn bp" disabled={!canSave} onClick={save}>Save packs</button>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {changed && (
+            <span role="status" style={{ fontSize: 11, fontWeight: 700, color: '#B45309' }}>
+              Unsaved changes — press Save packs to update what clients see.
+            </span>
+          )}
+          <button type="button" className="btn bp" disabled={!canSave} onClick={save}>Save packs</button>
+        </span>
       </div>
     </div>
   );
