@@ -49,7 +49,7 @@ import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type {
-  ActionRow, AiCreditsSummary, CreditSettings, ModelPrice, MonthlyUsage, PackCheckout, SettingsChanges,
+  ActionRow, AiCreditsSummary, CreditSettings, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
 } from "@/types/ai-credits";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -5860,12 +5860,12 @@ export const aiCredits = {
 
 export const sparkAiCredits = {
   modelPrices: () =>
-    request<{ items: ModelPrice[]; settings: CreditSettings }>("/api/v1/spark/ai-credits/model-prices", {
+    request<ModelPriceList>("/api/v1/spark/ai-credits/model-prices", {
       noActingCompany: true,
     }),
 
   saveModelPrice: (model: string, body: { input_price_per_million: number; output_price_per_million: number }) =>
-    request<ModelPrice>(`/api/v1/spark/ai-credits/model-prices/${encodeURIComponent(model)}`, {
+    request<unknown>(`/api/v1/spark/ai-credits/model-prices/${encodeURIComponent(model)}`, {
       method: "PUT",
       body,
       noActingCompany: true,

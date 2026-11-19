@@ -58,13 +58,24 @@ export interface PackCheckout {
   payment_reference?: string | null;
 }
 
-// Spark: the price OpenAI charges per 1 million tokens.
+// Spark: one AI model the apps really use (from their .env files, or seen in
+// the last 30 days) and the price OpenAI charges per 1 million tokens.
+// Spark only types prices; it can't add or remove models.
+export type ModelUsedBy = "Centriyon" | "Annual Reporting" | "Recent usage";
+
 export interface ModelPrice {
   model: string;
-  input_price_per_million: number;
-  output_price_per_million: number;
-  updated_at: string;
-  updated_by: string | null;
+  used_by: ModelUsedBy[];
+  has_price: boolean;
+  input_price_per_million: number | null;    // null = no price yet
+  output_price_per_million: number | null;
+  updated_at: string | null;
+}
+
+export interface ModelPriceList {
+  items: ModelPrice[];
+  annual_reporting_reachable: boolean;
+  settings: CreditSettings;
 }
 
 export interface CreditSettings {

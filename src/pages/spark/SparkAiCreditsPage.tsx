@@ -1,7 +1,8 @@
 // Spark admin → AI credits. Three parts on one page:
-//   1. Two settings: the AI cost one credit covers ($0.02) and when to warn
-//      a company's admin that credits are low (20%).
-//   2. Model prices: what OpenAI charges per 1 million tokens, per model.
+//   1. The AI cost one credit covers ($0.02). The low-balance warning % is
+//      set in the backend's .env, not here.
+//   2. Model prices: what OpenAI charges per 1 million tokens, for each model
+//      the apps use (the list comes from their .env files; Spark types prices).
 //   3. Minimum balance to start each action, next to what each action usually
 //      cost and the most it cost in the last 30 days (all companies).
 // The rules: a job starts while the balance is above zero and at least the
@@ -15,7 +16,7 @@ import { Spinner } from '@/components/shared/Spinner';
 import { formatCredits } from '@/components/ai-credits/creditFormat';
 import { useToast } from '@/hooks/use-toast';
 import { sparkAiCredits } from '@/lib/api';
-import type { ActionArea, ActionRow, CreditSettings, ModelPrice } from '@/types/ai-credits';
+import type { ActionArea, ActionRow, CreditSettings, ModelPrice, ModelUsedBy } from '@/types/ai-credits';
 
 const AREAS: { key: ActionArea | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -54,6 +55,7 @@ export default function SparkAiCreditsPage() {
   const [saveError, setSaveError] = useState('');
   const [settings, setSettings] = useState<CreditSettings | null>(null);
   const [prices, setPrices] = useState<ModelPrice[]>([]);
+  const [annualReportingReachable, setAnnualReportingReachable] = useState(true);
   const [actions, setActions] = useState<ActionRow[]>([]);
   const [days, setDays] = useState(30);
 
@@ -62,6 +64,7 @@ export default function SparkAiCreditsPage() {
     Promise.all([sparkAiCredits.modelPrices(), sparkAiCredits.actions()])
       .then(([priceList, actionList]) => {
         setPrices(priceList.items);
+        setAnnualReportingReachable(priceList.annual_reporting_reachable);
         setSettings(priceList.settings);
         setActions(actionList.items);
         setDays(actionList.days);
@@ -102,7 +105,7 @@ export default function SparkAiCreditsPage() {
         <CreditValueCard settings={settings}
           onSave={(changes) => saveThen(() => sparkAiCredits.changeSettings(changes), 'Settings saved')} />
       )}
-      <ModelPricesTable prices={prices}
+      <ModelPricesTable prices={prices} annualReportingReachable={annualReportingReachable}
         onSave={(model, body) => saveThen(() => sparkAiCredits.saveModelPrice(model, body), `${model} price saved`)} />
       {settings && (
         <MinimumsTable actions={actions} days={days} saved={settings.action_minimums}
@@ -157,37 +160,72 @@ function CreditValueCard({ settings, onSave }: {
 }
 
 // ── 2. Model prices ─────────────────────────────────────────────────
+// The models come from the apps' .env files (and models used in the last 30
+// days), not from Spark: Spark only types prices. Plan:
+// Centriton/.claude/plans/model-prices-from-code.md
 
-function ModelPricesTable({ prices, onSave }: {
+type PriceBody = { input_price_per_million: number; output_price_per_million: number };
+
+const USED_BY_BADGE: Record<ModelUsedBy, string> = {
+  'Centriyon': 'b-or',
+  'Annual Reporting': 'b-pp',
+  'Recent usage': 'b-gy',
+};
+
+/** Whether a row's two price boxes hold valid prices, and whether they differ
+ *  from what's saved (a model with no price yet always counts as changed). */
+export function priceBoxState(price: ModelPrice, inputText: string, outputText: string) {
+  const input = readAmount(inputText);
+  const output = readAmount(outputText);
+  const valid = input !== null && output !== null;
+  const changed = !price.has_price
+    || input !== price.input_price_per_million
+    || output !== price.output_price_per_million;
+  return { input, output, valid, changed };
+}
+
+/** The price box text for a saved price ('' when there's none yet). */
+function priceText(value: number | null): string {
+  return value === null ? '' : String(value);
+}
+
+function ModelPricesTable({ prices, annualReportingReachable, onSave }: {
   prices: ModelPrice[];
-  onSave: (model: string, body: { input_price_per_million: number; output_price_per_million: number }) => void;
+  annualReportingReachable: boolean;
+  onSave: (model: string, body: PriceBody) => void;
 }) {
-  const [newModel, setNewModel] = useState('');
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Model prices</div>
-          <div style={{ fontSize: 11, color: '#9BA3C4' }}>
-            What OpenAI charges per 1 million tokens. Copy them from{' '}
-            <a href={OPENAI_PRICES_URL} target="_blank" rel="noreferrer">OpenAI&apos;s price page</a>. Thinking tokens count as writing.
-          </div>
+      <div style={{ padding: '14px 18px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800 }}>Model prices</div>
+        <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
+          What OpenAI charges per 1 million tokens, for each model the apps use. Copy them from{' '}
+          <a href={OPENAI_PRICES_URL} target="_blank" rel="noreferrer">OpenAI&apos;s price page</a>.
+          Thinking tokens count as writing. Change a price, then press Save.
         </div>
-        <span style={{ display: 'flex', gap: 6 }}>
-          <input className="inp" aria-label="New model name" placeholder="New model, e.g. gpt-5" value={newModel}
-            onChange={(e) => setNewModel(e.target.value.trim())} style={{ width: 180 }} />
-        </span>
+        <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 4 }}>
+          The list comes from the apps&apos; settings: a developer adds or changes a model there.
+        </div>
+        {!annualReportingReachable && (
+          <div style={{ fontSize: 11, color: '#D97706', marginTop: 4 }}>
+            Couldn&apos;t reach Annual Reporting, so its models are shown from recent usage.
+          </div>
+        )}
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table className="utable" style={{ width: "100%", fontSize: 12 }}>
+        <table className="utable">
           <thead>
-            <tr><th>Model</th><th>Reading (input) · $ per 1M</th><th>Writing (output) · $ per 1M</th><th>Last updated</th><th /></tr>
+            <tr>
+              <th>Model</th><th>Used by</th>
+              <th style={{ textAlign: 'right' }}>Reading (input) · $ per 1M</th>
+              <th style={{ textAlign: 'right' }}>Writing (output) · $ per 1M</th>
+              <th>Last updated</th><th style={{ width: 90 }} />
+            </tr>
           </thead>
           <tbody>
             {prices.map((price) => <ModelPriceRow key={price.model} price={price} onSave={onSave} />)}
-            {newModel && !prices.some((price) => price.model === newModel) && (
-              <ModelPriceRow key={`new-${newModel}`} isNew onSave={(model, body) => { onSave(model, body); setNewModel(''); }}
-                price={{ model: newModel, input_price_per_million: 0, output_price_per_million: 0, updated_at: '', updated_by: null }} />
+            {prices.length === 0 && (
+              <tr className="urow"><td colSpan={6} style={{ color: '#9BA3C4' }}>No models found.</td></tr>
             )}
           </tbody>
         </table>
@@ -196,27 +234,64 @@ function ModelPricesTable({ prices, onSave }: {
   );
 }
 
-function ModelPriceRow({ price, onSave, isNew = false }: {
-  price: ModelPrice;
-  onSave: (model: string, body: { input_price_per_million: number; output_price_per_million: number }) => void;
-  isNew?: boolean;
-}) {
-  const [input, setInput] = useState(String(price.input_price_per_million));
-  const [output, setOutput] = useState(String(price.output_price_per_million));
-  const inputNumber = readAmount(input);
-  const outputNumber = readAmount(output);
-  const changed = isNew || inputNumber !== Number(price.input_price_per_million) || outputNumber !== Number(price.output_price_per_million);
+function PriceBox({ label, value, onChange }: { label: string; value: string; onChange: (text: string) => void }) {
   return (
-    <tr>
-      <td style={{ fontFamily: "'DM Mono', monospace" }}>{price.model}{isNew && <span className="badge b-am" style={{ marginLeft: 6 }}>new</span>}</td>
-      <td><input className="inp" inputMode="decimal" aria-label={`Reading price for ${price.model}`} value={input} onChange={(e) => setInput(e.target.value)} style={{ width: 100 }} /></td>
-      <td><input className="inp" inputMode="decimal" aria-label={`Writing price for ${price.model}`} value={output} onChange={(e) => setOutput(e.target.value)} style={{ width: 100 }} /></td>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ color: '#9BA3C4' }}>$</span>
+      <input className="inp" inputMode="decimal" aria-label={label} value={value} placeholder="0.00"
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: 110, textAlign: 'right', padding: '6px 10px' }} />
+    </span>
+  );
+}
+
+function ModelPriceRow({ price, onSave }: { price: ModelPrice; onSave: (model: string, body: PriceBody) => void }) {
+  const [inputText, setInputText] = useState(priceText(price.input_price_per_million));
+  const [outputText, setOutputText] = useState(priceText(price.output_price_per_million));
+  // After a save the page reloads; show the saved prices again.
+  useEffect(() => {
+    setInputText(priceText(price.input_price_per_million));
+    setOutputText(priceText(price.output_price_per_million));
+  }, [price]);
+
+  const state = priceBoxState(price, inputText, outputText);
+  const typedSomething = inputText.trim() !== '' || outputText.trim() !== '';
+  const showError = !state.valid && (price.has_price || typedSomething);
+
+  const save = () => {
+    if (state.input === null || state.output === null) return;
+    onSave(price.model, { input_price_per_million: state.input, output_price_per_million: state.output });
+  };
+
+  return (
+    <tr className="urow" style={price.has_price ? undefined : { ['--row-accent' as string]: '#DC2626', background: '#FEF6F6' }}>
+      <td>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>{price.model}</div>
+        {!price.has_price && (
+          <div style={{ fontSize: 11, color: '#DC2626', marginTop: 2 }}>
+            No price yet: jobs on this model are free until you add one.
+          </div>
+        )}
+      </td>
+      <td>
+        <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {price.used_by.map((source) => <span key={source} className={`badge ${USED_BY_BADGE[source]}`}>{source}</span>)}
+        </span>
+      </td>
+      <td style={{ textAlign: 'right' }}>
+        <PriceBox label={`Reading price for ${price.model}`} value={inputText} onChange={setInputText} />
+      </td>
+      <td style={{ textAlign: 'right' }}>
+        <PriceBox label={`Writing price for ${price.model}`} value={outputText} onChange={setOutputText} />
+        {showError && (
+          <div role="alert" style={{ fontSize: 11, color: '#DC2626', marginTop: 4 }}>Enter a price of 0 or more in both boxes.</div>
+        )}
+      </td>
       <td style={{ color: '#9BA3C4' }}>{price.updated_at ? price.updated_at.slice(0, 10) : '—'}</td>
       <td style={{ textAlign: 'right' }}>
-        <button type="button" className="btn bs" disabled={!changed || inputNumber === null || outputNumber === null}
-          onClick={() => onSave(price.model, { input_price_per_million: inputNumber!, output_price_per_million: outputNumber! })}>
-          {isNew ? 'Add' : 'Save'}
-        </button>
+        {state.changed && state.valid && (
+          <button type="button" className="btn bp" onClick={save}>Save</button>
+        )}
       </td>
     </tr>
   );
@@ -267,7 +342,7 @@ function MinimumsTable({ actions, days, saved, onSave }: {
           </thead>
           <tbody>
             {shown.map((action) => (
-              <tr key={action.key}>
+              <tr key={action.key} className="urow">
                 <td><b>{action.label}</b><br /><span style={{ color: '#9BA3C4' }}>{action.line}</span></td>
                 <td style={{ color: '#5A6080' }}>{PER_WORDS[action.per]}</td>
                 <td>

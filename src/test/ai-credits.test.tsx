@@ -24,7 +24,7 @@ const {
 const { AiCreditsBanner, bannerText } = await import("@/components/ai-credits/AiCreditsBanner");
 const { CreditsCard } = await import("@/components/subscriptions/PlanFields");
 const { balanceText } = await import("@/pages/admin/AiCreditsPage");
-const { changedMinimums, readAmount } = await import("@/pages/spark/SparkAiCreditsPage");
+const { changedMinimums, priceBoxState, readAmount } = await import("@/pages/spark/SparkAiCreditsPage");
 const { billDifference } = await import("@/pages/spark/SparkAiUsagePage");
 const { limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 
@@ -155,6 +155,22 @@ describe("Spark's pages", () => {
     expect(readAmount("")).toBeNull();
     expect(readAmount("-1")).toBeNull();
     expect(readAmount("abc")).toBeNull();
+  });
+
+  it("only offers Save for a valid, changed model price", () => {
+    const priced = {
+      model: "gpt-4o", used_by: ["Centriyon" as const], has_price: true,
+      input_price_per_million: 2.5, output_price_per_million: 10, updated_at: "2026-11-15",
+    };
+    expect(priceBoxState(priced, "2.5", "10")).toMatchObject({ valid: true, changed: false });
+    expect(priceBoxState(priced, "3", "10")).toMatchObject({ valid: true, changed: true, input: 3 });
+    expect(priceBoxState(priced, "-1", "10").valid).toBe(false);
+    expect(priceBoxState(priced, "", "10").valid).toBe(false);
+
+    const unpriced = { ...priced, model: "gpt-9", has_price: false,
+      input_price_per_million: null, output_price_per_million: null, updated_at: null };
+    expect(priceBoxState(unpriced, "", "")).toMatchObject({ valid: false, changed: true });
+    expect(priceBoxState(unpriced, "1", "4")).toMatchObject({ valid: true, changed: true });
   });
 
   it("works out how far our total is from OpenAI's bill", () => {
