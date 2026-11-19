@@ -16,15 +16,9 @@ import { Spinner } from '@/components/shared/Spinner';
 import { formatCredits } from '@/components/ai-credits/creditFormat';
 import { useToast } from '@/hooks/use-toast';
 import { sparkAiCredits } from '@/lib/api';
-import type { ActionArea, ActionRow, CreditSettings, ModelPrice, ModelUsedBy } from '@/types/ai-credits';
-
-const AREAS: { key: ActionArea | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'design', label: 'Annual report · Design' },
-  { key: 'writing', label: 'Writing' },
-  { key: 'documents', label: 'Documents' },
-  { key: 'chat', label: 'Chat' },
-];
+import type {
+  ActionGroup, ActionGroupInfo, ActionRow, CreditSettings, ModelPrice, ModelUsedBy,
+} from '@/types/ai-credits';
 
 const PER_WORDS: Record<ActionRow['per'], string> = {
   section: 'per section', job: 'per job', document: 'per document', message: 'per message',
@@ -57,6 +51,7 @@ export default function SparkAiCreditsPage() {
   const [prices, setPrices] = useState<ModelPrice[]>([]);
   const [annualReportingReachable, setAnnualReportingReachable] = useState(true);
   const [actions, setActions] = useState<ActionRow[]>([]);
+  const [groups, setGroups] = useState<ActionGroupInfo[]>([]);
   const [days, setDays] = useState(30);
 
   const load = useCallback(() => {
@@ -67,6 +62,7 @@ export default function SparkAiCreditsPage() {
         setAnnualReportingReachable(priceList.annual_reporting_reachable);
         setSettings(priceList.settings);
         setActions(actionList.items);
+        setGroups(actionList.groups);
         setDays(actionList.days);
         setLoadError('');
       })
@@ -108,7 +104,7 @@ export default function SparkAiCreditsPage() {
       <ModelPricesTable prices={prices} annualReportingReachable={annualReportingReachable}
         onSave={(model, body) => saveThen(() => sparkAiCredits.saveModelPrice(model, body), `${model} price saved`)} />
       {settings && (
-        <MinimumsTable actions={actions} days={days} saved={settings.action_minimums}
+        <MinimumsTable actions={actions} groups={groups} days={days} saved={settings.action_minimums}
           onSave={(changes) => saveThen(() => sparkAiCredits.changeSettings({ action_minimums: changes }), 'Minimums saved')} />
       )}
     </div>
@@ -298,41 +294,47 @@ function ModelPriceRow({ price, onSave }: { price: ModelPrice; onSave: (model: s
 }
 
 // ── 3. Minimum balance to start each action ─────────────────────────
+// The actions are shown under 8 groups (Generate, Refine, Assemble, Translate,
+// Validate, Design, Documents, Chat). Groups only organise the page: each
+// action keeps its own minimum. Plan: Centriton/.claude/plans/ai-action-groups.md
 
-function MinimumsTable({ actions, days, saved, onSave }: {
+/** The actions of each group, in the groups' order; empty groups are left out. */
+export function actionsByGroup(groups: ActionGroupInfo[], actions: ActionRow[]) {
+  const sections = [];
+  for (const group of groups) {
+    const groupActions = actions.filter((action) => action.group === group.key);
+    if (groupActions.length > 0) sections.push({ group, actions: groupActions });
+  }
+  return sections;
+}
+
+function MinimumsTable({ actions, groups, days, saved, onSave }: {
   actions: ActionRow[];
+  groups: ActionGroupInfo[];
   days: number;
   saved: Record<string, number>;
   onSave: (changes: Record<string, number>) => void;
 }) {
-  const [area, setArea] = useState<ActionArea | 'all'>('all');
+  const [closed, setClosed] = useState<ActionGroup[]>([]);
   const [edited, setEdited] = useState<Record<string, number>>({});
   useEffect(() => setEdited({}), [saved]);
 
   const changes = changedMinimums(saved, edited);
-  const shown = actions.filter((action) => area === 'all' || action.area === area);
   const minimumOf = (action: ActionRow) => edited[action.key] ?? action.minimum;
+  const toggle = (key: ActionGroup) =>
+    setClosed(closed.includes(key) ? closed.filter((item) => item !== key) : [...closed, key]);
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Minimum balance to start each action</div>
-          <div style={{ fontSize: 11, color: '#9BA3C4' }}>
-            0 = above zero is enough. A higher minimum stops a big job starting on a nearly empty balance.
-          </div>
-        </div>
-        <div role="group" aria-label="Filter by area" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {AREAS.map((option) => (
-            <button key={option.key} type="button" aria-pressed={area === option.key}
-              className={`btn ${area === option.key ? 'bp' : 'bs'}`} onClick={() => setArea(option.key)}>
-              {option.label}
-            </button>
-          ))}
+      <div style={{ padding: '14px 18px' }}>
+        <div style={{ fontSize: 13, fontWeight: 800 }}>Minimum balance to start each action</div>
+        <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>
+          0 = above zero is enough. A higher minimum stops a big job starting on a nearly empty balance.
+          Every action is still charged its real cost.
         </div>
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table className="utable" style={{ width: "100%", fontSize: 12 }}>
+        <table className="utable">
           <thead>
             <tr>
               <th>Action</th><th>Charged</th><th>Minimum to start</th>
@@ -340,24 +342,43 @@ function MinimumsTable({ actions, days, saved, onSave }: {
               <th>Most it has cost<br /><small>last {days} days</small></th>
             </tr>
           </thead>
-          <tbody>
-            {shown.map((action) => (
-              <tr key={action.key} className="urow">
-                <td><b>{action.label}</b><br /><span style={{ color: '#9BA3C4' }}>{action.line}</span></td>
-                <td style={{ color: '#5A6080' }}>{PER_WORDS[action.per]}</td>
-                <td>
-                  <input className="inp" inputMode="numeric" aria-label={`Minimum to start ${action.label}`}
-                    value={minimumOf(action)} style={{ width: 80 }}
-                    onChange={(e) => {
-                      const value = Math.floor(Number(e.target.value));
-                      setEdited({ ...edited, [action.key]: Number.isFinite(value) && value >= 0 ? value : 0 });
-                    }} /> credits
-                </td>
-                <td>{action.usual_credits == null ? '—' : `${formatCredits(action.usual_credits)} credits`}</td>
-                <td>{action.most_credits == null ? '—' : `${formatCredits(action.most_credits)} credits`}</td>
-              </tr>
-            ))}
-          </tbody>
+          {actionsByGroup(groups, actions).map(({ group, actions: groupActions }) => {
+            const open = !closed.includes(group.key);
+            return (
+              <tbody key={group.key}>
+                <tr>
+                  <td colSpan={5} style={{ padding: 0, background: '#F6F7FC', borderTop: '1px solid #ECEEF8' }}>
+                    <button type="button" aria-expanded={open} onClick={() => toggle(group.key)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 18px',
+                        background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                      <span style={{ fontSize: 11, color: '#5A6080', width: 10 }}>{open ? '▾' : '▸'}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#1A1D2E' }}>{group.label}</span>
+                      <span className="uhead-count" style={{ marginLeft: 0 }}>{groupActions.length}</span>
+                      <span style={{ fontSize: 11, color: '#9BA3C4' }}>{group.line}</span>
+                    </button>
+                  </td>
+                </tr>
+                {open && groupActions.map((action) => (
+                  <tr key={action.key} className="urow">
+                    <td style={{ paddingLeft: 38 }}>
+                      <b>{action.label}</b><br /><span style={{ color: '#9BA3C4' }}>{action.line}</span>
+                    </td>
+                    <td style={{ color: '#5A6080' }}>{PER_WORDS[action.per]}</td>
+                    <td>
+                      <input className="inp" inputMode="numeric" aria-label={`Minimum to start ${action.label}`}
+                        value={minimumOf(action)} style={{ width: 80, padding: '6px 10px' }}
+                        onChange={(e) => {
+                          const value = Math.floor(Number(e.target.value));
+                          setEdited({ ...edited, [action.key]: Number.isFinite(value) && value >= 0 ? value : 0 });
+                        }} /> credits
+                    </td>
+                    <td>{action.usual_credits == null ? '—' : `${formatCredits(action.usual_credits)} credits`}</td>
+                    <td>{action.most_credits == null ? '—' : `${formatCredits(action.most_credits)} credits`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            );
+          })}
         </table>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '1px solid #ECEEF8', gap: 12, flexWrap: 'wrap' }}>

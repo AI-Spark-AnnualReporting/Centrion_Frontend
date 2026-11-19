@@ -89,12 +89,23 @@ export type SettingsChanges = Partial<{
   action_minimums: Record<string, number>;   // 0 removes that action's minimum
 }>;
 
-export type ActionArea = "design" | "writing" | "documents" | "chat";
+// The 8 groups Spark's minimums table shows the AI actions under. Groups only
+// organise the page: each action keeps its own minimum.
+// Plan: Centriton/.claude/plans/ai-action-groups.md
+export type ActionGroup =
+  | "generate" | "refine" | "assemble" | "translate"
+  | "validate" | "design" | "documents" | "chat";
+
+export interface ActionGroupInfo {
+  key: ActionGroup;
+  label: string;
+  line: string;
+}
 
 // Spark's minimums table: one AI action, its minimum, and the last 30 days.
 export interface ActionRow {
   key: string;
-  area: ActionArea;
+  group: ActionGroup;
   per: "section" | "job" | "document" | "message";
   label: string;
   line: string;
@@ -102,6 +113,12 @@ export interface ActionRow {
   jobs: number;
   usual_credits: number | null;   // null = hasn't run in the last 30 days
   most_credits: number | null;
+}
+
+export interface ActionList {
+  items: ActionRow[];
+  groups: ActionGroupInfo[];
+  days: number;
 }
 
 export interface OpenAiBill {

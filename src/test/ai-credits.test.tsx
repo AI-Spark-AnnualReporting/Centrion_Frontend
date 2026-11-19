@@ -63,7 +63,8 @@ describe("credit helpers", () => {
 
   it("turns an action key into words", () => {
     expect(actionName("annual.design.custom_template")).toBe("Custom template");
-    expect(actionName("annual.chat")).toBe("Chat");
+    expect(actionName("annual.chat")).toBe("Department chat message");
+    expect(actionName("annual.questions")).toBe("Questions");
   });
 
   it("names the month as the usage page asks for it", () => {

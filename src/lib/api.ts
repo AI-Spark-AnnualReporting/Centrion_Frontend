@@ -49,7 +49,7 @@ import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type {
-  ActionRow, AiCreditsSummary, CreditSettings, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
+  ActionList, AiCreditsSummary, CreditSettings, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
 } from "@/types/ai-credits";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -4213,6 +4213,15 @@ export type ChatStreamEvent =
   | { type: "done" }
   | { type: string; [key: string]: unknown };
 
+/** An error response's body: the parsed JSON when it is JSON, else the text. */
+export function parseErrorBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 // Internal: shared SSE consumer. Splits the response stream on `\n\n` and
 // yields one parsed event per `data: …` block.
 async function* consumeSse(
@@ -4221,7 +4230,10 @@ async function* consumeSse(
 ): AsyncGenerator<ChatStreamEvent, void, void> {
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    throw new ApiError(res.status, res.statusText, text, url);
+    // Parse the JSON error body so ApiError shows the backend's own words
+    // (e.g. "Not enough AI credits… Ask your admin to buy more.") instead of
+    // "API 403 Forbidden — …". Non-JSON bodies stay as text.
+    throw new ApiError(res.status, res.statusText, parseErrorBody(text), url);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -5877,7 +5889,7 @@ export const sparkAiCredits = {
     request<CreditSettings>("/api/v1/spark/ai-credits/settings", { method: "PATCH", body, noActingCompany: true }),
 
   actions: () =>
-    request<{ items: ActionRow[]; days: number }>("/api/v1/spark/ai-credits/actions", { noActingCompany: true }),
+    request<ActionList>("/api/v1/spark/ai-credits/actions", { noActingCompany: true }),
 
   usage: (query: { month: string; page?: number; limit?: number; sort?: "cost" | "credits" }) =>
     request<MonthlyUsage>("/api/v1/spark/ai-credits/usage", { query, noActingCompany: true }),

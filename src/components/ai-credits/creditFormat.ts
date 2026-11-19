@@ -35,8 +35,19 @@ export function isNotEnoughCreditsMessage(message: string | null | undefined): b
   return text.startsWith('Not enough AI credits') || text.includes('AI credits to start');
 }
 
+// Names that the key alone can't give (they match Centriton's AI_ACTIONS labels).
+const ACTION_NAMES: Record<string, string> = {
+  'annual.brief': 'Generate brief',
+  'annual.brief_refine': 'Refine brief',
+  'annual.section': 'Write a section',
+  'annual.section_refine': 'Refine a section',
+  'annual.chat': 'Department chat message',
+  'centriyon.copilot': 'AI Copilot message',
+};
+
 /** An action key as words: "annual.design.custom_template" → "Custom template". */
 export function actionName(key: string): string {
+  if (ACTION_NAMES[key]) return ACTION_NAMES[key];
   const last = key.split('.').pop() ?? key;
   const words = last.replace(/_/g, ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
