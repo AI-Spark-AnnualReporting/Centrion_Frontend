@@ -45,6 +45,14 @@ function EnterpriseBody({ contact }: { contact: PlanContact | null }) {
   );
 }
 
+/** The card's AI credits line: "100 AI credits / year", or "No AI credits
+ *  included" when the plan gives none. */
+export function aiCreditsLine(plan: { ai_credits?: number; duration: Duration }): string {
+  const credits = plan.ai_credits ?? 0;
+  if (credits <= 0) return 'No AI credits included';
+  return `${credits.toLocaleString('en-US')} AI credits ${durationPer(plan.duration).replace('per ', '/ ')}`;
+}
+
 function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: LicensableModule[] }) {
   const per = durationPer(plan.duration).split(' ');
   return (
@@ -73,12 +81,11 @@ function PricedBody({ plan, catalogue }: { plan: CardPlan; catalogue: Licensable
           <span className="sub-ic sub-ok">✓</span>
           <span>{usersSummary(plan)}</span>
         </li>
-        {(plan.ai_credits ?? 0) > 0 && (
-          <li>
-            <span className="sub-ic sub-ok">✓</span>
-            <span>{(plan.ai_credits ?? 0).toLocaleString('en-US')} AI credits {durationPer(plan.duration).replace('per ', '/ ')}</span>
-          </li>
-        )}
+        {/* Always shown, so clients can compare plans on AI too (0 = greyed out). */}
+        <li className={(plan.ai_credits ?? 0) > 0 ? '' : 'off'}>
+          <span className={`sub-ic ${(plan.ai_credits ?? 0) > 0 ? 'sub-ok' : 'sub-no'}`}>{(plan.ai_credits ?? 0) > 0 ? '✓' : '✗'}</span>
+          <span>{aiCreditsLine(plan)}</span>
+        </li>
       </ul>
     </>
   );

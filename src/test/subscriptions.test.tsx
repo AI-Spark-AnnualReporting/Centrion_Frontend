@@ -25,7 +25,7 @@ vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions, sparkAiCredits }));
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");
 const { usersSummary } = await import("@/components/subscriptions/PlanFields");
-const { CardStrip, PlanCard, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
+const { CardStrip, PlanCard, aiCreditsLine, fitScale, scrollingListHeight } = await import("@/components/subscriptions/PlanCard");
 const { default: SparkQuotesPage } = await import("@/pages/spark/SparkQuotesPage");
 const { QuoteForm } = await import("@/components/subscriptions/QuoteForm");
 const { default: SubscriptionPage, orderPlans } = await import("@/pages/admin/SubscriptionPage");
@@ -982,5 +982,14 @@ describe("Compliance Validation is counted in validations", () => {
     expect(screen.getByLabelText("Compliance Validation validations")).toHaveValue("3");
     expect(screen.getByText("Validations per plan period")).toBeInTheDocument();
     expect(screen.queryByText("Included")).not.toBeInTheDocument();
+  });
+});
+
+describe("plan card AI credits", () => {
+  it("always says how many AI credits a plan includes", () => {
+    expect(aiCreditsLine({ ai_credits: 100, duration: "yearly" })).toBe("100 AI credits / year");
+    expect(aiCreditsLine({ ai_credits: 5000, duration: "quarterly" })).toMatch(/^5,000 AI credits \//);
+    expect(aiCreditsLine({ ai_credits: 0, duration: "yearly" })).toBe("No AI credits included");
+    expect(aiCreditsLine({ duration: "yearly" })).toBe("No AI credits included");
   });
 });
