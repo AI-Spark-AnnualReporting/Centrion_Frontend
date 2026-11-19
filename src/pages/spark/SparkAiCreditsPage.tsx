@@ -99,7 +99,7 @@ export default function SparkAiCreditsPage() {
       <ErrorPopup open={!!saveError} title="Couldn't save" message={saveError} onClose={() => setSaveError('')} />
 
       {settings && (
-        <SettingsCards settings={settings}
+        <CreditValueCard settings={settings}
           onSave={(changes) => saveThen(() => sparkAiCredits.changeSettings(changes), 'Settings saved')} />
       )}
       <ModelPricesTable prices={prices}
@@ -114,28 +114,23 @@ export default function SparkAiCreditsPage() {
 
 // ── 1. Settings ─────────────────────────────────────────────────────
 
-function SettingsCards({ settings, onSave }: {
+// The low-balance warning percent isn't edited here: it's set in the backend's
+// .env (AI_CREDITS_LOW_BALANCE_PERCENT), so only a developer can change it.
+function CreditValueCard({ settings, onSave }: {
   settings: CreditSettings;
-  onSave: (changes: { credit_value_usd?: number; low_balance_percent?: number }) => void;
+  onSave: (changes: { credit_value_usd: number }) => void;
 }) {
   const [creditValue, setCreditValue] = useState(String(settings.credit_value_usd));
-  const [percent, setPercent] = useState(String(settings.low_balance_percent));
   useEffect(() => {
     setCreditValue(String(settings.credit_value_usd));
-    setPercent(String(settings.low_balance_percent));
   }, [settings]);
 
   const value = readAmount(creditValue);
-  const percentNumber = Math.floor(Number(percent));
   const valueChanged = value !== settings.credit_value_usd;
-  const percentChanged = percentNumber !== settings.low_balance_percent;
-  const valid = value !== null && value > 0 && percentNumber >= 1 && percentNumber <= 99;
+  const valid = value !== null && value > 0;
 
   const save = () => {
-    const changes: { credit_value_usd?: number; low_balance_percent?: number } = {};
-    if (valueChanged && value !== null) changes.credit_value_usd = value;
-    if (percentChanged) changes.low_balance_percent = percentNumber;
-    onSave(changes);
+    if (value !== null) onSave({ credit_value_usd: value });
   };
 
   return (
@@ -152,18 +147,8 @@ function SettingsCards({ settings, onSave }: {
             : 'Every charge = real AI cost ÷ this amount.'}
         </span>
       </label>
-      <label className="card" style={{ padding: 16, fontSize: 12, fontWeight: 700, color: '#5A6080' }}>
-        Warn the company admin when credits fall below
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-          <input className="inp" inputMode="numeric" aria-label="Low-balance percent" value={percent}
-            onChange={(e) => setPercent(e.target.value)} /> %
-        </span>
-        <span style={{ display: 'block', fontWeight: 500, fontSize: 11, marginTop: 6, color: '#9BA3C4' }}>
-          A banner in the app, and one email per period.
-        </span>
-      </label>
       <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-        <button type="button" className="btn bp" disabled={!valid || (!valueChanged && !percentChanged)} onClick={save}>
+        <button type="button" className="btn bp" disabled={!valid || !valueChanged} onClick={save}>
           Save settings
         </button>
       </div>

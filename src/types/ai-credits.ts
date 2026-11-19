@@ -69,13 +69,12 @@ export interface ModelPrice {
 
 export interface CreditSettings {
   credit_value_usd: number;
-  low_balance_percent: number;
+  low_balance_percent: number;   // read-only: set in the backend's .env, not by Spark
   action_minimums: Record<string, number>;
 }
 
 export type SettingsChanges = Partial<{
   credit_value_usd: number;
-  low_balance_percent: number;
   action_minimums: Record<string, number>;   // 0 removes that action's minimum
 }>;
 
