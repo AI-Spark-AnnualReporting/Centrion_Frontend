@@ -115,16 +115,23 @@ describe("Spark minimums in groups", () => {
     expect(actionsByGroup(GROUPS, [ACTIONS[0]]).map((s) => s.group.key)).toEqual(["generate"]);
   });
 
-  it("shows group headings that open and close", async () => {
+  it("shows group headings, all collapsed at first, that open and close", async () => {
     modelPrices.mockResolvedValue(listing());
     actions.mockResolvedValue({ items: ACTIONS, groups: GROUPS, days: 30 });
     showPage();
     const chat = await screen.findByRole("button", { name: /Chat/ });
-    expect(screen.getByText("AI Copilot message")).toBeInTheDocument();
-    fireEvent.click(chat);
     expect(chat).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Generate/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("AI Copilot message")).not.toBeInTheDocument();
-    expect(screen.getByText("Refine brief")).toBeInTheDocument();
+    expect(screen.queryByText("Refine brief")).not.toBeInTheDocument();
+
+    fireEvent.click(chat);
+    expect(chat).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("AI Copilot message")).toBeInTheDocument();
+    expect(screen.queryByText("Refine brief")).not.toBeInTheDocument();
+
+    fireEvent.click(chat);
+    expect(screen.queryByText("AI Copilot message")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Filter by area" })).not.toBeInTheDocument();
   });
 

@@ -315,14 +315,15 @@ function MinimumsTable({ actions, groups, days, saved, onSave }: {
   saved: Record<string, number>;
   onSave: (changes: Record<string, number>) => void;
 }) {
-  const [closed, setClosed] = useState<ActionGroup[]>([]);
+  // Every group starts collapsed: Spark sees the 8 headings first and opens one to edit.
+  const [opened, setOpened] = useState<ActionGroup[]>([]);
   const [edited, setEdited] = useState<Record<string, number>>({});
   useEffect(() => setEdited({}), [saved]);
 
   const changes = changedMinimums(saved, edited);
   const minimumOf = (action: ActionRow) => edited[action.key] ?? action.minimum;
   const toggle = (key: ActionGroup) =>
-    setClosed(closed.includes(key) ? closed.filter((item) => item !== key) : [...closed, key]);
+    setOpened(opened.includes(key) ? opened.filter((item) => item !== key) : [...opened, key]);
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -343,7 +344,7 @@ function MinimumsTable({ actions, groups, days, saved, onSave }: {
             </tr>
           </thead>
           {actionsByGroup(groups, actions).map(({ group, actions: groupActions }) => {
-            const open = !closed.includes(group.key);
+            const open = opened.includes(group.key);
             return (
               <tbody key={group.key}>
                 <tr>
