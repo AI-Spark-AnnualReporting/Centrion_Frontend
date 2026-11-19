@@ -69,6 +69,13 @@ function Steps() {
   );
 }
 
+/** The words under the AI credits number in "What you get":
+ *  "AI credits per year", or "AI credits (none included)" for 0. */
+export function aiCreditsBoxLabel(checkout: { ai_credits?: number; billing_period: PaidDuration }): string {
+  if ((checkout.ai_credits ?? 0) <= 0) return 'AI credits (none included)';
+  return `AI credits ${durationPer(checkout.billing_period)}`;
+}
+
 function Success({ checkout, onDone }: { checkout: CompanySubscription; onDone: () => void }) {
   const confetti = [];
   for (let i = 0; i < 26; i++) {
@@ -85,6 +92,12 @@ function Success({ checkout, onDone }: { checkout: CompanySubscription; onDone: 
       <p>
         Your plan runs from <b>{formatLicenseDate(checkout.starts_at)}</b> to <b>{formatLicenseDate(checkout.ends_at)}</b>.
         <br />Your modules are switched on now.
+        {(checkout.ai_credits ?? 0) > 0 && (
+          <>
+            <br /><b>{(checkout.ai_credits ?? 0).toLocaleString('en-US')} AI credits</b> are ready to use
+            until <b>{formatLicenseDate(checkout.ends_at)}</b>.
+          </>
+        )}
       </p>
       <button type="button" className="btn bp" style={{ marginTop: 18, padding: '10px 22px' }} onClick={onDone}>
         Go to my subscription
@@ -154,6 +167,10 @@ export default function CheckoutPage() {
             </div>
             <div className="sub-co-people">
               <div className="sub-co-pbox"><b>{checkout.max_users}</b><span>users (admin included)</span></div>
+              <div className="sub-co-pbox" style={(checkout.ai_credits ?? 0) > 0 ? undefined : { opacity: 0.6 }}>
+                <b>{(checkout.ai_credits ?? 0).toLocaleString('en-US')}</b>
+                <span>{aiCreditsBoxLabel(checkout)}</span>
+              </div>
             </div>
           </div>
 

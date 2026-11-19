@@ -742,6 +742,25 @@ describe("CheckoutPage", () => {
     expect(screen.getByRole("button", { name: "🔒 Pay $12,000" })).toBeEnabled();
   });
 
+  it("shows the plan's AI credits in What you get and in the success popup", async () => {
+    const withCredits = { ...CHECKOUT, ai_credits: 5000 };
+    subscriptions.pay.mockResolvedValue({ ...withCredits, status: "active" });
+    renderCheckout({ checkout: withCredits, catalogue: CATALOGUE });
+    expect(screen.getByText("AI credits per 6 months").previousSibling).toHaveTextContent("5,000");
+    fireEvent.click(screen.getByRole("button", { name: "🔒 Pay $12,000" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("5,000 AI credits are ready to use until 3 May 2027.");
+  });
+
+  it("says when a plan includes no AI credits, and the popup doesn't mention them", async () => {
+    subscriptions.pay.mockResolvedValue({ ...CHECKOUT, ai_credits: 0, status: "active" });
+    renderCheckout({ checkout: { ...CHECKOUT, ai_credits: 0 }, catalogue: CATALOGUE });
+    expect(screen.getByText("AI credits (none included)").previousSibling).toHaveTextContent("0");
+    fireEvent.click(screen.getByRole("button", { name: "🔒 Pay $12,000" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).not.toHaveTextContent("AI credits are ready");
+  });
+
   it("without a checkout (e.g. after a refresh) goes back to the plans", () => {
     renderCheckout(null);
     expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription");
