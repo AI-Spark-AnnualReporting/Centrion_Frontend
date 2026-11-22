@@ -12,6 +12,7 @@ import { sparkAiCredits } from '@/lib/api';
 import type { MonthlyUsage, OpenAiBill } from '@/types/ai-credits';
 
 const PAGE_SIZE = 20;
+const ACTIONS_PER_PAGE = 10;
 
 /** How far our own total is from OpenAI's bill, in %; null when the bill isn't known. */
 export function billDifference(ourCost: number, bill: OpenAiBill): number | null {
@@ -22,6 +23,8 @@ export function billDifference(ourCost: number, bill: OpenAiBill): number | null
 export default function SparkAiUsagePage() {
   const [month, setMonth] = useState(() => monthOf(new Date()));
   const [page, setPage] = useState(1);
+  // The API sends every action at once, so this table pages on the client.
+  const [actionPage, setActionPage] = useState(1);
   const [usage, setUsage] = useState<MonthlyUsage | null>(null);
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -48,6 +51,9 @@ export default function SparkAiUsagePage() {
 
   const difference = usage ? billDifference(usage.cost_usd, usage.openai_bill) : null;
   const pages = usage ? Math.max(1, Math.ceil(usage.companies.total / PAGE_SIZE)) : 1;
+  const actionPages = usage ? Math.max(1, Math.ceil(usage.by_action.length / ACTIONS_PER_PAGE)) : 1;
+  const firstAction = (actionPage - 1) * ACTIONS_PER_PAGE;
+  const shownActions = usage ? usage.by_action.slice(firstAction, firstAction + ACTIONS_PER_PAGE) : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1100 }}>
@@ -61,7 +67,7 @@ export default function SparkAiUsagePage() {
         <label style={{ fontSize: 11, fontWeight: 700, color: '#5A6080' }}>
           Month{' '}
           <input className="inp" type="month" value={month} aria-label="Month"
-            onChange={(e) => { if (e.target.value) { setMonth(e.target.value); setPage(1); } }} />
+            onChange={(e) => { if (e.target.value) { setMonth(e.target.value); setPage(1); setActionPage(1); } }} />
         </label>
       </div>
       {error && <div className="card" style={{ padding: 14, fontSize: 12, color: '#DC2626' }}>{error}</div>}
@@ -91,10 +97,10 @@ export default function SparkAiUsagePage() {
                 <thead><tr><th>Action</th><th>Jobs</th><th>Credits charged</th><th>Average per job</th><th>AI cost</th></tr></thead>
                 <tbody>
                   {usage.by_action.length === 0 && (
-                    <tr><td colSpan={5} style={{ color: '#9BA3C4' }}>No AI use this month.</td></tr>
+                    <tr className="urow"><td colSpan={5} style={{ color: '#9BA3C4' }}>No AI use this month.</td></tr>
                   )}
-                  {usage.by_action.map((row) => (
-                    <tr key={row.action}>
+                  {shownActions.map((row) => (
+                    <tr key={row.action} className="urow">
                       <td><b>{labels[row.action] ?? row.action}</b></td>
                       <td>{row.jobs}</td>
                       <td>{formatCredits(row.credits)}</td>
@@ -105,6 +111,13 @@ export default function SparkAiUsagePage() {
                 </tbody>
               </table>
             </div>
+            {actionPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, padding: '10px 16px', fontSize: 12 }}>
+                <button type="button" className="btn bs" disabled={actionPage <= 1} onClick={() => setActionPage(actionPage - 1)}>Previous</button>
+                <span>Page {actionPage} of {actionPages}</span>
+                <button type="button" className="btn bs" disabled={actionPage >= actionPages} onClick={() => setActionPage(actionPage + 1)}>Next</button>
+              </div>
+            )}
           </div>
 
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -114,12 +127,12 @@ export default function SparkAiUsagePage() {
                 <thead><tr><th>Company</th><th>Plan</th><th>Balance now</th><th>Credits this month</th><th>AI cost</th></tr></thead>
                 <tbody>
                   {usage.companies.items.length === 0 && (
-                    <tr><td colSpan={5} style={{ color: '#9BA3C4' }}>No company used AI this month.</td></tr>
+                    <tr className="urow"><td colSpan={5} style={{ color: '#9BA3C4' }}>No company used AI this month.</td></tr>
                   )}
                   {usage.companies.items.map((row) => {
                     const below = (row.balance?.balance ?? 0) < 0;
                     return (
-                      <tr key={row.company_id ?? 'unassigned'}>
+                      <tr key={row.company_id ?? 'unassigned'} className="urow">
                         <td><b>{row.company_name}</b></td>
                         <td style={{ color: '#5A6080' }}>{row.plan_name ?? '—'}</td>
                         <td style={{ color: below ? '#B45309' : undefined, fontWeight: below ? 700 : undefined }}>
