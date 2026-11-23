@@ -28,6 +28,35 @@ export function formatCycleDate(input?: string | null): string {
   });
 }
 
+// "Nov 16" for this year, "Dec 3, 2025" for any other year — the short form for the
+// Created column, in the same month-first style as the deadline next to it.
+export function formatCreatedDate(input?: string | null, now: Date = new Date()): string {
+  if (!input) return '—';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return '—';
+  const showYear = d.getFullYear() !== now.getFullYear();
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: showYear ? 'numeric' : undefined,
+  });
+}
+
+// "Created Nov 16, 2026, 9:04 AM" — full date and time for the hover tooltip.
+export function formatCreatedTooltip(input?: string | null): string {
+  if (!input) return '';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return '';
+  const when = d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `Created ${when}`;
+}
+
 // A deadline is overdue once it's in the past and the cycle isn't finished.
 export function isOverdue(deadline?: string | null, status?: CycleStatus): boolean {
   if (!deadline || status === 'completed' || status === 'archived') return false;
