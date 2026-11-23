@@ -20,6 +20,8 @@ import { canCreateFeature } from '@/lib/features';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
+import { MeetingLinkField } from '@/components/MeetingLinkField';
+import { getMeetingLinkError, getMeetingLinkToSave } from '@/lib/meetingLink';
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 import { isAdminLevel } from '@/constants/roles';
@@ -312,6 +314,8 @@ function MeetingDetailModal({
   }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown under the Meeting URL / Location field itself, not in the box at the bottom.
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   // Refresh from server in case the list payload was stale.
   useEffect(() => {
@@ -341,6 +345,12 @@ function MeetingDetailModal({
   const update = <K extends keyof ModalState>(key: K, value: ModalState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  const changePlatform = (platform: MeetingPlatform) => {
+    update('platform', platform);
+    // The rules differ between a link and a room, so an old error no longer applies.
+    setLinkError(null);
+  };
+
   // Participants the backend can't email. It accepts them (they still show as
   // attendees) but silently can't notify them.
   const unreachable = form.participants.filter((p) => !p.includes('@'));
@@ -365,13 +375,13 @@ function MeetingDetailModal({
       setError('Meeting date cannot be in the past.');
       return;
     }
-    // Required: the updated invitation is useless without somewhere to go.
-    if (!form.linkOrLocation.trim()) {
-      setError(
-        form.platform === 'in_person'
-          ? 'A location is required.'
-          : 'A meeting URL is required.',
-      );
+    // Required: the updated invitation is useless without somewhere to go, and
+    // an online meeting needs a real web link (it is shown as a clickable link).
+    // An old meeting saved with a bad link has to be fixed before it can be saved.
+    const problem = getMeetingLinkError(form.platform, form.linkOrLocation);
+    if (problem) {
+      setError(null);
+      setLinkError(problem);
       return;
     }
     setSubmitting(true);
@@ -385,7 +395,7 @@ function MeetingDetailModal({
         platform: form.platform,
         participants: form.participants,
         agenda: form.agenda.trim(),
-        link_or_location: form.linkOrLocation.trim(),
+        link_or_location: getMeetingLinkToSave(form.platform, form.linkOrLocation),
       });
       setCurrent(res.meeting);
       onUpdated(res.meeting);
@@ -524,7 +534,7 @@ function MeetingDetailModal({
                 </div>
                 <div>
                   <span className="fl-label">Platform</span>
-                  <select className="inp sel" value={form.platform} onChange={(e) => update('platform', e.target.value as MeetingPlatform)}>
+                  <select className="inp sel" value={form.platform} onChange={(e) => changePlatform(e.target.value as MeetingPlatform)}>
                     {PLATFORM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
@@ -545,23 +555,14 @@ function MeetingDetailModal({
                   </div>
                 )}
               </div>
-              <div>
-                <span className="fl-label">
-                  {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}{' '}
-                  <span style={{ color: '#E5484D' }}>*</span>
-                </span>
-                <input
-                  className="inp"
-                  type={form.platform === 'in_person' ? 'text' : 'url'}
-                  placeholder={
-                    form.platform === 'in_person'
-                      ? 'Venue / address'
-                      : 'https://zoom.us/j/…'
-                  }
-                  value={form.linkOrLocation}
-                  onChange={(e) => update('linkOrLocation', e.target.value)}
-                />
-              </div>
+              <MeetingLinkField
+                id="edit-meeting-link"
+                platform={form.platform}
+                value={form.linkOrLocation}
+                error={linkError}
+                onChange={(value) => update('linkOrLocation', value)}
+                onErrorChange={setLinkError}
+              />
               <div>
                 <span className="fl-label">Agenda</span>
                 <textarea className="inp" rows={4} value={form.agenda} onChange={(e) => update('agenda', e.target.value)} style={{ resize: 'vertical' }} />
@@ -653,7 +654,7 @@ function MeetingDetailModal({
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Close</button>
                 {!hasHappened && (
-                  <button className="btn bs" onClick={() => setEditing(true)} style={{ padding: '9px 18px' }}>Edit</button>
+                  <button className="btn bs" onClick={() => { setLinkError(null); setEditing(true); }} style={{ padding: '9px 18px' }}>Edit</button>
                 )}
               </div>
             </>

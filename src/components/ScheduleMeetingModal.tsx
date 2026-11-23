@@ -8,6 +8,8 @@ import type {
   MeetingType,
 } from '@/types/meeting';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
+import { MeetingLinkField } from '@/components/MeetingLinkField';
+import { getMeetingLinkError, getMeetingLinkToSave } from '@/lib/meetingLink';
 
 const TYPE_OPTIONS: { value: MeetingType; label: string }[] = [
   { value: 'investor_call', label: 'Investor Call' },
@@ -76,8 +78,16 @@ export default function ScheduleMeetingModal({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown under the Meeting URL / Location field itself, not in the box at the bottom.
+  const [linkError, setLinkError] = useState<string | null>(null);
   const update = <K extends keyof ModalState>(key: K, value: ModalState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const changePlatform = (platform: MeetingPlatform) => {
+    update('platform', platform);
+    // The rules differ between a link and a room, so an old error no longer applies.
+    setLinkError(null);
+  };
 
   const submit = async () => {
     if (!form.title.trim() || !form.date || !form.time) {
@@ -88,13 +98,12 @@ export default function ScheduleMeetingModal({
       setError('Meeting date cannot be in the past.');
       return;
     }
-    // Required: the invitation email is useless without somewhere to go.
-    if (!form.linkOrLocation.trim()) {
-      setError(
-        form.platform === 'in_person'
-          ? 'A location is required.'
-          : 'A meeting URL is required.',
-      );
+    // Required: the invitation email is useless without somewhere to go, and an
+    // online meeting needs a real web link (it is shown as a clickable link).
+    const problem = getMeetingLinkError(form.platform, form.linkOrLocation);
+    if (problem) {
+      setError(null);
+      setLinkError(problem);
       return;
     }
     const body: CreateMeetingBody = {
@@ -106,7 +115,7 @@ export default function ScheduleMeetingModal({
       platform: form.platform,
       participants: form.participants,
       agenda: form.agenda.trim(),
-      link_or_location: form.linkOrLocation.trim(),
+      link_or_location: getMeetingLinkToSave(form.platform, form.linkOrLocation),
     };
     setSubmitting(true);
     setError(null);
@@ -187,7 +196,7 @@ export default function ScheduleMeetingModal({
             <select
               className="inp sel"
               value={form.platform}
-              onChange={(e) => update('platform', e.target.value as MeetingPlatform)}
+              onChange={(e) => changePlatform(e.target.value as MeetingPlatform)}
             >
               {PLATFORM_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -200,23 +209,14 @@ export default function ScheduleMeetingModal({
             companyId={companyId}
             companyName={companyName}
           />
-          <div>
-            <span className="fl-label">
-              {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}{' '}
-              <span style={{ color: '#E5484D' }}>*</span>
-            </span>
-            <input
-              className="inp"
-              type={form.platform === 'in_person' ? 'text' : 'url'}
-              placeholder={
-                form.platform === 'in_person'
-                  ? 'Venue / address'
-                  : 'https://zoom.us/j/…'
-              }
-              value={form.linkOrLocation}
-              onChange={(e) => update('linkOrLocation', e.target.value)}
-            />
-          </div>
+          <MeetingLinkField
+            id="schedule-meeting-link"
+            platform={form.platform}
+            value={form.linkOrLocation}
+            error={linkError}
+            onChange={(value) => update('linkOrLocation', value)}
+            onErrorChange={setLinkError}
+          />
           <div>
             <span className="fl-label">Agenda</span>
             <textarea
