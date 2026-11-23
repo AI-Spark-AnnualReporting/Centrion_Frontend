@@ -282,7 +282,9 @@ export function QuestionsPage() {
   }, [questions, search]);
 
   const groups = useMemo(() => groupByReport(filtered), [filtered]);
-  const totalReports = groups.length;
+  // The badge counts everything raised, like its question count does — not the
+  // search results (a no-match search used to read "1 question · 0 reports").
+  const totalReports = useMemo(() => new Set(questions.map((q) => q.report.id)).size, [questions]);
 
   return (
     <div style={{ paddingBottom: 80 }}>
@@ -345,16 +347,34 @@ export function QuestionsPage() {
         <div className="card" style={{ padding: 24, color: '#DC2626', fontSize: 12, textAlign: 'center' }}>
           {error}
         </div>
-      ) : groups.length === 0 ? (
+      ) : questions.length === 0 ? (
+        // Truly empty: nothing has been raised yet, whatever is in the search box.
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 4 }}>
             No questions yet
           </div>
           <div style={{ fontSize: 11, color: '#9BA3C4' }}>
-            {search
-              ? 'No questions match your search.'
-              : 'Open a report and click any missing metric to raise a question.'}
+            Open a report and click any missing metric to raise a question.
           </div>
+        </div>
+      ) : groups.length === 0 ? (
+        // Questions exist, the search just matched none of them. This used to
+        // say "No questions yet", which was false (QA audit QB-03).
+        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 4 }}>
+            No results
+          </div>
+          <div style={{ fontSize: 11, color: '#9BA3C4', wordBreak: 'break-word' }}>
+            No questions match “{search.trim()}”.
+          </div>
+          <button
+            type="button"
+            className="btn bs"
+            onClick={() => setSearch('')}
+            style={{ marginTop: 12, padding: '6px 14px', fontSize: 11 }}
+          >
+            Clear search
+          </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
