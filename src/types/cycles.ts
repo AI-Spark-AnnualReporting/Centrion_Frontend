@@ -41,6 +41,9 @@ export interface Cycle {
   has_subsidiaries: boolean;
   has_sukuk: boolean;
   status: CycleStatus;
+  // True once the PM clicked Start Building in the Annual Reporting app. Until then
+  // an admin can still add departments to an active cycle.
+  sections_locked?: boolean;
   // Assembled final-report status (e.g. 'approved') surfaced on the cycle list so
   // the dashboard can mark an approved annual report done. Null if not assembled.
   report_status?: string | null;
