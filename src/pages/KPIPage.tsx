@@ -13,6 +13,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type { DocumentBankReport, DocumentBankResponse } from '@/types/report';
+import { compareIndicatorCodes } from '@/lib/indicatorCodeOrder';
 
 const PAGE_SIZE = 20;
 
@@ -899,16 +900,28 @@ export default function KPIPage() {
     return () => ctrl.abort();
   }, []);
 
+  // Both lists are sorted here in reading order (2-1, 2-2 … 2-10): the API
+  // returns the codes sorted as plain text, 2-1, 2-10, 2-11 … 2-2 (QA audit KP-04).
   const griIndicators = useMemo(
-    () => indicators.filter((i) => resolveFramework(i) === 'GRI'),
+    () =>
+      indicators
+        .filter((i) => resolveFramework(i) === 'GRI')
+        .sort((a, b) => compareIndicatorCodes(a.source_code, b.source_code)),
     [indicators],
   );
   const ifrsIndicators = useMemo(
     () =>
-      indicators.filter((i) => {
-        const f = resolveFramework(i);
-        return f === 'IFRS-S1' || f === 'IFRS-S2';
-      }),
+      indicators
+        .filter((i) => {
+          const f = resolveFramework(i);
+          return f === 'IFRS-S1' || f === 'IFRS-S2';
+        })
+        // S1 before S2 (as the API had it), then the codes in reading order.
+        .sort(
+          (a, b) =>
+            resolveFramework(a).localeCompare(resolveFramework(b)) ||
+            compareIndicatorCodes(a.source_code, b.source_code),
+        ),
     [indicators],
   );
 
