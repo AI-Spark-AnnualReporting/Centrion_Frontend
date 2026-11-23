@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
 import { lookups, reports as reportsApi } from '@/lib/api';
+import { loadDashboardReportList } from '@/lib/dashboard-cache';
 import { useAuth } from '@/context/AuthContext';
 import type {
   CoverageCriticalGap,
@@ -153,9 +154,8 @@ export function DashboardESG() {
       });
     (async () => {
       try {
-        const list = await reportsApi.list<{ reports: ReportListItem[] }>(
-          companyId,
-        );
+        // Shared with Home's cards (lib/dashboard-cache.ts): one request, not 4-5.
+        const list = await loadDashboardReportList<{ reports: ReportListItem[] }>(companyId);
         const reports = (list?.reports ?? []).filter(
           (r) => r && r.period && r.report_type === 'esg',
         );

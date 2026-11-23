@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reports as reportsApi, sarCycles } from '@/lib/api';
+import { sarCycles } from '@/lib/api';
+import { loadDashboardReportList } from '@/lib/dashboard-cache';
 import { useAuth } from '@/context/AuthContext';
 import type { Cycle } from '@/types/cycles';
 import { ProgressBar, safePct } from '@/pages/annual-report/cycle-ui';
@@ -97,8 +98,7 @@ export function ActiveReportsCard() {
       return;
     }
     let cancelled = false;
-    reportsApi
-      .list<{ reports?: ReportRow[] }>(companyId)
+    loadDashboardReportList<{ reports?: ReportRow[] }>(companyId)
       .then((r) => { if (!cancelled) setReports(r?.reports ?? []); })
       .catch(() => { if (!cancelled) setReports([]); });
     return () => { cancelled = true; };
