@@ -968,6 +968,24 @@ export const companies = {
       query: filters,
     }),
 
+  // Every question as a Word file (built on the server). Authed and binary, so
+  // not request() — same pattern as complianceValidation.certificatePdf.
+  exportQuestions: async (companyId: string): Promise<{ blob: Blob; filename: string | null }> => {
+    const full = `${API_BASE_URL}/api/v1/companies/${encodeURIComponent(companyId)}/questions/export`;
+    const headers: Record<string, string> = { ...defaultRequestHeaders() };
+    const token = getAuthToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(full, { headers });
+    checkAiCreditsHeader(res);
+    if (res.status === 401) handleUnauthorized();
+    if (!res.ok) {
+      const parsed: unknown = await res.json().catch(() => null);
+      throw new ApiError(res.status, res.statusText, parsed, full);
+    }
+    return { blob: await res.blob(), filename: attachmentFilename(res) };
+  },
+
   // Onboarding-time: kick off BACKGROUND tone/theme/outline extraction from the
   // uploaded report documents. `docTypes` is parallel to `files` (annual / esg /
   // financial / other) and drives the source rules. Returns { status }. Non-fatal.

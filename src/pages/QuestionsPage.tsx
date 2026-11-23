@@ -237,6 +237,29 @@ export function QuestionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+
+  /** Saves every question (not just the search results) as a Word file built on the server. */
+  const downloadQuestions = () => {
+    if (!companyId || downloading) return;
+    setDownloading(true);
+    setDownloadError('');
+    companiesApi
+      .exportQuestions(companyId)
+      .then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename ?? 'Questions_Bank.docx';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setDownloadError("Couldn't download the questions. Please try again."))
+      .finally(() => setDownloading(false));
+  };
 
   useEffect(() => {
     if (!companyId) {
@@ -335,8 +358,23 @@ export function QuestionsPage() {
               background: '#fff',
             }}
           />
+          <button
+            type="button"
+            className="btn bs"
+            onClick={downloadQuestions}
+            disabled={downloading || loading || questions.length === 0}
+            title={questions.length === 0 ? 'No questions to download yet' : 'Download every question as a Word file'}
+            style={{ padding: '7px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+          >
+            {downloading ? 'Preparing…' : 'Download (.docx)'}
+          </button>
         </div>
       </div>
+      {downloadError && (
+        <div role="alert" style={{ fontSize: 11, color: '#DC2626', margin: '-8px 0 12px', textAlign: 'right' }}>
+          {downloadError}
+        </div>
+      )}
 
       {loading ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>

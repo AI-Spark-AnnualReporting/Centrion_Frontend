@@ -6,9 +6,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const listQuestions = vi.fn();
+const exportQuestions = vi.fn();
 
 vi.mock('@/lib/api', () => ({
-  companies: { listQuestions: () => listQuestions() },
+  companies: {
+    listQuestions: () => listQuestions(),
+    exportQuestions: (companyId: string) => exportQuestions(companyId),
+  },
   ApiError: class ApiError extends Error {},
 }));
 vi.mock('@/context/AuthContext', () => ({
@@ -83,5 +87,47 @@ describe('Questions Bank empty states', () => {
     fireEvent.change(searchBox(), { target: { value: 'scope 1' } });
     expect(screen.getByText('What were total Scope 1 emissions?')).toBeInTheDocument();
     expect(screen.queryByText('No results')).toBeNull();
+  });
+});
+
+describe('Questions Bank download', () => {
+  it('downloads every question as a Word file', async () => {
+    listQuestions.mockResolvedValue({ company_id: 'co-1', questions: [QUESTION], total: 1 });
+    exportQuestions.mockResolvedValue({ blob: new Blob(['x']), filename: 'Questions_Bank_ACME.docx' });
+    const createURL = vi.fn(() => 'blob:x');
+    const revokeURL = vi.fn();
+    Object.assign(URL, { createObjectURL: createURL, revokeObjectURL: revokeURL });
+    const clicked: string[] = [];
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this.download);
+    });
+
+    render(<QuestionsPage />);
+    await waitFor(() => expect(screen.getByText('What were total Scope 1 emissions?')).toBeInTheDocument());
+    // Even with a search typed, the file has every question (the server builds it).
+    fireEvent.change(searchBox(), { target: { value: 'zzzz' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Download (.docx)' }));
+
+    await waitFor(() => expect(clicked).toEqual(['Questions_Bank_ACME.docx']));
+    expect(exportQuestions).toHaveBeenCalledWith('co-1');
+    expect(revokeURL).toHaveBeenCalledWith('blob:x');
+    clickSpy.mockRestore();
+  });
+
+  it('is disabled when there are no questions', async () => {
+    listQuestions.mockResolvedValue({ company_id: 'co-1', questions: [], total: 0 });
+    render(<QuestionsPage />);
+    await waitFor(() => expect(screen.getByText('No questions yet')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Download (.docx)' })).toBeDisabled();
+  });
+
+  it('says so when the download fails, and the button works again', async () => {
+    listQuestions.mockResolvedValue({ company_id: 'co-1', questions: [QUESTION], total: 1 });
+    exportQuestions.mockRejectedValue(new Error('500'));
+    render(<QuestionsPage />);
+    await waitFor(() => expect(screen.getByText('What were total Scope 1 emissions?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Download (.docx)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't download the questions");
+    expect(screen.getByRole('button', { name: 'Download (.docx)' })).not.toBeDisabled();
   });
 });
