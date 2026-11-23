@@ -730,6 +730,8 @@ export interface ChatStreamEvent {
   name?: string;
   args?: Record<string, unknown>;
   message?: string;
+  /** "exhausted" on an error frame when the OpenAI account is out of credit. */
+  ai_credits?: string;
 }
 
 // ─── Cover template picker (Part 6) ──────────────────────────────────────────

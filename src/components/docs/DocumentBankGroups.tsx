@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { BankDocument, ReportGroup, ReportCategory } from '@/types/report';
 
 // The Document Bank's presentation layer — category pill tabs, an expandable
@@ -107,11 +107,17 @@ export function CategoryTabs({
 export function ReportCard({
   report,
   onOpenThread,
+  defaultExpanded = false,
+  renderDocumentExtra,
 }: {
   report: ReportGroup;
   onOpenThread?: (threadId: string) => void;
+  /** Start with the documents showing (Upload Previous Reports opens the latest report). */
+  defaultExpanded?: boolean;
+  /** Extra content drawn on a document's row, before its Download button. */
+  renderDocumentExtra?: (doc: BankDocument) => ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const threadId = report.thread_id;
 
   return (
@@ -248,7 +254,7 @@ export function ReportCard({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {report.documents.map((doc) => (
-              <DocumentRow key={doc.id} doc={doc} />
+              <DocumentRow key={doc.id} doc={doc} extra={renderDocumentExtra?.(doc)} />
             ))}
           </div>
         ))}
@@ -256,7 +262,7 @@ export function ReportCard({
   );
 }
 
-export function DocumentRow({ doc }: { doc: BankDocument }) {
+export function DocumentRow({ doc, extra }: { doc: BankDocument; extra?: ReactNode }) {
   return (
     <div
       style={{
@@ -265,6 +271,9 @@ export function DocumentRow({ doc }: { doc: BankDocument }) {
         gap: 12,
         padding: '12px 18px',
         borderBottom: '1px solid #ECEEF8',
+        // Only a row with extra content wraps: on a narrow screen that content drops
+        // under the file name instead of squeezing it to nothing.
+        flexWrap: extra ? 'wrap' : undefined,
       }}
     >
       <div
@@ -283,7 +292,7 @@ export function DocumentRow({ doc }: { doc: BankDocument }) {
           {fileExt(doc.file_type)}
         </span>
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: extra ? 180 : 0 }}>
         <div
           style={{
             fontSize: 12,
@@ -301,6 +310,7 @@ export function DocumentRow({ doc }: { doc: BankDocument }) {
           {formatBytes(doc.file_size_bytes)} · Uploaded {formatDate(doc.created_at)}
         </div>
       </div>
+      {extra && <div className="docrow-extra">{extra}</div>}
       {doc.download_url ? (
         <a
           href={doc.download_url}

@@ -10,9 +10,40 @@ import CompanyIntelStep from '@/pages/onboarding/CompanyIntelStep';
 import UploadReportsStep, { type UploadedReportFile } from '@/pages/onboarding/UploadReportsStep';
 import WizardStepper from '@/pages/onboarding/WizardStepper';
 import AiLoadingScreen from '@/pages/onboarding/AiLoadingScreen';
-import { ApiError, companies, extractCompanyProfile, getSectors, type ExtractedCompanyProfile } from '@/lib/api';
+import { ApiError, companies, extractCompanyProfile, getSectors, sparkInternal, type ExtractedCompanyProfile } from '@/lib/api';
+import { saveNewLogins } from '@/lib/sparkLogins';
 import { CYCLE_SECTOR_OPTIONS } from '@/types/cycles';
 import { useAuth } from '@/context/AuthContext';
+
+// The reason kept when setup itself failed, so no departments (and therefore
+// no lead logins) were made. The Logins dialog puts its own "We couldn't create
+// the department lead logins." in front of it, so this is only the reason.
+const SETUP_FAILED_LEADS_MESSAGE = "Setup didn't finish.";
+
+/** The reason to keep when creating the lead logins fails (the server's words when there are any). */
+function describeCreateLeadsError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'Something went wrong.';
+}
+
+/**
+ * Create the department lead logins for a Spark-made company, after its
+ * onboarding (and so its departments) has been saved.
+ *
+ * Leaves the result in this tab's sessionStorage for the Logins dialog. Every
+ * lead gets the fixed Spark temporary password on the server. Never throws:
+ * the setup screen must always go on to open the app.
+ */
+async function createLeadLoginsAfterSetup(companyId: string): Promise<void> {
+  try {
+    const result = await sparkInternal.createLeads(companyId);
+    saveNewLogins(companyId, { ok: true, created: result.created ?? [], skipped: result.skipped ?? [] });
+  } catch (error) {
+    saveNewLogins(companyId, { ok: false, error: describeCreateLeadsError(error) });
+  }
+}
 
 const LogoMark = () => (
   <svg viewBox="0 0 16 16" fill="none" width="17" height="17">
@@ -127,7 +158,33 @@ export default function OnboardingPage() {
   // else's behalf, so the Command Center is not where their work is — the
   // client's annual report is, matching what clicking an existing company does.
   // Everyone else is setting up their OWN company and still lands on it.
-  const landingPath = user?.role === 'spark_internal' ? '/annual-report' : '/dashboard';
+  const isSpark = user?.role === 'spark_internal';
+  const landingPath = isSpark ? '/annual-report' : '/dashboard';
+
+  // Spark only: the company being set up, read ONCE when the wizard opens. A
+  // company switch in another tab changes user.company_id, and the lead logins
+  // must still go to the company this wizard started on.
+  const [sparkCompanyId] = useState<string | null>(() =>
+    user?.role === 'spark_internal' ? user.company_id ?? null : null,
+  );
+  // Spark only: true once the loaded company turns out to be one a Spark user
+  // created (companies.created_by is set). The server refuses lead logins for a
+  // self-signup company, so the card is not offered there.
+  const [createdInSpark, setCreatedInSpark] = useState(false);
+  // Spark only: "Create department lead logins" on the Departments step. Off by default.
+  const [leadLoginsOn, setLeadLoginsOn] = useState(false);
+  const canOfferLeadLogins = sparkCompanyId !== null && createdInSpark;
+  const wantsLeadLogins = canOfferLeadLogins && leadLoginsOn;
+
+  /** Switch the lead logins on or off. */
+  const handleLeadLoginsChange = (enabled: boolean) => {
+    setLeadLoginsOn(enabled);
+  };
+
+  /** Move on to the setup screen. */
+  const startProcessing = () => {
+    setStep('processing');
+  };
 
   const [step, setStep] = useState<Step>('loading');
   const [urlFailed, setUrlFailed] = useState(false);
@@ -222,6 +279,7 @@ export default function OnboardingPage() {
             return;
           }
           applyCompany(c);
+          setCreatedInSpark(Boolean(c.created_by));
           if (c.description && c.description.trim()) {
             setStep('review');                 // extraction gave us data
           } else {
@@ -363,6 +421,12 @@ export default function OnboardingPage() {
         payload={buildPayload()}
         files={uploadedFiles}
         landingPath={landingPath}
+        onOnboarded={wantsLeadLogins ? () => createLeadLoginsAfterSetup(sparkCompanyId) : undefined}
+        onOnboardingFailed={
+          wantsLeadLogins
+            ? () => saveNewLogins(sparkCompanyId, { ok: false, error: SETUP_FAILED_LEADS_MESSAGE })
+            : undefined
+        }
       />
     );
   }
@@ -553,6 +617,15 @@ export default function OnboardingPage() {
               onBack={() => setStep('brand')}
               onSubmit={() => setStep('upload')}
               onOptionsLoaded={() => {}}
+              leadLogins={
+                canOfferLeadLogins && sparkCompanyId
+                  ? {
+                      enabled: leadLoginsOn,
+                      onChange: handleLeadLoginsChange,
+                      companyId: sparkCompanyId,
+                    }
+                  : undefined
+              }
             />
           )}
 
@@ -568,12 +641,12 @@ export default function OnboardingPage() {
                   sessionStorage.setItem('centriyon:freshUpload', '1');
                 }
                 setUploadedFiles(files);
-                setStep('processing');
+                startProcessing();
               }}
               onSkip={() => {
                 sessionStorage.removeItem('centriyon:freshUpload');
                 setUploadedFiles([]);
-                setStep('processing');
+                startProcessing();
               }}
             />
           )}

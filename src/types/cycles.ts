@@ -41,6 +41,9 @@ export interface Cycle {
   has_subsidiaries: boolean;
   has_sukuk: boolean;
   status: CycleStatus;
+  // True once the PM clicked Start Building in the Annual Reporting app. Until then
+  // an admin can still add departments to an active cycle.
+  sections_locked?: boolean;
   // Assembled final-report status (e.g. 'approved') surfaced on the cycle list so
   // the dashboard can mark an approved annual report done. Null if not assembled.
   report_status?: string | null;
@@ -178,7 +181,10 @@ export interface ResolveSectionsResponse {
 // POST /api/v1/admin/cycles/{id}/assign-departments
 export interface AssignDepartmentsPayload {
   // HR Lead flow: department-only. The dept's HR Lead is resolved server-side; user_id is ignored.
-  assignments: { department_id: string; user_id?: string }[];
+  // `lead` is sent only by Spark: 'department' = the department's real lead heads
+  // the session (the default), 'self' = the Spark user leads it. Left out for
+  // everyone else, so their request stays exactly as before.
+  assignments: { department_id: string; user_id?: string; lead?: 'department' | 'self' }[];
   // true = `assignments` is the cycle's FULL list: departments left off it are removed
   // (only while they have no work; otherwise 409 and nothing changes).
   replace?: boolean;

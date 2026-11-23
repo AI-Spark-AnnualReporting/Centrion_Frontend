@@ -15,6 +15,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const companies = vi.fn();
 const createCompany = vi.fn();
+const logins = vi.fn();
 const switchCompany = vi.fn();
 const leaveCompany = vi.fn();
 let actingCompany: { id: string; name: string } | null = null;
@@ -24,6 +25,7 @@ vi.mock("@/lib/api", () => ({
   sparkInternal: {
     companies: (opts: unknown) => companies(opts),
     createCompany: (body: unknown) => createCompany(body),
+    logins: (companyId: string) => logins(companyId),
   },
 }));
 
@@ -205,6 +207,50 @@ describe("Spark company directory", () => {
     fireEvent.click(screen.getByText("Create and set up →"));
     expect(await screen.findByText("Company name is required.")).toBeInTheDocument();
     expect(createCompany).not.toHaveBeenCalled();
+  });
+
+  it("shows the Logins key only on companies Spark created", async () => {
+    companies.mockResolvedValue({
+      companies: [{ ...ROWS[0], created_by_spark: true }, ROWS[1]],
+      total: 2,
+      stats: STATS,
+    });
+    render(<SparkCompaniesPage />);
+    await screen.findByText("Acme Corporation");
+    expect(screen.getByRole("button", { name: "Logins for Acme Corporation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Logins for Bahri" })).not.toBeInTheDocument();
+  });
+
+  it("opens the Logins dialog from the key without opening the company", async () => {
+    // The row click enters the company; the key must stop that click.
+    logins.mockResolvedValue({
+      company: { id: "cmp_1", name: "Acme Corporation" },
+      logins: [],
+      departments_without_lead: 0,
+    });
+    companies.mockResolvedValue({
+      companies: [{ ...ROWS[0], created_by_spark: true }],
+      total: 1,
+      stats: STATS,
+    });
+    render(<SparkCompaniesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Logins for Acme Corporation" }));
+    expect(await screen.findByText("Logins · Acme Corporation")).toBeInTheDocument();
+    expect(logins).toHaveBeenCalledWith("cmp_1");
+    expect(switchCompany).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("sends no admin key when the admin switch is left off", async () => {
+    createCompany.mockResolvedValue({ company: { id: "cmp_new", name: "Fresh Co" } });
+    render(<SparkCompaniesPage />);
+    fireEvent.click(await screen.findByText("+ Add company"));
+    fireEvent.change(screen.getByPlaceholderText("Acme Corporation"), {
+      target: { value: "Fresh Co" },
+    });
+    fireEvent.click(screen.getByText("Create and set up →"));
+    await waitFor(() => expect(createCompany).toHaveBeenCalled());
+    expect(createCompany.mock.calls[0][0]).not.toHaveProperty("admin");
   });
 
   it("surfaces a load failure instead of rendering an empty directory", async () => {

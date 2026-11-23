@@ -16,6 +16,24 @@ export interface UploadedReportFile {
   period: string | null;
 }
 
+// Same limit as the backend (config.MAX_FILE_SIZE_MB) and Supabase Storage.
+const MAX_UPLOAD_MB = 50;
+
+/** The message for a file over the upload limit, or null when it fits. */
+function fileTooLargeMessage(file: File): string | null {
+  const sizeMb = file.size / (1024 * 1024);
+  if (sizeMb <= MAX_UPLOAD_MB) return null;
+  return `This file is ${sizeMb.toFixed(1)} MB. The limit is ${MAX_UPLOAD_MB} MB. `
+    + 'Please upload a smaller file (in Acrobat: File → Reduce File Size).';
+}
+
+/** What to show when the upload call fails. The backend words a 413 for the user. */
+function uploadErrorMessage(err: unknown): string {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 413 && err instanceof Error && err.message) return err.message;
+  return 'Upload failed — please try again.';
+}
+
 interface RowDef {
   icon: string;
   title: string;
@@ -105,7 +123,7 @@ function StatusLine({
 }
 
 function UploadRow({
-  row, file, state, onPick, overridden, onOverride,
+  row, file, state, onPick, overridden, onOverride, disabled,
 }: {
   row: RowDef;
   file: File | null;
@@ -113,6 +131,7 @@ function UploadRow({
   onPick: (f: File | null) => void;
   overridden: boolean;
   onOverride: () => void;
+  disabled: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -133,13 +152,20 @@ function UploadRow({
           onOverride={onOverride}
         />
       </div>
-      <button type="button" className="ob-upload-btn" onClick={() => inputRef.current?.click()}>
+      <button
+        type="button"
+        className="ob-upload-btn"
+        disabled={disabled}
+        style={disabled ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+        onClick={() => inputRef.current?.click()}
+      >
         {file ? 'Replace' : 'Upload'}
       </button>
       <input
         ref={inputRef}
         type="file"
         style={{ display: 'none' }}
+        disabled={disabled}
         onChange={(e) => onPick(e.target.files?.[0] ?? null)}
       />
     </div>
@@ -157,6 +183,8 @@ export default function UploadReportsStep({
   onSkip,
   submitLabel,
   docTypes,
+  disabled = false,
+  disabledLabel,
 }: {
   onProcess: (files: UploadedReportFile[]) => void;
   onSkip?: () => void;
@@ -165,6 +193,11 @@ export default function UploadReportsStep({
   // ['annual','esg'] because the ingest only ever reads those two — the other slots
   // just bank a file nothing downstream looks at.
   docTypes?: ReportDocType[];
+  // Locks the whole form (the in-app page sets it while a run is in progress, so a
+  // second run cannot be started on top of the first). Onboarding never passes it.
+  disabled?: boolean;
+  // What the submit button says while locked.
+  disabledLabel?: string;
 }) {
   const rows = docTypes ? ROWS.filter((r) => docTypes.includes(r.docType)) : ROWS;
   const { user } = useAuth();
@@ -180,6 +213,13 @@ export default function UploadReportsStep({
     // A new file gets a fresh verdict — never inherit the last file's override.
     setOverridden((prev) => ({ ...prev, [row.title]: false }));
     if (!f || !companyId) return;
+    // Refuse it here: uploading 50+ MB only for Storage to reject it is slow and
+    // used to end in a vague "Upload failed".
+    const tooLarge = fileTooLargeMessage(f);
+    if (tooLarge) {
+      setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: tooLarge } }));
+      return;
+    }
     companies
       .validateReport(companyId, f, row.docType)
       .then((res) => {
@@ -193,7 +233,7 @@ export default function UploadReportsStep({
                 : { status: 'error', message: 'Upload failed — please try again.' },
         }));
       })
-      .catch(() => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: 'Upload failed — please try again.' } })));
+      .catch((err: unknown) => setStates((prev) => ({ ...prev, [row.title]: { status: 'error', message: uploadErrorMessage(err) } })));
   };
 
   const anyValidating = Object.values(states).some((s) => s?.status === 'validating');
@@ -202,7 +242,7 @@ export default function UploadReportsStep({
   const blockingInvalid = rows.some(
     (r) => states[r.title]?.status === 'invalid' && !overridden[r.title],
   );
-  const canProcess = !!companyId && !anyValidating && !blockingInvalid;
+  const canProcess = !!companyId && !anyValidating && !blockingInvalid && !disabled;
 
   const collected: UploadedReportFile[] = rows
     .map((r) => {
@@ -239,6 +279,7 @@ export default function UploadReportsStep({
             onPick={(f) => handlePick(r, f)}
             overridden={!!overridden[r.title]}
             onOverride={() => setOverridden((prev) => ({ ...prev, [r.title]: true }))}
+            disabled={disabled}
           />
         ))}
       </div>
@@ -250,7 +291,9 @@ export default function UploadReportsStep({
         disabled={!canProcess}
         onClick={() => canProcess && onProcess(collected)}
       >
-        {anyValidating ? 'Checking your documents…' : submitLabel ?? 'Process Reports & Build Dashboard →'}
+        {disabled && disabledLabel
+          ? disabledLabel
+          : anyValidating ? 'Checking your documents…' : submitLabel ?? 'Process Reports & Build Dashboard →'}
       </button>
 
       {onSkip && (

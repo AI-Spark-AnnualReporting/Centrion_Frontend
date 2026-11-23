@@ -4,8 +4,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import type {
+  AssignDepartmentsPayload,
   CreateCyclePayload,
   Cycle,
+  CycleDepartmentProgress,
   CycleOverview,
   CycleSection,
   SARUser,
@@ -16,8 +18,17 @@ import type { AdminUserRow, Department } from '@/types/admin';
 import type { DepartmentSuggestionsResponse, ReportOutlineDetail } from '@/types/company';
 import { PreviousOutline } from './PreviousOutline';
 import SelectOutlineModal, { type OutlineSource } from './SelectOutlineModal';
-import AssignDepartmentsSection, { type DepartmentAssignment } from './AssignDepartmentsSection';
-import { departmentsWithoutLead, everyDepartmentHasLead } from './departmentLead';
+import AssignDepartmentsSection, {
+  type DepartmentAssignment,
+  type DepartmentLeadChoice,
+  type SavedDepartmentLead,
+} from './AssignDepartmentsSection';
+import {
+  departmentHasLead,
+  departmentsWithoutLead,
+  everyDepartmentHasLead,
+  sparkLeadChoice,
+} from './departmentLead';
 import CycleSetupPanel, { type SetupTarget } from './CycleSetupPanel';
 import ReportTeamCard from './ReportTeamCard';
 import { isAdminLevel } from '@/constants/roles';
@@ -292,6 +303,42 @@ function SelectedOutlineStrip({
   );
 }
 
+/**
+ * Maps each department already saved on the cycle to the lead stored on its
+ * session (name + whether that is the viewer). Returns an empty map for none.
+ */
+function buildSavedLeads(
+  savedDepartments: CycleDepartmentProgress[],
+  viewerUserId: string | undefined,
+): Map<string, SavedDepartmentLead> {
+  const saved = new Map<string, SavedDepartmentLead>();
+  for (const d of savedDepartments) {
+    const isYou = !!viewerUserId && d.hod_user_id === viewerUserId;
+    saved.set(d.department_id, { name: d.hod_name ?? null, isYou });
+  }
+  return saved;
+}
+
+type AssignmentItem = AssignDepartmentsPayload['assignments'][number];
+
+/**
+ * One row of the Submit request. Only Spark sends `lead`, and only for rows not
+ * yet saved: a saved session is never rewritten, so a choice there would mean
+ * nothing. Every other role sends `{department_id}` exactly as before.
+ */
+function buildAssignmentItem(
+  row: DepartmentAssignment,
+  isSpark: boolean,
+  savedLeads: Map<string, SavedDepartmentLead>,
+  allDepartments: Department[],
+): AssignmentItem {
+  if (!isSpark || savedLeads.has(row.department_id)) {
+    return { department_id: row.department_id };
+  }
+  const dept = allDepartments.find((d) => d.id === row.department_id);
+  return { department_id: row.department_id, lead: sparkLeadChoice(row, dept) };
+}
+
 export default function CycleDetailPage() {
   const { cycleId = '' } = useParams();
   const navigate = useNavigate();
@@ -474,11 +521,16 @@ export default function CycleDetailPage() {
   }, [user?.company_id, outlineReload]);
 
   const isDraft = overview?.cycle.status === 'draft';
+  // Departments can be added to a draft cycle, and to an active one until the PM
+  // clicks Start Building in the Annual Reporting app (sections_locked). The
+  // backend enforces the same rule; this only decides what the page shows.
+  const canAddDepartments =
+    isDraft || (overview?.cycle.status === 'active' && !overview?.cycle.sections_locked);
 
   // Load the department + user lists (and hydrate any saved assignments) once we
-  // know the cycle is a draft an admin can manage.
+  // know the cycle still takes departments and an admin can manage it.
   useEffect(() => {
-    if (!isDraft || !canManage) return;
+    if (!canAddDepartments || !canManage) return;
     adminConsole
       .listDepartments()
       .then((res) => {
@@ -503,6 +555,8 @@ export default function CycleDetailPage() {
 
     // Hydrate from any existing assignments on the cycle (usually empty for a
     // fresh draft). The dept's HR Lead comes from allDepartments, not the assignment.
+    // These rows carry no `lead`: they are saved, and Spark's screen shows the lead
+    // stored on their session instead (see savedLeads below).
     setAssigned(
       (overview?.departments ?? []).map((d) => ({
         department_id: d.department_id,
@@ -511,8 +565,10 @@ export default function CycleDetailPage() {
       })),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDraft, canManage, cycleId]);
+  }, [canAddDepartments, canManage, cycleId]);
 
+  // A new row starts on the department's real lead when it has one, otherwise on
+  // "you". Only Spark's screen and request read `lead`; other roles ignore it.
   const addDepartment = (dept: Department) =>
     setAssigned((prev) =>
       prev.some((a) => a.department_id === dept.id)
@@ -523,6 +579,7 @@ export default function CycleDetailPage() {
               department_id: dept.id,
               department_name: dept.department_name,
               department_code: dept.department_code,
+              lead: departmentHasLead(dept) ? 'department' : 'self',
             },
           ],
     );
@@ -530,17 +587,33 @@ export default function CycleDetailPage() {
   const removeDepartment = (departmentId: string) =>
     setAssigned((prev) => prev.filter((a) => a.department_id !== departmentId));
 
-  // Spark staff run the cycles they submit, so they lead every department in one
-  // — the backend makes the same substitution from the caller's own identity.
-  const selfLeadName = user?.role === 'spark_internal' ? (user.full_name || 'You') : null;
+  // Spark's per-row lead picker: who heads this department's session.
+  const changeDepartmentLead = (departmentId: string, lead: DepartmentLeadChoice) =>
+    setAssigned((prev) =>
+      prev.map((a) => (a.department_id === departmentId ? { ...a, lead } : a)),
+    );
+
+  // Spark staff run the cycles they submit. A department's real lead heads its
+  // session by default; Spark can pick "(you)" per new row, and is the fallback
+  // for a department with no lead (the backend applies the same rule).
+  const isSpark = user?.role === 'spark_internal';
+  const selfLeadName = isSpark ? (user?.full_name || 'You') : null;
+
+  // Departments already saved on the cycle, with the lead stored on their session.
+  // Read from the live overview (not a flag on the row) so it stays right after a
+  // Submit and when a saved department is removed and added back: the backend
+  // never rewrites a saved session, so its lead must not look editable.
+  const savedLeads = useMemo(
+    () => buildSavedLeads(overview?.departments ?? [], user?.user_id),
+    [overview, user?.user_id],
+  );
 
   // Every added department must have an HR Lead before the cycle can be submitted.
   // Shared with the section so the gate and the warning badge can't disagree.
   // And an outline must be picked: a cycle can't start without knowing its sections.
-  const canSubmit =
-    chosenSource !== null &&
-    assigned.length > 0 &&
-    everyDepartmentHasLead(assigned, allDepartments, selfLeadName);
+  const canSaveDepartments =
+    assigned.length > 0 && everyDepartmentHasLead(assigned, allDepartments, selfLeadName);
+  const canSubmit = chosenSource !== null && canSaveDepartments;
 
   // The Cycle setup panel's steps scroll to the card where each one is done, and
   // flash it briefly so the eye lands on it.
@@ -565,15 +638,24 @@ export default function CycleDetailPage() {
       // The page holds the cycle's whole department list (loaded from the cycle, then
       // edited), so it asks the backend to remove any department taken off it.
       const res = await sarCycles.assignDepartments(cycleId, {
-        assignments: assigned.map((a) => ({ department_id: a.department_id })),
+        assignments: assigned.map((a) =>
+          buildAssignmentItem(a, isSpark, savedLeads, allDepartments),
+        ),
         replace: true,
       });
       const removed = res?.assignments_removed ?? 0;
-      setSubmitMsg(
-        removed > 0
-          ? `Departments saved: ${removed} removed. The project manager can now kick off the cycle.`
-          : 'Departments assigned. The project manager can now kick off the cycle.',
-      );
+      // After kickoff a new department waits for the PM to generate its questions.
+      if (!isDraft) {
+        setSubmitMsg(
+          'Departments saved. The project manager can now generate questions for any new department.',
+        );
+      } else if (removed > 0) {
+        setSubmitMsg(
+          `Departments saved: ${removed} removed. The project manager can now kick off the cycle.`,
+        );
+      } else {
+        setSubmitMsg('Departments assigned. The project manager can now kick off the cycle.');
+      }
       await fetchOverview();
     } catch (e) {
       // ApiError.message already carries the backend's `detail` (or a
@@ -681,8 +763,10 @@ export default function CycleDetailPage() {
       <div className={showSetup ? 'cycle-setup-layout' : undefined}>
       <div style={{ minWidth: 0 }}>
 
-      {/* Draft → assign departments sits right under the header, above the stats */}
-      {cycle.status === 'draft' && canManage && (
+      {/* Assign departments sits right under the header, above the stats. On a
+          draft cycle Submit lives in the setup panel; after kickoff (until the PM
+          starts building) a Save button sits under the card instead. */}
+      {canAddDepartments && canManage && (
         <div id="cycle-setup-departments" style={{ marginBottom: 16 }}>
           <AssignDepartmentsSection
             allDepartments={allDepartments}
@@ -690,8 +774,31 @@ export default function CycleDetailPage() {
             onAdd={addDepartment}
             onRemove={removeDepartment}
             selfLeadName={selfLeadName}
+            isSpark={isSpark}
+            savedLeads={isSpark ? savedLeads : undefined}
+            onLeadChange={changeDepartmentLead}
             departmentSuggestions={departmentSuggestions}
           />
+          {!isDraft && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+              <button
+                className="btn bp"
+                type="button"
+                onClick={handleSubmitCycle}
+                disabled={submitting || !canSaveDepartments}
+              >
+                {submitting ? 'Saving…' : 'Save departments'}
+              </button>
+              {submitErr || submitMsg ? (
+                <span
+                  role={submitErr ? 'alert' : 'status'}
+                  style={{ fontSize: 12, fontWeight: 600, color: submitErr ? '#B33A3E' : '#16A34A' }}
+                >
+                  {submitErr || submitMsg}
+                </span>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 

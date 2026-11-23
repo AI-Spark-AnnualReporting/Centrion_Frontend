@@ -5,6 +5,12 @@ import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 const TOAST_LIMIT = 1;
 const TOAST_REMOVE_DELAY = 1000000;
 
+// Toasts that a newer toast must not push out while they are open. Only one
+// slot is shown (TOAST_LIMIT), so without this the page's own "X failed" toast
+// replaced the AI-credits notice in the same moment it appeared.
+export const AI_CREDITS_TOAST_ID = "ai-credits-paused";
+const PINNED_TOAST_IDS = new Set<string>([AI_CREDITS_TOAST_ID]);
+
 type ToasterToast = ToastProps & {
   id: string;
   title?: React.ReactNode;
@@ -68,12 +74,28 @@ const addToRemoveQueue = (toastId: string) => {
   toastTimeouts.set(toastId, timeout);
 };
 
+/** True when this toast is pinned and still showing, so it must not be pushed out. */
+function isOpenPinnedToast(toast: ToasterToast): boolean {
+  return PINNED_TOAST_IDS.has(toast.id) && toast.open !== false;
+}
+
+/**
+ * Put a new toast first, keep at most TOAST_LIMIT, but never drop an open pinned
+ * toast. A toast with the same id as the new one is replaced, not duplicated.
+ */
+function addToastToList(toasts: ToasterToast[], newToast: ToasterToast): ToasterToast[] {
+  const others = toasts.filter((t) => t.id !== newToast.id);
+  const kept = [newToast, ...others].slice(0, TOAST_LIMIT);
+  const droppedPinned = others.filter((t) => isOpenPinnedToast(t) && !kept.includes(t));
+  return [...kept, ...droppedPinned];
+}
+
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
     case "ADD_TOAST":
       return {
         ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
+        toasts: addToastToList(state.toasts, action.toast),
       };
 
     case "UPDATE_TOAST":
@@ -132,10 +154,21 @@ function dispatch(action: Action) {
   });
 }
 
-type Toast = Omit<ToasterToast, "id">;
+// `id` is optional: pass a fixed one to show the same toast again instead of a
+// second copy (the AI-credits notice does).
+type Toast = Omit<ToasterToast, "id"> & { id?: string };
 
-function toast({ ...props }: Toast) {
-  const id = genId();
+/** Stop a pending removal, so re-showing a closed toast by the same id is not removed by the old timer. */
+function cancelPendingRemoval(toastId: string): void {
+  const timeout = toastTimeouts.get(toastId);
+  if (timeout === undefined) return;
+  clearTimeout(timeout);
+  toastTimeouts.delete(toastId);
+}
+
+function toast({ id: fixedId, onOpenChange: callerOnOpenChange, ...props }: Toast) {
+  const id = fixedId ?? genId();
+  cancelPendingRemoval(id);
 
   const update = (props: ToasterToast) =>
     dispatch({
@@ -151,6 +184,9 @@ function toast({ ...props }: Toast) {
       id,
       open: true,
       onOpenChange: (open) => {
+        // The caller may want to know when the user closes it (the AI-credits
+        // notice starts its 5-minute quiet period then).
+        callerOnOpenChange?.(open);
         if (!open) dismiss();
       },
     },
