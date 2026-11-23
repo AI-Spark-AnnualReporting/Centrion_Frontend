@@ -26,7 +26,7 @@ import type { ComplianceRunningState } from './ComplianceRunningPage';
 import {
   ComplianceHeader,
   DARK,
-  FRAMEWORK_LABELS,
+  frameworkLabel,
   MONO,
   MUTED,
   PRIMARY,
@@ -394,7 +394,6 @@ function FrameworkChip({
   locked?: boolean;
   onToggle: () => void;
 }) {
-  const label = FRAMEWORK_LABELS[regulator];
   const active = applicable && on;
   const interactive = applicable && !locked;
   return (
@@ -439,7 +438,10 @@ function FrameworkChip({
         }}
       />
       <span style={{ textDecoration: active ? 'none' : 'line-through' }}>
-        {label ? `${regulator} · ${label}` : regulator}
+        {/* Display name only — the internal code ("GHG_PROTOCOL · GHG Protocol")
+            meant nothing to users (QA audit CV-03). Unmapped codes fall back to
+            the code itself. */}
+        {frameworkLabel(regulator)}
       </span>
     </button>
   );

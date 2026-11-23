@@ -85,7 +85,8 @@ describe("regulators locked by company profile", () => {
     expect(screen.queryByText("Bank")).toBeNull();
 
     // The frameworks that follow from it are shown but inert.
-    const chip = await screen.findByRole("button", { name: /IA/ });
+    // Chips show the display name only ("Insurance Authority"), not the code (QA CV-03).
+    const chip = await screen.findByRole("button", { name: /Insurance Authority/ });
     expect((chip as HTMLButtonElement).disabled).toBe(true);
   });
 
