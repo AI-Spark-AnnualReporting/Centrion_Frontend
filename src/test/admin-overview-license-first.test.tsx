@@ -58,9 +58,20 @@ describe('Admin Console: License card first', () => {
     expect(cardMounts).toBe(1);
     finish(OVERVIEW);
     await waitFor(() => expect(screen.queryByText(/Couldn’t load the overview/)).toBeNull());
-    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Reports generated')).toBeInTheDocument());
     expect(screen.getAllByText('LICENSE CARD')).toHaveLength(1);
     expect(cardMounts).toBe(1);
+  });
+
+  it('has no stat cards row and no Slack line or View integrations link', async () => {
+    overview.mockResolvedValue(OVERVIEW);
+    renderPage();
+    await waitFor(() => expect(screen.getByText('System health')).toBeInTheDocument());
+    for (const gone of ['Active users', 'Reports this quarter', 'Document storage', 'Pending actions',
+      'Slack integration', 'View integrations →']) {
+      expect(screen.queryByText(gone)).toBeNull();
+    }
+    expect(screen.getByText('Reporting API')).toBeInTheDocument();
   });
 
   it('keeps the License card when the overview fails', async () => {
