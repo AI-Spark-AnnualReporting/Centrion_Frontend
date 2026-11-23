@@ -331,8 +331,11 @@ All paths are under `${VITE_API_URL}`. `{companyId}` etc. are path params. Funct
 | Method | Path | Function | Notes |
 |--------|------|----------|-------|
 | POST | `/api/v1/auth/register` | `auth.register` | email, password, full_name, role? |
-| POST | `/api/v1/auth/login` | `auth.login` | → `LoginResponse` (access_token, user) |
-| POST | `/api/v1/auth/change-password` | `auth.changePassword` | old_password, new_password (query) |
+| POST | `/api/v1/auth/login` | `auth.login` | → `LoginResponse` (access_token, refresh_token, user). `login()` saves both tokens |
+| POST | `/api/v1/auth/refresh` | `refreshAccessToken()` (internal) | `{ refresh_token }`, no Bearer → new access + refresh token. Called by `authorizedFetch` on a 401, then the request is sent again once. One tab at a time (Web Locks) |
+| POST | `/api/v1/auth/logout` | `logout()` (internal) | `{ refresh_token }` → ends this browser's session; fire-and-forget |
+| POST | `/api/v1/auth/handoff` | `auth.handoff` | `{ app: "sar" }` → a SAR refresh token, put after `#` in the SAR link (`lib/appRouting.ts`) |
+| POST | `/api/v1/auth/change-password` | `auth.changePassword` | old_password, new_password (query) → `{ changed, refresh_token }` (all other sessions end). Wrong old password is 400 |
 | GET | `/api/v1/auth/me` | `auth.me` | → `UserProfile` |
 | POST | `/api/v1/auth/forgot-password` | `auth.forgotPassword` | email (query) → `{ sent: true }` |
 | POST | `/api/v1/auth/reset-password` | `auth.resetPassword` | token, new_password (query) → `{ reset: true }` |
@@ -589,7 +592,9 @@ sample; once the real shape is confirmed, the unused branch can be deleted.
 interface AuthUser { user_id; email; full_name; role:"admin"|"user";
   display_role?:string|null;
   company_id?:string|null; company_name?:string|null; must_change_password?:boolean|null }
-interface LoginResponse { access_token; token_type:"bearer"; user:AuthUser }
+interface LoginResponse { access_token; refresh_token?:string|null; token_type:"bearer"; user:AuthUser }
+// Stored: access token `centriton_token` (15 min once rolled out), refresh token
+// `centriton_refresh_token` (7 days). See Centriton/.claude/plans/refresh-token.md.
 // display_role is presentation ONLY ("spark_admin" → "Spark Admin"). Every
 // permission check, route gate and role comparison uses the raw `role`.
 interface UserProfile { user_id; email; full_name; role; display_role?:string|null; status;

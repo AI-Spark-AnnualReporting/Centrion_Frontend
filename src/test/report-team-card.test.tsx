@@ -1,4 +1,4 @@
-// The Report team card is mostly a URL builder, and the URL is where it can go
+// The Report team card decides WHERE each Open goes, and that is where it can go
 // wrong invisibly:
 //
 //   - miss `company` and every scoped route in the SAR app answers
@@ -7,13 +7,21 @@
 //     bug the department switcher exists to avoid;
 //   - link a department with no session yet and the tab opens on nothing.
 //
-// It must also stay a NEW tab: a same-tab hop loses the acting company.
+// It must also stay a NEW tab: a same-tab hop loses the acting company. Building
+// the actual hand-off link (a fresh SAR session after `#`) is appRouting's job
+// and is tested in token-refresh.test.ts; here openSarInNewTab is a spy.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { Cycle, CycleDepartmentProgress } from "@/types/cycles";
+import type { SarLinkOptions } from "@/lib/appRouting";
 
 vi.mock("@/lib/api", () => ({ getToken: () => "jwt-abc" }));
+
+const openSarInNewTab = vi.fn(async (_options: SarLinkOptions) => undefined);
+vi.mock("@/lib/appRouting", () => ({
+  openSarInNewTab: (options: SarLinkOptions) => openSarInNewTab(options),
+}));
 
 let actingCompany: { id: string; name: string } | null = { id: "cmp_1", name: "Acme" };
 vi.mock("@/context/AuthContext", () => ({
@@ -63,60 +71,69 @@ const DEPTS = [
   },
 ] as CycleDepartmentProgress[];
 
-const links = () =>
-  Array.from(document.querySelectorAll("a")).map((a) => a.getAttribute("href")!);
+/** The Open buttons that can be clicked (a disabled one is a <span>). */
+const openButtons = () => screen.queryAllByRole("button", { name: "Open ↗" });
+
+/** Click every Open and return what each asked appRouting to open. */
+function opened(): SarLinkOptions[] {
+  openSarInNewTab.mockClear();
+  for (const button of openButtons()) fireEvent.click(button);
+  return openSarInNewTab.mock.calls.map((call) => call[0]);
+}
+
+const nextPaths = () => opened().map((link) => link.next);
 
 describe("Report team card", () => {
   beforeEach(() => {
     actingCompany = { id: "cmp_1", name: "Acme" };
+    openSarInNewTab.mockClear();
   });
 
   it("sends each role to a different workspace", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
     fireEvent.click(screen.getByText("Human Resources"));
-    const paths = links().map((h) => new URL(h).searchParams.get("next"));
-    expect(paths).toEqual(["/pm", "/hod/sessions/sess_hr"]);
+    expect(nextPaths()).toEqual(["/pm", "/hod/sessions/sess_hr"]);
   });
 
   it("tells the SAR tab where to come back to", () => {
     // Without this the nav button over there resolves to the CLIENT's
     // dashboard, which this role must never see.
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
-    const back = new URL(links()[0]).searchParams.get("back");
-    expect(back).toBe(window.location.href);
+    expect(opened()[0].back).toBe(window.location.href);
   });
 
-  it("carries the token and the acting company on every link", () => {
+  it("carries the acting company on every link", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
     fireEvent.click(screen.getByText("Human Resources"));
-    for (const href of links()) {
-      const q = new URL(href).searchParams;
-      expect(q.get("token")).toBe("jwt-abc");
+    for (const link of opened()) {
       // Without this the SAR app has no company and every scoped route 403s.
-      expect(q.get("company")).toBe("cmp_1");
+      expect(link.company).toBe("cmp_1");
     }
   });
 
-  it("opens in a new tab, and can't reach back into this one", () => {
+  it("opens in a new tab", () => {
+    render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
+    // Every Open goes through openSarInNewTab — never a same-tab redirect.
+    expect(opened()).toHaveLength(1);
+    expect(document.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  it("clicking Open does not fold or unfold the row", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
     fireEvent.click(screen.getByText("Human Resources"));
-    for (const a of document.querySelectorAll("a")) {
-      expect(a.getAttribute("target")).toBe("_blank");
-      expect(a.getAttribute("rel")).toBe("noopener noreferrer");
-    }
+    opened();
+    expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
   });
 
   it("hides each department's roles until its row is clicked", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
     // Collapsed: only the PM can be opened.
-    expect(links()).toHaveLength(1);
+    expect(openButtons()).toHaveLength(1);
     expect(screen.queryByText("DEPARTMENT HEAD")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Human Resources"));
     expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
-
-    const paths = links().map((h) => new URL(h).searchParams.get("next"));
-    expect(paths).toEqual(["/pm", "/hod/sessions/sess_hr"]);
+    expect(nextPaths()).toEqual(["/pm", "/hod/sessions/sess_hr"]);
   });
 
   it("collapses again, and only one department is open at a time", () => {
@@ -127,13 +144,12 @@ describe("Report team card", () => {
     render(<ReportTeamCard cycle={CYCLE} departments={withTwo} pmName="Sara Nasser" />);
 
     fireEvent.click(screen.getByText("Human Resources"));
-    let paths = links().map((h) => new URL(h).searchParams.get("next"));
-    expect(paths).toContain("/hod/sessions/sess_hr");
+    expect(nextPaths()).toContain("/hod/sessions/sess_hr");
 
     // Opening another closes the first — otherwise two "DEPARTMENT HEAD"
     // headings would be on screen with no way to tell them apart.
     fireEvent.click(screen.getByText("Finance"));
-    paths = links().map((h) => new URL(h).searchParams.get("next"));
+    const paths = nextPaths();
     expect(paths).toContain("/hod/sessions/sess_fin");
     expect(paths).not.toContain("/hod/sessions/sess_hr");
 
@@ -147,8 +163,7 @@ describe("Report team card", () => {
     // The roles are visible so you can see who they are...
     expect(screen.getByText("DEPARTMENT HEAD")).toBeInTheDocument();
     // ...but PM is cycle-level and the only thing openable.
-    expect(links()).toHaveLength(1);
-    expect(new URL(links()[0]).searchParams.get("next")).toBe("/pm");
+    expect(nextPaths()).toEqual(["/pm"]);
   });
 
   it("still renders when nothing is assigned", () => {
@@ -175,6 +190,6 @@ describe("Report team card", () => {
     // A client admin reading their own cycle has no acting company.
     actingCompany = null;
     render(<ReportTeamCard cycle={CYCLE} departments={DEPTS} pmName="Sara Nasser" />);
-    expect(new URL(links()[0]).searchParams.get("company")).toBe("cmp_1");
+    expect(opened()[0].company).toBe("cmp_1");
   });
 });
