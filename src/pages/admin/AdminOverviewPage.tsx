@@ -184,20 +184,32 @@ export default function AdminOverviewPage() {
     };
   }, []);
 
+  // The License card doesn't need the overview, so it loads straight away instead
+  // of waiting behind the stats spinner (QA audit AC-04). It sits first in the
+  // same column in all three states, so React keeps the same card (no reload,
+  // no flash) when the stats arrive.
   if (loading) {
-    return <Spinner pad={80} />;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LicenseCard />
+        <Spinner pad={80} />
+      </div>
+    );
   }
 
   if (error || !data) {
     return (
-      <Card style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
-          Couldn’t load the overview
-        </div>
-        <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6 }}>
-          {error || 'No data returned.'}
-        </div>
-      </Card>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LicenseCard />
+        <Card style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
+            Couldn’t load the overview
+          </div>
+          <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6 }}>
+            {error || 'No data returned.'}
+          </div>
+        </Card>
+      </div>
     );
   }
 
