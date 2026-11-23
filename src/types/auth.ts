@@ -55,6 +55,8 @@ export interface AuthUser {
 
 export interface LoginResponse {
   access_token: string;
+  // The "stay signed in" key. Missing/null from a backend older than refresh tokens.
+  refresh_token?: string | null;
   token_type: "bearer";
   user: AuthUser;
   // Explicit top-level mirror of the user's onboarding state.
