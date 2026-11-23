@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
 import { MeetingLinkField } from '@/components/MeetingLinkField';
-import { getMeetingLinkError, getMeetingLinkToSave } from '@/lib/meetingLink';
+import { getMeetingLinkError, getMeetingLinkToSave, normalizeMeetingLink } from '@/lib/meetingLink';
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 import { isAdminLevel } from '@/constants/roles';
@@ -200,6 +200,25 @@ const ICON_PEOPLE = (
 const ICON_DOC = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 1.5h5l3 3v8a.5.5 0 01-.5.5h-7.5a.5.5 0 01-.5-.5v-10.5a.5.5 0 01.5-.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /><path d="M8 1.5v3h3M4.5 8h5M4.5 10.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
 );
+
+/**
+ * The saved Meeting URL / Location on the details view. A link is only made
+ * clickable when it is a real http(s) web address; anything else saved before
+ * links were checked (e.g. "not a url", "javascript:…") is shown as plain text,
+ * so nobody is sent somewhere unsafe (QA audit BM-03). A link saved without
+ * "https://" ("zoom.us/j/1") still opens correctly.
+ */
+function MeetingLinkDisplay({ platform, value }: { platform: string; value: string | null | undefined }) {
+  if (!value) return <span style={{ color: '#9BA3C4' }}>None</span>;
+  if (platform === 'in_person') return <span style={{ wordBreak: 'break-word' }}>{value}</span>;
+  const safeLink = normalizeMeetingLink(value);
+  if (safeLink === null) return <span style={{ wordBreak: 'break-all' }}>{value}</span>;
+  return (
+    <a href={safeLink} target="_blank" rel="noopener noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>
+      {value}
+    </a>
+  );
+}
 
 function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
@@ -609,11 +628,7 @@ function MeetingDetailModal({
                   icon={ICON_DOC}
                   label={current.platform === 'in_person' ? 'Location' : 'Meeting URL'}
                 >
-                  {current.link_or_location
-                    ? current.platform === 'in_person'
-                      ? <span style={{ wordBreak: 'break-word' }}>{current.link_or_location}</span>
-                      : <a href={current.link_or_location} target="_blank" rel="noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>{current.link_or_location}</a>
-                    : <span style={{ color: '#9BA3C4' }}>None</span>}
+                  <MeetingLinkDisplay platform={current.platform} value={current.link_or_location} />
                 </DetailRow>
               )}
               <DetailRow icon={ICON_DOC} label="Agenda">

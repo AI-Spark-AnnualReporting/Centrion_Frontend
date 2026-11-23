@@ -1,5 +1,6 @@
-// The meeting link is checked in the Schedule Meeting popup and in the edit form
-// on the Meetings page (QA audit BM-03: "not a url" was saved and shown as a link).
+// The meeting link is checked in the Schedule Meeting popup and the meeting
+// details view never turns an unsafe saved link into a clickable one
+// (QA audit BM-03: "not a url" was saved and shown as a link).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -128,7 +129,7 @@ describe('Schedule Meeting popup: meeting link', () => {
   });
 });
 
-describe('Meeting details: editing the link', () => {
+describe('Meeting details: saved links', () => {
   const meeting = (link: string) => ({
     id: 'm1', user_id: 'u1', title: 'Future Investor Call', meeting_date: tomorrow(), meeting_time: '14:30:00',
     meeting_type: 'investor_call', platform: 'zoom', participants: ['ali@x.com'],
@@ -144,6 +145,29 @@ describe('Meeting details: editing the link', () => {
     fireEvent.click(screen.getAllByText('Future Investor Call')[0]);
     await waitFor(() => expect(screen.getByText('Meeting URL')).toBeInTheDocument());
   }
+
+  it('shows an unsafe old link as plain text, never as a clickable link', async () => {
+    await openDetails('javascript:alert(1)');
+    expect(screen.getByText('javascript:alert(1)').closest('a')).toBeNull();
+  });
+
+  it('shows "not a url" as plain text', async () => {
+    await openDetails('not a url');
+    expect(screen.getByText('not a url').closest('a')).toBeNull();
+  });
+
+  it('makes a real link clickable, opening safely in a new tab', async () => {
+    await openDetails('https://zoom.us/j/1');
+    const a = screen.getByText('https://zoom.us/j/1').closest('a')!;
+    expect(a).toHaveAttribute('href', 'https://zoom.us/j/1');
+    expect(a).toHaveAttribute('target', '_blank');
+    expect(a.getAttribute('rel')).toContain('noopener');
+  });
+
+  it('opens an old link saved without https:// correctly', async () => {
+    await openDetails('zoom.us/j/1');
+    expect(screen.getByText('zoom.us/j/1').closest('a')).toHaveAttribute('href', 'https://zoom.us/j/1');
+  });
 
   it('makes the admin fix an old bad link before an edit can be saved', async () => {
     updateMeeting.mockReset().mockResolvedValue({ meeting: meeting('https://zoom.us/j/2'), email_sent: null });
