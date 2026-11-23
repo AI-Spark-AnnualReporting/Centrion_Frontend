@@ -14,6 +14,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import type { DocumentBankReport, DocumentBankResponse } from '@/types/report';
 import { compareIndicatorCodes } from '@/lib/indicatorCodeOrder';
+import { filterIndicators } from '@/lib/indicatorSearch';
 
 const PAGE_SIZE = 20;
 
@@ -347,9 +348,16 @@ interface IndicatorListProps {
   loading: boolean;
   error: string | null;
   emptyLabel: string;
+  /** Names the list in the search box, e.g. "GRI" → "Search GRI code or name…". */
+  searchLabel: string;
 }
 
-function IndicatorList({ indicators, loading, error, emptyLabel }: IndicatorListProps) {
+function IndicatorList({ indicators, loading, error, emptyLabel, searchLabel }: IndicatorListProps) {
+  // Each card keeps its own search: a GRI search never hides IFRS rows.
+  const [search, setSearch] = useState('');
+  const shown = useMemo(() => filterIndicators(indicators, search), [indicators, search]);
+  const searching = search.trim() !== '';
+
   if (loading) {
     return (
       <div style={{ padding: '32px 18px', textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
@@ -374,80 +382,126 @@ function IndicatorList({ indicators, loading, error, emptyLabel }: IndicatorList
   }
 
   return (
-    <div style={{ padding: '4px 18px 12px', maxHeight: 420, overflowY: 'auto' }}>
-      {indicators.map((ind, i) => {
-        const last = i === indicators.length - 1;
-        return (
-          <div
-            key={ind.id ?? `${ind.framework}-${ind.source_code}-${i}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '11px 0',
-              borderBottom: last ? 'none' : '1px solid #ECEEF8',
-              gap: 10,
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: '#1A1D2E',
-                  fontWeight: 500,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-                title={ind.indicator_label}
-              >
-                {ind.indicator_label}
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: '#9BA3C4',
-                  marginTop: 2,
-                  fontFamily: "'DM Mono',monospace",
-                  fontWeight: 600,
-                }}
-              >
-                {resolveFramework(ind)} · {ind.source_code}
-              </div>
-            </div>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: "'DM Mono',monospace",
-                color: '#1A1D2E',
-                minWidth: 56,
-                textAlign: 'right',
-              }}
-            >
-              {ind.expected_unit ?? '—'}
-            </span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                fontSize: 10,
-                fontWeight: 700,
-                color: categoryColor(ind.esg_category),
-                background: categoryBg(ind.esg_category),
-                padding: '3px 10px',
-                borderRadius: 999,
-                whiteSpace: 'nowrap',
-                letterSpacing: '.2px',
-                flexShrink: 0,
-              }}
-            >
-              {ind.esg_category ?? '—'}
-            </span>
+    <>
+      {/* Search sits outside the scrolling list so it stays visible while scrolling. */}
+      <div style={{ padding: '10px 18px 4px' }}>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={`Search ${searchLabel} code or name…`}
+          aria-label={`Search ${searchLabel} indicators`}
+          maxLength={100}
+          style={{
+            width: '100%',
+            padding: '8px 11px',
+            border: '1.5px solid #E2E4F0',
+            borderRadius: 8,
+            fontSize: 12,
+            fontFamily: 'inherit',
+            outline: 'none',
+            background: '#fff',
+            color: '#1A1D2E',
+          }}
+        />
+        {/* With no matches the empty state below already says so. */}
+        {searching && shown.length > 0 && (
+          <div aria-live="polite" style={{ fontSize: 10.5, color: '#9BA3C4', marginTop: 6 }}>
+            Showing {shown.length} of {indicators.length}
           </div>
-        );
-      })}
-    </div>
+        )}
+      </div>
+      {shown.length === 0 ? (
+        <div style={{ padding: '24px 18px', textAlign: 'center' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', wordBreak: 'break-word' }}>
+            No {searchLabel} indicators match “{search.trim()}”.
+          </div>
+          <button
+            type="button"
+            className="btn bs"
+            onClick={() => setSearch('')}
+            style={{ marginTop: 10, padding: '5px 12px', fontSize: 11 }}
+          >
+            Clear search
+          </button>
+        </div>
+      ) : (
+        <div style={{ padding: '4px 18px 12px', maxHeight: 420, overflowY: 'auto' }}>
+          {shown.map((ind, i) => {
+            const last = i === shown.length - 1;
+            return (
+              <div
+                key={ind.id ?? `${ind.framework}-${ind.source_code}-${i}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '11px 0',
+                  borderBottom: last ? 'none' : '1px solid #ECEEF8',
+                  gap: 10,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: '#1A1D2E',
+                      fontWeight: 500,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={ind.indicator_label}
+                  >
+                    {ind.indicator_label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: '#9BA3C4',
+                      marginTop: 2,
+                      fontFamily: "'DM Mono',monospace",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {resolveFramework(ind)} · {ind.source_code}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: "'DM Mono',monospace",
+                    color: '#1A1D2E',
+                    minWidth: 56,
+                    textAlign: 'right',
+                  }}
+                >
+                  {ind.expected_unit ?? '—'}
+                </span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: categoryColor(ind.esg_category),
+                    background: categoryBg(ind.esg_category),
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    whiteSpace: 'nowrap',
+                    letterSpacing: '.2px',
+                    flexShrink: 0,
+                  }}
+                >
+                  {ind.esg_category ?? '—'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1478,6 +1532,7 @@ export default function KPIPage() {
               loading={indicatorsLoading}
               error={indicatorsError}
               emptyLabel="No GRI indicators returned."
+              searchLabel="GRI"
             />
           </div>
 
@@ -1495,6 +1550,7 @@ export default function KPIPage() {
               loading={indicatorsLoading}
               error={indicatorsError}
               emptyLabel="No IFRS-S1 / IFRS-S2 indicators returned."
+              searchLabel="IFRS"
             />
           </div>
         </div>
