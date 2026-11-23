@@ -154,6 +154,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{e.subtitle}</div>
+                {e.note && <div style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>{e.note}</div>}
                 {e.cta && !lock && (
                   <button
                     type="button"

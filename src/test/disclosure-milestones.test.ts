@@ -199,3 +199,51 @@ describe('quarter helpers', () => {
     expect(nextQuarter({ q: 4, year: 2026 })).toEqual({ q: 1, year: 2027 });
   });
 });
+
+// The next-annual due date always comes from the fiscal year-end month given at
+// onboarding. A cycle for that year used to REPLACE it with its own submission
+// deadline (" · official deadline"), so the timeline contradicted the fiscal month.
+// Now the cycle only re-points the button and adds its deadline as a second line.
+describe('the annual milestone and a cycle for that year', () => {
+  const reports = [report({ id: 'a', period: 'FY-2025', report_type: 'annual' })];
+  const cycle = (over: Record<string, unknown>) =>
+    ({ id: 'cyc1', fiscal_year: 2026, submission_deadline: '2026-09-15', ...over }) as never;
+
+  it('keeps the fiscal year-end date and shows the cycle deadline as a note', () => {
+    const events = deriveEvents({ reports, company: COMPANY, cycles: [cycle({})] }, NOW);
+    const annual = due(events, 'Next Annual report due')!;
+    expect(annual.date).toEqual(new Date(2026, 10, 0)); // 31 Oct 2026 = October year-end
+    expect(annual.subtitle).toContain('October 2026');
+    expect(annual.subtitle).not.toContain('official deadline');
+    expect(annual.note).toBe('Cycle deadline: 15 Sept 2026');
+    expect(annual.cta).toEqual({ label: 'Open cycle', path: '/annual-report/cycles/cyc1' });
+  });
+
+  it('does not let an earlier cycle deadline make the milestone urgent', () => {
+    // Deadline in 3 days would have been red; the fiscal date is ~80 days out.
+    const events = deriveEvents(
+      { reports, company: COMPANY, cycles: [cycle({ submission_deadline: '2026-08-15' })] },
+      NOW,
+    );
+    const annual = due(events, 'Next Annual report due')!;
+    expect(annual.tone).toBe('normal');
+    expect(annual.overdue).toBe(false);
+  });
+
+  it('adds no note and keeps "Start cycle" when there is no cycle for that year', () => {
+    const events = deriveEvents({ reports, company: COMPANY, cycles: [cycle({ fiscal_year: 2025 })] }, NOW);
+    const annual = due(events, 'Next Annual report due')!;
+    expect(annual.note).toBeUndefined();
+    expect(annual.cta?.label).toBe('Start cycle');
+  });
+
+  it('skips the note when the cycle deadline is unreadable, but still links the cycle', () => {
+    const events = deriveEvents(
+      { reports, company: COMPANY, cycles: [cycle({ submission_deadline: 'not-a-date' })] },
+      NOW,
+    );
+    const annual = due(events, 'Next Annual report due')!;
+    expect(annual.note).toBeUndefined();
+    expect(annual.cta?.label).toBe('Open cycle');
+  });
+});

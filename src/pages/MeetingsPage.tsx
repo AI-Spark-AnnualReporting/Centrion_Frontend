@@ -177,7 +177,7 @@ function buildIcs(items: CalItem[]): string {
       lines.push(
         `DTSTART;VALUE=DATE:${icsDate(it.date)}`,
         `SUMMARY:${escapeIcs(it.event.title)}`,
-        `DESCRIPTION:${escapeIcs(it.event.subtitle)}`,
+        `DESCRIPTION:${escapeIcs(it.event.note ? `${it.event.subtitle} · ${it.event.note}` : it.event.subtitle)}`,
       );
     }
     lines.push('END:VEVENT');
@@ -997,6 +997,7 @@ export default function MeetingsPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>{it.event.title}</div>
                           <div style={{ fontSize: 10, color: '#9BA3C4' }}>{it.event.subtitle}</div>
+                          {it.event.note && <div style={{ fontSize: 10, color: '#5A6080' }}>{it.event.note}</div>}
                         </div>
                       </div>
                     ),
@@ -1109,7 +1110,7 @@ export default function MeetingsPage() {
               </div>
             ) : upcoming.length === 0 ? (
               <div style={{ padding: '28px 4px', textAlign: 'center', color: '#9BA3C4', fontSize: 12, lineHeight: 1.6 }}>
-                Nothing upcoming. Report deadlines and cycle dates appear here as they're set up.{' '}
+                Nothing upcoming. Report deadlines appear here as they're set up.{' '}
                 {canCreateMeeting && (
                   <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
                     Schedule a meeting →
@@ -1164,6 +1165,7 @@ export default function MeetingsPage() {
                         )}
                       </div>
                       <div style={{ fontSize: 10, color: '#9BA3C4' }}>{e.subtitle}</div>
+                      {e.note && <div style={{ fontSize: 10, color: '#5A6080' }}>{e.note}</div>}
                       {e.cta && (
                         <button
                           type="button"

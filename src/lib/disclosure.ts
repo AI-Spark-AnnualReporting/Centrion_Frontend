@@ -50,6 +50,9 @@ export interface TimelineEvent {
   // covers "due within 30 days") so the UI can say OVERDUE rather than URGENT.
   overdue?: boolean;
   cta?: { label: string; path: string };
+  // Optional second line shown under the subtitle, e.g. the annual cycle's own
+  // submission deadline ("Cycle deadline: 30 Nov 2026"). Never changes `date`.
+  note?: string;
 }
 
 // A report is a disclosure only once it has been signed off. A draft is work in
@@ -131,7 +134,7 @@ function dueEvent(
   label: string,
   cta: Cta,
   now: Date,
-  suffix = '',
+  note?: string,
 ): TimelineEvent {
   if (!date) {
     return {
@@ -143,6 +146,7 @@ function dueEvent(
       dotColor: DOT_FAR,
       tone: 'normal',
       cta,
+      note,
     };
   }
   const days = diffDays(date, now);
@@ -151,12 +155,13 @@ function dueEvent(
     id: `due-${key}`,
     date,
     title,
-    subtitle: `${label} · ${formatDue(date, now)}${suffix}`,
+    subtitle: `${label} · ${formatDue(date, now)}`,
     kind: 'due',
     dotColor: overdue || days <= 30 ? DOT_LATE : days <= 120 ? DOT_SOON : DOT_FAR,
     tone: overdue || days <= 30 ? 'urgent' : 'normal',
     overdue,
     cta,
+    note,
   };
 }
 
@@ -194,26 +199,27 @@ export function deriveEvents(input: DeriveInput, now: Date = new Date()): Timeli
 
     let date: Date | null = null;
     let label = '';
-    let suffix = '';
+    let note: string | undefined;
     if (anchor) {
+      // The due date ALWAYS comes from the fiscal year-end month the company gave at
+      // onboarding (last day of that month). A cycle's own submission deadline used
+      // to replace it, which made the timeline contradict the fiscal month.
       date = new Date(anchor + 1, fye, 0);
       label = `${MONTHS[fye - 1]} ${anchor + 1}`;
-      // A real cycle for the year now being targeted supersedes the derived date
-      // with its actual submission deadline and re-points the CTA into that cycle.
+      // A real cycle for the year now being targeted re-points the CTA into that
+      // cycle, and its submission deadline is shown as a second line only.
       const cycle = cycles.find((c) => c.fiscal_year === anchor + 1);
       if (cycle) {
         cta = { label: 'Open cycle', path: `/annual-report/cycles/${cycle.id}` };
         if (cycle.submission_deadline) {
           const parsed = toLocalDate(cycle.submission_deadline.slice(0, 10));
           if (!Number.isNaN(parsed.getTime())) {
-            date = parsed;
-            label = formatDayMonth(parsed);
-            suffix = ' · official deadline';
+            note = `Cycle deadline: ${formatDayMonth(parsed)}`;
           }
         }
       }
     }
-    events.push(dueEvent('annual', 'Next Annual report due', date, label, cta, now, suffix));
+    events.push(dueEvent('annual', 'Next Annual report due', date, label, cta, now, note));
   }
 
   // ── 2) ESG ───────────────────────────────────────────────────────────────
