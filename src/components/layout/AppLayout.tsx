@@ -73,6 +73,9 @@ const PAGE_NAME_PREFIXES: [string, string][] = [
   // The builder steps carry a report id (/board-report/<id>/sources …), so the
   // exact '/board-report' entry above never matched them (QA audit BR-03).
   ['/board-report', 'Board Report'],
+  // The client's plan page and its checkout step; matches the sidebar item.
+  // Both used to fall through to "Command Center" (QA audit SB-05).
+  ['/admin-console/subscription', 'Subscription'],
   // An ESG result is /reports/<id>. The exact entries above (/reports/quarterly,
   // /reports/processing) are checked first, so only result pages reach this
   // (QA audit ES-03).
