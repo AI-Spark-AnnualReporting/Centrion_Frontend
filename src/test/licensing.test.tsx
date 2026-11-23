@@ -37,7 +37,13 @@ vi.mock("@/lib/api", () => ({
   },
   sparkLicenses: { generate: (...args: unknown[]) => generate(...args) },
   auth: { resetPasswordWithCode: (...args: unknown[]) => resetWithCode(...args) },
+  // The shared license cache (lib/license-cache.ts) keys answers by login token.
+  getAuthToken: () => "test-token",
 }));
+
+// Each test sets its own license; the shared cache must not carry one over.
+const { clearCompanyLicense } = await import("@/lib/license-cache");
+beforeEach(() => clearCompanyLicense());
 
 const { ProtectedRoute } = await import("@/components/ProtectedRoute");
 const { LicenseBanner, PageLimitBanner, pickBanner, daysUntil } = await import("@/components/license/LicenseBanner");

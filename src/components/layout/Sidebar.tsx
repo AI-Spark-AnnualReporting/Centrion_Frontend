@@ -6,8 +6,9 @@ import type { FeatureKey } from '@/constants/features';
 import { isAdminLevel, type BackendRole } from '@/constants/roles';
 import { sparkStudioUrl } from '@/lib/appRouting';
 import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
-import { license, sparkPlans } from '@/lib/api';
+import { sparkPlans } from '@/lib/api';
 import { IS_ON_PREM } from '@/lib/deployment';
+import { loadCompanyLicense, subscribeCompanyLicense } from '@/lib/license-cache';
 import type { CompanyLicense } from '@/types/license';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
@@ -257,11 +258,13 @@ export function Sidebar() {
   useEffect(() => {
     if (user?.role !== 'admin') return;
     let cancelled = false;
-    license
-      .get()
+    // Shared with the license banner and card: one request per page, not three.
+    loadCompanyLicense()
       .then((data) => { if (!cancelled) setCompanyLicense(data); })
       .catch(() => { if (!cancelled) setCompanyLicense(null); });
-    return () => { cancelled = true; };
+    // A license activated / unlocked on the License card shows here at once.
+    const unsubscribe = subscribeCompanyLicense((next) => { if (!cancelled) setCompanyLicense(next); });
+    return () => { cancelled = true; unsubscribe(); };
   }, [user]); // user changes on refreshPermissions, e.g. right after a license is activated
   // spark_admin: how many Enterprise requests still need a plan (Quotes badge).
   // Rechecked on every page change, like the license banner.

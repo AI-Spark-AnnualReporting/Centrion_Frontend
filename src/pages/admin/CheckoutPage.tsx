@@ -19,6 +19,7 @@ import { FormDialog } from '@/components/subscriptions/FormDialog';
 import { durationLabel, durationPer, formatMoney } from '@/components/subscriptions/PlanFields';
 import { useAuth } from '@/context/AuthContext';
 import { subscriptions } from '@/lib/api';
+import { clearCompanyLicense } from '@/lib/license-cache';
 import type { LicensableModule } from '@/types/license';
 import type { CompanySubscription, PaidDuration } from '@/types/subscription';
 import '@/components/subscriptions/subscriptions.css';
@@ -111,6 +112,8 @@ export default function CheckoutPage() {
     setError('');
     try {
       const result = await subscriptions.pay(checkout.id, paymentKey.current);
+      // The cached license is the old plan now; the next read must ask the server.
+      clearCompanyLicense();
       // The new plan's modules show without logging out.
       await refreshPermissions().catch(() => undefined);
       setPaid(result);
