@@ -26,6 +26,8 @@ const PAGE_NAMES: Record<string, string> = {
   '/stakeholders': 'Leadership',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
+  // Matches the sidebar item; used to fall through to "Command Center" (QA audit UR-02b).
+  '/upload-reports': 'Upload Previous Reports',
   '/profile': 'User Profile',
   '/profile/company': 'Company Profile',
   '/admin-console': 'Admin Console',
