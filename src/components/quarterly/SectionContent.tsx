@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ProducedSection } from '@/types/quarterly';
 import type { DocumentBankResponse } from '@/types/report';
-import { documents } from '@/lib/api';
+import { documents, getAuthToken } from '@/lib/api';
 import { readNarrativeEnvelope } from '@/lib/sectionEnvelope';
 import { asStringArray, fullKey, isDataImage } from '@/components/quarterly/sectionState';
 // One shared rule for reading a figure's units, also used by the extraction screen
@@ -163,6 +163,26 @@ function NoData() {
   );
 }
 
+// Every attached-PDF section looks its file up in the company's document list.
+// A report with several attachments asked for that same (large) list once per
+// section; they now share one request, reused for 30 s — short, because the
+// list carries signed download links that expire (QA audit QR-05).
+const DOCUMENTS_FRESH_FOR_MS = 30_000;
+const documentsCache = new Map<string, { request: Promise<DocumentBankResponse>; storedAt: number }>();
+
+/** The company's document list, shared by every attached-PDF section. */
+function loadCompanyDocuments(companyId: string): Promise<DocumentBankResponse> {
+  const key = `${getAuthToken() ?? ''}|${companyId}`;
+  const hit = documentsCache.get(key);
+  if (hit && Date.now() - hit.storedAt < DOCUMENTS_FRESH_FOR_MS) return hit.request;
+  const request = documents.byReport<DocumentBankResponse>(companyId);
+  documentsCache.set(key, { request, storedAt: Date.now() });
+  request.catch(() => {
+    if (documentsCache.get(key)?.request === request) documentsCache.delete(key);
+  });
+  return request;
+}
+
 // Attach-mode content — a PDF embedded verbatim, identified only by
 // document_id. Looks up its filename + signed download_url once on mount
 // (documents.byReport is the same proven source the Document Bank reads
@@ -178,8 +198,7 @@ function AttachedPdf({ documentId, companyId }: { documentId: string; companyId?
     let cancelled = false;
     setLoading(true);
     setError(null);
-    documents
-      .byReport<DocumentBankResponse>(companyId)
+    loadCompanyDocuments(companyId)
       .then((res) => {
         if (cancelled) return;
         const found = res.reports.flatMap((r) => r.documents).find((d) => d.id === documentId);
