@@ -64,6 +64,9 @@ function PageLoader() {
 // shorter prefix added later would otherwise silently shadow a longer one.
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
+  // The builder steps carry a report id (/board-report/<id>/sources …), so the
+  // exact '/board-report' entry above never matched them (QA audit BR-03).
+  ['/board-report', 'Board Report'],
   ['/spark/licenses', 'Licenses'],
   ['/annual-report', 'Annual Report'],
   ['/earnings', 'Earnings Report'],
