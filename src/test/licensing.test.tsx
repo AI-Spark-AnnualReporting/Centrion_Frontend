@@ -158,18 +158,31 @@ describe("LicenseBanner", () => {
     expect(licenseGet).not.toHaveBeenCalled();
   });
 
-  it("refreshes the login when Spark adds a module to an active license", async () => {
+  it("refreshes the login when Spark adds a module, on the first page change after 30 s", async () => {
+    // Page changes reuse the shared license for 30 s instead of starting a new
+    // ~4 s request each click (QA audit AC-04); after that they re-check.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const refreshPermissions = vi.fn().mockResolvedValue(undefined);
     mockAuth = { user: CLIENT_ADMIN, refreshPermissions };
     const far = { starts_at: "2026-01-01", expires_at: "2099-12-31" };
     licenseGet.mockResolvedValueOnce(licenseOf("active", { ...far, modules: ["board_report"] }))
       .mockResolvedValue(licenseOf("active", { ...far, modules: ["board_report", "leadership"] }));
-    const Go = () => { const navigate = useNavigate(); return <button onClick={() => navigate("/b")}>go</button>; };
-    render(<MemoryRouter initialEntries={["/a"]}><LicenseBanner /><Go /></MemoryRouter>);
+    const Go = ({ to }: { to: string }) => {
+      const navigate = useNavigate();
+      return <button onClick={() => navigate(to)}>{`go ${to}`}</button>;
+    };
+    render(<MemoryRouter initialEntries={["/a"]}><LicenseBanner /><Go to="/b" /><Go to="/c" /></MemoryRouter>);
     await waitFor(() => expect(licenseGet).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "go /b" }));   // within 30 s: no new request
+    await act(async () => { await Promise.resolve(); });
+    expect(licenseGet).toHaveBeenCalledTimes(1);
     expect(refreshPermissions).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "go" }));   // a page change re-checks the license
+
+    await act(async () => { vi.advanceTimersByTime(30_001); });
+    fireEvent.click(screen.getByRole("button", { name: "go /c" }));   // after 30 s: re-checks
     await waitFor(() => expect(refreshPermissions).toHaveBeenCalledTimes(1));
+    vi.useRealTimers();
   });
 
   it("refreshes the login when Spark activates the license", async () => {
