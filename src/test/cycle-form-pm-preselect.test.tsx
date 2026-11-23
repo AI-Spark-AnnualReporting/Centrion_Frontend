@@ -32,6 +32,8 @@ const CLIENT_PMS = [
 vi.mock("@/lib/api", () => ({
   adminConsole: { listUsers: vi.fn().mockResolvedValue({ users: CLIENT_PMS }) },
   sarCycles: { create: vi.fn() },
+  // Opening the form loads the company's fiscal year-end month.
+  companies: { getMyCompany: vi.fn().mockResolvedValue({ fiscal_year_end_month: 12 }) },
 }));
 
 const { default: CycleForm } = await import("@/pages/annual-report/CycleForm");
