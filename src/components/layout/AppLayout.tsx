@@ -14,6 +14,9 @@ const PAGE_NAMES: Record<string, string> = {
   '/dashboard': 'Command Center',
   '/reports': 'Reports',
   '/reports/quarterly': 'Quarterly Reports',
+  // Full-screen progress page shared by ESG and Quarterly runs, so a neutral
+  // title (it used to fall through to "Command Center").
+  '/reports/processing': 'Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance Validation',
   '/ai': 'AI Copilot',
