@@ -12,10 +12,11 @@ import { BackToOrigin } from '../shared/BackToOrigin';
 const PAGE_NAMES: Record<string, string> = {
   '/companies': 'Companies',
   '/dashboard': 'Command Center',
-  '/reports': 'Reports',
+  // The ESG Validator list (the sidebar's "ESG Validator" item lives here).
+  '/reports': 'ESG Validator',
   '/reports/quarterly': 'Quarterly Reports',
   // Full-screen progress page shared by ESG and Quarterly runs, so a neutral
-  // title (it used to fall through to "Command Center").
+  // title. Pinned here so the '/reports/' prefix below can't claim it.
   '/reports/processing': 'Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance Validation',
@@ -70,6 +71,10 @@ const PAGE_NAME_PREFIXES: [string, string][] = [
   // The builder steps carry a report id (/board-report/<id>/sources …), so the
   // exact '/board-report' entry above never matched them (QA audit BR-03).
   ['/board-report', 'Board Report'],
+  // An ESG result is /reports/<id>. The exact entries above (/reports/quarterly,
+  // /reports/processing) are checked first, so only result pages reach this
+  // (QA audit ES-03).
+  ['/reports/', 'ESG Validator'],
   ['/spark/licenses', 'Licenses'],
   ['/annual-report', 'Annual Report'],
   ['/earnings', 'Earnings Report'],
