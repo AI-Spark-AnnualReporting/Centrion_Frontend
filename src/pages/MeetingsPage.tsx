@@ -335,6 +335,9 @@ function MeetingDetailModal({
   const [error, setError] = useState<string | null>(null);
   // Shown under the Meeting URL / Location field itself, not in the box at the bottom.
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Cancelling emails every participant and can't be undone from here, so the
+  // first click only asks; the footer then shows "Keep meeting / Yes, cancel" (QA audit BM-06).
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   // Refresh from server in case the list payload was stale.
   useEffect(() => {
@@ -427,6 +430,19 @@ function MeetingDetailModal({
     }
   };
 
+  /** Opens the edit form fresh: no leftover link error or pending cancel question. */
+  const startEditing = () => {
+    setLinkError(null);
+    setConfirmingCancel(false);
+    setEditing(true);
+  };
+
+  /** Leaves the edit form; a half-asked cancel question goes away with it. */
+  const stopEditing = () => {
+    setConfirmingCancel(false);
+    setEditing(false);
+  };
+
   const cancel = async () => {
     setSubmitting(true);
     setError(null);
@@ -441,8 +457,17 @@ function MeetingDetailModal({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to cancel meeting.');
       setSubmitting(false);
+      // Back to the normal footer, so the error is read next to a fresh "Cancel meeting".
+      setConfirmingCancel(false);
     }
   };
+
+  // Who gets the cancellation email: the backend can only email participants
+  // stored as email addresses (same rule as the "won't be notified" hint).
+  const emailableCount = current.participants.filter((person) => person.includes('@')).length;
+  let cancelNotice = 'Nobody will be emailed: no participant has an email address.';
+  if (emailableCount === 1) cancelNotice = '1 participant will be emailed a cancellation notice.';
+  if (emailableCount > 1) cancelNotice = `${emailableCount} participants will be emailed a cancellation notice.`;
 
   const date = toLocalDate(current.meeting_date, current.meeting_time);
 
@@ -500,7 +525,7 @@ function MeetingDetailModal({
                   setTab(key);
                   // Leaving an unsaved edit behind on the Details tab would be
                   // invisible from Minutes, so drop it on the way out.
-                  if (key === 'minutes') setEditing(false);
+                  if (key === 'minutes') stopEditing();
                 }}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -646,18 +671,38 @@ function MeetingDetailModal({
         </div>
 
         <div style={{ padding: '14px 24px 18px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-          {editing ? (
+          {editing && confirmingCancel ? (
+            <>
+              <div role="alert" style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#DC2626' }}>Cancel this meeting?</div>
+                <div style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>{cancelNotice}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+                <button className="btn bs" onClick={() => setConfirmingCancel(false)} disabled={submitting} style={{ padding: '9px 16px' }}>
+                  Keep meeting
+                </button>
+                <button
+                  className="btn"
+                  onClick={cancel}
+                  disabled={submitting}
+                  style={{ padding: '9px 16px', background: '#DC2626', borderColor: '#DC2626', color: '#fff', opacity: submitting ? 0.7 : 1 }}
+                >
+                  {submitting ? 'Cancelling…' : 'Yes, cancel meeting'}
+                </button>
+              </div>
+            </>
+          ) : editing ? (
             <>
               <button
                 className="btn bs"
-                onClick={cancel}
+                onClick={() => setConfirmingCancel(true)}
                 disabled={submitting || current.status === 'cancelled'}
                 style={{ padding: '9px 16px', color: '#DC2626', borderColor: 'rgba(239,68,68,.3)' }}
               >
                 {current.status === 'cancelled' ? 'Already cancelled' : 'Cancel meeting'}
               </button>
               <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn bs" onClick={() => setEditing(false)} disabled={submitting} style={{ padding: '9px 18px' }}>Discard</button>
+                <button className="btn bs" onClick={stopEditing} disabled={submitting} style={{ padding: '9px 18px' }}>Discard</button>
                 <button className="btn bp" onClick={save} disabled={submitting} style={{ padding: '9px 20px', opacity: submitting ? 0.7 : 1 }}>
                   {submitting ? 'Saving…' : 'Save'}
                 </button>
@@ -669,7 +714,7 @@ function MeetingDetailModal({
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Close</button>
                 {!hasHappened && (
-                  <button className="btn bs" onClick={() => { setLinkError(null); setEditing(true); }} style={{ padding: '9px 18px' }}>Edit</button>
+                  <button className="btn bs" onClick={startEditing} style={{ padding: '9px 18px' }}>Edit</button>
                 )}
               </div>
             </>
