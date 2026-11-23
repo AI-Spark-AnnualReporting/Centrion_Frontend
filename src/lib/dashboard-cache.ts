@@ -9,8 +9,8 @@ import { getAuthToken, reports as reportsApi } from '@/lib/api';
    And every switch back to the ESG tab re-fetched its coverage (~2 s)
    (QA audit CC-02).
 
-   So: one request at a time per company, the list reused for 30 s. Same
-   small pattern as lib/license-cache.ts.
+   So: one request at a time per company, the list reused for 30 s and a
+   report's coverage for 60 s. Same small pattern as lib/license-cache.ts.
    Only the dashboard uses these; report pages still fetch fresh.
 
    The key includes the login token, so a different user on the same browser
@@ -18,6 +18,7 @@ import { getAuthToken, reports as reportsApi } from '@/lib/api';
 ═══════════════════════════════════════════════════════════════════════ */
 
 export const REPORT_LIST_FRESH_FOR_MS = 30_000;
+export const COVERAGE_FRESH_FOR_MS = 60_000;
 
 interface CacheEntry {
   request: Promise<unknown>;
@@ -44,6 +45,14 @@ function loadShared<T>(key: string, freshForMs: number, start: () => Promise<T>)
 /** The company's reports list (GET /reports/{companyId}), shared by the dashboard cards. */
 export function loadDashboardReportList<T>(companyId: string): Promise<T> {
   return loadShared(`list|${companyId}`, REPORT_LIST_FRESH_FOR_MS, () => reportsApi.list<T>(companyId));
+}
+
+/** A report's coverage for the ESG tab, reused for 60 s so switching back to
+ *  the tab is instant. `lean` leaves out raw evidence the tab never shows. */
+export function loadDashboardCoverage<T>(companyId: string, reportId: string): Promise<T> {
+  return loadShared(`coverage|${companyId}|${reportId}`, COVERAGE_FRESH_FOR_MS, () =>
+    reportsApi.getCoverage<T>(companyId, reportId, { lean: true }),
+  );
 }
 
 /** Forget everything, so the next read asks the server. */

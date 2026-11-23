@@ -1785,6 +1785,9 @@ export interface CoverageQuery {
   status?: CoverageStatus; // default "all"
   pillar?: string;
   include_duplicates?: boolean; // default false
+  // Leave out raw_evidence / normalization_warnings (provenance comes back
+  // empty): for screens that only show the summary, e.g. the ESG tab.
+  lean?: boolean; // default false
 }
 
 export const reports = {

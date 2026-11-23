@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import { useNavigate } from 'react-router-dom';
-import { lookups, reports as reportsApi } from '@/lib/api';
-import { loadDashboardReportList } from '@/lib/dashboard-cache';
+import { lookups } from '@/lib/api';
+import { loadDashboardCoverage, loadDashboardReportList } from '@/lib/dashboard-cache';
 import { useAuth } from '@/context/AuthContext';
 import type {
   CoverageCriticalGap,
@@ -180,10 +180,9 @@ export function DashboardESG() {
           return yearFromPeriod(b.period) - yearFromPeriod(a.period);
         });
         const target = reports[0];
-        const cov = await reportsApi.getCoverage<CoverageResponse>(
-          companyId,
-          target.id,
-        );
+        // Cached for 60 s (switching back to this tab is instant) and lean:
+        // this tab never shows the raw evidence (lib/dashboard-cache.ts).
+        const cov = await loadDashboardCoverage<CoverageResponse>(companyId, target.id);
         if (cancelled) return;
         setLatestReport(target);
         setCoverage(cov);
