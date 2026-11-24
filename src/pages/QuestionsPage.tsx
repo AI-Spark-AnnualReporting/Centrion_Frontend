@@ -237,6 +237,29 @@ export function QuestionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+
+  /** Saves every question (not just the search results) as a Word file built on the server. */
+  const downloadQuestions = () => {
+    if (!companyId || downloading) return;
+    setDownloading(true);
+    setDownloadError('');
+    companiesApi
+      .exportQuestions(companyId)
+      .then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename ?? 'Questions_Bank.docx';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => setDownloadError("Couldn't download the questions. Please try again."))
+      .finally(() => setDownloading(false));
+  };
 
   useEffect(() => {
     if (!companyId) {
@@ -282,7 +305,9 @@ export function QuestionsPage() {
   }, [questions, search]);
 
   const groups = useMemo(() => groupByReport(filtered), [filtered]);
-  const totalReports = groups.length;
+  // The badge counts everything raised, like its question count does — not the
+  // search results (a no-match search used to read "1 question · 0 reports").
+  const totalReports = useMemo(() => new Set(questions.map((q) => q.report.id)).size, [questions]);
 
   return (
     <div style={{ paddingBottom: 80 }}>
@@ -333,8 +358,23 @@ export function QuestionsPage() {
               background: '#fff',
             }}
           />
+          <button
+            type="button"
+            className="btn bs"
+            onClick={downloadQuestions}
+            disabled={downloading || loading || questions.length === 0}
+            title={questions.length === 0 ? 'No questions to download yet' : 'Download every question as a Word file'}
+            style={{ padding: '7px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+          >
+            {downloading ? 'Preparing…' : 'Download (.docx)'}
+          </button>
         </div>
       </div>
+      {downloadError && (
+        <div role="alert" style={{ fontSize: 11, color: '#DC2626', margin: '-8px 0 12px', textAlign: 'right' }}>
+          {downloadError}
+        </div>
+      )}
 
       {loading ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: '#9BA3C4', fontSize: 12 }}>
@@ -345,16 +385,34 @@ export function QuestionsPage() {
         <div className="card" style={{ padding: 24, color: '#DC2626', fontSize: 12, textAlign: 'center' }}>
           {error}
         </div>
-      ) : groups.length === 0 ? (
+      ) : questions.length === 0 ? (
+        // Truly empty: nothing has been raised yet, whatever is in the search box.
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 4 }}>
             No questions yet
           </div>
           <div style={{ fontSize: 11, color: '#9BA3C4' }}>
-            {search
-              ? 'No questions match your search.'
-              : 'Open a report and click any missing metric to raise a question.'}
+            Open a report and click any missing metric to raise a question.
           </div>
+        </div>
+      ) : groups.length === 0 ? (
+        // Questions exist, the search just matched none of them. This used to
+        // say "No questions yet", which was false (QA audit QB-03).
+        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E', marginBottom: 4 }}>
+            No results
+          </div>
+          <div style={{ fontSize: 11, color: '#9BA3C4', wordBreak: 'break-word' }}>
+            No questions match “{search.trim()}”.
+          </div>
+          <button
+            type="button"
+            className="btn bs"
+            onClick={() => setSearch('')}
+            style={{ marginTop: 12, padding: '6px 14px', fontSize: 11 }}
+          >
+            Clear search
+          </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

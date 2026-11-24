@@ -26,7 +26,6 @@ const SYSTEM_HEALTH: {
   { name: 'Reporting API', uptime: '99.98%', status: 'Operational' },
   { name: 'Tadawul feed', uptime: '99.91%', status: 'Operational' },
   { name: 'CMA e-Disclosure', uptime: '99.99%', status: 'Operational' },
-  { name: 'Slack integration', uptime: '—', status: 'Degraded' },
 ];
 
 const HEALTH_BADGE: Record<string, string> = {
@@ -66,65 +65,6 @@ function Card({
     <div className="card" style={{ padding: 18, ...style }}>
       {children}
     </div>
-  );
-}
-
-function StatCard({
-  icon,
-  value,
-  label,
-  hint,
-  hintColor,
-  amber,
-}: {
-  icon: React.ReactNode;
-  value: string;
-  label: string;
-  hint: string;
-  hintColor: string;
-  amber?: boolean;
-}) {
-  return (
-    <Card
-      style={{
-        flex: 1,
-        minWidth: 0,
-        ...(amber
-          ? { background: '#FFFBEB', borderColor: '#FCE7B0' }
-          : {}),
-      }}
-    >
-      <div
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
-          background: amber ? 'rgba(245,158,11,.14)' : '#EEEEFF',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: amber ? '#B45309' : PRIMARY,
-          marginBottom: 12,
-        }}
-      >
-        {icon}
-      </div>
-      <div
-        style={{
-          fontSize: 28,
-          fontWeight: 800,
-          color: '#1A1D2E',
-          lineHeight: 1,
-          fontFamily: "'DM Mono', monospace",
-        }}
-      >
-        {value}
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#1A1D2E', marginTop: 8 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2 }}>{hint}</div>
-    </Card>
   );
 }
 
@@ -184,87 +124,43 @@ export default function AdminOverviewPage() {
     };
   }, []);
 
+  // The License card doesn't need the overview, so it loads straight away instead
+  // of waiting behind the stats spinner (QA audit AC-04). It sits first in the
+  // same column in all three states, so React keeps the same card (no reload,
+  // no flash) when the stats arrive.
   if (loading) {
-    return <Spinner pad={80} />;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LicenseCard />
+        <Spinner pad={80} />
+      </div>
+    );
   }
 
   if (error || !data) {
     return (
-      <Card style={{ textAlign: 'center', padding: 40 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
-          Couldn’t load the overview
-        </div>
-        <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6 }}>
-          {error || 'No data returned.'}
-        </div>
-      </Card>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LicenseCard />
+        <Card style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1A1D2E' }}>
+            Couldn’t load the overview
+          </div>
+          <div style={{ fontSize: 12, color: '#5A6080', marginTop: 6 }}>
+            {error || 'No data returned.'}
+          </div>
+        </Card>
+      </div>
     );
   }
 
   const chartData = data.reports_by_quarter ?? [];
   const lastIdx = chartData.length - 1;
-  const storagePct =
-    data.storage_limit_gb > 0
-      ? Math.round((data.document_storage_gb / data.storage_limit_gb) * 100)
-      : 0;
 
   const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n}% QoQ`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <LicenseCard />
-      {/* Stat cards */}
-      <div style={{ display: 'flex', gap: 14 }}>
-        <StatCard
-          icon={
-            <svg viewBox="0 0 14 14" width="15" height="15" fill="none">
-              <circle cx="7" cy="4.5" r="2.5" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M2 12c0-2.8 2.2-5 5-5s5 2.2 5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
-          }
-          value={String(data.active_users)}
-          label="Active users"
-          hint={`of ${data.total_seats} seats`}
-          hintColor="#9BA3C4"
-        />
-        <StatCard
-          icon={
-            <svg viewBox="0 0 14 14" width="15" height="15" fill="none">
-              <rect x="2" y="1.5" width="10" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M4.5 5h5M4.5 7.5h5M4.5 10h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-            </svg>
-          }
-          value={String(data.reports_this_quarter)}
-          label="Reports this quarter"
-          hint={fmtPct(data.reports_qoq_pct)}
-          hintColor="#16A34A"
-        />
-        <StatCard
-          icon={
-            <svg viewBox="0 0 14 14" width="15" height="15" fill="none">
-              <ellipse cx="7" cy="3.5" rx="4.5" ry="2" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M2.5 3.5v7c0 1.1 2 2 4.5 2s4.5-.9 4.5-2v-7M2.5 7c0 1.1 2 2 4.5 2s4.5-.9 4.5-2" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
-          }
-          value={`${data.document_storage_gb} GB`}
-          label="Document storage"
-          hint={`of ${data.storage_limit_gb} GB · ${storagePct}% used`}
-          hintColor="#9BA3C4"
-        />
-        <StatCard
-          amber
-          icon={
-            <svg viewBox="0 0 14 14" width="15" height="15" fill="none">
-              <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M7 4v3.2M7 9.4v.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
-          }
-          value={String(data.pending_actions)}
-          label="Pending actions"
-          hint={`${data.pending_invites} invites · ${data.pending_onboarding} onboarding · Needs review`}
-          hintColor="#B45309"
-        />
-      </div>
 
       {/* Chart + system health */}
       <div style={{ display: 'flex', gap: 14 }}>
@@ -353,22 +249,6 @@ export default function AdminOverviewPage() {
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/admin-console/users')}
-            style={{
-              marginTop: 12,
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              fontSize: 11,
-              fontWeight: 700,
-              color: PRIMARY,
-              cursor: 'pointer',
-            }}
-          >
-            View integrations →
-          </button>
         </Card>
       </div>
 

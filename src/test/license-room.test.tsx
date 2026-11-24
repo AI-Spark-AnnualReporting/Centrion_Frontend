@@ -18,6 +18,8 @@ vi.mock("@/lib/api", () => ({
   },
   adminConsole: { listUsers: vi.fn().mockResolvedValue({ users: [] }) },
   sarCycles: { create: vi.fn() },
+  // Opening the cycle form loads the company's fiscal year-end month.
+  companies: { getMyCompany: vi.fn().mockResolvedValue({ fiscal_year_end_month: 12 }) },
 }));
 
 const { roomFor } = await import("@/components/license/useLicenseRoom");

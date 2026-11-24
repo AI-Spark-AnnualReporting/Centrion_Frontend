@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { license } from '@/lib/api';
+import { clearCompanyLicense } from '@/lib/license-cache';
 import type { CompanyLicense, UpgradeRequestPayload } from '@/types/license';
 
 interface Props {
@@ -115,6 +116,8 @@ export function UpgradeRequestDialog({ data, companyName, startWithRenewal = fal
     setError('');
     try {
       await license.requestUpgrade(payload());
+      // The license now carries upgrade_requested_at; the next read must ask the server.
+      clearCompanyLicense();
       onSent();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send the request.');

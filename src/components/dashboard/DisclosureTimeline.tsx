@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reports as reportsApi, meetings as meetingsApi, sarCycles } from '@/lib/api';
+import { meetings as meetingsApi, sarCycles } from '@/lib/api';
+import { loadDashboardReportList } from '@/lib/dashboard-cache';
 import { useAuth } from '@/context/AuthContext';
 import type { Company } from '@/types/company';
 import type { Cycle } from '@/types/cycles';
@@ -58,7 +59,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
     (async () => {
       const [rRes, mRes, cRes] = await Promise.allSettled([
         companyId
-          ? reportsApi.list<{ reports?: ReportListItem[] }>(companyId)
+          ? loadDashboardReportList<{ reports?: ReportListItem[] }>(companyId)
           : Promise.resolve({ reports: [] as ReportListItem[] }),
         meetingsApi.list(),
         // SAR cycles are a separate, admin-only backend — best-effort only.
@@ -154,6 +155,7 @@ export function DisclosureTimeline({ company }: { company: Company | null }) {
                   )}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#9BA3C4', marginTop: 2 }}>{e.subtitle}</div>
+                {e.note && <div style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>{e.note}</div>}
                 {e.cta && !lock && (
                   <button
                     type="button"

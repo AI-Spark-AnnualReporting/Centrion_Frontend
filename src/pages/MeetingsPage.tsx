@@ -20,6 +20,8 @@ import { canCreateFeature } from '@/lib/features';
 import { useToast } from '@/hooks/use-toast';
 import ScheduleMeetingModal from '@/components/ScheduleMeetingModal';
 import ParticipantsPicker from '@/components/ParticipantsPicker';
+import { MeetingLinkField } from '@/components/MeetingLinkField';
+import { getMeetingLinkError, getMeetingLinkToSave, normalizeMeetingLink } from '@/lib/meetingLink';
 import MeetingMinutesPanel from '@/components/MeetingMinutesPanel';
 import { deriveEvents, type TimelineEvent, type ReportListItem } from '@/lib/disclosure';
 import { isAdminLevel } from '@/constants/roles';
@@ -177,7 +179,7 @@ function buildIcs(items: CalItem[]): string {
       lines.push(
         `DTSTART;VALUE=DATE:${icsDate(it.date)}`,
         `SUMMARY:${escapeIcs(it.event.title)}`,
-        `DESCRIPTION:${escapeIcs(it.event.subtitle)}`,
+        `DESCRIPTION:${escapeIcs(it.event.note ? `${it.event.subtitle} · ${it.event.note}` : it.event.subtitle)}`,
       );
     }
     lines.push('END:VEVENT');
@@ -198,6 +200,25 @@ const ICON_PEOPLE = (
 const ICON_DOC = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 1.5h5l3 3v8a.5.5 0 01-.5.5h-7.5a.5.5 0 01-.5-.5v-10.5a.5.5 0 01.5-.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /><path d="M8 1.5v3h3M4.5 8h5M4.5 10.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
 );
+
+/**
+ * The saved Meeting URL / Location on the details view. A link is only made
+ * clickable when it is a real http(s) web address; anything else saved before
+ * links were checked (e.g. "not a url", "javascript:…") is shown as plain text,
+ * so nobody is sent somewhere unsafe (QA audit BM-03). A link saved without
+ * "https://" ("zoom.us/j/1") still opens correctly.
+ */
+function MeetingLinkDisplay({ platform, value }: { platform: string; value: string | null | undefined }) {
+  if (!value) return <span style={{ color: '#9BA3C4' }}>None</span>;
+  if (platform === 'in_person') return <span style={{ wordBreak: 'break-word' }}>{value}</span>;
+  const safeLink = normalizeMeetingLink(value);
+  if (safeLink === null) return <span style={{ wordBreak: 'break-all' }}>{value}</span>;
+  return (
+    <a href={safeLink} target="_blank" rel="noopener noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>
+      {value}
+    </a>
+  );
+}
 
 function DetailRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
@@ -312,6 +333,11 @@ function MeetingDetailModal({
   }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown under the Meeting URL / Location field itself, not in the box at the bottom.
+  const [linkError, setLinkError] = useState<string | null>(null);
+  // Cancelling emails every participant and can't be undone from here, so the
+  // first click only asks; the footer then shows "Keep meeting / Yes, cancel" (QA audit BM-06).
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
 
   // Refresh from server in case the list payload was stale.
   useEffect(() => {
@@ -341,6 +367,12 @@ function MeetingDetailModal({
   const update = <K extends keyof ModalState>(key: K, value: ModalState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  const changePlatform = (platform: MeetingPlatform) => {
+    update('platform', platform);
+    // The rules differ between a link and a room, so an old error no longer applies.
+    setLinkError(null);
+  };
+
   // Participants the backend can't email. It accepts them (they still show as
   // attendees) but silently can't notify them.
   const unreachable = form.participants.filter((p) => !p.includes('@'));
@@ -365,13 +397,13 @@ function MeetingDetailModal({
       setError('Meeting date cannot be in the past.');
       return;
     }
-    // Required: the updated invitation is useless without somewhere to go.
-    if (!form.linkOrLocation.trim()) {
-      setError(
-        form.platform === 'in_person'
-          ? 'A location is required.'
-          : 'A meeting URL is required.',
-      );
+    // Required: the updated invitation is useless without somewhere to go, and
+    // an online meeting needs a real web link (it is shown as a clickable link).
+    // An old meeting saved with a bad link has to be fixed before it can be saved.
+    const problem = getMeetingLinkError(form.platform, form.linkOrLocation);
+    if (problem) {
+      setError(null);
+      setLinkError(problem);
       return;
     }
     setSubmitting(true);
@@ -385,7 +417,7 @@ function MeetingDetailModal({
         platform: form.platform,
         participants: form.participants,
         agenda: form.agenda.trim(),
-        link_or_location: form.linkOrLocation.trim(),
+        link_or_location: getMeetingLinkToSave(form.platform, form.linkOrLocation),
       });
       setCurrent(res.meeting);
       onUpdated(res.meeting);
@@ -396,6 +428,19 @@ function MeetingDetailModal({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /** Opens the edit form fresh: no leftover link error or pending cancel question. */
+  const startEditing = () => {
+    setLinkError(null);
+    setConfirmingCancel(false);
+    setEditing(true);
+  };
+
+  /** Leaves the edit form; a half-asked cancel question goes away with it. */
+  const stopEditing = () => {
+    setConfirmingCancel(false);
+    setEditing(false);
   };
 
   const cancel = async () => {
@@ -412,8 +457,17 @@ function MeetingDetailModal({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to cancel meeting.');
       setSubmitting(false);
+      // Back to the normal footer, so the error is read next to a fresh "Cancel meeting".
+      setConfirmingCancel(false);
     }
   };
+
+  // Who gets the cancellation email: the backend can only email participants
+  // stored as email addresses (same rule as the "won't be notified" hint).
+  const emailableCount = current.participants.filter((person) => person.includes('@')).length;
+  let cancelNotice = 'Nobody will be emailed: no participant has an email address.';
+  if (emailableCount === 1) cancelNotice = '1 participant will be emailed a cancellation notice.';
+  if (emailableCount > 1) cancelNotice = `${emailableCount} participants will be emailed a cancellation notice.`;
 
   const date = toLocalDate(current.meeting_date, current.meeting_time);
 
@@ -471,7 +525,7 @@ function MeetingDetailModal({
                   setTab(key);
                   // Leaving an unsaved edit behind on the Details tab would be
                   // invisible from Minutes, so drop it on the way out.
-                  if (key === 'minutes') setEditing(false);
+                  if (key === 'minutes') stopEditing();
                 }}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -524,7 +578,7 @@ function MeetingDetailModal({
                 </div>
                 <div>
                   <span className="fl-label">Platform</span>
-                  <select className="inp sel" value={form.platform} onChange={(e) => update('platform', e.target.value as MeetingPlatform)}>
+                  <select className="inp sel" value={form.platform} onChange={(e) => changePlatform(e.target.value as MeetingPlatform)}>
                     {PLATFORM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
@@ -545,23 +599,14 @@ function MeetingDetailModal({
                   </div>
                 )}
               </div>
-              <div>
-                <span className="fl-label">
-                  {form.platform === 'in_person' ? 'Location' : 'Meeting URL'}{' '}
-                  <span style={{ color: '#E5484D' }}>*</span>
-                </span>
-                <input
-                  className="inp"
-                  type={form.platform === 'in_person' ? 'text' : 'url'}
-                  placeholder={
-                    form.platform === 'in_person'
-                      ? 'Venue / address'
-                      : 'https://zoom.us/j/…'
-                  }
-                  value={form.linkOrLocation}
-                  onChange={(e) => update('linkOrLocation', e.target.value)}
-                />
-              </div>
+              <MeetingLinkField
+                id="edit-meeting-link"
+                platform={form.platform}
+                value={form.linkOrLocation}
+                error={linkError}
+                onChange={(value) => update('linkOrLocation', value)}
+                onErrorChange={setLinkError}
+              />
               <div>
                 <span className="fl-label">Agenda</span>
                 <textarea className="inp" rows={4} value={form.agenda} onChange={(e) => update('agenda', e.target.value)} style={{ resize: 'vertical' }} />
@@ -608,11 +653,7 @@ function MeetingDetailModal({
                   icon={ICON_DOC}
                   label={current.platform === 'in_person' ? 'Location' : 'Meeting URL'}
                 >
-                  {current.link_or_location
-                    ? current.platform === 'in_person'
-                      ? <span style={{ wordBreak: 'break-word' }}>{current.link_or_location}</span>
-                      : <a href={current.link_or_location} target="_blank" rel="noreferrer" style={{ color: '#4040C8', wordBreak: 'break-all' }}>{current.link_or_location}</a>
-                    : <span style={{ color: '#9BA3C4' }}>None</span>}
+                  <MeetingLinkDisplay platform={current.platform} value={current.link_or_location} />
                 </DetailRow>
               )}
               <DetailRow icon={ICON_DOC} label="Agenda">
@@ -630,18 +671,38 @@ function MeetingDetailModal({
         </div>
 
         <div style={{ padding: '14px 24px 18px', borderTop: '1px solid #ECEEF8', display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-          {editing ? (
+          {editing && confirmingCancel ? (
+            <>
+              <div role="alert" style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#DC2626' }}>Cancel this meeting?</div>
+                <div style={{ fontSize: 11, color: '#5A6080', marginTop: 2 }}>{cancelNotice}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+                <button className="btn bs" onClick={() => setConfirmingCancel(false)} disabled={submitting} style={{ padding: '9px 16px' }}>
+                  Keep meeting
+                </button>
+                <button
+                  className="btn"
+                  onClick={cancel}
+                  disabled={submitting}
+                  style={{ padding: '9px 16px', background: '#DC2626', borderColor: '#DC2626', color: '#fff', opacity: submitting ? 0.7 : 1 }}
+                >
+                  {submitting ? 'Cancelling…' : 'Yes, cancel meeting'}
+                </button>
+              </div>
+            </>
+          ) : editing ? (
             <>
               <button
                 className="btn bs"
-                onClick={cancel}
+                onClick={() => setConfirmingCancel(true)}
                 disabled={submitting || current.status === 'cancelled'}
                 style={{ padding: '9px 16px', color: '#DC2626', borderColor: 'rgba(239,68,68,.3)' }}
               >
                 {current.status === 'cancelled' ? 'Already cancelled' : 'Cancel meeting'}
               </button>
               <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn bs" onClick={() => setEditing(false)} disabled={submitting} style={{ padding: '9px 18px' }}>Discard</button>
+                <button className="btn bs" onClick={stopEditing} disabled={submitting} style={{ padding: '9px 18px' }}>Discard</button>
                 <button className="btn bp" onClick={save} disabled={submitting} style={{ padding: '9px 20px', opacity: submitting ? 0.7 : 1 }}>
                   {submitting ? 'Saving…' : 'Save'}
                 </button>
@@ -653,7 +714,7 @@ function MeetingDetailModal({
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn bs" onClick={onClose} style={{ padding: '9px 18px' }}>Close</button>
                 {!hasHappened && (
-                  <button className="btn bs" onClick={() => setEditing(true)} style={{ padding: '9px 18px' }}>Edit</button>
+                  <button className="btn bs" onClick={startEditing} style={{ padding: '9px 18px' }}>Edit</button>
                 )}
               </div>
             </>
@@ -997,6 +1058,7 @@ export default function MeetingsPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#1A1D2E' }}>{it.event.title}</div>
                           <div style={{ fontSize: 10, color: '#9BA3C4' }}>{it.event.subtitle}</div>
+                          {it.event.note && <div style={{ fontSize: 10, color: '#5A6080' }}>{it.event.note}</div>}
                         </div>
                       </div>
                     ),
@@ -1109,7 +1171,7 @@ export default function MeetingsPage() {
               </div>
             ) : upcoming.length === 0 ? (
               <div style={{ padding: '28px 4px', textAlign: 'center', color: '#9BA3C4', fontSize: 12, lineHeight: 1.6 }}>
-                Nothing upcoming. Report deadlines and cycle dates appear here as they're set up.{' '}
+                Nothing upcoming. Report deadlines appear here as they're set up.{' '}
                 {canCreateMeeting && (
                   <button onClick={() => setScheduleOpen(true)} style={{ background: 'none', border: 'none', color: '#4040C8', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
                     Schedule a meeting →
@@ -1164,6 +1226,7 @@ export default function MeetingsPage() {
                         )}
                       </div>
                       <div style={{ fontSize: 10, color: '#9BA3C4' }}>{e.subtitle}</div>
+                      {e.note && <div style={{ fontSize: 10, color: '#5A6080' }}>{e.note}</div>}
                       {e.cta && (
                         <button
                           type="button"

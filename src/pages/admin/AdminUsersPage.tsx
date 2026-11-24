@@ -23,7 +23,6 @@ import type {
   UserStatus,
 } from '@/types/admin';
 import type { FeatureAction, FeaturePermissions } from '@/types/auth';
-import { relativeTime } from '@/lib/time';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import { downloadText } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -1112,7 +1111,6 @@ function UsersView(props: {
                 <th>Department</th>
                 <th>Status</th>
                 <th>Onboarding</th>
-                <th>Last active</th>
                 <th style={{ width: 44 }} />
               </tr>
             </thead>
@@ -1182,13 +1180,6 @@ function UsersView(props: {
                           </span>
                         )}
                       </td>
-                      <td style={{ color: '#5A6080' }}>
-                        {u.last_active ? (
-                          relativeTime(u.last_active)
-                        ) : (
-                          <span style={{ color: '#C4C9DD' }}>Never</span>
-                        )}
-                      </td>
                       <td style={{ textAlign: 'right' }}>
                         <span className={`uchev ${isOpen ? 'open' : ''}`}>
                           <svg
@@ -1205,7 +1196,7 @@ function UsersView(props: {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
+                        <td colSpan={6} style={{ background: '#FAFBFE', padding: '14px 16px', borderBottom: '1px solid #F4F5FB' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                             {SHOW_CHANGE_ROLE && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
