@@ -419,3 +419,28 @@
 .sub-rv-warn { font-size: 11.5px; color: #92400E; background: rgba(245,158,11,.1); border-radius: 10px; padding: 9px 12px; line-height: 1.5; }
 .sub-rv-error { font-size: 12px; color: #DC2626; background: rgba(220,38,38,.07); border-radius: 10px; padding: 9px 12px; }
 .sub-rv-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid #EEF0F7; background: #FAFBFD; }
+
+/* ── Client Subscription page: your plan stands out, the others fade ──
+   Mockup: .claude/mockups/client-subscription-grid-mockup.html (option D). */
+.sub-strip-holder { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Room above the current card for its "Your current plan" label. */
+.sub-fade-others .sub-strip-row { padding-top: 52px; }
+.sub-fade-others .sub-pc { transition: filter .2s, transform .2s, box-shadow .2s; }
+/* Faded = still a solid white card (no blue showing through): a white wash over
+   its content and a greyed name tab. Pointing at it takes the wash away. */
+.sub-fade-others .sub-pc:not(.current) { transform: scale(.95); filter: grayscale(.7); box-shadow: 0 8px 20px rgba(26,29,46,.10); }
+.sub-fade-others .sub-pc:not(.current)::after { content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: rgba(255,255,255,.6); pointer-events: none; transition: opacity .2s; }
+.sub-fade-others .sub-pc:not(.current) .sub-pc-tab { filter: brightness(1.35) saturate(.4); transition: filter .2s; }
+.sub-fade-others .sub-pc:not(.current):hover,
+.sub-fade-others .sub-pc:not(.current):focus-within {
+  filter: none; transform: translateY(-4px); box-shadow: 0 18px 40px rgba(64,64,200,.22); }
+.sub-fade-others .sub-pc:not(.current):hover::after,
+.sub-fade-others .sub-pc:not(.current):focus-within::after { opacity: 0; }
+.sub-fade-others .sub-pc:not(.current):hover .sub-pc-tab,
+.sub-fade-others .sub-pc:not(.current):focus-within .sub-pc-tab { filter: none; }
+.sub-fade-others .sub-pc.current { box-shadow: 0 0 0 8px rgba(22,163,74,.14), 0 20px 44px rgba(22,163,74,.30); }
+.sub-fade-others .sub-pc.current::before { content: '✓ YOUR CURRENT PLAN'; position: absolute; top: -46px; left: 50%;
+  transform: translateX(-50%); white-space: nowrap; background: #16A34A; color: #fff; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .08em; padding: 5px 13px; border-radius: 999px; box-shadow: 0 6px 16px rgba(22,163,74,.35); }
+@media (prefers-reduced-motion: reduce) { .sub-fade-others .sub-pc { transition: none; } }

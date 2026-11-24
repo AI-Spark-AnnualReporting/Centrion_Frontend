@@ -117,9 +117,17 @@ export function scrollingListHeight(listHeight: number, cardNeeds: number, heigh
 
 /** How much to shrink the cards so the tallest fits the height there is
  *  (1 = full size; never bigger than full size). */
-export function fitScale(available: number, tallestCard: number): number {
+export function fitScale(available: number, tallestCard: number, paddingY: number = STRIP_PADDING_Y): number {
   if (available <= 0 || tallestCard <= 0) return 1;
-  return Math.min(1, available / (tallestCard + STRIP_PADDING_Y));
+  return Math.min(1, available / (tallestCard + paddingY));
+}
+
+/** The row's real top + bottom padding (the client page adds room above its
+ *  current plan's label), else the usual padding. */
+function rowPaddingY(row: HTMLElement): number {
+  const style = getComputedStyle(row);
+  const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  return Number.isFinite(padding) && padding > 0 ? padding : STRIP_PADDING_Y;
 }
 
 /** The cards in one row, all the same height, as a slider (approved mockup:
@@ -180,7 +188,8 @@ export function CardStrip({ children, paused = false }: { children: ReactNode; p
 
     let tallest = 0;
     for (const card of Array.from(cards.children) as HTMLElement[]) tallest = Math.max(tallest, card.offsetHeight);
-    const needs = tallest + STRIP_PADDING_Y;
+    const paddingY = rowPaddingY(cards);
+    const needs = tallest + paddingY;
     const there = box.clientHeight;
     const moduleCount = lists[0]?.children.length ?? 0;
 
@@ -191,7 +200,7 @@ export function CardStrip({ children, paused = false }: { children: ReactNode; p
       const height = scrollingListHeight(tallestList, needs, there);
       for (const list of lists) { list.style.maxHeight = `${height}px`; list.classList.add('scroll'); }
     } else {
-      cards.style.zoom = String(fitScale(there, tallest));
+      cards.style.zoom = String(fitScale(there, tallest, paddingY));
     }
     updatePosition();
   }, [updatePosition]);

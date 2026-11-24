@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client subscription — mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Plus Jakarta Sans', sans-serif; background: #F2F3FA; color: #1A1D2E; }
+  .shell { display: flex; min-height: 100vh; }
+  .sb { width: 200px; background: #3535B5; flex-shrink: 0; color: rgba(255,255,255,.7); font-size: 12px; padding: 18px 14px; }
+  .sb b { color: #fff; font-size: 14px; display: block; margin-bottom: 24px; }
+  .sb div { padding: 8px 10px; border-radius: 8px; margin-bottom: 2px; }
+  .sb .act { background: #3D3DC0; color: #fff; font-weight: 700; }
+  .main { flex: 1; min-width: 0; }
+  .top { height: 56px; background: #fff; border-bottom: 1px solid #E2E4F0; display: flex; align-items: center; padding: 0 24px; font-weight: 800; font-size: 14px; }
+  .top span { color: #9BA3C4; font-weight: 500; margin-left: 8px; }
+  .content { padding: 22px 22px 60px; }
+
+  .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  .head h1 { font-size: 15px; font-weight: 800; }
+  .head p { font-size: 12px; color: #9BA3C4; margin-top: 2px; }
+  .seg { background: #fff; border: 1px solid #E2E4F0; border-radius: 999px; padding: 4px; display: flex; gap: 2px; }
+  .seg button { border: none; background: none; font: inherit; font-size: 12px; font-weight: 700; color: #5A6080; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+  .seg button.on { background: #3535B5; color: #fff; }
+
+  /* Demo switcher */
+  .demo { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 40; background: #1A1D2E; border-radius: 999px; padding: 4px; display: flex; gap: 2px; }
+  .demo button { border: none; background: none; color: rgba(255,255,255,.7); font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+  .demo button.on { background: #fff; color: #1A1D2E; }
+
+  /* ── Today's card, unchanged (subscriptions.css) ── */
+  .sub-pc { width: 236px; background: #fff; border-radius: 20px 20px 40px 40px; box-shadow: 0 12px 30px rgba(26,29,46,.14);
+    position: relative; padding: 30px 18px 12px; display: flex; flex-direction: column; align-items: center; flex: none; }
+  .sub-pc-tab { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); min-width: 140px; text-align: center;
+    color: #fff; font-weight: 800; font-size: 13px; padding: 7px 16px; border-radius: 11px 11px 16px 16px; white-space: nowrap;
+    max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+  .sub-pc-flag { position: absolute; top: 10px; right: 12px; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+  .flag-you { background: #FEF3C7; color: #B45309; }
+  .flag-mine { background: #DCFCE7; color: #15803D; }
+  .sub-pc-price { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; }
+  .sub-pc-price b { font-size: 28px; font-weight: 800; letter-spacing: -1px; color: #3A3F55; line-height: 1; }
+  .sub-pc-price small { font-size: 10px; font-weight: 700; color: #5A6080; line-height: 1.2; margin-top: 3px; }
+  .sub-pc-cur { font-size: 12px; font-weight: 800; color: #3A3F55; margin-top: 3px; }
+  .sub-pc-line { width: 90px; height: 1px; background: #D5D8E6; margin: 10px 0; }
+  .sub-pc ul { list-style: none; width: 100%; font-size: 11px; font-weight: 600; color: #3A3F55; }
+  .sub-pc li { display: flex; gap: 8px; padding: 2.5px 0; line-height: 1.35; }
+  .sub-pc li .ic { width: 14px; flex: none; font-weight: 900; font-size: 12px; text-align: center; }
+  .ok { color: #16A34A; } .no { color: #EF4444; }
+  .sub-pc li.off { color: #A3A8BF; }
+  .sub-pc-bottom { margin-top: auto; }
+  .sub-pc-buy { border: none; background: none; font-family: inherit; font-size: 14px; font-weight: 800; letter-spacing: 2px;
+    color: #3A3F55; cursor: pointer; padding: 4px 12px; border-radius: 10px; }
+  .sub-pc-buy:hover { color: #4040C8; background: #F5F5FF; }
+  .sub-pc.current { outline: 3px solid #16A34A; outline-offset: 3px; }
+  .sub-pc.current .sub-pc-buy { color: #15803D; letter-spacing: .5px; font-size: 12px; cursor: default; background: none; }
+
+  /* The other plans: no slider, rows that wrap */
+  .sub-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 40px 20px; }
+  .group-title { display: flex; align-items: center; gap: 10px; margin: 8px 0 30px; font-size: 13px; font-weight: 800; color: #1A1D2E; }
+  .group-title::after { content: ''; flex: 1; height: 1px; background: #DDE1EE; }
+  .group-title em { font-style: normal; font-size: 11px; font-weight: 600; color: #9BA3C4; }
+
+  /* Shared summary bits */
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .fact { border-radius: 12px; padding: 11px 13px; }
+  .fact b { display: block; font-size: 18px; font-weight: 800; }
+  .fact span { font-size: 11px; }
+  .bar { height: 8px; border-radius: 99px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 3%; border-radius: 99px; }
+
+  /* ── Option A: a hero band — your card + a summary beside it ── */
+  .a-hero { background: linear-gradient(135deg, #3535B5 0%, #4F46E5 60%, #6366F1 100%); border-radius: 22px; padding: 40px 36px 34px;
+    display: flex; gap: 40px; align-items: center; margin-bottom: 40px; position: relative; overflow: hidden; }
+  .a-hero::before { content: ''; position: absolute; right: -80px; top: -80px; width: 280px; height: 280px; border-radius: 50%; background: rgba(255,255,255,.06); }
+  .a-hero .sub-pc { box-shadow: 0 20px 50px rgba(10,10,60,.35); }
+  .a-hero .sub-pc.current { outline-color: #86EFAC; }
+  .a-side { color: #fff; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; position: relative; }
+  .a-pill { align-self: flex-start; background: rgba(134,239,172,.18); color: #BBF7D0; border: 1px solid rgba(134,239,172,.4); font-size: 11px; font-weight: 800; letter-spacing: .06em; padding: 5px 12px; border-radius: 999px; }
+  .a-side h2 { font-size: 26px; font-weight: 800; line-height: 1.2; }
+  .a-side p { font-size: 13px; opacity: .85; line-height: 1.6; }
+  .a-side .bar { background: rgba(255,255,255,.2); } .a-side .bar i { background: #86EFAC; }
+  .a-side small { font-size: 11px; opacity: .75; }
+  .a-side .fact { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); }
+  .a-side .fact span { opacity: .8; }
+  .a-link { color: #fff; font-size: 12.5px; font-weight: 700; text-decoration: none; opacity: .9; }
+
+  /* ── Option B: your plan pinned on the left, the others beside it ── */
+  .b-wrap { display: grid; grid-template-columns: 300px 1fr; gap: 26px; align-items: start; }
+  .b-pin { position: sticky; top: 20px; background: linear-gradient(180deg, #ECFDF3 0%, #fff 70%); border: 1.5px solid #BBF7D0; border-radius: 22px; padding: 22px 20px 26px;
+    display: flex; flex-direction: column; align-items: center; gap: 26px; box-shadow: 0 10px 30px rgba(22,163,74,.12); }
+  .b-pin-head { text-align: center; }
+  .b-pin-head b { display: block; font-size: 11px; letter-spacing: .08em; color: #15803D; font-weight: 800; }
+  .b-pin-head span { font-size: 12px; color: #5A6080; }
+  .b-pin .bar { width: 100%; background: #DCFCE7; } .b-pin .bar i { background: #16A34A; }
+  .b-pin small { font-size: 11px; color: #5A6080; }
+  .b-others { background: linear-gradient(#3535B5 0, #3535B5 110px, transparent 110px); border-radius: 22px; padding: 20px 16px 10px; }
+  .b-others .stage-title { color: #fff; font-size: 13px; font-weight: 700; opacity: .85; text-align: center; margin-bottom: 30px; }
+
+  /* ── Option C: a green banner on top, then all cards (yours first) ── */
+  .c-banner { background: #fff; border: 1.5px solid #BBF7D0; border-left: 6px solid #16A34A; border-radius: 16px; padding: 18px 22px;
+    display: flex; align-items: center; gap: 22px; margin-bottom: 26px; box-shadow: 0 8px 24px rgba(22,163,74,.1); flex-wrap: wrap; }
+  .c-ic { width: 46px; height: 46px; border-radius: 14px; background: #DCFCE7; color: #16A34A; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; flex: none; }
+  .c-main { flex: 1; min-width: 200px; }
+  .c-main b { font-size: 17px; font-weight: 800; }
+  .c-main div { font-size: 12px; color: #5A6080; margin-top: 3px; }
+  .c-main .bar { margin-top: 10px; background: #ECFDF3; max-width: 360px; } .c-main .bar i { background: #16A34A; }
+  .c-banner .fact { background: #F7F8FC; border: 1px solid #EEF0F7; min-width: 110px; }
+  .c-banner .fact span { color: #5A6080; }
+  .c-stage { background: linear-gradient(#3535B5 0, #3535B5 130px, transparent 130px); border-radius: 18px; padding: 22px 16px 10px; }
+  .c-stage .stage-title { color: #fff; font-size: 13px; font-weight: 700; opacity: .85; text-align: center; margin-bottom: 30px; }
+  .c-stage .sub-pc.current { transform: scale(1.04); box-shadow: 0 0 0 7px rgba(22,163,74,.14), 0 18px 40px rgba(22,163,74,.25); }
+
+  /* ── Option D: yours bright, the others faded until you point at them ── */
+  .d-stage { background: linear-gradient(#3535B5 0, #3535B5 150px, transparent 150px); border-radius: 18px; padding: 22px 16px 20px; }
+  .d-stage .stage-title { color: #fff; font-size: 13px; font-weight: 700; opacity: .85; text-align: center; margin-bottom: 40px; }
+  .d-grid { gap: 46px 22px; align-items: flex-start; }
+  .d-grid .sub-pc { transition: opacity .2s, filter .2s, transform .2s, box-shadow .2s; }
+  .d-grid .sub-pc:not(.current) { opacity: .45; filter: grayscale(.6); transform: scale(.95); }
+  .d-grid .sub-pc:not(.current):hover, .d-grid .sub-pc:not(.current):focus-within {
+    opacity: 1; filter: none; transform: scale(1) translateY(-4px); box-shadow: 0 18px 40px rgba(64,64,200,.22); }
+  .d-grid .sub-pc.current { transform: scale(1.07); transform-origin: top center; z-index: 2;
+    box-shadow: 0 0 0 8px rgba(22,163,74,.14), 0 24px 50px rgba(22,163,74,.30); }
+  .d-grid .sub-pc.current::before { content: '✓ YOUR CURRENT PLAN'; position: absolute; top: -46px; left: 50%; transform: translateX(-50%);
+    white-space: nowrap; background: #16A34A; color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
+    padding: 5px 13px; border-radius: 999px; box-shadow: 0 6px 16px rgba(22,163,74,.35); }
+  .d-hint { text-align: center; font-size: 11.5px; color: #9BA3C4; margin-top: 30px; }
+
+  .note { position: fixed; bottom: 14px; right: 14px; background: #1A1D2E; color: #fff; font-size: 11.5px; padding: 10px 14px; border-radius: 12px; max-width: 320px; line-height: 1.5; }
+  @media (max-width: 1000px) { .sb { display: none; } .b-wrap { grid-template-columns: 1fr; } .b-pin { position: static; } .a-hero { flex-direction: column; } }
+</style>
+</head>
+<body>
+<div class="demo">
+  <button class="on" data-show="d">D · Yours bright, others faded</button>
+  <button data-show="a">A · Hero band</button>
+  <button data-show="b">B · Pinned on the left</button>
+  <button data-show="c">C · Banner on top</button>
+</div>
+
+<div class="shell">
+  <aside class="sb">
+    <b>Centriyon</b>
+    <div>Command Center</div><div>Reports</div><div>AI Copilot</div><div>Document Bank</div>
+    <div>Users &amp; Roles</div><div>Departments</div><div class="act">Subscription</div><div>Usage</div>
+  </aside>
+  <div class="main">
+    <div class="top">Command Center <span>· Aramco</span></div>
+    <div class="content">
+      <div class="head">
+        <div><h1>Subscription</h1><p>You're on Test Plan v1 (1 year) until 18 Nov 2027.</p></div>
+        <div class="seg"><button class="on">All</button><button>Quarterly</button><button>Half year</button><button>1 year</button></div>
+      </div>
+
+      <!-- D -->
+      <div data-view="d">
+        <div class="d-stage">
+          <div class="stage-title">Choose the plan that fits your company</div>
+          <div class="sub-grid d-grid d-slot"></div>
+          <div class="d-hint">Other plans are faded — point at one to see it clearly.</div>
+        </div>
+      </div>
+
+      <!-- A -->
+      <div data-view="a" hidden>
+        <section class="a-hero">
+          <div class="mine-slot"></div>
+          <div class="a-side">
+            <span class="a-pill">✓ YOUR CURRENT PLAN · ACTIVE</span>
+            <h2>You're on Test Plan v1</h2>
+            <p>Your plan renews on <b>18 Nov 2027</b>. Need more reports, users or AI credits? Pick a bigger plan below — what you've used so far carries over.</p>
+            <div><div class="bar"><i></i></div><small>359 days left · 6 of 365 days used</small></div>
+            <div class="facts">
+              <div class="fact"><b>21</b><span>users (admin included)</span></div>
+              <div class="fact"><b>100</b><span>AI credits / year</span></div>
+              <div class="fact"><b>2</b><span>annual reports / year</span></div>
+            </div>
+            <a class="a-link" href="#">See your usage →</a>
+          </div>
+        </section>
+        <div class="group-title">Made for Aramco <em>4 plans</em></div>
+        <div class="sub-grid made-slot"></div>
+        <div class="group-title" style="margin-top:44px">All plans <em>10 plans · cheapest first</em></div>
+        <div class="sub-grid rest-slot"></div>
+      </div>
+
+      <!-- B -->
+      <div data-view="b" hidden>
+        <div class="b-wrap">
+          <aside class="b-pin">
+            <div class="b-pin-head"><b>✓ YOUR CURRENT PLAN</b><span>Active until 18 Nov 2027</span></div>
+            <div class="mine-slot"></div>
+            <div style="width:100%"><div class="bar"><i></i></div><small>359 days left</small></div>
+          </aside>
+          <div class="b-others">
+            <div class="stage-title">Other plans you can switch to</div>
+            <div class="sub-grid all-others-slot"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- C -->
+      <div data-view="c" hidden>
+        <section class="c-banner">
+          <div class="c-ic">✓</div>
+          <div class="c-main">
+            <b>Test Plan v1</b> <span style="font-size:11px;font-weight:800;color:#15803D;background:#DCFCE7;padding:2px 8px;border-radius:999px;margin-left:6px">ACTIVE</span>
+            <div>$100 per year · renews 18 Nov 2027 · 359 days left</div>
+            <div class="bar"><i></i></div>
+          </div>
+          <div class="fact"><b>21</b><span>users</span></div>
+          <div class="fact"><b>100</b><span>AI credits / year</span></div>
+          <div class="fact"><b>2</b><span>annual reports</span></div>
+        </section>
+        <div class="c-stage">
+          <div class="stage-title">Choose the plan that fits your company</div>
+          <div class="sub-grid c-all-slot"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  Mockup: D is your idea — your plan bright and a little bigger, every other plan faded
+  until you point at it. A, B and C are the earlier options. The cards are exactly today's. In all three
+  there's no slider (the cards wrap onto rows) and your plan stands out.
+</div>
+
+<script>
+  const MODULES = ['Quarterly Report', 'Earnings Report', 'Annual Report', 'Board Report', 'ESG Validator',
+    'Compliance Validation', 'Board Meetings', 'Leadership', 'Annual Report Validator'];
+  const COLOURS = ['#4F7BE8', '#14B8A6', '#3535B5'];
+  const MINE = ['Test Plan v1', 100, 'year', { 'Annual Report': 2 }, 21, '100 AI credits / year', 'mine'];
+  const MADE = [
+    ['Custom plan for Aramco', 1, '6 months', { 'Quarterly Report': 1 }, 3, null, 'you'],
+    ['Custom plan for Aramco (2)', 60, 'year', { 'Annual Report': 2 }, 13, null, 'you'],
+    ['Custom plan for Aramco v1', 71, 'year', { 'Annual Report': 1, 'Board Report': 2, 'Board Meetings': true, 'Leadership': true }, 14, '1 AI credit / year', 'you'],
+    ['Custom plan for Aramco v2', 90, 'year', { 'ESG Validator': 2, 'Leadership': true, 'Annual Report Validator': 2 }, 37, null, 'you'],
+  ];
+  const REST = [
+    ['Starter', 40, 'quarter', { 'Quarterly Report': 1 }, 5, '20 AI credits / quarter'],
+    ['Growth', 90, '6 months', { 'Quarterly Report': 2, 'ESG Validator': 2 }, 10, '60 AI credits / 6 months'],
+    ['Board Pack', 120, 'year', { 'Board Report': 4, 'Board Meetings': true, 'Leadership': true }, 15, '100 AI credits / year'],
+    ['ESG Focus', 150, 'year', { 'ESG Validator': 6, 'Compliance Validation': 6 }, 12, '150 AI credits / year'],
+    ['Professional', 240, 'year', { 'Annual Report': 2, 'Quarterly Report': 4, 'Board Report': 2, 'Compliance Validation': 4 }, 37, '400 AI credits / year'],
+  ];
+
+  function card(plan, index) {
+    const [name, price, per, mods, users, credits, flag] = plan;
+    const lines = MODULES.map((m) => {
+      const v = mods[m];
+      if (!v) return `<li class="off"><span class="ic no">✗</span>${m}</li>`;
+      const extra = v === true ? '' : ` · ${v} report${v > 1 ? 's' : ''}`;
+      return `<li><span class="ic ok">✓</span>${m}${extra}</li>`;
+    }).join('');
+    const creditLine = credits ? `<li><span class="ic ok">✓</span>${credits}</li>`
+      : `<li class="off"><span class="ic no">✗</span>No AI credits included</li>`;
+    const flagHtml = flag === 'mine' ? '<span class="sub-pc-flag flag-mine">Your plan</span>'
+      : flag === 'you' ? '<span class="sub-pc-flag flag-you">Made for you</span>' : '';
+    const button = flag === 'mine' ? '<button class="sub-pc-buy">Current · ends 18 Nov 2027</button>'
+      : '<button class="sub-pc-buy">Buy now</button>';
+    return `<div class="sub-pc${flag === 'mine' ? ' current' : ''}">
+      <div class="sub-pc-tab" style="background:${COLOURS[index % 3]}">${name}</div>${flagHtml}
+      <div class="sub-pc-price"><span class="sub-pc-cur">$</span><b>${price}</b><small>per<br>${per}</small></div>
+      <div class="sub-pc-line"></div>
+      <ul>${lines}<li><span class="ic ok">✓</span>${users} users (admin included)</li>${creditLine}</ul>
+      <div class="sub-pc-line sub-pc-bottom"></div>${button}
+    </div>`;
+  }
+  const ENTERPRISE = `<div class="sub-pc"><div class="sub-pc-tab" style="background:#1A1D2E">Enterprise</div>
+    <div style="text-align:center;font-size:12px;color:#5A6080;line-height:1.6;padding:4px 6px">
+    <b style="display:block;font-size:23px;color:#3A3F55;margin-bottom:4px">Let's talk</b>A plan sized to your company.</div>
+    <div class="sub-pc-line sub-pc-bottom"></div><button class="sub-pc-buy">Contact us</button></div>`;
+
+  const made = MADE.map((p, i) => card(p, i + 1));
+  const rest = REST.map((p, i) => card(p, i + 1 + MADE.length));
+  document.querySelectorAll('.mine-slot').forEach((el) => { el.innerHTML = card(MINE, 0); });
+  document.querySelector('.made-slot').innerHTML = made.join('');
+  document.querySelector('.rest-slot').innerHTML = rest.join('') + ENTERPRISE;
+  document.querySelector('.all-others-slot').innerHTML = made.join('') + rest.join('') + ENTERPRISE;
+  document.querySelector('.d-slot').innerHTML = card(MINE, 0) + made.join('') + rest.join('') + ENTERPRISE;
+  document.querySelector('.c-all-slot').innerHTML = card(MINE, 0) + made.join('') + rest.join('') + ENTERPRISE;
+
+  document.querySelectorAll('.demo button').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.demo button').forEach((b) => b.classList.toggle('on', b === button));
+      document.querySelectorAll('[data-view]').forEach((v) => { v.hidden = v.dataset.view !== button.dataset.show; });
+      window.scrollTo(0, 0);
+    });
+  });
+</script>
+</body>
+</html>

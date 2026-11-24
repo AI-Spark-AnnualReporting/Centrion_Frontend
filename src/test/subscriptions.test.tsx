@@ -622,6 +622,23 @@ describe("SubscriptionPage", () => {
     expect(screen.getByRole("button", { name: "Contact us" })).toBeInTheDocument();
   });
 
+  it("the current plan stands out and the other cards fade", async () => {
+    const { container } = renderSubscriptionPage();
+    await screen.findByText("Your plan");
+    expect(container.querySelector(".sub-fade-others")).not.toBeNull();
+    const current = container.querySelectorAll(".sub-pc.current");
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveTextContent("Gold");
+  });
+
+  it("nothing fades when the company has no active plan", async () => {
+    subscriptions.current.mockResolvedValue({ ...CURRENT, status: "expired" });
+    const { container } = renderSubscriptionPage();
+    await screen.findByText("Made for you");
+    expect(container.querySelector(".sub-fade-others")).toBeNull();
+    expect(container.querySelector(".sub-pc.current")).toBeNull();
+  });
+
   it("the duration tabs filter the cards (Enterprise always shows)", async () => {
     renderSubscriptionPage();
     await screen.findByText("Made for you");

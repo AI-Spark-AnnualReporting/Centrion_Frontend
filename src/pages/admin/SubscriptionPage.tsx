@@ -215,7 +215,10 @@ export default function SubscriptionPage() {
             No plans are available yet. Please check back soon.
           </div>
         ) : (
-          <CardStrip>
+          // No sliding by itself on the client page: only the arrows and dots move it.
+          // With an active plan, the other cards fade until pointed at (sub-fade-others).
+          <div className={activePlanId ? 'sub-strip-holder sub-fade-others' : 'sub-strip-holder'}>
+          <CardStrip paused>
             {ordered.map((plan, index) => {
               const isCurrent = plan.id === activePlanId;
               const flag = isCurrent ? <span className="badge b-gn">Your plan</span>
@@ -226,6 +229,7 @@ export default function SubscriptionPage() {
               );
             })}
           </CardStrip>
+          </div>
         )}
       </div>
     </div>
