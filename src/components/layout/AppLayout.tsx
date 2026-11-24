@@ -126,7 +126,8 @@ export function AppLayout() {
   // (client side) floats over the cards' band instead of getting clearance.
   const fitPage = /^\/spark\/subscriptions(\/new|\/[^/]+\/edit)?$/.test(location.pathname)
     || /^\/spark\/licenses\/[^/]+\/key$/.test(location.pathname)
-    || location.pathname === '/admin-console/subscription';
+    || location.pathname === '/admin-console/subscription'
+    || location.pathname === '/admin-console/billing';
   // The directory is company-less, and the chatbot answers questions about a
   // company's data — on this page it would be a dead button (it routes to /ai,
   // which the spark gate bounces straight back here). Only Spark reaches

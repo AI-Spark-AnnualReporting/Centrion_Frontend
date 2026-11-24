@@ -1,26 +1,24 @@
-// Admin Console → Usage (cloud, company admin). Four parts, top to bottom:
+// Admin Console → Settings → Usage (cloud, company admin). Two parts:
 //   1. Plan: the subscription card that used to sit on the Admin Console
 //      overview (plan, limits, modules, Change plan).
 //   2. AI credits: what's left (below zero in red), where they came from, what
 //      used them, and Buy credits (opens the Buy credits screen).
-//   3. Payment: card buttons shown greyed out — card payments are coming
-//      later; payments are test mode today.
-//   4. Invoices: every paid plan and paid credit pack, newest first, in pages.
+// Payment and Invoices moved to the Billing tab (BillingPage.tsx).
 //
 // Route: /admin-console/usage · Plan: Centriton/.claude/plans/admin-usage-page.md
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
 import { LicenseCard } from '@/components/license/LicenseCard';
+import { SettingsTabs } from '@/components/admin/SettingsTabs';
 import { formatLicenseDate } from '@/components/license/LicenseBanner';
 import {
-  actionName, formatCredits, formatCreditsDetail, formatDollars, formatPaidDate,
+  actionName, formatCredits, formatCreditsDetail,
 } from '@/components/ai-credits/creditFormat';
 import { aiCredits } from '@/lib/api';
-import { PAGE_SIZES, Pager } from '@/pages/spark/SparkLicensesPage';
-import type { AiCreditsSummary, InvoicePage } from '@/types/ai-credits';
+import type { AiCreditsSummary } from '@/types/ai-credits';
 
 export const BUY_CREDITS_PAGE = '/admin-console/usage/buy-credits';
 
@@ -39,17 +37,14 @@ export function creditsLeftPercent(balance: number, total: number): number {
 
 export default function UsagePage() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1040 }}>
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Usage</div>
-        <div style={{ fontSize: 12, color: '#9BA3C4', marginTop: 2 }}>
-          Your plan, your AI credits, payment and invoices.
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <SettingsTabs />
+      {/* Frosted glass over soft colour glows (index.css .glass-stage); only here,
+          the on-prem Admin Console's License card stays plain. */}
+      <div className="glass-stage">
+        <LicenseCard />
       </div>
-      <LicenseCard />
       <CreditsSection />
-      <PaymentSection />
-      <InvoicesSection />
     </div>
   );
 }
@@ -136,87 +131,15 @@ function CreditsSection() {
   );
 }
 
-// ── 3. Payment (coming soon) ────────────────────────────────────────
-
-function PaymentSection() {
-  return (
-    <Section title="Payment" line="Add a backup card in case your default card is declined.">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, color: '#5A6080' }}>No card yet</span>
-        <span style={{ display: 'flex', gap: 8 }}>
-          <button type="button" className="btn bs" disabled>Update</button>
-          <button type="button" className="btn bs" disabled>Add payment method</button>
-        </span>
-      </div>
-      <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 10 }}>
-        Card payments are coming soon. Test mode today: no card is charged.
-      </div>
-    </Section>
-  );
-}
-
-// ── 4. Invoices ─────────────────────────────────────────────────────
-
-function InvoicesSection() {
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZES[0]);      // 10 rows at first
-  const [data, setData] = useState<InvoicePage | null>(null);
-  const [error, setError] = useState('');
-
-  const load = useCallback((pageNumber: number, size: number) => {
-    aiCredits.invoices(pageNumber, size)
-      .then((next) => { setData(next); setError(''); })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load invoices.'));
-  }, []);
-
-  useEffect(() => load(page, pageSize), [load, page, pageSize]);
-
-  /** A new page size starts again from page 1. */
-  const changePageSize = (size: number) => {
-    setPageSize(size);
-    setPage(1);
-  };
-
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
-  return (
-    <Section title="Invoices">
-      {error && <div style={{ fontSize: 12, color: '#DC2626' }}>{error}</div>}
-      {!data && !error && <Spinner pad={20} />}
-      {data && (
-        <>
-          <table className="utable">
-            <thead>
-              <tr><th>Date</th><th>What</th><th style={{ textAlign: 'right' }}>Total</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {data.items.length === 0 && (
-                <tr className="urow"><td colSpan={4} style={{ color: '#9BA3C4' }}>No invoices yet.</td></tr>
-              )}
-              {data.items.map((invoice) => (
-                <tr key={`${invoice.kind}-${invoice.id}`} className="urow">
-                  <td>{formatPaidDate(invoice.paid_at)}</td>
-                  <td>{invoice.description}</td>
-                  <td style={{ textAlign: 'right' }}>{formatDollars(invoice.total)}</td>
-                  <td><span className="badge b-gn">Paid</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data.total > 0 && (
-            <Pager total={data.total} page={page} pages={pages} size={pageSize}
-              onPage={setPage} onSize={changePageSize} />
-          )}
-        </>
-      )}
-    </Section>
-  );
-}
-
 // ── Small pieces ────────────────────────────────────────────────────
 
-function Section({ title, line, children }: { title: string; line?: string; children: ReactNode }) {
+
+export function Section({ title, line, children, className }: {
+  title: string; line?: string; children: ReactNode;
+  className?: string;   // extra class, e.g. Billing's full-height Invoices card
+}) {
   return (
-    <section className="card" aria-label={title} style={{ padding: 18 }}>
+    <section className={className ? `card ${className}` : 'card'} aria-label={title} style={{ padding: 18 }}>
       <div style={{ fontSize: 13, fontWeight: 800 }}>{title}</div>
       {line && <div style={{ fontSize: 11, color: '#9BA3C4', marginTop: 2, marginBottom: 10 }}>{line}</div>}
       {!line && <div style={{ marginBottom: 10 }} />}

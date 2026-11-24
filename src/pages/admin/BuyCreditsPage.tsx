@@ -66,7 +66,7 @@ export default function BuyCreditsPage() {
   const packs = period?.credit_packs ?? [];
   const picked = packs.find((pack) => pack.id === pickedId) ?? null;
   return (
-    <div className="card" style={{ padding: 24, maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
         <Link to={USAGE_PAGE} style={{ fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>← Back to Usage</Link>
         <div style={{ fontSize: 18, fontWeight: 800, marginTop: 6 }}>Buy AI credits</div>

@@ -259,6 +259,14 @@ describe("sidebar for everyone else", () => {
     expect(screen.getByText("Departments")).toBeInTheDocument();
   });
 
+  it("gives an admin one Settings item instead of Subscription and Usage", () => {
+    renderSidebar();
+    fireEvent.click(screen.getByText("Admin Console"));
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.queryByText("Subscription")).not.toBeInTheDocument();
+    expect(screen.queryByText("Usage")).not.toBeInTheDocument();
+  });
+
   it("gives an admin the Annual Report Validator, under Reports Validator", async () => {
     renderSidebar();
     // Collapsed behind the accordion by default, same as ESG Validator and

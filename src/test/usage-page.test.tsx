@@ -40,6 +40,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 const { default: UsagePage } = await import("@/pages/admin/UsagePage");
+const { default: BillingPage } = await import("@/pages/admin/BillingPage");
 const { default: BuyCreditsPage } = await import("@/pages/admin/BuyCreditsPage");
 const { default: SparkAiCreditsPage } = await import("@/pages/spark/SparkAiCreditsPage");
 
@@ -76,14 +77,26 @@ beforeEach(() => {
 });
 
 describe("Usage page", () => {
-  it("shows the plan, AI credits, greyed-out payment and invoices with real dates", async () => {
+  it("shows the Settings tabs, the plan and AI credits, but not payment or invoices", async () => {
     summary.mockResolvedValue(creditsSummary());
     invoices.mockResolvedValue(invoicePage(1));
-    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/admin-console/usage"]}><UsagePage /></MemoryRouter>);
+    expect(screen.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Plan card")).toBeInTheDocument();
     expect(await screen.findByText("Generate brief")).toBeInTheDocument();
     expect(screen.getByText("0.2")).toBeInTheDocument();                    // small use isn't shown as 0
     expect(screen.getByRole("link", { name: "Buy credits" })).toHaveAttribute("href", "/admin-console/usage/buy-credits");
+    expect(screen.queryByText("Invoices")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add payment method" })).toBeNull();
+    expect(invoices).not.toHaveBeenCalled();
+  });
+});
+
+describe("Billing page", () => {
+  it("shows greyed-out payment and invoices with real dates", async () => {
+    invoices.mockResolvedValue(invoicePage(1));
+    render(<MemoryRouter initialEntries={["/admin-console/billing"]}><BillingPage /></MemoryRouter>);
+    expect(screen.getByRole("tab", { name: "Billing" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "Add payment method" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Update" })).toBeDisabled();
     expect(screen.getByText(/Card payments are coming soon/)).toBeInTheDocument();
@@ -92,9 +105,8 @@ describe("Usage page", () => {
   });
 
   it("shows invoices 10 to a page with the app's pager", async () => {
-    summary.mockResolvedValue(creditsSummary());
     invoices.mockImplementation((page: number, limit: number) => Promise.resolve(invoicePage(19, page, limit)));
-    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    render(<MemoryRouter><BillingPage /></MemoryRouter>);
     expect(await screen.findByText("1–10")).toBeInTheDocument();     // "Showing 1–10 of 19"
     expect(invoices).toHaveBeenLastCalledWith(1, 10);
     expect(screen.getByRole("button", { name: "2" })).toBeInTheDocument();
@@ -106,13 +118,14 @@ describe("Usage page", () => {
   });
 
   it("shows the pager even when everything fits on one page", async () => {
-    summary.mockResolvedValue(creditsSummary());
     invoices.mockResolvedValue(invoicePage(3));
-    render(<MemoryRouter><UsagePage /></MemoryRouter>);
+    render(<MemoryRouter><BillingPage /></MemoryRouter>);
     expect(await screen.findByText("1–3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next ›" })).toBeDisabled();
   });
+});
 
+describe("Usage page, nothing on sale", () => {
   it("says when nothing is on sale", async () => {
     summary.mockResolvedValue(creditsSummary({ credit_packs: [] }));
     invoices.mockResolvedValue(invoicePage(0));
@@ -214,5 +227,33 @@ describe("Spark credit packs", () => {
     modelPrices.mockResolvedValue({ items: [], annual_reporting_reachable: true, settings: settings(five) });
     render(<MemoryRouter><SparkAiCreditsPage /></MemoryRouter>);
     expect(await screen.findByRole("button", { name: "+ Add pack" })).toBeDisabled();
+  });
+});
+
+
+describe("Settings tabs", () => {
+  it("each tab goes to its page", async () => {
+    const { SettingsTabs } = await import("@/components/admin/SettingsTabs");
+    const { Routes, Route, useLocation } = await import("react-router-dom");
+    function Where() { return <div data-testid="where">{useLocation().pathname}</div>; }
+    render(
+      <MemoryRouter initialEntries={["/admin-console/subscription"]}>
+        <SettingsTabs />
+        <Routes><Route path="*" element={<Where />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("tab", { name: "Subscription" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Billing" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/billing");
+    fireEvent.click(screen.getByRole("tab", { name: "Usage" }));
+    expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/usage");
+  });
+
+  it("knows which addresses belong to Settings (for the sidebar)", async () => {
+    const { isSettingsPath } = await import("@/components/admin/SettingsTabs");
+    expect(isSettingsPath("/admin-console/subscription/checkout")).toBe(true);
+    expect(isSettingsPath("/admin-console/usage/buy-credits")).toBe(true);
+    expect(isSettingsPath("/admin-console/billing")).toBe(true);
+    expect(isSettingsPath("/admin-console/users")).toBe(false);
   });
 });

@@ -1529,3 +1529,32 @@ button.xlive-row:focus-visible { outline: 2px solid #4040C8; outline-offset: -2p
 .model-info-app-name { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #8A91AE; margin-bottom: 4px; }
 .model-info-app ul { margin: 0; padding-left: 16px; list-style: disc; }
 .model-info-app li { font-size: 12px; color: #1A1D2E; line-height: 1.6; }
+
+/* Settings → Usage: the plan card as frosted glass. The soft colour glows
+   behind it are what the blur shows through; without them glass looks flat. */
+/* No padding: the card lines up with the cards below it. The glow spreads a
+   little past the card's edges instead (negative inset, nothing clipped). */
+.glass-stage { position: relative; isolation: isolate; }
+.glass-stage::before { content: ''; position: absolute; inset: -14px; border-radius: 28px; z-index: -1;
+  /* Centriyon's own indigo family only, kept faint (sidebar #3535B5, buttons #4040C8). */
+  background:
+    radial-gradient(circle at 10% 20%, rgba(64,64,200,.16) 0, transparent 40%),
+    radial-gradient(circle at 90% 100%, rgba(53,53,181,.12) 0, transparent 42%),
+    linear-gradient(135deg, #F2F3FA 0%, #EEEEFF 100%);
+  filter: blur(6px); }
+.glass-stage > .card { background: rgba(255,255,255,.62); border: 1px solid rgba(255,255,255,.8);
+  box-shadow: 0 8px 28px rgba(53,53,181,.08), inset 0 1px 0 rgba(255,255,255,.8);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); }
+.glass-stage > .card .badge { border: 1px solid rgba(255,255,255,.85); box-shadow: 0 2px 8px rgba(53,53,181,.08); }
+.glass-stage > .card .btn.bs { background: rgba(255,255,255,.65); border-color: rgba(255,255,255,.9); }
+/* No blur support: a plainer card that still reads well. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-stage > .card { background: rgba(255,255,255,.85); }
+}
+
+/* Settings → Billing: one screen. The Invoices card fills the height left under
+   Payment; its rows scroll inside it under a header that stays put, and the
+   pager stays at the bottom of the card. */
+.billing-invoices { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.billing-invoices-rows { flex: 1; min-height: 0; overflow-y: auto; }
+.billing-invoices-rows thead th { position: sticky; top: 0; z-index: 1; }

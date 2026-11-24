@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { subscriptions } from '@/lib/api';
 import type { LicensableModule } from '@/types/license';
 import type { CurrentSubscription, PlanContact, PlanForClient } from '@/types/subscription';
+import { SettingsTabs } from '@/components/admin/SettingsTabs';
 
 export const CHECKOUT_PAGE = '/admin-console/subscription/checkout';
 
@@ -146,6 +147,7 @@ export default function SubscriptionPage() {
 
   return (
     <div className="sub-fit">
+      <SettingsTabs />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>Subscription</div>

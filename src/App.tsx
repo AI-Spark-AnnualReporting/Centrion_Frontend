@@ -67,6 +67,7 @@ const SubscriptionPage = lazy(() => import("./pages/admin/SubscriptionPage"));
 const CheckoutPage = lazy(() => import("./pages/admin/CheckoutPage"));
 // AI credits (plans: Centriton/.claude/plans/ai-credits.md, admin-usage-page.md) — cloud only.
 const UsagePage = lazy(() => import("./pages/admin/UsagePage"));
+const BillingPage = lazy(() => import("./pages/admin/BillingPage"));
 const BuyCreditsPage = lazy(() => import("./pages/admin/BuyCreditsPage"));
 const SparkAiCreditsPage = lazy(() => import("./pages/spark/SparkAiCreditsPage"));
 const SparkAiUsagePage = lazy(() => import("./pages/spark/SparkAiUsagePage"));
@@ -340,6 +341,7 @@ const App = () => (
               <Route path="/admin-console/subscription/checkout" element={<CheckoutPage />} />
               <Route path="/admin-console/usage" element={<UsagePage />} />
               <Route path="/admin-console/usage/buy-credits" element={<BuyCreditsPage />} />
+              <Route path="/admin-console/billing" element={<BillingPage />} />
               {/* The old address, so bookmarks and older links still work. */}
               <Route path="/admin-console/ai-credits" element={<Navigate to="/admin-console/usage" replace />} />
             </Route>

@@ -8,6 +8,7 @@ import { sparkStudioUrl } from '@/lib/appRouting';
 import { SECTIONS, SECTION_KEYS } from '@/constants/spark-sections';
 import { license, sparkPlans } from '@/lib/api';
 import { IS_ON_PREM } from '@/lib/deployment';
+import { isSettingsPath } from '@/components/admin/SettingsTabs';
 import type { CompanyLicense } from '@/types/license';
 
 // Sub-sections shown when the "Reports" item is expanded — mirrors the report
@@ -100,6 +101,7 @@ const ADMIN_CHILDREN: {
   path: string;
   end?: boolean;
   allowedRoles?: BackendRole[];
+  activeWhen?: (pathname: string) => boolean;   // when one item covers several pages (Settings)
 }[] = [
   // Spark staff see it too (boss's ask, 2026-11-10): they hand out the logins
   // Spark makes for a client, so they need every user's email and the Show
@@ -114,8 +116,9 @@ const ADMIN_CHILDREN: {
   { key: 'departments', label: 'Departments', path: '/admin-console/departments' },
   // Cloud only: on-premises installs use license keys (the License card).
   ...(IS_ON_PREM ? [] : [
-    { key: 'subscription', label: 'Subscription', path: '/admin-console/subscription', allowedRoles: ['admin'] as BackendRole[] },
-    { key: 'usage', label: 'Usage', path: '/admin-console/usage', allowedRoles: ['admin'] as BackendRole[] },
+    // One item for the Subscription | Usage | Billing tabs (SettingsTabs).
+    { key: 'settings', label: 'Settings', path: '/admin-console/subscription', allowedRoles: ['admin'] as BackendRole[],
+      activeWhen: isSettingsPath },
   ]),
 ];
 
@@ -671,9 +674,10 @@ export function Sidebar() {
           {adminOpen && (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {visibleAdminChildren.map((child) => {
-                const childActive = child.end
+                let childActive = child.end
                   ? location.pathname === child.path
                   : location.pathname.startsWith(child.path);
+                if (child.activeWhen) childActive = child.activeWhen(location.pathname);
                 return (
                   <button
                     key={child.key}

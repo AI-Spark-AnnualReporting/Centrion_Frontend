@@ -1,7 +1,7 @@
 # Client Subscription page: your plan stands out, the others fade
 
 **Date:** 2026-11-24
-**Status:** Built and tested, not committed
+**Status:** Pushed 2026-11-24 (`03a721a`)
 **Mockup:** `.claude/mockups/client-subscription-grid-mockup.html` (option D)
 
 ## What changed (client page only: Admin Console → Subscription)
