@@ -71,6 +71,7 @@ const BillingPage = lazy(() => import("./pages/admin/BillingPage"));
 const BuyCreditsPage = lazy(() => import("./pages/admin/BuyCreditsPage"));
 const SparkAiCreditsPage = lazy(() => import("./pages/spark/SparkAiCreditsPage"));
 const SparkAiUsagePage = lazy(() => import("./pages/spark/SparkAiUsagePage"));
+const SparkCompanyDashboardPage = lazy(() => import("./pages/spark/SparkCompanyDashboardPage"));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminDepartmentsPage = lazy(
   () => import("./pages/admin/AdminDepartmentsPage"),
@@ -202,6 +203,7 @@ const App = () => (
             <Route path="/spark/quotes" element={<SparkQuotesPage />} />
             <Route path="/spark/ai-credits" element={<SparkAiCreditsPage />} />
             <Route path="/spark/ai-credits/usage" element={<SparkAiUsagePage />} />
+            <Route path="/spark/companies/:companyId" element={<SparkCompanyDashboardPage />} />
             {/* One page for the three lists; an unknown section redirects back. */}
             <Route path="/spark/:section" element={<SparkSectionPage />} />
           </Route>

@@ -277,6 +277,82 @@ describe("Spark section page", () => {
     expect(screen.queryByText("Aramco")).toBeNull();
   });
 
+  it("shows the KPI columns: plan, users, credits and revenue", async () => {
+    overview.mockResolvedValue({
+      total_companies: 2, total_reports: 0, total_users: 0,
+      companies: [
+        { ...COMPANIES[0], plan: { name: "Gold", status: "active", starts_at: "2026-01-01", ends_at: "2099-01-01" },
+          users_used: 21, users_limit: 21, credits_used_30d: 177, total_paid: 1271,
+          last_activity: "2026-11-24T08:00:00Z",
+          credits: { included: 200, packs: 100, carried: 0, used: 177, total: 300, balance: 123, low: false } },
+        { ...COMPANIES[1], plan: null, users_used: 1, users_limit: null, credits: null, total_paid: 0, last_activity: null },
+      ],
+    });
+    landOn("/spark/companies");
+    await screen.findByText("Gold");
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("No plan")).toBeTruthy();
+    expect(screen.getByText("21 / 21")).toBeTruthy();
+    expect(screen.getByText("full")).toBeTruthy();
+    expect(screen.getByText("177 used in 30 days")).toBeTruthy();
+    expect(screen.getByText("$1,271")).toBeTruthy();
+    expect(screen.getByText("last active 24 Nov 2026")).toBeTruthy();
+    expect(screen.queryByText("Sector")).toBeNull();
+    expect(screen.queryByText("Joined")).toBeNull();
+  });
+
+  it("splits companies into Cloud companies and Spark companies tabs", async () => {
+    overview.mockResolvedValue({
+      total_companies: 3, total_reports: 0, total_users: 0,
+      companies: [...COMPANIES, { id: "c3", name: "Made By Spark Co", created_by_spark: true }],
+    });
+    landOn("/spark/companies");
+    await screen.findByText("Aramco");
+    expect(screen.getByRole("tab", { name: "Cloud companies (2)" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByText("Made By Spark Co")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Spark companies (1)" }));
+    expect(screen.getByText("Made By Spark Co")).toBeTruthy();
+    expect(screen.queryByText("Aramco")).toBeNull();
+
+    // The search works inside the open tab; both counts follow it.
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "zain" } });
+    expect(screen.getByRole("tab", { name: "Cloud companies (1)" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Spark companies (0)" })).toBeTruthy();
+  });
+
+  it("shows people, reports and AI cost to Spark on the Spark companies tab", async () => {
+    overview.mockResolvedValue({
+      total_companies: 2, total_reports: 0, total_users: 0,
+      companies: [COMPANIES[0], { id: "c3", name: "Center of Governance", created_by_spark: true,
+        plan: null, user_count: 18, report_count: 4, ai_cost_30d: 3.5, last_activity: null }],
+    });
+    landOn("/spark/companies");
+    await screen.findByText("Aramco");
+    expect(screen.getByText("AI credits")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Spark companies (1)" }));
+    expect(screen.getByText("AI cost to Spark (30 days)")).toBeTruthy();
+    expect(screen.queryByText("AI credits")).toBeNull();
+    expect(screen.queryByText("Revenue & last activity")).toBeNull();
+    expect(screen.getByText("18")).toBeTruthy();
+    expect(screen.getByText("4")).toBeTruthy();
+    expect(screen.getByText("$3.50")).toBeTruthy();
+    expect(screen.getByText("no activity yet")).toBeTruthy();
+  });
+
+  it("opens a company's dashboard when its row is clicked", async () => {
+    render(
+      <MemoryRouter initialEntries={["/spark/companies"]}>
+        <Routes>
+          <Route path="/spark/:section" element={<SparkSectionPage />} />
+          <Route path="/spark/companies/:companyId" element={<div>DASHBOARD</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByText("Aramco"));
+    await waitFor(() => screen.getByText("DASHBOARD"));
+  });
+
   it("sends an unknown section back to the overview", async () => {
     landOn("/spark/nonsense");
     await waitFor(() => screen.getByText("OVERVIEW"));

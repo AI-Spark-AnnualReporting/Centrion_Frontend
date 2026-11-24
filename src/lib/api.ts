@@ -7,7 +7,14 @@
 // Both attach Authorization: Bearer <token> automatically and trigger logout
 // on a 401. Do not use raw `fetch()` for authenticated endpoints.
 
-import type { InternalUsersPage, SparkOverview, SparkReportRow, SparkUserRow } from "@/types/spark";
+import type {
+  InternalUsersPage,
+  SparkCompanyDashboard,
+  SparkOverview,
+  SparkReportRow,
+  SparkUserRow,
+  UsageRange,
+} from "@/types/spark";
 import { normalizeTrends } from "@/types/spark";
 import type {
   CompanyLicense,
@@ -5633,6 +5640,13 @@ function listOrEnvelope<T>(raw: T[] | Record<string, T[]>, key: string): T[] {
 export const spark = {
   // Cards + the Companies tab in one call.
   overview: () => request<SparkOverview>("/api/v1/spark/overview", { noActingCompany: true }),
+
+  // One cloud company's dashboard; `range` picks the AI credits window.
+  companyDashboard: (companyId: string, range: UsageRange) =>
+    request<SparkCompanyDashboard>(`/api/v1/spark/companies/${encodeURIComponent(companyId)}/dashboard`, {
+      query: { range },
+      noActingCompany: true,
+    }),
 
   listUsers: () =>
     request<SparkUserRow[] | { users: SparkUserRow[] }>("/api/v1/spark/users", {

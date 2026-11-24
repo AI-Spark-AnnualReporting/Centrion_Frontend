@@ -7,7 +7,9 @@
 // grouping and the empty states to save nothing.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { formatCredits, formatDollars, formatPaidDate } from '@/components/ai-credits/creditFormat';
+import { CreditsLeft, PlanStatusChip, endingSoonText, formatDay } from '@/components/spark/companyKpis';
 import { Spinner } from '@/components/shared/Spinner';
 import { spark } from '@/lib/api';
 import { roleMeta } from '@/constants/roles';
@@ -234,48 +236,114 @@ function GroupedTable<T>({
   );
 }
 
-// A zero reads as "nothing here" rather than a number worth scanning, so it
-// loses the pill and greys out.
-function CountPill({ n }: { n: number }) {
-  if (!n) return <span style={{ color: '#C4C9DD', fontWeight: 700 }}>0</span>;
+const SMALL_GREY = { fontSize: 11, color: '#9BA3C4', marginTop: 1 };
+
+function PlanCell({ company }: { company: SparkCompanyRow }) {
+  const plan = company.plan;
+  if (!plan) return <PlanStatusChip status="none" />;
+  const endText = endingSoonText(plan);
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: 26,
-        padding: '3px 8px',
-        borderRadius: 20,
-        background: '#F2F3FA',
-        color: '#1A1D2E',
-        fontSize: 11,
-        fontWeight: 800,
-        fontFamily: "'DM Mono', monospace",
-      }}
-    >
-      {n}
-    </span>
+    <div>
+      <div style={{ fontWeight: 600, color: '#1A1D2E', marginBottom: 3 }}>{plan.name || 'Plan'}</div>
+      <PlanStatusChip status={plan.status} />
+      {endText && <div style={{ ...SMALL_GREY, color: '#D97706' }}>{endText}</div>}
+      {plan.status === 'expired' && <div style={SMALL_GREY}>ended {formatDay(plan.ends_at)}</div>}
+    </div>
   );
 }
 
-function CompaniesTable({ rows }: { rows: SparkCompanyRow[] }) {
+function UsersCell({ company }: { company: SparkCompanyRow }) {
+  const used = company.users_used ?? 0;
+  const limit = company.users_limit;
+  if (limit == null) return <span style={{ fontVariantNumeric: 'tabular-nums' }}>{used} <span style={{ color: '#9BA3C4' }}>/ —</span></span>;
+  const full = used >= limit;
+  return (
+    <div style={{ fontVariantNumeric: 'tabular-nums', color: full ? '#DC2626' : '#1A1D2E', fontWeight: full ? 700 : 400 }}>
+      {used} / {limit}
+      {full && <div style={{ ...SMALL_GREY, fontWeight: 400 }}>full</div>}
+    </div>
+  );
+}
+
+function CreditsCell({ company }: { company: SparkCompanyRow }) {
+  if (!company.credits) return <Dash />;
+  return (
+    <div style={{ minWidth: 140 }}>
+      <CreditsLeft credits={company.credits} />
+      <div style={SMALL_GREY}>{formatCredits(company.credits_used_30d ?? 0)} used in 30 days</div>
+    </div>
+  );
+}
+
+function RevenueCell({ company }: { company: SparkCompanyRow }) {
+  return (
+    <div>
+      <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <b>{formatDollars(company.total_paid ?? 0, 0)}</b> <span style={{ color: '#5A6080' }}>paid</span>
+      </div>
+      <div style={SMALL_GREY}>
+        {company.last_activity ? `last active ${formatPaidDate(company.last_activity)}` : 'no activity yet'}
+      </div>
+    </div>
+  );
+}
+
+// Cloud companies that signed up themselves vs. ones Spark staff created.
+type CompaniesTab = 'cloud' | 'spark';
+
+function LastActivityCell({ company }: { company: SparkCompanyRow }) {
+  if (!company.last_activity) return <span style={{ color: '#9BA3C4' }}>no activity yet</span>;
+  return <span>{formatPaidDate(company.last_activity)}</span>;
+}
+
+// Cloud companies are customers: plan, seats, credits and money. Spark
+// companies are set up by Spark staff, whose AI use isn't charged as credits,
+// so their tab shows people, reports and what the AI cost Spark instead.
+const CLOUD_COLUMNS = ['Plan & status', 'Users', 'AI credits', 'Revenue & last activity'];
+const SPARK_COLUMNS = ['Plan & status', 'People', 'Reports', 'AI cost to Spark (30 days)', 'Last activity'];
+
+function CloudCompanyCells({ company }: { company: SparkCompanyRow }) {
+  return (
+    <>
+      <td><PlanCell company={company} /></td>
+      <td><UsersCell company={company} /></td>
+      <td><CreditsCell company={company} /></td>
+      <td><RevenueCell company={company} /></td>
+    </>
+  );
+}
+
+function SparkCompanyCells({ company }: { company: SparkCompanyRow }) {
+  const number = { fontVariantNumeric: 'tabular-nums' as const };
+  return (
+    <>
+      <td><PlanCell company={company} /></td>
+      <td style={number}>{company.user_count ?? 0}</td>
+      <td style={number}>{company.report_count ?? 0}</td>
+      <td style={number}>{formatDollars(company.ai_cost_30d ?? 0)}</td>
+      <td><LastActivityCell company={company} /></td>
+    </>
+  );
+}
+
+function CompaniesTable({ rows, tab }: { rows: SparkCompanyRow[]; tab: CompaniesTab }) {
+  const navigate = useNavigate();
   if (rows.length === 0) return <EmptyState text="No companies match this search" />;
+  const open = (id: string) => navigate(`/spark/companies/${encodeURIComponent(id)}`);
   return (
     <table className="utable">
       <thead>
         <tr>
           <th>Company</th>
-          <th>Sector</th>
-          <th>Jurisdiction</th>
-          <th style={{ textAlign: 'right' }}>Users</th>
-          <th style={{ textAlign: 'right' }}>Reports</th>
-          <th>Joined</th>
+          {(tab === 'cloud' ? CLOUD_COLUMNS : SPARK_COLUMNS).map((title) => <th key={title}>{title}</th>)}
         </tr>
       </thead>
       <tbody>
         {rows.map((c) => (
-          <tr key={c.id} className="urow">
+          <tr key={c.id} className="urow" tabIndex={0} style={{ cursor: 'pointer' }}
+            aria-label={`Open ${c.name}'s dashboard`}
+            onClick={() => open(c.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter') open(c.id); }}>
             <td>
               <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                 <Tile seed={c.id} text={initialsOf(c.name)} radius={9} />
@@ -299,17 +367,7 @@ function CompaniesTable({ rows }: { rows: SparkCompanyRow[] }) {
                 </div>
               </div>
             </td>
-            <td style={{ color: '#5A6080' }}>{c.sector_name || <Dash />}</td>
-            <td style={{ color: '#5A6080' }}>{c.jurisdiction || <Dash />}</td>
-            <td style={{ textAlign: 'right' }}>
-              <CountPill n={c.user_count ?? 0} />
-            </td>
-            <td style={{ textAlign: 'right' }}>
-              <CountPill n={c.report_count ?? 0} />
-            </td>
-            <td style={{ color: '#5A6080' }}>
-              {c.created_at ? shortDateTime(c.created_at) : <Dash />}
-            </td>
+            {tab === 'cloud' ? <CloudCompanyCells company={c} /> : <SparkCompanyCells company={c} />}
           </tr>
         ))}
       </tbody>
@@ -1070,9 +1128,44 @@ function UsersTabs({
   );
 }
 
+
+function CompaniesTabs({
+  value,
+  onChange,
+  cloudCount,
+  sparkCount,
+}: {
+  value: CompaniesTab;
+  onChange: (tab: CompaniesTab) => void;
+  cloudCount: number;
+  sparkCount: number;
+}) {
+  const tabs: { key: CompaniesTab; label: string; count: number }[] = [
+    { key: 'cloud', label: 'Cloud companies', count: cloudCount },
+    { key: 'spark', label: 'Spark companies', count: sparkCount },
+  ];
+  return (
+    <div className="tabs" role="tablist" aria-label="Companies" style={{ marginBottom: 0 }}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          role="tab"
+          aria-selected={value === tab.key}
+          className={`tab ${value === tab.key ? 'act' : ''}`}
+          onClick={() => onChange(tab.key)}
+        >
+          {tab.label} ({tab.count})
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function SparkSectionPage() {
   const { section } = useParams<{ section: string }>();
   const [usersTab, setUsersTab] = useState<UsersTab>('company');
+  const [companiesTab, setCompaniesTab] = useState<CompaniesTab>('cloud');
   const [activating, setActivating] = useState<SparkUserRow | null>(null);
   const [editing, setEditing] = useState<SparkUserRow | null>(null);
 
@@ -1153,13 +1246,16 @@ export default function SparkSectionPage() {
 
   const q = search.trim().toLowerCase();
 
-  const companyRows = useMemo(() => {
+  const searchedCompanies = useMemo(() => {
     const rows = companies ?? [];
     if (!q) return rows;
     return rows.filter((c) =>
       `${c.name} ${c.sector_name ?? ''} ${c.jurisdiction ?? ''}`.toLowerCase().includes(q),
     );
   }, [companies, q]);
+  const cloudCompanies = searchedCompanies.filter((c) => !c.created_by_spark);
+  const sparkCompanies = searchedCompanies.filter((c) => c.created_by_spark);
+  const companyRows = companiesTab === 'cloud' ? cloudCompanies : sparkCompanies;
 
   const userGroups = useMemo(
     () =>
@@ -1207,6 +1303,16 @@ export default function SparkSectionPage() {
       />
     ) : null;
 
+  const companiesTabs =
+    key === 'companies' && loaded ? (
+      <CompaniesTabs
+        value={companiesTab}
+        onChange={setCompaniesTab}
+        cloudCount={cloudCompanies.length}
+        sparkCount={sparkCompanies.length}
+      />
+    ) : null;
+
   if (key === 'users' && usersTab === 'internal') {
     return <InternalUsersPanel tabs={usersTabs} onTotal={setInternalCount} />;
   }
@@ -1215,7 +1321,7 @@ export default function SparkSectionPage() {
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="uhead">
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
-          {usersTabs ?? (
+          {usersTabs ?? companiesTabs ?? (
             <>
               <span className="uhead-title">{meta.listTitle}</span>
               <span className="uhead-count">{count}</span>
@@ -1256,7 +1362,7 @@ export default function SparkSectionPage() {
       ) : !loaded ? (
         <Spinner />
       ) : key === 'companies' ? (
-        <CompaniesTable rows={companyRows} />
+        <CompaniesTable rows={companyRows} tab={companiesTab} />
       ) : key === 'users' ? (
         <GroupedTable
           groups={userGroups}

@@ -12,6 +12,7 @@
 // a placeholder instead of crashing the page — same tolerance as @/types/admin.
 
 import type { BackendRole } from "@/constants/roles";
+import type { CreditBalance } from "@/types/ai-credits";
 import { titleCase } from "@/lib/utils";
 
 export interface SparkCompanyRow {
@@ -21,10 +22,60 @@ export interface SparkCompanyRow {
   jurisdiction?: string | null;
   created_at?: string | null;
   is_active?: boolean | null;
+  // Made by Spark staff: listed on the "Spark companies" tab, not "Cloud companies".
+  created_by_spark?: boolean;
   // Per-company counts come down with the company so the Companies tab needs
   // no second call and no client-side tally of the users/reports lists.
   user_count?: number | null;
   report_count?: number | null;
+  // The KPI columns (Plan & status · Users · AI credits · Revenue & last activity).
+  // Plan: Centriton/.claude/plans/spark-company-dashboard.md
+  plan?: SparkPlanSummary | null;
+  users_used?: number | null;
+  users_limit?: number | null;
+  credits?: CreditBalance | null;
+  credits_used_30d?: number | null;
+  ai_cost_30d?: number | null;        // dollars, charged or not (the Spark companies tab)
+  total_paid?: number | null;
+  last_activity?: string | null;
+}
+
+export type SparkPlanStatus = "active" | "expired" | "not_started" | "none";
+
+export interface SparkPlanSummary {
+  name: string | null;
+  status: SparkPlanStatus;
+  starts_at: string;          // YYYY-MM-DD
+  ends_at: string;            // YYYY-MM-DD
+}
+
+export type UsageRange = "period" | "30d" | "90d" | "all";
+
+// GET /api/v1/spark/companies/{id}/dashboard
+export interface SparkCompanyDashboard {
+  company: { id: string; name: string; jurisdiction: string | null; created_at: string | null };
+  plan: SparkPlanSummary | null;
+  users: { used: number; limit: number | null };
+  credits: CreditBalance | null;
+  paid: { total: number; plans: number; packs: number };
+  reports_this_period: number;   // from the plan's report counter; validation runs left out
+  last_activity: string | null;
+  modules: {
+    key: string;
+    label: string;
+    in_plan: boolean;
+    used: number | null;      // null = the module counts no reports
+    limit: number | null;     // null = no limit
+  }[];
+  usage: {
+    range: UsageRange;
+    from: string | null;
+    to: string | null;
+    over_time: { bucket: "day" | "week"; points: { date: string; credits: number }[] };
+    by_feature: { action: string; label: string; credits: number; jobs: number }[];
+    by_user: { user_id: string | null; full_name: string; role: string | null; credits: number; jobs: number }[];
+  };
+  purchases: { id: string; paid_at: string | null; credits: number; price: number; bought_by: string | null }[];
 }
 
 export interface SparkOverview {
