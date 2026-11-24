@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>License review popup — mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Plus Jakarta Sans', sans-serif; background: #F2F3FA; color: #1A1D2E; min-height: 100vh; }
+  .mono { font-family: 'DM Mono', monospace; }
+
+  /* The key page behind the popup (faded) */
+  .page { padding: 70px 22px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: #fff; border: 1px solid #E2E4F0; border-radius: 16px; box-shadow: 0 2px 12px rgba(64,64,200,.06); }
+  .ghost { height: 90px; } .ghost.tall { height: 460px; }
+  .overlay { position: fixed; inset: 0; background: rgba(26,29,46,.45); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; padding: 9px 16px; border-radius: 10px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; border: none; }
+  .bp { background: #4040C8; color: #fff; box-shadow: 0 4px 14px rgba(64,64,200,.3); }
+  .bs { background: #fff; color: #5A6080; border: 1.5px solid #E2E4F0; }
+
+  /* Demo switcher */
+  .demo { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 40; background: #1A1D2E; border-radius: 999px; padding: 4px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; }
+  .demo button { border: none; background: none; color: rgba(255,255,255,.7); font-family: inherit; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  .demo button.on { background: #fff; color: #1A1D2E; }
+
+  /* ── The popup ── */
+  .rv { width: 100%; max-width: 480px; background: #fff; border-radius: 18px; box-shadow: 0 24px 60px rgba(26,29,46,.25); overflow: hidden; }
+  .rv-head { padding: 22px 24px 0; position: relative; }
+  .rv-x { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 8px; border: none; background: #F2F3FA; color: #5A6080; font-size: 14px; cursor: pointer; }
+  .chip { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; display: inline-block; }
+  .chip.generate { background: #EEEEFF; color: #4040C8; }
+  .chip.upgrade { background: rgba(20,184,166,.14); color: #0F766E; }
+  .chip.renew { background: rgba(245,158,11,.14); color: #B45309; }
+  .rv-title { font-size: 18px; font-weight: 800; margin-top: 10px; }
+  .rv-note { font-size: 12px; color: #5A6080; margin-top: 4px; line-height: 1.5; }
+
+  .rv-body { padding: 18px 24px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .rv-info { background: #F7F8FC; border: 1px solid #EEF0F7; border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 88px 1fr; row-gap: 8px; font-size: 12px; }
+  .rv-info dt { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #9BA3C4; align-self: center; }
+  .rv-info dd { font-weight: 700; }
+
+  .rv-sec { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #8A91AE; margin-bottom: 8px; }
+  .rv-list { border: 1px solid #EEF0F7; border-radius: 12px; overflow: hidden; }
+  .rv-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; font-size: 12.5px; }
+  .rv-row + .rv-row { border-top: 1px solid #EEF0F7; }
+  .rv-ic { width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+  .rv-ic.up { background: rgba(34,197,94,.14); color: #16A34A; }
+  .rv-ic.add { background: #EEEEFF; color: #4040C8; }
+  .rv-ic.on { background: #F2F3FA; color: #5A6080; }
+  .rv-ic.reset { background: rgba(245,158,11,.14); color: #B45309; }
+  .rv-name { font-weight: 700; flex: 1; }
+  .rv-val { color: #5A6080; font-weight: 600; white-space: nowrap; }
+  .rv-val b { color: #1A1D2E; }
+  .rv-tag { font-size: 9.5px; font-weight: 800; border-radius: 20px; padding: 2px 7px; margin-left: 6px; background: #EEEEFF; color: #4040C8; }
+  .rv-empty { padding: 14px; text-align: center; font-size: 12px; color: #9BA3C4; background: #FAFBFD; }
+  .rv-warn { font-size: 11.5px; color: #92400E; background: rgba(245,158,11,.1); border-radius: 10px; padding: 9px 12px; line-height: 1.5; }
+
+  .rv-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid #EEF0F7; background: #FAFBFD; }
+</style>
+</head>
+<body>
+
+<div class="demo" role="tablist">
+  <button class="on" data-show="generate">New license</button>
+  <button data-show="upgrade">Upgrade</button>
+  <button data-show="renew">Renew</button>
+  <button data-show="same">Upgrade, nothing changed</button>
+</div>
+
+<div class="page">
+  <div class="card ghost"></div>
+  <div class="card ghost tall"></div>
+</div>
+
+<div class="overlay">
+
+  <!-- New license (Generate) -->
+  <div class="rv" data-view="generate">
+    <div class="rv-head">
+      <button class="rv-x" aria-label="Close">✕</button>
+      <span class="chip generate">New license</span>
+      <div class="rv-title">Generate Ma'aden's license?</div>
+      <div class="rv-note">It starts today. You'll get the key once, to copy and send to the client admin.</div>
+    </div>
+    <div class="rv-body">
+      <dl class="rv-info">
+        <dt>Client</dt><dd>Ma'aden</dd>
+        <dt>Client ID</dt><dd class="mono">SRV-7K2M-9QXA-4T8P</dd>
+        <dt>Period</dt><dd>24 Nov 2026 → 23 Nov 2027</dd>
+      </dl>
+      <div>
+        <div class="rv-sec">What the key gives · 4</div>
+        <div class="rv-list">
+          <div class="rv-row"><span class="rv-ic on">👤</span><span class="rv-name">Users</span><span class="rv-val"><b>10</b> (admin included)</span></div>
+          <div class="rv-row"><span class="rv-ic on">A</span><span class="rv-name">Annual Report</span><span class="rv-val"><b>2</b> reports</span></div>
+          <div class="rv-row"><span class="rv-ic on">Q</span><span class="rv-name">Quarterly Report</span><span class="rv-val"><b>4</b> reports</span></div>
+          <div class="rv-row"><span class="rv-ic on">L</span><span class="rv-name">Leadership</span><span class="rv-val">Access</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="rv-foot">
+      <button class="btn bs">Back</button>
+      <button class="btn bp">Generate key</button>
+    </div>
+  </div>
+
+  <!-- Upgrade -->
+  <div class="rv" data-view="upgrade" hidden>
+    <div class="rv-head">
+      <button class="rv-x" aria-label="Close">✕</button>
+      <span class="chip upgrade">Upgrade license</span>
+      <div class="rv-title">Upgrade aramco's license?</div>
+      <div class="rv-note">It replaces their current license now. Usage is kept.</div>
+    </div>
+    <div class="rv-body">
+      <dl class="rv-info">
+        <dt>Client</dt><dd>aramco</dd>
+        <dt>Client ID</dt><dd class="mono">SRV-BYH9-JAXE-K4VX</dd>
+        <dt>Period</dt><dd>11 Nov 2026 → 10 Nov 2027</dd>
+      </dl>
+      <div>
+        <div class="rv-sec">What changes · 3</div>
+        <div class="rv-list">
+          <div class="rv-row"><span class="rv-ic up">▲</span><span class="rv-name">Annual Report</span><span class="rv-val">2 → <b>4</b> reports</span></div>
+          <div class="rv-row"><span class="rv-ic add">+</span><span class="rv-name">Board Report<span class="rv-tag">New</span></span><span class="rv-val"><b>3</b> reports</span></div>
+          <div class="rv-row"><span class="rv-ic up">▲</span><span class="rv-name">Users</span><span class="rv-val">5 → <b>8</b></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="rv-foot">
+      <button class="btn bs">Back</button>
+      <button class="btn bp">Upgrade</button>
+    </div>
+  </div>
+
+  <!-- Renew -->
+  <div class="rv" data-view="renew" hidden>
+    <div class="rv-head">
+      <button class="rv-x" aria-label="Close">✕</button>
+      <span class="chip renew">Renew license</span>
+      <div class="rv-title">Renew Testing server's license?</div>
+      <div class="rv-note">A new period starts today.</div>
+    </div>
+    <div class="rv-body">
+      <dl class="rv-info">
+        <dt>Client</dt><dd>Testing server</dd>
+        <dt>Client ID</dt><dd class="mono">SRV-UUHA-EFL5-V99W</dd>
+        <dt>Period</dt><dd>24 Nov 2026 → 23 Nov 2027</dd>
+      </dl>
+      <div class="rv-warn">Report counts start again from 0 (old reports stay). Users don't reset.</div>
+      <div>
+        <div class="rv-sec">What the key gives · 3</div>
+        <div class="rv-list">
+          <div class="rv-row"><span class="rv-ic on">👤</span><span class="rv-name">Users</span><span class="rv-val"><b>29</b> (admin included)</span></div>
+          <div class="rv-row"><span class="rv-ic on">A</span><span class="rv-name">Annual Report</span><span class="rv-val"><b>2</b> reports</span></div>
+          <div class="rv-row"><span class="rv-ic on">B</span><span class="rv-name">Board Meetings</span><span class="rv-val">Access</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="rv-foot">
+      <button class="btn bs">Back</button>
+      <button class="btn bp">Renew</button>
+    </div>
+  </div>
+
+  <!-- Upgrade with nothing changed -->
+  <div class="rv" data-view="same" hidden>
+    <div class="rv-head">
+      <button class="rv-x" aria-label="Close">✕</button>
+      <span class="chip upgrade">Upgrade license</span>
+      <div class="rv-title">Upgrade aramco's license?</div>
+      <div class="rv-note">It replaces their current license now. Usage is kept.</div>
+    </div>
+    <div class="rv-body">
+      <dl class="rv-info">
+        <dt>Client</dt><dd>aramco</dd>
+        <dt>Client ID</dt><dd class="mono">SRV-BYH9-JAXE-K4VX</dd>
+        <dt>Period</dt><dd>11 Nov 2026 → 10 Nov 2027</dd>
+      </dl>
+      <div>
+        <div class="rv-sec">What changes · 0</div>
+        <div class="rv-list"><div class="rv-empty">Nothing changes — same as the current license.</div></div>
+      </div>
+    </div>
+    <div class="rv-foot">
+      <button class="btn bs">Back</button>
+      <button class="btn bp">Upgrade</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.querySelectorAll('.demo button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      document.querySelectorAll('.demo button').forEach(function (b) { b.classList.toggle('on', b === button); });
+      document.querySelectorAll('.rv').forEach(function (view) { view.hidden = view.dataset.view !== button.dataset.show; });
+    });
+  });
+</script>
+</body>
+</html>

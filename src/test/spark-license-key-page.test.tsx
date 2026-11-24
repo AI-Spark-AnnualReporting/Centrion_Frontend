@@ -15,7 +15,7 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-const { default: SparkLicenseKeyPage, describeChanges, limitsOfKey } = await import("@/pages/spark/SparkLicenseKeyPage");
+const { default: SparkLicenseKeyPage, describeChanges, limitsOfKey, reviewRowText } = await import("@/pages/spark/SparkLicenseKeyPage");
 
 const MODULES = [
   { key: "board_report", label: "Board Report", report_type: "board_report" },
@@ -75,8 +75,9 @@ describe("License key page — generate", () => {
 
     fireEvent.click(review);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("6 users (admin included)");
-    expect(dialog).toHaveTextContent("Board Report · 2 reports");
+    expect(within(dialog).getByLabelText("Users 6 (admin included)")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Board Report 2 reports")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("SRV-AAAA-BBBB-CCCC");
     fireEvent.click(within(dialog).getByRole("button", { name: "Generate key" }));
 
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
@@ -130,8 +131,9 @@ describe("License key page — upgrade", () => {
     const current = limitsOfKey(ACTIVE as never);
     const form = { ...current, max_users: 20, modules: ["board_report", "leadership"],
       report_limits: { board_report: 10 } };
-    expect(describeChanges("upgrade", form, current, ACTIVE.starts_at, ACTIVE.expires_at, ACTIVE.expires_at, MODULES as never))
-      .toEqual(["Users 15 → 20", "Board Report 4 → 10 reports", "Leadership added"]);
+    const rows = describeChanges("upgrade", form, current, ACTIVE.expires_at, ACTIVE.expires_at, MODULES as never);
+    expect(rows.map(reviewRowText)).toEqual(["Users 15 → 20", "Board Report 4 → 10 reports", "Leadership Access"]);
+    expect(rows.map((row) => row.kind)).toEqual(["up", "up", "add"]);
   });
 });
 
@@ -149,5 +151,21 @@ describe("License key page — renew", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Renew" }));
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
     expect(generate.mock.calls[0][1]).toMatchObject({ starts_at: today, server_id: "SRV-7K2M-9QXA-4T8P" });
+  });
+});
+
+describe("License key page — a client just added", () => {
+  it("starts with the Client ID typed on the Licenses page", async () => {
+    get.mockResolvedValue(NEW_CLIENT);
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/spark/licenses/cmp_1/key", state: { serverId: "SRV-AAAA-BBBB-CCCC" } }]}>
+        <Routes>
+          <Route path="/spark/licenses/:companyId/key" element={<SparkLicenseKeyPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const clientId = await screen.findByPlaceholderText("SRV-7K2M-9QXA-4T8P");
+    expect(clientId).toHaveValue("SRV-AAAA-BBBB-CCCC");
+    expect(clientId).toHaveAttribute("readonly");
   });
 });

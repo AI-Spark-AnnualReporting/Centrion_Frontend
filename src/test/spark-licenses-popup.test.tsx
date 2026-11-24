@@ -4,7 +4,7 @@
 // to a plan instead.
 
 import { describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render as renderBare, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render as renderBare, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
 
@@ -91,13 +91,13 @@ describe("Licenses key page and popups", () => {
 
 
 describe("Licenses (on-premises)", () => {
-  it("lists on-premises clients with their Client ID and modules, and the add-client box", async () => {
+  it("lists on-premises clients with their Client ID and modules, and the add-client button", async () => {
     render(<SparkLicensesPage />);
     expect(await screen.findByText("BUPA")).toBeInTheDocument();
     expect(screen.getByText("Annual · 3")).toBeInTheDocument();
     expect(screen.getByText("Board")).toBeInTheDocument();       // no limit = no number
     expect(screen.getByText("Leadership")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("On-premises client name")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add on-premises client" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^All/ }));
     expect(screen.getAllByText("SRV-1111-2222-3333").length).toBeGreaterThan(0);
   });
@@ -206,5 +206,40 @@ describe("A locked company", () => {
     expect(screen.getByText("Locked Co")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock code" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New key" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Add on-premises client", () => {
+  it("asks for the name and Client ID in a popup, then opens the key page", async () => {
+    const { sparkLicenses } = await import("@/lib/api");
+    const add = vi.mocked(sparkLicenses.addOnPremClient);
+    add.mockResolvedValue({ company: { id: "cmp_new", name: "Ma'aden", deployment: "on_prem" } });
+    render(<SparkLicensesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add on-premises client" }));
+    const dialog = await screen.findByRole("dialog");
+    const addButton = within(dialog).getByRole("button", { name: "Add client" });
+
+    fireEvent.change(within(dialog).getByLabelText(/Client name/), { target: { value: "Ma'aden" } });
+    expect(addButton).toBeDisabled();                       // Client ID is needed too
+    fireEvent.change(within(dialog).getByLabelText(/Client ID/), { target: { value: "srv-aaaa" } });
+    expect(addButton).toBeDisabled();                       // and must look right
+    expect(dialog).toHaveTextContent("Looks like SRV-XXXX-XXXX-XXXX");
+    fireEvent.change(within(dialog).getByLabelText(/Client ID/), { target: { value: "srv-aaaa-bbbb-cccc" } });
+    fireEvent.click(addButton);
+
+    expect(await screen.findByTestId("where")).toHaveTextContent("/spark/licenses/cmp_new/key");
+    expect(add).toHaveBeenCalledWith("Ma'aden", "SRV-AAAA-BBBB-CCCC");
+  });
+
+  it("keeps the popup open with the server's reason when the Client ID is taken", async () => {
+    const { sparkLicenses } = await import("@/lib/api");
+    vi.mocked(sparkLicenses.addOnPremClient).mockRejectedValue(new Error("This Client ID is already used by Aramco."));
+    render(<SparkLicensesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add on-premises client" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Client name/), { target: { value: "New" } });
+    fireEvent.change(within(dialog).getByLabelText(/Client ID/), { target: { value: "SRV-AAAA-BBBB-CCCC" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add client" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("already used by Aramco");
   });
 });

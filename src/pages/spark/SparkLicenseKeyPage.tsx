@@ -17,11 +17,11 @@
 // Plan: Centriton/.claude/plans/license-key-page-and-people-checks.md
 
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
-import { FormDialog } from '@/components/subscriptions/FormDialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
-  EMPTY_LIMITS, ModulesCard, UsersCard, usersSummary,
+  EMPTY_LIMITS, ModulesCard, UsersCard,
 } from '@/components/subscriptions/PlanFields';
 import { sparkLicenses } from '@/lib/api';
 import type { GeneratedLicense, LicensableModule, SparkLicenseRow } from '@/types/license';
@@ -92,53 +92,69 @@ function reportCaptions(row: KeyRow, mode: KeyMode): Record<string, string> {
   return captions;
 }
 
-/** "25 users (admin included)" */
-function peopleLine(limits: PlanLimits): string {
-  return usersSummary(limits);
+/** One row of the Review popup: "Annual Report  2 → 4 reports". */
+export type ReviewRow = {
+  kind: 'up' | 'add' | 'on';   // goes up (upgrade) / newly added (upgrade) / what the key gives
+  icon: string;
+  name: string;
+  before?: string;             // upgrade only: the value now
+  after: string;
+  unit?: string;
+};
+
+/** "Users · 25 (admin included)" */
+function usersRow(limits: PlanLimits): ReviewRow {
+  return { kind: 'on', icon: '👤', name: 'Users', after: String(limits.max_users), unit: '(admin included)' };
 }
 
-/** "Quarterly Report · 4 reports", or the name alone for access-only modules. */
-function moduleLine(module: LicensableModule, limits: PlanLimits): string {
-  if (!module.report_type) return module.label;
-  return `${module.label} · ${limits.report_limits[module.report_type] ?? 1} reports`;
+/** "Quarterly Report · 4 reports", or "Access" for access-only modules. */
+function moduleRow(module: LicensableModule, limits: PlanLimits, kind: ReviewRow['kind']): ReviewRow {
+  const icon = kind === 'add' ? '+' : module.label.slice(0, 1);
+  if (!module.report_type) return { kind, icon, name: module.label, after: 'Access' };
+  return { kind, icon, name: module.label, after: String(limits.report_limits[module.report_type] ?? 1), unit: 'reports' };
 }
 
-/** Upgrade only: what goes up, in plain words ("PMs 2 → 4", "Board Report added · 10 reports"). */
+/** Upgrade only: what goes up ("Users 2 → 4", "Board Report added · 10 reports"). */
 function upgradeChanges(form: PlanLimits, current: PlanLimits, endsAt: string, currentEnd: string,
-                        catalogue: LicensableModule[]): string[] {
-  const lines: string[] = [];
-  if (endsAt !== currentEnd) lines.push(`End date ${formatDate(currentEnd)} → ${formatDate(endsAt)}`);
-  if (form.max_users !== current.max_users) lines.push(`Users ${current.max_users} → ${form.max_users}`);
+                        catalogue: LicensableModule[]): ReviewRow[] {
+  const rows: ReviewRow[] = [];
+  if (endsAt !== currentEnd) {
+    rows.push({ kind: 'up', icon: '▲', name: 'End date', before: formatDate(currentEnd), after: formatDate(endsAt) });
+  }
+  if (form.max_users !== current.max_users) {
+    rows.push({ kind: 'up', icon: '▲', name: 'Users', before: String(current.max_users), after: String(form.max_users) });
+  }
   for (const module of catalogue) {
     if (!form.modules.includes(module.key)) continue;
     if (!current.modules.includes(module.key)) {
-      const reports = module.report_type ? ` · ${form.report_limits[module.report_type] ?? 1} reports` : '';
-      lines.push(`${module.label} added${reports}`);
+      rows.push(moduleRow(module, form, 'add'));
       continue;
     }
     if (!module.report_type) continue;
     const before = current.report_limits[module.report_type] ?? 1;
     const after = form.report_limits[module.report_type] ?? 1;
-    if (after > before) lines.push(`${module.label} ${before} → ${after} reports`);
+    if (after > before) {
+      rows.push({ kind: 'up', icon: '▲', name: module.label, before: String(before), after: String(after), unit: 'reports' });
+    }
   }
-  return lines;
+  return rows;
 }
 
-/** Every line of the Review popup. */
-export function describeChanges(mode: KeyMode, form: PlanLimits, current: PlanLimits, startsAt: string,
-                                endsAt: string, currentEnd: string, catalogue: LicensableModule[]): string[] {
+/** Every row of the Review popup: what changes (upgrade), or what the key gives (new, renew). */
+export function describeChanges(mode: KeyMode, form: PlanLimits, current: PlanLimits,
+                                endsAt: string, currentEnd: string, catalogue: LicensableModule[]): ReviewRow[] {
   if (mode === 'upgrade') return upgradeChanges(form, current, endsAt, currentEnd, catalogue);
-  const lines: string[] = [];
-  if (mode === 'renew') {
-    lines.push(`New period ${formatDate(startsAt)} → ${formatDate(endsAt)}`, 'Report counts start again from 0');
-  } else {
-    lines.push(`Period ${formatDate(startsAt)} → ${formatDate(endsAt)}`);
-  }
-  lines.push(peopleLine(form));
+  const rows = [usersRow(form)];
   for (const module of catalogue) {
-    if (form.modules.includes(module.key)) lines.push(moduleLine(module, form));
+    if (form.modules.includes(module.key)) rows.push(moduleRow(module, form, 'on'));
   }
-  return lines;
+  return rows;
+}
+
+/** "Annual Report 2 → 4 reports": a row as one line of text (for tests and screen readers). */
+export function reviewRowText(row: ReviewRow): string {
+  const value = row.before ? `${row.before} → ${row.after}` : row.after;
+  return [row.name, value, row.unit].filter(Boolean).join(' ');
 }
 
 /** The report limits to send: one per chosen module that counts reports (at least 1). */
@@ -172,6 +188,8 @@ export default function SparkLicenseKeyPage() {
 // Split from the page so every field starts from the loaded key.
 function KeyEditor({ row }: { row: KeyRow }) {
   const navigate = useNavigate();
+  // A client just added on the Licenses page brings its Client ID along.
+  const passedClientId = (useLocation().state as { serverId?: string } | null)?.serverId ?? '';
   const mode = modeFor(row);
   const today = todayText();
   const onPrem = row.deployment === 'on_prem';
@@ -183,7 +201,7 @@ function KeyEditor({ row }: { row: KeyRow }) {
 
   const [form, setForm] = useState<PlanLimits>(() => startingLimits(row, mode));
   const [endsAt, setEndsAt] = useState(mode === 'upgrade' ? currentEnd : addDays(today, 364));
-  const [clientId, setClientId] = useState(row.server_id ?? '');
+  const [clientId, setClientId] = useState(row.server_id ?? passedClientId);
   const [reviewing, setReviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -195,7 +213,7 @@ function KeyEditor({ row }: { row: KeyRow }) {
   const endOk = endsAt >= earliestEnd;
   const usersOk = !floor || form.max_users >= floor.max_users;
   const ready = clientIdOk && endOk && usersOk && form.modules.length > 0;
-  const changes = describeChanges(mode, form, current, startsAt, endsAt, currentEnd, catalogue);
+  const changes = describeChanges(mode, form, current, endsAt, currentEnd, catalogue);
 
   const makeKey = async () => {
     setSaving(true);
@@ -244,15 +262,13 @@ function KeyEditor({ row }: { row: KeyRow }) {
             End
             <input className="inp" type="date" value={endsAt} min={earliestEnd} onChange={(e) => setEndsAt(e.target.value)} />
           </label>
-          {!endOk && <div className="sub-err">Not before {formatDate(earliestEnd)}</div>}
-          {endOk && mode === 'upgrade' && <div className="sub-hint" style={{ marginTop: 3 }}>Not before {formatDate(currentEnd)}</div>}
-        </div>
+          {!endOk && <div className="sub-err">Not before {formatDate(earliestEnd)}</div>}        </div>
         {onPrem ? (
           <div>
             <label>
               Client ID <span style={{ color: '#9BA3C4', fontWeight: 600 }}>(from the client&apos;s License screen)</span>
               <input className="inp" style={{ fontFamily: "'DM Mono', monospace" }} placeholder="SRV-7K2M-9QXA-4T8P"
-                value={clientId} readOnly={mode !== 'generate' && !!row.server_id} onChange={(e) => setClientId(e.target.value)} />
+                value={clientId} readOnly={(mode !== 'generate' && !!row.server_id) || !!passedClientId} onChange={(e) => setClientId(e.target.value)} />
             </label>
             {clientId.trim() !== '' && !clientIdOk && <div className="sub-err">Looks like SRV-XXXX-XXXX-XXXX</div>}
           </div>
@@ -271,14 +287,24 @@ function KeyEditor({ row }: { row: KeyRow }) {
         </div>
       </div>
 
-      <FormDialog open={reviewing} title={TITLES[mode]} onClose={closeDialog}>
-        <div className="card" style={{ padding: '22px 24px', maxWidth: 460, margin: '0 auto' }}>
-          {made
-            ? <KeyReady company={company} made={made} onDone={backToLicenses} />
-            : <ReviewChanges mode={mode} company={company} changes={changes} error={error} saving={saving}
-                onBack={() => setReviewing(false)} onConfirm={makeKey} onPrem={onPrem} />}
-        </div>
-      </FormDialog>
+      {/* Centred in the screen (the shared FormDialog sits near the top, for long
+          forms). Only ✕, Back / Done or Esc close it — never a click outside. */}
+      <Dialog open={reviewing} onOpenChange={(open) => { if (!open) closeDialog(); }}>
+        <DialogContent className="sub-rv max-w-[480px] max-h-[92vh] overflow-y-auto gap-0 border-0 p-0 rounded-[18px] sm:rounded-[18px]"
+          onInteractOutside={(event) => event.preventDefault()} aria-describedby={undefined}>
+          {made ? (
+            <div style={{ padding: '22px 24px' }}>
+              <DialogTitle className="sr-only">{TITLES[mode]}</DialogTitle>
+              <KeyReady company={company} made={made} onDone={backToLicenses} />
+            </div>
+          ) : (
+            <ReviewChanges mode={mode} company={company} changes={changes} error={error} saving={saving}
+              onBack={() => setReviewing(false)} onConfirm={makeKey} onPrem={onPrem}
+              clientId={onPrem ? clientId.trim().toUpperCase() : ''}
+              period={`${formatDate(startsAt)} → ${formatDate(endsAt)}`} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -291,25 +317,61 @@ const REVIEW_TITLE: Record<KeyMode, (company: string) => string> = {
 const REVIEW_NOTE: Record<KeyMode, string> = {
   generate: 'It starts today.',
   upgrade: 'It replaces their current license now. Usage is kept.',
-  renew: "It starts today. Report counts start again from 0 (old reports stay). Users don't reset.",
+  renew: 'A new period starts today.',
 };
 const CONFIRM_LABEL: Record<KeyMode, string> = { generate: 'Generate key', upgrade: 'Upgrade', renew: 'Renew' };
 
-function ReviewChanges({ mode, company, changes, error, saving, onBack, onConfirm, onPrem }: {
-  mode: KeyMode; company: string; changes: string[]; error: string; saving: boolean;
-  onBack: () => void; onConfirm: () => void; onPrem: boolean;
+function ReviewRowLine({ row }: { row: ReviewRow }) {
+  return (
+    <div className="sub-rv-row" aria-label={reviewRowText(row)}>
+      <span className={`sub-rv-ic ${row.kind}`} aria-hidden="true">{row.icon}</span>
+      <span className="sub-rv-name">
+        {row.name}
+        {row.kind === 'add' && <span className="sub-rv-tag">New</span>}
+      </span>
+      <span className="sub-rv-val">
+        {row.before && <>{row.before} → </>}
+        <b>{row.after}</b>
+        {row.unit && <> {row.unit}</>}
+      </span>
+    </div>
+  );
+}
+
+function ReviewChanges({ mode, company, changes, error, saving, onBack, onConfirm, onPrem, clientId, period }: {
+  mode: KeyMode; company: string; changes: ReviewRow[]; error: string; saving: boolean;
+  onBack: () => void; onConfirm: () => void; onPrem: boolean; clientId: string; period: string;
 }) {
   const confirmLabel = onPrem ? CONFIRM_LABEL[mode] : `${CONFIRM_LABEL[mode]} and activate`;
+  let note = REVIEW_NOTE[mode];
+  if (mode === 'generate' && onPrem) note += " You'll get the key once, to copy and send to the client admin.";
+  const listTitle = mode === 'upgrade' ? 'What changes' : 'What the key gives';
   return (
     <>
-      <div style={{ fontSize: 15, fontWeight: 800, color: '#1A1D2E' }}>{REVIEW_TITLE[mode](company)}</div>
-      <div style={{ fontSize: 11.5, color: '#5A6080', marginTop: 4 }}>{REVIEW_NOTE[mode]}</div>
-      <ul style={{ listStyle: 'none', marginTop: 10, fontSize: 12, lineHeight: 1.9, color: '#1A1D2E' }}>
-        {changes.length === 0 && <li style={{ color: '#9BA3C4' }}>Nothing changes — same as the current license.</li>}
-        {changes.map((line) => <li key={line}>• {line}</li>)}
-      </ul>
-      {error && <div role="alert" style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>{error}</div>}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+      <div className="sub-rv-head">
+        <span className={`sub-key-chip ${mode}`}>{TITLES[mode]}</span>
+        <DialogTitle className="sub-rv-title">{REVIEW_TITLE[mode](company)}</DialogTitle>
+        <div className="sub-rv-note">{note}</div>
+      </div>
+      <div className="sub-rv-body">
+        <dl className="sub-rv-info">
+          <dt>Client</dt><dd>{company}</dd>
+          {clientId && <><dt>Client ID</dt><dd className="mono">{clientId}</dd></>}
+          <dt>Period</dt><dd>{period}</dd>
+        </dl>
+        {mode === 'renew' && (
+          <div className="sub-rv-warn">Report counts start again from 0 (old reports stay). Users don&apos;t reset.</div>
+        )}
+        <div>
+          <div className="sub-rv-sec">{listTitle} · {changes.length}</div>
+          <div className="sub-rv-list">
+            {changes.length === 0 && <div className="sub-rv-empty">Nothing changes — same as the current license.</div>}
+            {changes.map((row) => <ReviewRowLine key={row.name} row={row} />)}
+          </div>
+        </div>
+        {error && <div role="alert" className="sub-rv-error">{error}</div>}
+      </div>
+      <div className="sub-rv-foot">
         <button type="button" className="btn bs" onClick={onBack} disabled={saving}>Back</button>
         <button type="button" className="btn bp" onClick={onConfirm} disabled={saving}>{saving ? 'Saving…' : confirmLabel}</button>
       </div>

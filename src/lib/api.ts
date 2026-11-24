@@ -5720,10 +5720,11 @@ export const sparkLicenses = {
       { method: "POST", body: { email }, noActingCompany: true },
     ),
 
-  addOnPremClient: (name: string) =>
+  // serverId is only checked by the server, not saved: it goes into the first key.
+  addOnPremClient: (name: string, serverId: string) =>
     request<{ company: { id: string; name: string; deployment: "on_prem" } }>(
       "/api/v1/spark/on-prem-clients",
-      { method: "POST", body: { name }, noActingCompany: true },
+      { method: "POST", body: { name, server_id: serverId }, noActingCompany: true },
     ),
 };
 

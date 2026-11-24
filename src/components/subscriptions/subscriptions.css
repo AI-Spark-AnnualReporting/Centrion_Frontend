@@ -326,6 +326,11 @@
 .sub-key-top { display: grid; grid-template-columns: 1.1fr .8fr .9fr 1.3fr auto; gap: 12px; align-items: end; padding: 14px 18px; }
 .sub-key-top label, .sub-key-top .sub-key-f { font-size: 11px; font-weight: 700; color: #5A6080; display: block; }
 .sub-key-top label .inp { margin-top: 5px; }
+/* The line under a field (hint or error) floats below its box, so it doesn't
+   push that field's label and box above the others in the row. */
+.sub-key-top { padding-bottom: 24px; }
+.sub-key-top > div { position: relative; }
+.sub-key-top > div > .sub-err, .sub-key-top > div > .sub-hint { position: absolute; top: 100%; left: 0; white-space: nowrap; }
 .sub-key-who { display: flex; flex-direction: column; gap: 4px; }
 .sub-key-who b { font-size: 15px; font-weight: 800; color: #1A1D2E; }
 .sub-key-chip { font-size: 10px; font-weight: 800; padding: 3px 10px; border-radius: 20px; width: fit-content; }
@@ -386,3 +391,31 @@
 .sub-cur { font-style: normal; font-size: 10.5px; font-weight: 700; color: #9BA3C4; margin-left: 6px; white-space: nowrap; }
 .sub-mt-cap.cur { color: #4040C8; font-weight: 700; }
 .sub-cur { color: #4040C8; }
+
+/* ── License key page: Review popup (mockup: .claude/mockups/license-review-popup-mockup.html) ── */
+.sub-rv { background: #fff; border-radius: 18px; box-shadow: 0 24px 60px rgba(26,29,46,.25); font-family: 'Plus Jakarta Sans', sans-serif; color: #1A1D2E; }
+.sub-rv-head { padding: 22px 24px 0; }
+.sub-rv-head .sub-key-chip { display: inline-block; }
+.sub-rv-title { font-size: 18px; font-weight: 800; margin-top: 10px; line-height: 1.3; }
+.sub-rv-note { font-size: 12px; color: #5A6080; margin-top: 4px; line-height: 1.5; }
+.sub-rv-body { padding: 18px 24px 20px; display: flex; flex-direction: column; gap: 16px; }
+.sub-rv-info { background: #F7F8FC; border: 1px solid #EEF0F7; border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 88px 1fr; row-gap: 8px; font-size: 12px; margin: 0; }
+.sub-rv-info dt { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #9BA3C4; align-self: center; }
+.sub-rv-info dd { font-weight: 700; margin: 0; }
+.sub-rv-info .mono { font-family: 'DM Mono', monospace; }
+.sub-rv-sec { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #8A91AE; margin-bottom: 8px; }
+.sub-rv-list { border: 1px solid #EEF0F7; border-radius: 12px; overflow: hidden; }
+.sub-rv-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; font-size: 12.5px; }
+.sub-rv-row + .sub-rv-row { border-top: 1px solid #EEF0F7; }
+.sub-rv-ic { width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+.sub-rv-ic.up { background: rgba(34,197,94,.14); color: #16A34A; }
+.sub-rv-ic.add { background: #EEEEFF; color: #4040C8; }
+.sub-rv-ic.on { background: #F2F3FA; color: #5A6080; }
+.sub-rv-name { font-weight: 700; flex: 1; }
+.sub-rv-val { color: #5A6080; font-weight: 600; white-space: nowrap; }
+.sub-rv-val b { color: #1A1D2E; }
+.sub-rv-tag { font-size: 9.5px; font-weight: 800; border-radius: 20px; padding: 2px 7px; margin-left: 6px; background: #EEEEFF; color: #4040C8; }
+.sub-rv-empty { padding: 14px; text-align: center; font-size: 12px; color: #9BA3C4; background: #FAFBFD; }
+.sub-rv-warn { font-size: 11.5px; color: #92400E; background: rgba(245,158,11,.1); border-radius: 10px; padding: 9px 12px; line-height: 1.5; }
+.sub-rv-error { font-size: 12px; color: #DC2626; background: rgba(220,38,38,.07); border-radius: 10px; padding: 9px 12px; }
+.sub-rv-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid #EEF0F7; background: #FAFBFD; }

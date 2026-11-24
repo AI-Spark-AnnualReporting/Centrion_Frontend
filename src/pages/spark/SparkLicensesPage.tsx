@@ -142,19 +142,38 @@ function StatusCell({ row }: { row: SparkLicenseRow }) {
   );
 }
 
-function AddOnPremClient({ onAdded }: { onAdded: () => void }) {
+// Same check as the server (license_issuer.SERVER_ID_PATTERN).
+const CLIENT_ID_PATTERN = /^SRV-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+
+// A button that opens a popup asking for the client's name and Client ID (both
+// needed). After adding, the key page opens for the new client with the
+// Client ID filled in.
+function AddOnPremClient() {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [clientId, setClientId] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const navigate = useNavigate();
+
+  const serverId = clientId.trim().toUpperCase();
+  const clientIdOk = CLIENT_ID_PATTERN.test(serverId);
+  const canAdd = !saving && name.trim() !== '' && clientIdOk;
+
+  const close = () => {
+    setOpen(false);
+    setName('');
+    setClientId('');
+    setError('');
+  };
 
   const add = async () => {
-    if (!name.trim()) return;
+    if (!canAdd) return;
     setSaving(true);
     setError('');
     try {
-      await sparkLicenses.addOnPremClient(name.trim());
-      setName('');
-      onAdded();
+      const { company } = await sparkLicenses.addOnPremClient(name.trim(), serverId);
+      navigate(`/spark/licenses/${encodeURIComponent(company.id)}/key`, { state: { serverId } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add the client.');
     } finally {
@@ -163,13 +182,33 @@ function AddOnPremClient({ onAdded }: { onAdded: () => void }) {
   };
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-      <input className="inp" placeholder="On-premises client name" value={name} onChange={(e) => setName(e.target.value)} style={{ width: 240 }} />
-      <button type="button" className="btn bs" onClick={add} disabled={saving || !name.trim()}>
-        {saving ? 'Adding…' : 'Add on-premises client'}
-      </button>
-      {error && <span style={{ fontSize: 12, color: '#DC2626' }}>{error}</span>}
-    </div>
+    <>
+      <button type="button" className="btn bp" onClick={() => setOpen(true)}>Add on-premises client</button>
+      <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) close(); }}>
+        <DialogContent className="max-w-md" onInteractOutside={(event) => event.preventDefault()} aria-describedby={undefined}>
+          <DialogTitle>Add on-premises client</DialogTitle>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label>
+              Client name
+              <input className="inp" value={name} onChange={(e) => setName(e.target.value)} placeholder="Aramco" />
+            </label>
+            <label>
+              Client ID <span style={{ color: '#9BA3C4', fontWeight: 600 }}>(from the client&apos;s License screen)</span>
+              <input className="inp" value={clientId} onChange={(e) => setClientId(e.target.value)}
+                placeholder="SRV-7K2M-9QXA-4T8P" style={{ fontFamily: "'DM Mono', monospace" }} />
+            </label>
+            {clientId.trim() !== '' && !clientIdOk && <div className="sub-err">Looks like SRV-XXXX-XXXX-XXXX</div>}
+            {error && <div role="alert" style={{ fontSize: 12, color: '#DC2626' }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn bs" onClick={close}>Cancel</button>
+              <button type="button" className="btn bp" onClick={add} disabled={!canAdd}>
+                {saving ? 'Adding…' : 'Add client'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -356,7 +395,7 @@ export default function SparkLicensesPage() {
             License keys for clients running Centriyon on their own servers. Cloud companies subscribe to a plan instead.
           </div>
         </div>
-        {tab === 'on_prem' && <AddOnPremClient onAdded={load} />}
+        {tab === 'on_prem' && <AddOnPremClient />}
       </div>
 
       {tab !== 'requests' && (
