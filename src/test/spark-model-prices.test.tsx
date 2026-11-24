@@ -2,7 +2,7 @@
 // Spark only types prices. Plan: Centriton/.claude/plans/model-prices-from-code.md
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ModelPriceList } from "@/types/ai-credits";
 
@@ -29,9 +29,10 @@ const { parseErrorBody, ApiError } = await import("@/lib/api");
 function listing(overrides: Partial<ModelPriceList> = {}): ModelPriceList {
   return {
     items: [
-      { model: "gpt-9", used_by: ["Annual Reporting"], has_price: false,
+      { model: "gpt-9", used_by: ["Annual Reporting"], steps: { "Annual Reporting": ["Writing a section or a department's draft"] }, has_price: false,
         input_price_per_million: null, output_price_per_million: null, updated_at: null },
-      { model: "gpt-4o", used_by: ["Centriyon", "Annual Reporting"], has_price: true,
+      { model: "gpt-4o", used_by: ["Centriyon", "Annual Reporting"],
+        steps: { Centriyon: ["Company chatbot", "Writing quarterly reports"], "Annual Reporting": ["Report chat"] }, has_price: true,
         input_price_per_million: 2.5, output_price_per_million: 10, updated_at: "2026-11-15T00:00:00Z" },
     ],
     annual_reporting_reachable: true,
@@ -150,5 +151,37 @@ describe("Copilot refusals show the backend's words", () => {
     const error = new ApiError(403, "Forbidden", body, "/api/v1/chat/");
     expect(error.message).toBe("Not enough AI credits (balance -3). Ask your admin to buy more.");
     expect(parseErrorBody("not json")).toBe("not json");
+  });
+});
+
+
+describe("Which steps use a model (the info icon)", () => {
+  it("hovering the icon lists each app's steps", async () => {
+    modelPrices.mockResolvedValue(listing());
+    showPage();
+    fireEvent.mouseEnter(await screen.findByRole("button", { name: "Where gpt-4o is used" }));
+    const box = await screen.findByRole("dialog");
+    expect(within(box).getByText("Centriyon")).toBeInTheDocument();
+    expect(within(box).getByText("Company chatbot")).toBeInTheDocument();
+    expect(within(box).getByText("Writing quarterly reports")).toBeInTheDocument();
+    expect(within(box).getByText("Annual Reporting")).toBeInTheDocument();
+    expect(within(box).getByText("Report chat")).toBeInTheDocument();
+  });
+
+  it("clicking the icon opens it too (touch screens)", async () => {
+    modelPrices.mockResolvedValue(listing());
+    showPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Where gpt-9 is used" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Writing a section or a department's draft");
+  });
+
+  it("a model seen only in recent usage says so", async () => {
+    modelPrices.mockResolvedValue(listing({
+      items: [{ model: "gpt-7", used_by: ["Recent usage"], steps: {}, has_price: false,
+        input_price_per_million: null, output_price_per_million: null, updated_at: null }],
+    }));
+    showPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Where gpt-7 is used" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Not set in either app's .env");
   });
 });

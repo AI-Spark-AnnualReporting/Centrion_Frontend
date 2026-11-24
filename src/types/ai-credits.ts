@@ -76,6 +76,9 @@ export type ModelUsedBy = "Centriyon" | "Annual Reporting" | "Recent usage";
 export interface ModelPrice {
   model: string;
   used_by: ModelUsedBy[];
+  // What each app uses this model for, in plain words ({"Centriyon": ["Company chatbot", ...]}).
+  // Empty for a model seen only in recent usage.
+  steps: Partial<Record<ModelUsedBy, string[]>>;
   has_price: boolean;
   input_price_per_million: number | null;    // null = no price yet
   output_price_per_million: number | null;

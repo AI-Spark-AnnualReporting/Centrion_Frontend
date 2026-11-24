@@ -12,7 +12,8 @@
 //
 // Route: /spark/ai-credits · Plan: Centriton/.claude/plans/ai-credits.md
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ErrorPopup } from '@/components/shared/ErrorPopup';
 import { Spinner } from '@/components/shared/Spinner';
 import {
@@ -415,6 +416,50 @@ function PriceBox({ label, value, onChange }: { label: string; value: string; on
   );
 }
 
+// How long the steps box stays open after the mouse leaves, so it can move from
+// the ⓘ onto the box without it closing in between.
+const INFO_CLOSE_DELAY_MS = 150;
+
+/** The ⓘ beside a model: hover or click shows which steps use it, per app. */
+export function ModelStepsInfo({ price }: { price: ModelPrice }) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+
+  const openNow = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const closeSoon = () => {
+    closeTimer.current = window.setTimeout(() => setOpen(false), INFO_CLOSE_DELAY_MS);
+  };
+
+  const apps = Object.entries(price.steps ?? {}).filter(([, labels]) => labels && labels.length > 0);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={`Where ${price.model} is used`} className="model-info-btn"
+          onMouseEnter={openNow} onMouseLeave={closeSoon}>
+          i
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="model-info-box" onMouseEnter={openNow} onMouseLeave={closeSoon}>
+        <div className="model-info-title">{price.model}</div>
+        {apps.length === 0 && (
+          <p className="model-info-note">Not set in either app's .env. Seen in AI answers in the last 30 days.</p>
+        )}
+        {apps.map(([app, labels]) => (
+          <div key={app} className="model-info-app">
+            <div className="model-info-app-name">{app}</div>
+            <ul>
+              {labels!.map((label) => <li key={label}>{label}</li>)}
+            </ul>
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function ModelPriceRow({ price, onSave }: { price: ModelPrice; onSave: (model: string, body: PriceBody) => void }) {
   const [inputText, setInputText] = useState(priceText(price.input_price_per_million));
   const [outputText, setOutputText] = useState(priceText(price.output_price_per_million));
@@ -458,10 +503,13 @@ function ModelPriceRow({ price, onSave }: { price: ModelPrice; onSave: (model: s
         )}
       </td>
       <td style={{ color: '#9BA3C4' }}>{price.updated_at ? price.updated_at.slice(0, 10) : '—'}</td>
-      <td style={{ textAlign: 'right' }}>
-        {state.changed && state.valid && (
-          <button type="button" className="btn bp" onClick={save}>Save</button>
-        )}
+      <td>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {state.changed && state.valid && (
+            <button type="button" className="btn bp" onClick={save}>Save</button>
+          )}
+          <ModelStepsInfo price={price} />
+        </div>
       </td>
     </tr>
   );
