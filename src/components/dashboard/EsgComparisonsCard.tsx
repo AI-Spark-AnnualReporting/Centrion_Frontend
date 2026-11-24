@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { reports as reportsApi } from '@/lib/api';
+import { loadDashboardReportList } from '@/lib/dashboard-cache';
 import { useAuth } from '@/context/AuthContext';
 import { CoverageByReportChart } from '@/components/dashboard/DashboardESG';
 
@@ -26,8 +26,7 @@ export function EsgComparisonsCard() {
   useEffect(() => {
     if (!companyId) return;
     let cancelled = false;
-    reportsApi
-      .list<{ reports?: EsgReportRow[] }>(companyId)
+    loadDashboardReportList<{ reports?: EsgReportRow[] }>(companyId)
       .then((r) => {
         if (cancelled) return;
         setReports((r?.reports ?? []).filter((x) => (x.report_type ?? '').toLowerCase() === 'esg' && x.period));

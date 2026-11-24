@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { quarterlyReports } from '@/lib/api';
-import { Spinner } from '@/components/shared/Spinner';
+import { Skeleton } from '@/components/ui/skeleton';
 import { QuarterlyReportStepper } from '@/components/quarterly/QuarterlyReportStepper';
 import { CoverRenderer } from '@/components/quarterly/CoverRenderer';
 import { CoverTemplatePicker } from '@/components/quarterly/CoverTemplatePicker';
@@ -103,6 +103,34 @@ export function toProduced(s: AssembledSection): ProducedSection {
   };
 }
 
+/** A placeholder shaped like the report (cover + a few sections) while it
+ *  loads, instead of a lone spinner (QA audit QR-05). */
+function ReportLoadingSkeleton() {
+  return (
+    <div role="status" aria-label="Assembling report" style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ fontSize: 12, color: '#6B7280', textAlign: 'center' }}>Assembling report…</div>
+      <Skeleton className="w-full" style={{ height: 300, borderRadius: 12 }} />
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ background: '#fff', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Skeleton style={{ height: 18, width: '40%' }} />
+          <Skeleton style={{ height: 12, width: '100%' }} />
+          <Skeleton style={{ height: 12, width: '92%' }} />
+          <Skeleton style={{ height: 12, width: '76%' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The "approved" flag the Reports page passes in the navigation, if any. */
+function readApprovedHint(state: unknown): boolean | undefined {
+  if (state && typeof state === 'object' && 'approved' in state) {
+    const value = (state as { approved?: unknown }).approved;
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
 export default function AssembledReportPage() {
   const { reportId } = useParams<{ reportId: string }>();
   const navigate = useNavigate();
@@ -140,7 +168,13 @@ export default function AssembledReportPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   // approve & lock
-  const [approved, setApproved] = useState(false);
+  // The Reports page passes whether this report is approved, so the locked
+  // header shows at once. Without it (a direct link or a refresh) the status is
+  // unknown until the report loads, and the edit/approve actions stay hidden
+  // until then — an approved report used to show "Approve & Lock" for the whole
+  // load (QA audit QR-05).
+  const approvedHint = readApprovedHint(useLocation().state);
+  const [approved, setApproved] = useState(approvedHint === true);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
   // Only for the step indicator — Custom reports have an extra Financial Data step.
   const [metricsMode, setMetricsMode] = useState<MetricsMode | null>(null);
@@ -149,6 +183,8 @@ export default function AssembledReportPage() {
   const [approveError, setApproveError] = useState<string | null>(null);
 
   const companyName = coverMeta.company ?? user?.company_name ?? null;
+  // Whether we know if the report is approved: from the Reports page, or once loaded.
+  const statusKnown = approvedHint !== undefined || !loading;
 
   // ── load: assembled report + picker catalogue ──
   useEffect(() => {
@@ -174,6 +210,7 @@ export default function AssembledReportPage() {
         const { approved: isApproved, approvedAt: at } = readApprovalStatus(res);
         setApproved(isApproved);
         setApprovedAt(at);
+        if (skippedPicker && !isApproved) loadPickerCatalogue();
         setCoverMeta({
           company: res.header?.company_name ?? null,
           period: res.header?.period_label ?? null,
@@ -189,20 +226,29 @@ export default function AssembledReportPage() {
         }
       });
 
-    quarterlyReports.getCoverTemplates(companyId, reportId).then((res) => {
-      setCompanyDefault(res.company_default ?? null);
-      if (cancelled) return;
-      const t = res.cover_templates ?? [];
-      setCoverTemplates(t);
-      setCoverTemplateKey((prev) => prev ?? (t.find((x) => x.is_default) ?? t[0])?.key ?? null);
-    }).catch(() => {});
-    quarterlyReports.getColorPalettes(companyId).then((res) => {
-      if (!cancelled) setPalettes(res.color_palettes ?? []);
-    }).catch(() => {});
+    // The cover picker's catalogue is only needed while the report can still be
+    // edited. Known-approved: skip it (two fewer requests); if the report turns
+    // out NOT approved after all, it's loaded once the report arrives (below).
+    const loadPickerCatalogue = () => {
+      quarterlyReports.getCoverTemplates(companyId, reportId).then((res) => {
+        setCompanyDefault(res.company_default ?? null);
+        if (cancelled) return;
+        const t = res.cover_templates ?? [];
+        setCoverTemplates(t);
+        setCoverTemplateKey((prev) => prev ?? (t.find((x) => x.is_default) ?? t[0])?.key ?? null);
+      }).catch(() => {});
+      quarterlyReports.getColorPalettes(companyId).then((res) => {
+        if (!cancelled) setPalettes(res.color_palettes ?? []);
+      }).catch(() => {});
+    };
+    const skippedPicker = approvedHint === true;
+    if (!skippedPicker) loadPickerCatalogue();
 
     return () => {
       cancelled = true;
     };
+    // approvedHint comes from the navigation and never changes while mounted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, reportId, retryKey]);
 
   // "Saved ✓" flash auto-clears.
@@ -299,13 +345,15 @@ export default function AssembledReportPage() {
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: DARK, margin: 0, lineHeight: 1.2 }}>Assembled report</h1>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: MUTED }}>
-            {approved
-              ? 'This report is approved and locked — read-only.'
-              : 'Cover first, then every section. Click the pencil to edit any section; changes save automatically.'}
+            {!statusKnown
+              ? 'Loading the report…'
+              : approved
+                ? 'This report is approved and locked — read-only.'
+                : 'Cover first, then every section. Click the pencil to edit any section; changes save automatically.'}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {approved ? (
+          {!statusKnown ? null : approved ? (
             <>
               <span className="badge b-gn" style={{ fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.2L5 8.7l4.5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -350,7 +398,7 @@ export default function AssembledReportPage() {
         }}
       >
         {loading ? (
-          <Spinner pad={80} />
+          <ReportLoadingSkeleton />
         ) : fetchError ? (
           <div style={{ maxWidth: 760, margin: '0 auto', padding: '16px 20px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
             <span style={{ fontSize: 13, color: '#DC2626' }}>{fetchError}</span>
@@ -433,7 +481,7 @@ export default function AssembledReportPage() {
 
       {/* Footer */}
       <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid #E5E7EF', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        {!approved && (
+        {statusKnown && !approved && (
           <button className="btn bs" style={{ fontSize: 13, padding: '10px 18px' }} onClick={() => navigate(`/quarterly-report/${reportId}/preview`)}>
             ← Back
           </button>

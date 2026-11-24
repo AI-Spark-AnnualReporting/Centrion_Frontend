@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
+import { YearPicker } from '@/components/shared/YearPicker';
+import { getFiscalPeriod } from '@/lib/fiscalPeriod';
 import { useNavigate, useParams } from 'react-router-dom';
 import { sarCycles, sarUsers, adminConsole, companies, ApiError } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -49,6 +51,17 @@ const PRIMARY = '#4040C8';
 // type=date wants YYYY-MM-DD; cycle dates may carry a time component.
 const toDateInput = (s?: string | null) => (s ? s.slice(0, 10) : '');
 
+/** The company's fiscal year-end month (1-12), or null if it can't be loaded. */
+async function getCompanyYearEndMonth(): Promise<number | null> {
+  try {
+    const company = await companies.getMyCompany();
+    return company?.fiscal_year_end_month ?? null;
+  } catch {
+    // getFiscalPeriod falls back to a December year-end.
+    return null;
+  }
+}
+
 // ── Edit Cycle modal ────────────────────────────────────────────────────────
 function EditCycleModal({
   cycle,
@@ -62,21 +75,22 @@ function EditCycleModal({
   // Prefill defensively — the GET response may use either the new SAR field
   // names (cycle_name/start_date/sector/is_shariah) or the older ones.
   const [name, setName] = useState(cycle.cycle_name ?? cycle.name ?? '');
-  const [fiscalYear, setFiscalYear] = useState(String(cycle.fiscal_year));
+  // The year saved on the cycle right now — used to spot a real change.
+  const savedFiscalYear = cycle.fiscal_year ?? null;
+  const [fiscalYear, setFiscalYear] = useState<number | null>(savedFiscalYear);
+  const fiscalYearChanged = fiscalYear !== null && fiscalYear !== savedFiscalYear;
   // Project Manager isn't editable here — keep the cycle's current PM and send
   // it back unchanged so the PUT doesn't drop it.
   const projectManagerId = cycle.project_manager_id;
-  const [startDate, setStartDate] = useState(toDateInput(cycle.start_date ?? cycle.cycle_start_date));
-  const [endDate, setEndDate] = useState(toDateInput(cycle.end_date ?? cycle.cycle_end_date));
+  // Cycle start/end dates are no longer edited here: they hold the fiscal period
+  // of the cycle's year and are only rewritten when that year changes (below).
   const [submissionDeadline, setSubmissionDeadline] = useState(toDateInput(cycle.submission_deadline));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const canSubmit =
     name.trim().length >= 3 &&
-    fiscalYear.trim() !== '' &&
-    startDate !== '' &&
-    endDate !== '' &&
+    fiscalYear !== null &&
     submissionDeadline !== '';
 
   const submit = async () => {
@@ -86,12 +100,18 @@ function EditCycleModal({
     try {
       const payload: Partial<CreateCyclePayload> = {
         cycle_name: name.trim(),
-        fiscal_year: parseInt(fiscalYear, 10),
         project_manager_id: projectManagerId,
-        start_date: startDate,
-        end_date: endDate,
         submission_deadline: submissionDeadline,
       };
+      // Only send the year when it really changed, so a normal edit never touches it.
+      // The stored start/end dates follow the year, so they move with it.
+      if (fiscalYearChanged && fiscalYear !== null) {
+        const yearEndMonth = await getCompanyYearEndMonth();
+        const period = getFiscalPeriod(fiscalYear, yearEndMonth);
+        payload.fiscal_year = fiscalYear;
+        payload.start_date = period.startDate;
+        payload.end_date = period.endDate;
+      }
       await sarCycles.update(cycle.id, payload);
       onSaved();
     } catch (e) {
@@ -115,20 +135,17 @@ function EditCycleModal({
             <input className="inp" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="fl" style={{ margin: 0 }}>
-            <label className="fl-label">Fiscal Year *</label>
-            <input className="inp" type="number" value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} />
+            <label className="fl-label" htmlFor="edit-cycle-fiscal-year">Fiscal Year *</label>
+            <YearPicker id="edit-cycle-fiscal-year" value={fiscalYear} onChange={setFiscalYear} />
+            {/* Changing the year does not rewrite what was already made for the
+                cycle (questions, briefs), so say so before the admin saves. */}
+            {fiscalYearChanged && (
+              <div role="status" style={{ fontSize: 11, color: '#B45309', marginTop: 6, lineHeight: 1.5 }}>
+                Questions and briefs already written stay anchored to FY{savedFiscalYear}. Only new ones will use FY{fiscalYear}.
+              </div>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="fl" style={{ margin: 0 }}>
-              <label className="fl-label">Start Date *</label>
-              <input className="inp" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div className="fl" style={{ margin: 0 }}>
-              <label className="fl-label">End Date *</label>
-              <input className="inp" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
-          </div>
           <div className="fl" style={{ margin: 0 }}>
             <label className="fl-label">Submission Deadline *</label>
             <input className="inp" type="date" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} />

@@ -12,8 +12,12 @@ import { BackToOrigin } from '../shared/BackToOrigin';
 const PAGE_NAMES: Record<string, string> = {
   '/companies': 'Companies',
   '/dashboard': 'Command Center',
-  '/reports': 'Reports',
+  // The ESG Validator list (the sidebar's "ESG Validator" item lives here).
+  '/reports': 'ESG Validator',
   '/reports/quarterly': 'Quarterly Reports',
+  // Full-screen progress page shared by ESG and Quarterly runs, so a neutral
+  // title. Pinned here so the '/reports/' prefix below can't claim it.
+  '/reports/processing': 'Reports',
   '/kpi': 'KPI Normalizer',
   '/compliance': 'Compliance Validation',
   '/ai': 'AI Copilot',
@@ -22,6 +26,8 @@ const PAGE_NAMES: Record<string, string> = {
   '/stakeholders': 'Leadership',
   '/docs': 'Document Bank',
   '/questions': 'Questions Bank',
+  // Matches the sidebar item; used to fall through to "Command Center" (QA audit UR-02b).
+  '/upload-reports': 'Upload Previous Reports',
   '/profile': 'User Profile',
   '/profile/company': 'Company Profile',
   '/admin-console': 'Admin Console',
@@ -64,6 +70,16 @@ function PageLoader() {
 // shorter prefix added later would otherwise silently shadow a longer one.
 const PAGE_NAME_PREFIXES: [string, string][] = [
   ['/quarterly-report', 'Quarterly Report'],
+  // The builder steps carry a report id (/board-report/<id>/sources …), so the
+  // exact '/board-report' entry above never matched them (QA audit BR-03).
+  ['/board-report', 'Board Report'],
+  // The client's plan page and its checkout step; matches the sidebar item.
+  // Both used to fall through to "Command Center" (QA audit SB-05).
+  ['/admin-console/subscription', 'Subscription'],
+  // An ESG result is /reports/<id>. The exact entries above (/reports/quarterly,
+  // /reports/processing) are checked first, so only result pages reach this
+  // (QA audit ES-03).
+  ['/reports/', 'ESG Validator'],
   ['/spark/licenses', 'Licenses'],
   ['/annual-report', 'Annual Report'],
   ['/earnings', 'Earnings Report'],

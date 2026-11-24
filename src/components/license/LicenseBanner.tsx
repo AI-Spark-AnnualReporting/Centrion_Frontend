@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { license } from '@/lib/api';
+import { loadCompanyLicense } from '@/lib/license-cache';
 import type { CompanyLicense } from '@/types/license';
 import { useLicenseRoom } from './useLicenseRoom';
 
@@ -229,9 +229,12 @@ export function LicenseBanner() {
   const lastModules = useRef<string | null>(null);
   const isClientAdmin = user?.role === 'admin' && !!user.company_id;
 
-  const check = useCallback(async () => {
+  // `fresh` asks the server even inside the shared cache's 30 s; only the
+  // "waiting for activation" recheck needs that. Page changes reuse the shared
+  // answer instead of starting a new ~4 s request each click (QA audit AC-04).
+  const check = useCallback(async (fresh = false) => {
     try {
-      const next = await license.get();
+      const next = await loadCompanyLicense({ fresh });
       const nowActive = next.status === 'active';
       const modules = [...next.modules].sort().join(',');
       // Turned active since the last check (Spark issued or unlocked it), or
@@ -251,7 +254,7 @@ export function LicenseBanner() {
   useEffect(() => {
     if (!isClientAdmin) return;
     const timer = window.setInterval(() => {
-      if (wasActive.current === false) check();
+      if (wasActive.current === false) check(true);
     }, RECHECK_MS);
     return () => window.clearInterval(timer);
   }, [isClientAdmin, check]);

@@ -144,24 +144,9 @@ export default function ProfilePage() {
               <span style={{ fontSize: 13, fontWeight: 800, color: '#1A1D2E' }}>
                 Personal Information
               </span>
-              <button
-                type="button"
-                disabled
-                title="Profile edit will be wired up when the backend exposes the endpoint."
-                style={{
-                  padding: '5px 14px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#5A6080',
-                  background: '#fff',
-                  border: '1px solid #E2E4F0',
-                  borderRadius: 999,
-                  cursor: 'not-allowed',
-                  opacity: 0.7,
-                }}
-              >
-                Edit
-              </button>
+              {/* No Edit button: users can't edit their own profile, by design. A
+                  disabled button with a developer note as its tooltip used to sit
+                  here (QA audit PU-02). */}
             </div>
 
             <ProfileRow label="Full name" value={profile.full_name} />

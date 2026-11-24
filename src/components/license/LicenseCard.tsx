@@ -14,6 +14,7 @@ import { CopyBox } from '@/components/spark/CopyBox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { license } from '@/lib/api';
+import { loadCompanyLicense, setCompanyLicense, subscribeCompanyLicense } from '@/lib/license-cache';
 import { LICENSE_CARD_ID, LICENSE_KEY_BOX_ID, LICENSE_UNLOCK_BOX_ID, REQUEST_RENEWAL_HASH, REQUEST_UPGRADE_HASH, SUBSCRIPTION_PAGE, TONE_STYLE, pickBanner } from '@/components/license/LicenseBanner';
 import type { CompanyLicense, LicenseStatus } from '@/types/license';
 
@@ -82,10 +83,13 @@ export function LicenseCard() {
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
-    license.get().then(setData).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load the license.'));
+    // Shared with the sidebar and banner: one request per page, not three (QA audit AC-04).
+    loadCompanyLicense().then(setData).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load the license.'));
   }, []);
 
   useEffect(load, [load]);
+  // A newer license fetched elsewhere (e.g. the banner noticing activation) shows here too.
+  useEffect(() => subscribeCompanyLicense(setData), []);
 
   // Opened from the license banner (/admin-console#license-key-box): once the
   // card is drawn, scroll to the part it asked for and put the cursor there.
@@ -107,6 +111,8 @@ export function LicenseCard() {
   // After a key or unlock code is accepted: show it, and refresh the login so
   // the licensed modules appear without logging out.
   const afterChange = async (next: CompanyLicense) => {
+    // Store the server's new answer for the sidebar and banner too, not just this card.
+    setCompanyLicense(next);
     setData(next);
     try {
       await refreshPermissions();

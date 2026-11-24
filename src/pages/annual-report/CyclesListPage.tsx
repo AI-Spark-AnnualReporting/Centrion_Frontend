@@ -12,6 +12,8 @@ import CompanyLoginsDialog from '@/pages/spark/CompanyLoginsDialog';
 import { readAndClearNewLogins, type NewLoginsRecord } from '@/lib/sparkLogins';
 import {
   CycleStatusBadge,
+  formatCreatedDate,
+  formatCreatedTooltip,
   formatCycleDate,
   isOverdue,
 } from './cycle-ui';
@@ -257,6 +259,7 @@ export default function CyclesListPage() {
               <tr style={{ background: '#FAFBFE', borderBottom: '1px solid #ECEEF8' }}>
                 <th style={th}>Cycle name</th>
                 <th style={th}>Project manager</th>
+                <th style={th}>Created</th>
                 <th style={th}>Deadline</th>
                 <th style={th}>Status</th>
                 <th style={{ ...th, width: 90 }} />
@@ -278,6 +281,11 @@ export default function CyclesListPage() {
                         </span>
                         <span style={{ color: '#1A1D2E' }}>{c.project_manager_name ?? '—'}</span>
                       </div>
+                    </td>
+                    {/* When the admin created the cycle (created_at). Muted so it
+                        never competes with the deadline; full date + time on hover. */}
+                    <td style={{ ...td, color: '#9BA3C4', whiteSpace: 'nowrap' }} title={formatCreatedTooltip(c.created_at)}>
+                      {formatCreatedDate(c.created_at)}
                     </td>
                     <td style={{ ...td, color: overdue ? '#DC2626' : '#5A6080', fontWeight: overdue ? 700 : 400 }}>
                       {overdue && <span style={{ marginRight: 4 }}>⚑</span>}

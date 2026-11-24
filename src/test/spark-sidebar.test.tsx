@@ -54,6 +54,11 @@ vi.mock("@/lib/api", async (importOriginal) => ({
 
 const { Sidebar } = await import("@/components/layout/Sidebar");
 
+// Each test sets its own license; the shared cache (lib/license-cache.ts) must
+// not carry one over.
+const { clearCompanyLicense } = await import("@/lib/license-cache");
+beforeEach(() => clearCompanyLicense());
+
 const SPARK = { user_id: "usr_s", full_name: "Spark", email: "spark@wearespark.me", role: "spark_internal" };
 const ADMIN = { ...SPARK, role: "admin" };
 

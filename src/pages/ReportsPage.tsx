@@ -634,10 +634,14 @@ export default function ReportsPage() {
   // dedicated detail page, which handles its own coverage fetch.
   const handleReportCardClick = (report: ReportSummary) => {
     if (isQuarterlyReport(report)) {
+      const approved = isApprovedReport(report);
+      // Pass what this page already knows, so the report screen shows the right
+      // (locked or editable) header at once instead of guessing while it loads.
       navigate(
-        isApprovedReport(report)
+        approved
           ? `/quarterly-report/${report.id}/report`
           : `/quarterly-report/${report.id}/outline`,
+        { state: { approved } },
       );
     } else {
       navigate(`/reports/${report.id}`);
