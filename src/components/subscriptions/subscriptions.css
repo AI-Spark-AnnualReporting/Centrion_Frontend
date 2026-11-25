@@ -268,7 +268,7 @@
 .sub-co-people { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
 .sub-co-pbox { background: #F7F7FF; border-radius: 10px; padding: 8px 10px; }
 .sub-co-pbox b { display: block; font-size: 16px; font-weight: 800; color: #1A1D2E; }
-.sub-co-pbox span { font-size: 10.5px; color: #5A6080; font-weight: 600; }
+.sub-co-pbox span { display: block; font-size: 10.5px; line-height: 1.35; color: #5A6080; font-weight: 600; }
 .sub-co-swap { display: flex; align-items: center; gap: 10px; font-size: 12px; flex-wrap: wrap; }
 .sub-co-swap .old { text-decoration: line-through; color: #9BA3C4; font-weight: 700; }
 .sub-co-swap .arrow { color: #4040C8; font-weight: 800; }

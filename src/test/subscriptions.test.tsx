@@ -571,9 +571,9 @@ const CURRENT = {
                   ends_at: "2027-11-03", starts_at: "2026-11-04", status: "active" },
 };
 
-function renderSubscriptionPage() {
+function renderSubscriptionPage(state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={["/admin-console/subscription"]}>
+    <MemoryRouter initialEntries={[{ pathname: "/admin-console/subscription", state }]}>
       <Routes>
         <Route path="/admin-console/subscription" element={<SubscriptionPage />} />
         <Route path="/admin-console/subscription/checkout" element={<Where />} />
@@ -639,6 +639,25 @@ describe("SubscriptionPage", () => {
     await screen.findByText("Made for you");
     expect(container.querySelector(".sub-fade-others")).toBeNull();
     expect(container.querySelector(".sub-pc.current")).toBeNull();
+  });
+
+  it("Renew subscription goes straight to the checkout for the plan they had", async () => {
+    subscriptions.current.mockResolvedValue({ ...CURRENT, status: "expired" });
+    subscriptions.startCheckout.mockResolvedValue({ id: "chk_renew" });
+    renderSubscriptionPage({ renew: true });
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/admin-console/subscription/checkout"));
+    expect(subscriptions.startCheckout.mock.calls[0][0]).toEqual({ plan_id: "plan_gold" });
+  });
+
+  it("Renew of a plan no longer on sale shows a popup and stays on the plans", async () => {
+    subscriptions.current.mockResolvedValue({
+      ...CURRENT, status: "expired",
+      subscription: { ...CURRENT.subscription, plan_id: "plan_gone", plan_name: "Standard v1" },
+    });
+    subscriptions.startCheckout.mockClear();
+    renderSubscriptionPage({ renew: true });
+    expect(await screen.findByText("Standard v1 is no longer available")).toBeInTheDocument();
+    expect(subscriptions.startCheckout).not.toHaveBeenCalled();
   });
 
   it("the duration tabs filter the cards (Enterprise always shows)", async () => {
@@ -737,11 +756,21 @@ describe("CheckoutPage", () => {
     expect(screen.getByText(/Switched off \(you confirmed\):/)).toBeInTheDocument();
   });
 
-  it("shows the bought AI credits that move to the new plan", async () => {
+  it("shows the unused AI credits that move to the new plan", async () => {
     aiCredits.summary.mockResolvedValueOnce({ subscription: { carry_to_next: 114 } } as never);
     renderCheckout({ checkout: { ...CHECKOUT, ai_credits: 200 }, catalogue: CATALOGUE, replaces: "Test Plan v1" });
     expect(await screen.findByTestId("carried-credits")).toHaveTextContent("+114");
-    expect(screen.getByText(/114 unused bought AI credits move to Standard, so you start with 314/)).toBeInTheDocument();
+    expect(screen.getByText(/114 unused AI credits from Test Plan v1 move to Standard, so you start with 314/)).toBeInTheDocument();
+  });
+
+  it("shimmers where the carried credits go until they load", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    aiCredits.summary.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }) as never);
+    renderCheckout({ checkout: { ...CHECKOUT, ai_credits: 100 }, catalogue: CATALOGUE, replaces: "MAX" });
+    expect(screen.getByTestId("carried-credits-skeleton")).toBeInTheDocument();
+    answer({ subscription: { carry_to_next: 295 } });
+    expect(await screen.findByTestId("carried-credits")).toHaveTextContent("+295");
+    expect(screen.queryByTestId("carried-credits-skeleton")).toBeNull();
   });
 
   it("shows nothing about carried credits when nothing moves", async () => {

@@ -7,9 +7,10 @@
 //
 // Plan: Centriton/.claude/plans/cloud-subscriptions-v2-redesign.md
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Spinner } from '@/components/shared/Spinner';
+import { ErrorPopup } from '@/components/shared/ErrorPopup';
 import { FormDialog } from '@/components/subscriptions/FormDialog';
 import { CardStrip, DurationTabs, PlanCard, matchesDuration, type DurationFilter } from '@/components/subscriptions/PlanCard';
 import { durationLabel } from '@/components/subscriptions/PlanFields';
@@ -74,6 +75,10 @@ export default function SubscriptionPage() {
   const [startingPlanId, setStartingPlanId] = useState<string | null>(null);
   const [check, setCheck] = useState<PlanCheck>(null);
   const [understood, setUnderstood] = useState(false);
+  // "Renew subscription" (expired banner, Usage): straight to the old plan's
+  // checkout; the name here = that plan isn't on sale any more (popup).
+  const [notAvailable, setNotAvailable] = useState<string | null>(null);
+  const renewHandled = useRef(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -125,6 +130,20 @@ export default function SubscriptionPage() {
       setStartingPlanId(null);
     }
   };
+
+  const renewRequested = (location.state as { renew?: boolean } | null)?.renew === true;
+  useEffect(() => {
+    if (!renewRequested || renewHandled.current || loading || !current) return;
+    renewHandled.current = true;
+    navigate(location.pathname, { replace: true, state: null });
+    const lastPlan = current.subscription;
+    if (current.status !== 'expired' || !lastPlan) return;
+    const plan = plans.find((offered) => offered.id === lastPlan.plan_id);
+    if (plan) buyNow(plan);
+    else setNotAvailable(lastPlan.plan_name);
+    // buyNow is recreated each render; this runs once, after the plans load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renewRequested, loading, current, plans]);
 
   if (loading && !current) return <Spinner pad={80} />;
 
@@ -234,6 +253,12 @@ export default function SubscriptionPage() {
           </div>
         )}
       </div>
+      <ErrorPopup
+        open={notAvailable !== null}
+        title={`${notAvailable ?? 'Your plan'} is no longer available`}
+        message="Your previous plan is no longer available, so it can't be renewed as it was. Choose a plan to continue: your unused AI credits still move across."
+        onClose={() => setNotAvailable(null)}
+      />
     </div>
   );
 }

@@ -307,7 +307,8 @@ export function LicenseBanner() {
     pasteKey: () => goToLicense(LICENSE_KEY_BOX_ID),
     pasteUnlock: () => goToLicense(LICENSE_UNLOCK_BOX_ID),
     plans: () => navigate(SUBSCRIPTION_PAGE),
-    renew: () => navigate(SUBSCRIPTION_PAGE),
+    // Straight to the checkout for the plan they had (SubscriptionPage handles it).
+    renew: () => navigate(SUBSCRIPTION_PAGE, { state: { renew: true } }),
     upgrade: () => navigate(SUBSCRIPTION_PAGE),
     close: () => banner.closable && close(banner.closable),
   };

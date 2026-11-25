@@ -112,6 +112,24 @@ describe("What used them: minimums", () => {
 });
 
 describe("Usage page", () => {
+  it("after the plan ended, shows the credits waiting (Renew is on the banner)", async () => {
+    summary.mockResolvedValue(creditsSummary({ ended: true, carry_to_next: 194.6 }));
+    render(<MemoryRouter initialEntries={["/admin-console/usage"]}><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText(/credits waiting/)).toBeInTheDocument();
+    expect(screen.getByText("195")).toBeInTheDocument();
+    expect(screen.getByText(/They move to your next plan when you renew/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Renew subscription" })).not.toBeInTheDocument();
+    expect(screen.getByText("What used them (last period)")).toBeInTheDocument();
+  });
+
+  it("after the plan ended with no AI use, says so instead of hiding the list", async () => {
+    summary.mockResolvedValue(creditsSummary({ ended: true, carry_to_next: 0, by_action: [] }));
+    render(<MemoryRouter initialEntries={["/admin-console/usage"]}><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText("No AI was used during this plan.")).toBeInTheDocument();
+    expect(screen.getByText("What used them (last period)")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Buy credits" })).not.toBeInTheDocument();
+  });
+
   it("shows bought credits carried from the last plan", async () => {
     summary.mockResolvedValue(creditsSummary({
       balance: { included: 500, packs: 0, carried: 114, used: 0, total: 614, balance: 614, low: false },

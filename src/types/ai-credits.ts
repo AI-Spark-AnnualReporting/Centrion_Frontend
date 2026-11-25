@@ -59,6 +59,8 @@ export interface AiCreditsSummary {
     by_action: ActionUsage[];
     // What would move to a new plan paid now: unused bought credits (> 0) or the minus (< 0).
     carry_to_next?: number;
+    // The plan's period is over: AI is off; carry_to_next waits for the next plan.
+    ended?: boolean;
   } | null;
 }
 

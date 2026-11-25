@@ -111,7 +111,7 @@ export function carryLine(carry: number, oldPlan: string, newPlan: string, inclu
   const start = Math.round(included + carry).toLocaleString('en-US');
   const amount = Math.round(Math.abs(carry)).toLocaleString('en-US');
   if (carry > 0) {
-    return `${amount} unused bought AI credits move to ${newPlan}, so you start with ${start}. Included credits from ${oldPlan} end today.`;
+    return `${amount} unused AI credits from ${oldPlan} move to ${newPlan}, so you start with ${start}.`;
   }
   return `${oldPlan} ended ${amount} AI credits below zero; that comes off ${newPlan}'s credits, so you start with ${start}.`;
 }
@@ -127,11 +127,15 @@ export default function CheckoutPage() {
   // AI credits that move to the new plan (bought and unused, or a minus).
   // A preview: worked out again when they pay. Unknown = nothing shown.
   const [carry, setCarry] = useState(0);
+  // Shimmer in the carried-credits spots until the number arrives, so the box
+  // doesn't pop in late.
+  const [carryLoading, setCarryLoading] = useState(true);
 
   useEffect(() => {
     aiCredits.summary()
       .then((summary) => setCarry(summary.subscription?.carry_to_next ?? 0))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setCarryLoading(false));
   }, []);
 
   // Opened without a checkout (e.g. a refresh): start again from the plans.
@@ -190,12 +194,19 @@ export default function CheckoutPage() {
                 <b>{(checkout.ai_credits ?? 0).toLocaleString('en-US')}</b>
                 <span>{aiCreditsBoxLabel(checkout)}</span>
               </div>
-              {carry !== 0 && (
-                <div className="sub-co-pbox" data-testid="carried-credits">
+              {carryLoading && (
+                <div className="sub-co-pbox" data-testid="carried-credits-skeleton" aria-busy="true" aria-label="Loading AI credits">
+                  <div className="skel" style={{ width: 48, height: 18, marginBottom: 5 }} />
+                  <div className="skel" style={{ width: '80%', height: 10 }} />
+                </div>
+              )}
+              {!carryLoading && carry !== 0 && (
+                <div className="sub-co-pbox" data-testid="carried-credits"
+                  title={carry > 0 ? 'Unused AI credits from your last plan' : 'Your last plan ended below zero'}>
                   <b style={{ color: carry < 0 ? '#DC2626' : undefined }}>
                     {carry > 0 ? '+' : '−'}{Math.round(Math.abs(carry)).toLocaleString('en-US')}
                   </b>
-                  <span>{carry > 0 ? 'AI credits carried over (bought, unused)' : 'AI credits carried over (below zero on your last plan)'}</span>
+                  <span>AI credits carried over</span>
                 </div>
               )}
             </div>
@@ -209,7 +220,8 @@ export default function CheckoutPage() {
                 <span className="new">{checkout.plan_name}</span>
                 <span style={{ color: '#9BA3C4' }}>· {state.replaces} ends today</span>
               </div>
-              {carry !== 0 && (
+              {carryLoading && <div className="skel" style={{ width: '70%', height: 11, marginTop: 10 }} aria-hidden="true" />}
+              {!carryLoading && carry !== 0 && (
                 <p style={{ margin: '8px 0 0', fontSize: 12, color: '#5A6080' }}>
                   {carryLine(carry, state.replaces, checkout.plan_name, checkout.ai_credits ?? 0)}
                 </p>

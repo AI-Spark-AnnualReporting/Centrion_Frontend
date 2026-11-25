@@ -114,13 +114,15 @@ function CreditsSection() {
     );
   }
 
+  if (period.ended) return <EndedCredits period={period} />;
+
   const { balance } = period;
   const percent = creditsLeftPercent(balance.balance, balance.total);
   const canBuy = period.credit_packs.length > 0;
   const rows = featureRows(period.by_action, status);
   return (
     <Section title="AI credits"
-      line={`This period: ${formatLicenseDate(period.period.starts_at)} – ${formatLicenseDate(period.period.ends_at)}. Unused credits don't carry over.`}>
+      line={`This period: ${formatLicenseDate(period.period.starts_at)} – ${formatLicenseDate(period.period.ends_at)}. Unused credits move to your next plan.`}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 30, fontWeight: 800, color: balance.balance <= 0 ? '#DC2626' : '#1A1D2E' }}>
@@ -176,6 +178,55 @@ function CreditsSection() {
                   </span>
                 )}
               </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Section>
+  );
+}
+
+/** The plan has ended: AI is off, and every unused credit waits for the next
+ *  plan (carry-bought-credits.md). Renewing is on the expired banner above. */
+function EndedCredits({ period }: { period: NonNullable<AiCreditsSummary['subscription']> }) {
+  const waiting = period.carry_to_next ?? 0;
+  const rows = featureRows(period.by_action, null);
+  return (
+    <Section title="AI credits"
+      line={`Your plan ended on ${formatLicenseDate(period.period.ends_at)}. AI is paused until you renew.`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          {waiting > 0 ? (
+            <>
+              <div style={{ fontSize: 30, fontWeight: 800, color: '#1A1D2E' }}>
+                {formatCredits(waiting)}
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#9BA3C4' }}> credits waiting</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#5A6080' }}>
+                They move to your next plan when you renew.
+              </div>
+            </>
+          ) : waiting < 0 ? (
+            <div style={{ fontSize: 13, color: '#DC2626' }}>
+              Your last plan ended {formatCredits(-waiting)} credits below zero. That comes off your next plan&apos;s credits.
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: '#5A6080' }}>No credits are left to carry over.</div>
+          )}
+        </div>
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 800, margin: '18px 0 6px' }}>What used them (last period)</div>
+      <table className="utable">
+        <thead><tr><th>Feature</th><th style={{ textAlign: 'right' }}>Times used</th><th style={{ textAlign: 'right' }}>Credits</th></tr></thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr className="urow"><td colSpan={3} style={{ color: '#9BA3C4' }}>No AI was used during this plan.</td></tr>
+          )}
+          {rows.map((row) => (
+            <tr key={row.action} className="urow">
+              <td><b>{row.name}</b></td>
+              <td style={{ textAlign: 'right' }}>{row.jobs}</td>
+              <td style={{ textAlign: 'right' }}>{formatCreditsDetail(row.credits)}</td>
             </tr>
           ))}
         </tbody>
