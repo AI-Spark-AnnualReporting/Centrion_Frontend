@@ -112,6 +112,16 @@ describe("What used them: minimums", () => {
 });
 
 describe("Usage page", () => {
+  it("shows bought credits carried from the last plan", async () => {
+    summary.mockResolvedValue(creditsSummary({
+      balance: { included: 500, packs: 0, carried: 114, used: 0, total: 614, balance: 614, low: false },
+    }));
+    render(<MemoryRouter initialEntries={["/admin-console/usage"]}><UsagePage /></MemoryRouter>);
+    expect(await screen.findByText("Carried from last plan")).toBeInTheDocument();
+    expect(screen.getByText("114")).toBeInTheDocument();
+    expect(screen.queryByText("Minus from last period")).not.toBeInTheDocument();
+  });
+
   it("shows the Settings tabs, the plan and AI credits, but not payment or invoices", async () => {
     summary.mockResolvedValue(creditsSummary());
     invoices.mockResolvedValue(invoicePage(1));

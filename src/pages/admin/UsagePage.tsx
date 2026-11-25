@@ -146,6 +146,8 @@ function CreditsSection() {
         <Figure title="Included in your plan" value={formatCredits(balance.included)} />
         <Figure title="Bought this period" value={formatCredits(balance.packs)} />
         {balance.carried < 0 && <Figure title="Minus from last period" value={formatCredits(balance.carried)} />}
+        {/* Unused bought credits move to the next plan (carry-bought-credits.md). */}
+        {balance.carried > 0 && <Figure title="Carried from last plan" value={formatCredits(balance.carried)} />}
         <Figure title="Used this period" value={formatCreditsDetail(balance.used)} />
       </div>
 

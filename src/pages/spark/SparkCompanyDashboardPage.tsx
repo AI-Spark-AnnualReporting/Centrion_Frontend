@@ -382,7 +382,8 @@ function Purchases({ dashboard }: { dashboard: SparkCompanyDashboard }) {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '0 16px 12px' }}>
           <SourceBox label="Included in plan" value={formatCredits(credits.included)} />
           <SourceBox label="Packs bought" value={`+${formatCredits(credits.packs)}`} />
-          <SourceBox label="Carried over" value={formatCredits(credits.carried)} />
+          <SourceBox label="Carried over"
+            value={credits.carried > 0 ? `+${formatCredits(credits.carried)}` : formatCredits(credits.carried)} />
         </div>
       ) : (
         <div style={{ padding: '0 16px 12px', fontSize: 12, color: FAINT }}>No plan, so no credits.</div>
