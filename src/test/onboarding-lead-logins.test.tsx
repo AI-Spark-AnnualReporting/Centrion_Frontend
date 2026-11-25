@@ -157,7 +157,7 @@ async function openDepartmentsStep() {
     </MemoryRouter>,
   );
   await screen.findByText(/Review Company Details/i);
-  fireEvent.change(screen.getByDisplayValue("Select month"), { target: { value: "12" } });
+  fireEvent.change(screen.getByDisplayValue("Select the month it ends"), { target: { value: "12" } });
   fireEvent.click(screen.getByRole("button", { name: /Looks good, Continue/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Brand continue" }));
   await screen.findByText(/4 \/ 4 selected/);

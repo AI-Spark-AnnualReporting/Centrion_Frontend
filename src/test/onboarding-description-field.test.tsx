@@ -74,7 +74,7 @@ const descriptionBox = () => screen.getByLabelText(/^Company description/i, { se
 const typeDescription = (text: string) => fireEvent.change(descriptionBox(), { target: { value: text } });
 const clickContinue = () => fireEvent.click(screen.getByRole("button", { name: /Looks good, Continue/i }));
 const infoButton = () => screen.getByRole("button", { name: /About the company description/i });
-const infoText = () => screen.queryByText(/Where it.s used/i);
+const infoText = () => screen.queryByText(/A short overview of what your company does/i);
 
 const words = (n: number) => Array.from({ length: n }, () => "word").join(" ");
 
@@ -160,7 +160,7 @@ describe("the i (info) button", () => {
     await renderReviewStep();
     expect(infoText()).not.toBeInTheDocument();
     fireEvent.click(infoButton());
-    expect(await screen.findByText(/Where it.s used/i)).toBeInTheDocument();
+    expect(await screen.findByText(/A short overview of what your company does/i)).toBeInTheDocument();
     fireEvent.mouseLeave(infoButton());
     await new Promise((r) => setTimeout(r, 200));
     expect(infoText()).toBeInTheDocument();
@@ -169,7 +169,7 @@ describe("the i (info) button", () => {
   it("a second click closes it", async () => {
     await renderReviewStep();
     fireEvent.click(infoButton());
-    await screen.findByText(/Where it.s used/i);
+    await screen.findByText(/A short overview of what your company does/i);
     fireEvent.click(infoButton());
     await waitFor(() => expect(infoText()).not.toBeInTheDocument());
   });
@@ -177,7 +177,7 @@ describe("the i (info) button", () => {
   it("opens on hover and closes when the mouse leaves", async () => {
     await renderReviewStep();
     fireEvent.mouseEnter(infoButton());
-    expect(await screen.findByText(/Where it.s used/i)).toBeInTheDocument();
+    expect(await screen.findByText(/A short overview of what your company does/i)).toBeInTheDocument();
     fireEvent.mouseLeave(infoButton());
     await waitFor(() => expect(infoText()).not.toBeInTheDocument());
   });
@@ -185,7 +185,7 @@ describe("the i (info) button", () => {
   it("opens on keyboard focus and closes on Escape", async () => {
     await renderReviewStep();
     fireEvent.focus(infoButton());
-    expect(await screen.findByText(/Where it.s used/i)).toBeInTheDocument();
+    expect(await screen.findByText(/A short overview of what your company does/i)).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(infoText()).not.toBeInTheDocument());
   });

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Info } from 'lucide-react';
+import { Info, ShieldAlert, Sparkles } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { TooltipPortal } from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { OnboardingPayload } from '@/types/auth';
 import type { Company, Sector } from '@/types/company';
 import type { BrandColors, ExtractedGuideline, PickedLogo } from '@/types/brand';
@@ -143,7 +145,7 @@ const FieldLabel = ({
     <label htmlFor={htmlFor} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: info ? 0 : undefined }}>
       {children}
       {required && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}
-      {ai && <span className="ai-chip">AI</span>}
+      {ai && <AiChip />}
     </label>
   );
   if (!info) return label;
@@ -154,6 +156,55 @@ const FieldLabel = ({
     </div>
   );
 };
+
+// Hover text for every "AI" mark on the Review step.
+const AI_CHIP_TIP = 'Filled by AI. AI can make mistakes, so please check this.';
+const AI_BADGE_TIP = 'Some fields were filled by AI. AI can make mistakes, so please check them.';
+
+// A small tag with a dark hover note. Used for the "AI" chip on field labels
+// and the "AI extracted" badge. Own TooltipProvider because the app has no
+// global one. Rendered in a portal: the chip sits inside a field <label>, which
+// is uppercase, so an in-place tooltip would shout in capitals. z-[10002]: the
+// portal is at the end of <body>, behind onboarding's fixed full-screen layer
+// (.auth, z-index 100) unless lifted above it.
+function AiHint({ className, label, tip }: { className: string; label: string; tip: string }) {
+  return (
+    <TooltipProvider delayDuration={500}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={className} style={{ cursor: 'help' }}>{label}</span>
+        </TooltipTrigger>
+        <TooltipPortal>
+          <TooltipContent side="top" sideOffset={6} collisionPadding={12} className="ob-ai-tip z-[10002]">
+            {tip}
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** The small "AI" chip on a field label. */
+function AiChip() {
+  return <AiHint className="ai-chip" label="AI" tip={AI_CHIP_TIP} />;
+}
+
+// Shown under the tagline in the blue left panel on every onboarding step:
+// everything entered here is what the rest of the product is built on.
+function OnboardingReviewNotice() {
+  return (
+    <div className="ob-notice" role="note">
+      <ShieldAlert className="ob-notice-icon" size={16} aria-hidden="true" />
+      <div>
+        <div className="ob-notice-title">Please review everything carefully</div>
+        <div className="ob-notice-body">
+          These details set up your workspace. Your departments, reports and AI-written
+          content are all built from them.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Review-step fields that can be filled by AI (website scrape at signup, or the
 // company profile document uploaded on step 1).
@@ -207,28 +258,55 @@ function countWords(text: string): number {
   return trimmed.split(/\s+/).length;
 }
 
-// The "i" next to Company description. Opens on hover, on focus (keyboard) and
-// on click/tap (touch screens have no hover). A click "pins" it open so moving
-// the mouse away doesn't close it; Escape or a click outside closes it.
-// The small close delay lets the mouse travel from the icon into the box.
-function DescriptionInfo() {
+// The "i" help button next to a Review-step field. Opens on hover, on focus
+// (keyboard) and on click/tap (touch screens have no hover). A click "pins" it
+// open so moving the mouse away doesn't close it; Escape or a click outside
+// closes it. The small close delay lets the mouse travel from the icon into the box.
+// How long the cursor must rest on an "i" before its box opens on hover.
+const HOVER_OPEN_DELAY_MS = 500;
+
+function FieldInfo({
+  title,
+  ariaLabel,
+  align = 'start',
+  children,
+}: {
+  title: string;
+  ariaLabel: string;
+  align?: 'start' | 'center' | 'end';
+  children: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const closeTimer = useRef<number | undefined>(undefined);
+  const openTimer = useRef<number | undefined>(undefined);
 
   const cancelClose = () => {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
   };
+  const cancelOpen = () => {
+    if (openTimer.current) window.clearTimeout(openTimer.current);
+  };
   const openNow = () => {
+    cancelOpen();
     cancelClose();
     setOpen(true);
   };
+  // Hover opens only once the cursor rests on the icon, so sweeping the mouse
+  // across the form doesn't flash boxes open. Click and keyboard focus open at once.
+  const openAfterHover = () => {
+    cancelOpen();
+    cancelClose();
+    openTimer.current = window.setTimeout(() => setOpen(true), HOVER_OPEN_DELAY_MS);
+  };
   const closeSoon = () => {
+    cancelOpen();
     if (pinned) return;
     cancelClose();
     closeTimer.current = window.setTimeout(() => setOpen(false), 150);
   };
   const closeNow = () => {
+    cancelOpen();
     cancelClose();
     setPinned(false);
     setOpen(false);
@@ -242,7 +320,12 @@ function DescriptionInfo() {
     openNow();
   };
 
-  useEffect(() => cancelClose, []);
+  useEffect(() => {
+    return () => {
+      cancelOpen();
+      cancelClose();
+    };
+  }, []);
 
   return (
     <Popover open={open} onOpenChange={(next) => (next ? openNow() : closeNow())}>
@@ -250,8 +333,8 @@ function DescriptionInfo() {
         <button
           type="button"
           className="ob-info-btn"
-          aria-label="About the company description"
-          onMouseEnter={openNow}
+          aria-label={ariaLabel}
+          onMouseEnter={openAfterHover}
           onMouseLeave={closeSoon}
           onFocus={openNow}
           onBlur={closeSoon}
@@ -268,7 +351,7 @@ function DescriptionInfo() {
           and the popover renders at the end of <body>, so the default z-50
           would sit hidden behind it. Same value the leads popover uses. */}
       <PopoverContent
-        align="start"
+        align={align}
         side="bottom"
         sideOffset={6}
         collisionPadding={12}
@@ -278,38 +361,97 @@ function DescriptionInfo() {
         // Keep focus in the textarea/icon — hovering must not steal focus.
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <p className="ob-info-title">About the company description</p>
-        <p>One paragraph about what the company does.</p>
-        <p>
-          <b>Where it's used:</b> AI reads it to write your department questions and report
-          sections (annual, quarterly, board and earnings). It also shows on your dashboard.
-        </p>
+        <p className="ob-info-title">{title}</p>
+        {children}
       </PopoverContent>
     </Popover>
   );
 }
 
+// One short line per field saying what it is, plus the same closing sentence
+// everywhere. Deliberately not field-specific about where each value is used.
+// `align` lines the box up so it stays inside the card: the right-hand tick-box
+// opens leftwards, the middle one centred.
+const HELP_USED_FOR = 'Centriyon uses this to set up your workspace and reports, so please make sure it is correct.';
+
+const FIELD_HELP: Record<string, { title: string; line: string; align?: 'start' | 'center' | 'end' }> = {
+  sector: { title: 'Sector', line: 'The industry your company operates in.' },
+  companyProfile: { title: 'Company profile', line: 'Whether your company is listed or private.' },
+  reportingSector: { title: 'Reporting sector', line: 'The regulatory category your company reports under.' },
+  employees: { title: 'Employees', line: 'The total number of people your company employs.' },
+  founded: { title: 'Founded year', line: 'The year your company was founded.' },
+  hqCity: { title: 'HQ city', line: 'The city where your head office is.' },
+  fiscalYear: { title: 'Fiscal year end', line: 'The month your financial year ends.' },
+  currency: { title: 'Currency', line: 'The currency your financial figures are reported in.' },
+  language: { title: 'Language', line: "Your company's main language." },
+  exchange: { title: 'Exchange', line: 'The stock exchange and ticker your company is listed under.' },
+  shariah: { title: 'Shariah-compliant', line: 'Whether your company follows Shariah principles.' },
+  subsidiaries: { title: 'Has subsidiaries', line: 'Whether your company owns other companies.', align: 'center' },
+  sukuk: { title: 'Has sukuk', line: 'Whether your company has issued sukuk.', align: 'end' },
+};
+
+/** The "i" button for one field, using its entry in FIELD_HELP. */
+function HelpFor({ field }: { field: keyof typeof FIELD_HELP }) {
+  const help = FIELD_HELP[field];
+  return (
+    <FieldInfo title={help.title} ariaLabel={`About ${help.title}`} align={help.align}>
+      <p>{help.line}</p>
+      <p className="ob-info-used">{HELP_USED_FOR}</p>
+    </FieldInfo>
+  );
+}
+
+/** The "i" button for Company description (its own wording and aria label). */
+function DescriptionInfo() {
+  return (
+    <FieldInfo title="Company description" ariaLabel="About the company description">
+      <p>A short overview of what your company does.</p>
+      <p className="ob-info-used">{HELP_USED_FOR}</p>
+    </FieldInfo>
+  );
+}
+
 // Checkbox in its own bordered box (highlights when checked).
-const Checkbox = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
-  <label
+// The bordered box is a <div>; the clickable <label> fills it, and the optional
+// "i" sits beside the label (not inside it — see FieldLabel for why).
+const Checkbox = ({
+  label,
+  checked,
+  onChange,
+  info,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  info?: React.ReactNode;
+}) => (
+  <div
     style={{
-      display: 'flex', alignItems: 'center', gap: 11,
-      padding: '13px 16px', borderRadius: 10,
+      display: 'flex', alignItems: 'center', gap: 6,
+      paddingRight: info ? 10 : 0, borderRadius: 10,
       border: `1.5px solid ${checked ? '#4040C8' : '#E2E4F0'}`,
       background: checked ? '#F4F5FF' : '#fff',
-      cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
-      color: checked ? '#4040C8' : '#1A1D2E',
       transition: 'border-color .15s, background .15s',
     }}
   >
-    <input
-      type="checkbox"
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      style={{ width: 17, height: 17, accentColor: '#4040C8', cursor: 'pointer', flexShrink: 0 }}
-    />
-    {label}
-  </label>
+    <label
+      style={{
+        display: 'flex', alignItems: 'center', gap: 11, flex: 1, minWidth: 0,
+        padding: info ? '13px 0 13px 16px' : '13px 16px',
+        cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
+        color: checked ? '#4040C8' : '#1A1D2E',
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 17, height: 17, accentColor: '#4040C8', cursor: 'pointer', flexShrink: 0 }}
+      />
+      {label}
+    </label>
+    {info}
+  </div>
 );
 
 export default function OnboardingPage() {
@@ -643,6 +785,7 @@ export default function OnboardingPage() {
                 <div className="auth-sl">{c.s}</div>
               </div>
             ))}
+            <OnboardingReviewNotice />
           </div>
         </div>
 
@@ -662,7 +805,7 @@ export default function OnboardingPage() {
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <h2 style={{ marginBottom: 0 }}>Review Company Details</h2>
-                {anyAiChipShown && <span className="ai-badge">AI extracted</span>}
+                {anyAiChipShown && <AiHint className="ai-badge" label="AI extracted" tip={AI_BADGE_TIP} />}
               </div>
               <p>
                 {anyAiChipShown
@@ -712,7 +855,7 @@ export default function OnboardingPage() {
 
               <div className="ob-review-grid">
                 <div className="fl">
-                  <FieldLabel required ai={showAiChip('sector', sectorId)}>Sector</FieldLabel>
+                  <FieldLabel required ai={showAiChip('sector', sectorId)} info={<HelpFor field="sector" />}>Sector</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.sectorId ? ' inp-error' : ''}`}
                     value={sectorId}
@@ -726,7 +869,7 @@ export default function OnboardingPage() {
                   {reviewErrors.sectorId && <div className="fl-err">{reviewErrors.sectorId}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required>Company profile</FieldLabel>
+                  <FieldLabel required info={<HelpFor field="companyProfile" />}>Company profile</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.companyProfile ? ' inp-error' : ''}`}
                     value={companyProfile}
@@ -740,7 +883,7 @@ export default function OnboardingPage() {
                   {reviewErrors.companyProfile && <div className="fl-err">{reviewErrors.companyProfile}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required>Reporting sector</FieldLabel>
+                  <FieldLabel required info={<HelpFor field="reportingSector" />}>Reporting sector</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.reportingSector ? ' inp-error' : ''}`}
                     value={reportingSector}
@@ -754,26 +897,26 @@ export default function OnboardingPage() {
                   {reviewErrors.reportingSector && <div className="fl-err">{reviewErrors.reportingSector}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai={showAiChip('employees', employeeCount)}>Employees</FieldLabel>
+                  <FieldLabel required ai={showAiChip('employees', employeeCount)} info={<HelpFor field="employees" />}>Employees</FieldLabel>
                   <input type="number" min={1} className={`inp${reviewErrors.employeeCount ? ' inp-error' : ''}`} placeholder="e.g. 120" value={employeeCount} onChange={(e) => { setEmployeeCount(e.target.value); clearReviewError('employeeCount'); }} />
                   {reviewErrors.employeeCount && <div className="fl-err">{reviewErrors.employeeCount}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel ai={showAiChip('founded', foundedYear)}>Founded year</FieldLabel>
+                  <FieldLabel ai={showAiChip('founded', foundedYear)} info={<HelpFor field="founded" />}>Founded year</FieldLabel>
                   <input type="number" className="inp" placeholder="e.g. 1995" value={foundedYear} onChange={(e) => setFoundedYear(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel ai={showAiChip('hqCity', headquarterCity)}>HQ city</FieldLabel>
+                  <FieldLabel ai={showAiChip('hqCity', headquarterCity)} info={<HelpFor field="hqCity" />}>HQ city</FieldLabel>
                   <input className="inp" placeholder="e.g. Riyadh" value={headquarterCity} onChange={(e) => setHeadquarterCity(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai={showAiChip('fiscalYear', fiscalYearEndMonth)}>Fiscal year</FieldLabel>
+                  <FieldLabel required ai={showAiChip('fiscalYear', fiscalYearEndMonth)} info={<HelpFor field="fiscalYear" />}>Fiscal year end</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.fiscalYearEndMonth ? ' inp-error' : ''}`}
                     value={fiscalYearEndMonth}
                     onChange={(e) => { setFiscalYearEndMonth(e.target.value); clearReviewError('fiscalYearEndMonth'); }}
                   >
-                    <option value="">Select month</option>
+                    <option value="">Select the month it ends</option>
                     {MONTHS.map((m, i) => (
                       <option key={m} value={i + 1}>{m}</option>
                     ))}
@@ -781,7 +924,7 @@ export default function OnboardingPage() {
                   {reviewErrors.fiscalYearEndMonth && <div className="fl-err">{reviewErrors.fiscalYearEndMonth}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai={showAiChip('currency', reportingCurrency)}>Currency</FieldLabel>
+                  <FieldLabel required ai={showAiChip('currency', reportingCurrency)} info={<HelpFor field="currency" />}>Currency</FieldLabel>
                   <select className="inp sel" value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value as OnboardingPayload['reporting_currency'])}>
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -789,27 +932,35 @@ export default function OnboardingPage() {
                   </select>
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai={showAiChip('language', primaryLanguage)}>Language</FieldLabel>
+                  <FieldLabel required ai={showAiChip('language', primaryLanguage)} info={<HelpFor field="language" />}>Language</FieldLabel>
                   <select className="inp sel" value={primaryLanguage} onChange={(e) => setPrimaryLanguage(e.target.value as OnboardingPayload['primary_language'])}>
                     <option value="en">English</option>
                     <option value="ar">Arabic</option>
                   </select>
                 </div>
                 <div className="fl">
-                  <FieldLabel ai={showAiChip('exchange', listedExchange)}>Exchange</FieldLabel>
+                  <FieldLabel ai={showAiChip('exchange', listedExchange)} info={<HelpFor field="exchange" />}>Exchange</FieldLabel>
                   <input className="inp" placeholder="e.g. Tadawul (1010)" value={listedExchange} onChange={(e) => setListedExchange(e.target.value)} />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 14 }}>
-                <Checkbox label="Shariah-compliant" checked={isShariah} onChange={setIsShariah} />
-                <Checkbox label="Has subsidiaries" checked={hasSubsidiaries} onChange={setHasSubsidiaries} />
-                <Checkbox label="Has sukuk" checked={hasSukuk} onChange={setHasSukuk} />
+              <div className="ob-check-row">
+                <Checkbox label="Shariah-compliant" checked={isShariah} onChange={setIsShariah} info={<HelpFor field="shariah" />} />
+                <Checkbox label="Has subsidiaries" checked={hasSubsidiaries} onChange={setHasSubsidiaries} info={<HelpFor field="subsidiaries" />} />
+                <Checkbox label="Has sukuk" checked={hasSukuk} onChange={setHasSukuk} info={<HelpFor field="sukuk" />} />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 18 }}>
-                <button type="button" className="btn bs" onClick={() => setStep('intel')}>← Back</button>
-                <button type="button" className="btn bp" onClick={onReviewContinue}>Looks good, Continue →</button>
+              <div className="ob-review-foot">
+                <button type="button" className="btn bs ob-foot-back" onClick={() => setStep('intel')}>← Back</button>
+                {/* Only when the AI actually filled something on screen — a
+                    warning about AI on hand-typed details would be noise. */}
+                {anyAiChipShown && (
+                  <span className="ob-ai-note">
+                    <Sparkles size={12} aria-hidden="true" />
+                    AI can make mistakes. Please check the details before you continue.
+                  </span>
+                )}
+                <button type="button" className="btn bp ob-foot-next" onClick={onReviewContinue}>Looks good, Continue →</button>
               </div>
             </>
           )}

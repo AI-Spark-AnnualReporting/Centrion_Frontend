@@ -109,7 +109,7 @@ describe("re-uploading a profile document from step 1", () => {
 
     await renderWizard();
     backToStepOne();
-    await screen.findByText(/Set Up Your Workspace|couldn't read your website/i);
+    await screen.findAllByText(/Set Up Your Workspace|couldn't read your website/i);
     await uploadAndAnalyse();
 
     await waitFor(() => expect(description().value).toMatch(/newly described/));
