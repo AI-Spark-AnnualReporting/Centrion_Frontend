@@ -2,6 +2,8 @@
 // badge mapping, a compact date formatter, and a thin progress bar. Keeps the
 // list/detail pages free of duplicated styling logic.
 
+import { TooltipPortal } from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type {
   CycleStatus,
   SectionLayer,
@@ -112,18 +114,60 @@ export function SectionLayerBadge({ layer }: { layer: SectionLayer }) {
   return <span className={`badge ${m.cls}`}>{m.label}</span>;
 }
 
-const SECTION_MODE: Record<SectionMode, { label: string; cls: string }> = {
-  generate: { label: 'Generate', cls: 'b-pp' },
-  attach: { label: 'Attach', cls: 'b-bl' },
-  auto: { label: 'Auto', cls: 'b-gy' },
-  manual: { label: 'Manual', cls: 'b-am' },
-  extract: { label: 'Extract', cls: 'b-tl' },
-  analyze: { label: 'Analyze', cls: 'b-gn' },
+// `hint` = how the section gets its content, in one short line (feedback F15:
+// the tags had no explanation). Shown on hover and in SectionModeLegend.
+const SECTION_MODE: Record<SectionMode, { label: string; cls: string; hint: string }> = {
+  generate: { label: 'Generate', cls: 'b-pp', hint: "AI writes it from the departments' answers." },
+  attach: { label: 'Attach', cls: 'b-bl', hint: 'You upload a document; it goes in as-is.' },
+  auto: { label: 'Auto', cls: 'b-gy', hint: 'Built automatically, e.g. the cover and contents.' },
+  manual: { label: 'Manual', cls: 'b-am', hint: 'You write or paste it yourself.' },
+  extract: { label: 'Extract', cls: 'b-tl', hint: 'AI pulls the content from a document you upload.' },
+  analyze: { label: 'Analyze', cls: 'b-gn', hint: "AI draws findings from all the departments' inputs." },
 };
 
+// Same rest-before-opening delay as the onboarding "i" boxes, so moving the
+// cursor down the outline table doesn't flash a note over every row.
+const MODE_HINT_DELAY_MS = 500;
+
+/** A section's mode tag; resting the cursor on it shows what the mode means. */
 export function SectionModeBadge({ mode }: { mode: SectionMode }) {
   const m = SECTION_MODE[mode] ?? SECTION_MODE.auto;
-  return <span className={`badge ${m.cls}`}>{m.label}</span>;
+  return (
+    <TooltipProvider delayDuration={MODE_HINT_DELAY_MS}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={`badge ${m.cls}`} style={{ cursor: 'help' }}>{m.label}</span>
+        </TooltipTrigger>
+        {/* Portal so the note isn't clipped by the table's card; z-[10002] so it
+            also shows above the outline-picker modal (SelectOutlineModal). */}
+        <TooltipPortal>
+          <TooltipContent side="top" sideOffset={6} collisionPadding={12} className="hint-tip z-[10002]">
+            {m.hint}
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// The order the legend lists the modes in — the same as the filter chips.
+const LEGEND_ORDER: SectionMode[] = ['generate', 'attach', 'auto', 'manual', 'extract', 'analyze'];
+
+/** One compact row explaining every mode tag, shown above the outline table. */
+export function SectionModeLegend() {
+  return (
+    <div className="mode-legend" aria-label="What the section tags mean">
+      {LEGEND_ORDER.map((mode) => {
+        const m = SECTION_MODE[mode];
+        return (
+          <span key={mode} className="mode-legend-item">
+            <span className={`badge ${m.cls}`}>{m.label}</span>
+            <span className="mode-legend-text">{m.hint}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 // Thin progress bar. `pct` is 0–100; bar turns teal/green at 100%.

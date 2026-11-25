@@ -39,6 +39,7 @@ import {
   ProgressBar,
   SectionLayerBadge,
   SectionModeBadge,
+  SectionModeLegend,
   SectionStatusBadge,
   SessionStatusBadge,
   formatCycleDate,
@@ -957,6 +958,8 @@ export default function CycleDetailPage() {
                 </button>
               ))}
             </div>
+
+            <SectionModeLegend />
 
             {chosenSource === 'previous' ? (
               <PreviousOutline
