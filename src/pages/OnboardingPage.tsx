@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Info } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { OnboardingPayload } from '@/types/auth';
 import type { Company, Sector } from '@/types/company';
 import type { BrandColors, ExtractedGuideline, PickedLogo } from '@/types/brand';
@@ -121,13 +123,171 @@ const LEFT_CARDS: Record<'intel' | 'review' | 'brand' | 'departments' | 'upload'
 };
 
 // Field label + a red "*" when required. `ai` adds the small AI-picked chip.
-const FieldLabel = ({ children, required, ai }: { children: React.ReactNode; required?: boolean; ai?: boolean }) => (
-  <label style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-    {children}
-    {required && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}
-    {ai && <span className="ai-chip">AI</span>}
-  </label>
-);
+// `info` is drawn BESIDE the <label>, never inside it: a button inside a label
+// is "clicked" whenever the label text is clicked, so the help box would pop
+// open every time someone clicked the field name.
+const FieldLabel = ({
+  children,
+  required,
+  ai,
+  htmlFor,
+  info,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+  ai?: boolean;
+  htmlFor?: string;
+  info?: React.ReactNode;
+}) => {
+  const label = (
+    <label htmlFor={htmlFor} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: info ? 0 : undefined }}>
+      {children}
+      {required && <span style={{ color: '#E5484D', fontWeight: 700 }}>*</span>}
+      {ai && <span className="ai-chip">AI</span>}
+    </label>
+  );
+  if (!info) return label;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+      {label}
+      {info}
+    </div>
+  );
+};
+
+// Review-step fields that can be filled by AI (website scrape at signup, or the
+// company profile document uploaded on step 1).
+type AiField =
+  | 'description' | 'sector' | 'employees' | 'founded' | 'hqCity'
+  | 'fiscalYear' | 'currency' | 'language' | 'exchange';
+
+// Which of the company row's values came from the signup scrape. The DB keeps
+// no record of this, so it is inferred, and we only claim "AI" when sure:
+//  - currency / language have DB defaults (SAR / en), so only a non-default
+//    value can be from the AI; the default could be either.
+//  - a Spark-created company (created_by set) may have had its sector picked
+//    by a person, so it isn't claimed.
+//  - fiscal year is never seeded from the row (see applyCompany).
+function aiFieldsFromCompanyRow(c: Company): AiField[] {
+  const fields: AiField[] = [];
+  if (c.description && c.description.trim()) fields.push('description');
+  if (c.sector_id && !c.created_by) fields.push('sector');
+  if (c.employee_count != null) fields.push('employees');
+  if (c.founded_year != null) fields.push('founded');
+  if (c.headquarter_city) fields.push('hqCity');
+  if (c.reporting_currency && c.reporting_currency !== 'SAR') fields.push('currency');
+  if (c.primary_language && c.primary_language !== 'en') fields.push('language');
+  if (c.listed_exchange) fields.push('exchange');
+  return fields;
+}
+
+// Which fields an uploaded profile document's extraction answered.
+function aiFieldsFromExtraction(d: ExtractedCompanyProfile): AiField[] {
+  const fields: AiField[] = [];
+  if (d.description) fields.push('description');
+  if (d.sector_id) fields.push('sector');
+  if (d.employee_count != null) fields.push('employees');
+  if (d.founded_year != null) fields.push('founded');
+  if (d.headquarter_city) fields.push('hqCity');
+  if (d.fiscal_year_end_month != null) fields.push('fiscalYear');
+  if (d.reporting_currency) fields.push('currency');
+  if (d.primary_language) fields.push('language');
+  if (d.listed_exchange) fields.push('exchange');
+  return fields;
+}
+
+// Above this many words the description box shows a gentle warning. It never
+// blocks Continue — a long description is allowed, just less focused for the AI.
+const DESCRIPTION_LONG_WORDS = 400;
+
+/** Count the words in a piece of text. Empty or spaces-only text is 0 words. */
+function countWords(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+// The "i" next to Company description. Opens on hover, on focus (keyboard) and
+// on click/tap (touch screens have no hover). A click "pins" it open so moving
+// the mouse away doesn't close it; Escape or a click outside closes it.
+// The small close delay lets the mouse travel from the icon into the box.
+function DescriptionInfo() {
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const closeTimer = useRef<number | undefined>(undefined);
+
+  const cancelClose = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+  };
+  const openNow = () => {
+    cancelClose();
+    setOpen(true);
+  };
+  const closeSoon = () => {
+    if (pinned) return;
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => setOpen(false), 150);
+  };
+  const closeNow = () => {
+    cancelClose();
+    setPinned(false);
+    setOpen(false);
+  };
+  const togglePin = () => {
+    if (pinned) {
+      closeNow();
+      return;
+    }
+    setPinned(true);
+    openNow();
+  };
+
+  useEffect(() => cancelClose, []);
+
+  return (
+    <Popover open={open} onOpenChange={(next) => (next ? openNow() : closeNow())}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="ob-info-btn"
+          aria-label="About the company description"
+          onMouseEnter={openNow}
+          onMouseLeave={closeSoon}
+          onFocus={openNow}
+          onBlur={closeSoon}
+          onClick={(e) => {
+            // Radix would toggle on click; we pin instead (see comment above).
+            e.preventDefault();
+            togglePin();
+          }}
+        >
+          <Info size={14} />
+        </button>
+      </PopoverTrigger>
+      {/* z-[10002]: onboarding is a fixed full-screen layer (.auth, z-index 100),
+          and the popover renders at the end of <body>, so the default z-50
+          would sit hidden behind it. Same value the leads popover uses. */}
+      <PopoverContent
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        collisionPadding={12}
+        className="ob-info-pop z-[10002] bg-white border-[#E2E4F0] rounded-[12px] shadow-[0_18px_48px_rgba(26,29,46,.18)] motion-reduce:animate-none"
+        onMouseEnter={openNow}
+        onMouseLeave={closeSoon}
+        // Keep focus in the textarea/icon — hovering must not steal focus.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <p className="ob-info-title">About the company description</p>
+        <p>One paragraph about what the company does.</p>
+        <p>
+          <b>Where it's used:</b> AI reads it to write your department questions and report
+          sections (annual, quarterly, board and earnings). It also shows on your dashboard.
+        </p>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // Checkbox in its own bordered box (highlights when checked).
 const Checkbox = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
@@ -192,6 +352,15 @@ export default function OnboardingPage() {
 
   // Company details (Review Details step)
   const [description, setDescription] = useState('');
+  const descriptionWords = countWords(description);
+
+  // Which fields the AI actually filled. The "AI" chip shows only on these, and
+  // only while the field still has a value — an empty field marked "AI" made
+  // users ask why the AI didn't pick it up.
+  const [aiFilledFields, setAiFilledFields] = useState<Set<AiField>>(new Set());
+  /** True when the AI filled this field and it is not empty now. */
+  const showAiChip = (field: AiField, value: string): boolean =>
+    aiFilledFields.has(field) && value.trim() !== '';
   const [sectorId, setSectorId] = useState('');               // ESG sector (UUID) — AI-picked, mandatory
   const [companyProfile, setCompanyProfile] = useState('');   // listed/private — mandatory, manual
   const [reportingSector, setReportingSector] = useState(''); // SAR 5-code — mandatory, manual
@@ -260,7 +429,9 @@ export default function OnboardingPage() {
         palette_key: c.brand_colors.palette_key || 'custom',
       });
     }
+    setAiFilledFields((prev) => new Set([...prev, ...aiFieldsFromCompanyRow(c)]));
   };
+
 
   // On entry: load the company. If signup extraction is still running, poll;
   // once ready, route to Review (we have data) or step 1 (no data / URL failed).
@@ -315,6 +486,7 @@ export default function OnboardingPage() {
     if (d.reporting_currency) setReportingCurrency(d.reporting_currency as OnboardingPayload['reporting_currency']);
     if (d.primary_language) setPrimaryLanguage(d.primary_language as OnboardingPayload['primary_language']);
     if (d.listed_exchange) setListedExchange(d.listed_exchange);
+    setAiFilledFields((prev) => new Set([...prev, ...aiFieldsFromExtraction(d)]));
     // website_url is deliberately NOT applied, and sector_name has no field. The
     // Review step has no website input, so taking the document's URL would silently
     // replace the one the user gave at signup — in a value they can neither see nor
@@ -381,7 +553,9 @@ export default function OnboardingPage() {
 
   const onReviewContinue = () => {
     const errs: Record<string, string> = {};
-    if (description.trim().length < 20) errs.description = 'Description must be at least 20 characters.';
+    if (description.trim().length < 20) {
+      errs.description = 'Add a description of at least 20 characters: what the company does and where it operates.';
+    }
     const count = Number(employeeCount);
     if (!employeeCount.trim() || !Number.isFinite(count) || count < 1) {
       errs.employeeCount = 'Number of employees is required (at least 1).';
@@ -434,6 +608,18 @@ export default function OnboardingPage() {
   const stepNumber = { intel: 1, review: 2, brand: 3, departments: 4, upload: 5 }[step];
   const cards = LEFT_CARDS[step];
 
+  // The "AI extracted" badge only when at least one field still shows its AI chip.
+  const anyAiChipShown =
+    showAiChip('description', description) ||
+    showAiChip('sector', sectorId) ||
+    showAiChip('employees', employeeCount) ||
+    showAiChip('founded', foundedYear) ||
+    showAiChip('hqCity', headquarterCity) ||
+    showAiChip('fiscalYear', fiscalYearEndMonth) ||
+    showAiChip('currency', reportingCurrency) ||
+    showAiChip('language', primaryLanguage) ||
+    showAiChip('exchange', listedExchange);
+
   return (
     <div className="auth">
       <div className="auth-card auth-card-wide">
@@ -476,26 +662,57 @@ export default function OnboardingPage() {
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <h2 style={{ marginBottom: 0 }}>Review Company Details</h2>
-                <span className="ai-badge">AI extracted</span>
+                {anyAiChipShown && <span className="ai-badge">AI extracted</span>}
               </div>
-              <p>Review the auto-filled details and complete the required fields — then continue.</p>
+              <p>
+                {anyAiChipShown
+                  ? 'Review the auto-filled details and complete the required fields — then continue.'
+                  : 'Fill in your company details and the required fields — then continue.'}
+              </p>
 
               <div className="fl">
-                <FieldLabel required ai>Company description</FieldLabel>
+                <FieldLabel required ai={showAiChip('description', description)} htmlFor="company-description" info={<DescriptionInfo />}>
+                  Company description
+                </FieldLabel>
+                <p className="ob-brand-hint" style={{ marginBottom: 8 }}>
+                  {showAiChip('description', description)
+                    ? 'AI wrote this from your sources. Check the facts and fix anything wrong. '
+                    : 'Describe what the company does. '}
+                  Aim for 4–8 sentences (about 100–200 words).
+                </p>
+                {/* 9 rows fits a typical AI description (~900 characters) without
+                    scrolling; longer text scrolls and the box can be dragged taller.
+                    dir="auto" so Arabic text reads right-to-left. */}
                 <textarea
+                  id="company-description"
                   className={`inp${reviewErrors.description ? ' inp-error' : ''}`}
-                  rows={3}
-                  placeholder="Brief description of your company"
+                  rows={9}
+                  dir="auto"
+                  placeholder="What the company does, its main activities, markets and history"
                   value={description}
                   onChange={(e) => { setDescription(e.target.value); clearReviewError('description'); }}
-                  style={{ resize: 'vertical' }}
+                  style={{ resize: 'vertical', lineHeight: 1.55 }}
                 />
-                {reviewErrors.description && <div className="fl-err">{reviewErrors.description}</div>}
+                <div className="ob-desc-foot">
+                  {reviewErrors.description ? (
+                    <div className="fl-err" style={{ marginTop: 0 }}>{reviewErrors.description}</div>
+                  ) : descriptionWords > DESCRIPTION_LONG_WORDS ? (
+                    <div className="ob-desc-long">
+                      This is long. A focused 100–200 word description gives better AI results.
+                    </div>
+                  ) : null}
+                  <span
+                    className={`ob-char-count${descriptionWords > DESCRIPTION_LONG_WORDS ? ' long' : ''}`}
+                    aria-live="polite"
+                  >
+                    {descriptionWords.toLocaleString()} {descriptionWords === 1 ? 'word' : 'words'}
+                  </span>
+                </div>
               </div>
 
               <div className="ob-review-grid">
                 <div className="fl">
-                  <FieldLabel required ai>Sector</FieldLabel>
+                  <FieldLabel required ai={showAiChip('sector', sectorId)}>Sector</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.sectorId ? ' inp-error' : ''}`}
                     value={sectorId}
@@ -537,20 +754,20 @@ export default function OnboardingPage() {
                   {reviewErrors.reportingSector && <div className="fl-err">{reviewErrors.reportingSector}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai>Employees</FieldLabel>
+                  <FieldLabel required ai={showAiChip('employees', employeeCount)}>Employees</FieldLabel>
                   <input type="number" min={1} className={`inp${reviewErrors.employeeCount ? ' inp-error' : ''}`} placeholder="e.g. 120" value={employeeCount} onChange={(e) => { setEmployeeCount(e.target.value); clearReviewError('employeeCount'); }} />
                   {reviewErrors.employeeCount && <div className="fl-err">{reviewErrors.employeeCount}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel ai>Founded year</FieldLabel>
+                  <FieldLabel ai={showAiChip('founded', foundedYear)}>Founded year</FieldLabel>
                   <input type="number" className="inp" placeholder="e.g. 1995" value={foundedYear} onChange={(e) => setFoundedYear(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel ai>HQ city</FieldLabel>
+                  <FieldLabel ai={showAiChip('hqCity', headquarterCity)}>HQ city</FieldLabel>
                   <input className="inp" placeholder="e.g. Riyadh" value={headquarterCity} onChange={(e) => setHeadquarterCity(e.target.value)} />
                 </div>
                 <div className="fl">
-                  <FieldLabel required>Fiscal year</FieldLabel>
+                  <FieldLabel required ai={showAiChip('fiscalYear', fiscalYearEndMonth)}>Fiscal year</FieldLabel>
                   <select
                     className={`inp sel${reviewErrors.fiscalYearEndMonth ? ' inp-error' : ''}`}
                     value={fiscalYearEndMonth}
@@ -564,7 +781,7 @@ export default function OnboardingPage() {
                   {reviewErrors.fiscalYearEndMonth && <div className="fl-err">{reviewErrors.fiscalYearEndMonth}</div>}
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai>Currency</FieldLabel>
+                  <FieldLabel required ai={showAiChip('currency', reportingCurrency)}>Currency</FieldLabel>
                   <select className="inp sel" value={reportingCurrency} onChange={(e) => setReportingCurrency(e.target.value as OnboardingPayload['reporting_currency'])}>
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -572,14 +789,14 @@ export default function OnboardingPage() {
                   </select>
                 </div>
                 <div className="fl">
-                  <FieldLabel required ai>Language</FieldLabel>
+                  <FieldLabel required ai={showAiChip('language', primaryLanguage)}>Language</FieldLabel>
                   <select className="inp sel" value={primaryLanguage} onChange={(e) => setPrimaryLanguage(e.target.value as OnboardingPayload['primary_language'])}>
                     <option value="en">English</option>
                     <option value="ar">Arabic</option>
                   </select>
                 </div>
                 <div className="fl">
-                  <FieldLabel ai>Exchange</FieldLabel>
+                  <FieldLabel ai={showAiChip('exchange', listedExchange)}>Exchange</FieldLabel>
                   <input className="inp" placeholder="e.g. Tadawul (1010)" value={listedExchange} onChange={(e) => setListedExchange(e.target.value)} />
                 </div>
               </div>

@@ -75,7 +75,7 @@ async function renderWizard() {
 }
 
 const description = () =>
-  screen.getByPlaceholderText(/Brief description of your company/i) as HTMLTextAreaElement;
+  screen.getByPlaceholderText(/What the company does, its main activities/i) as HTMLTextAreaElement;
 
 const backToStepOne = () => fireEvent.click(screen.getByRole("button", { name: /Back/i }));
 
