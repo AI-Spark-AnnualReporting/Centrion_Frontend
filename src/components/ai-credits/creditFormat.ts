@@ -67,9 +67,9 @@ export function isNotEnoughCreditsMessage(message: string | null | undefined): b
 // Names that the key alone can't give (they match Centriton's AI_ACTIONS labels).
 const ACTION_NAMES: Record<string, string> = {
   'annual.brief': 'Generate brief',
-  'annual.brief_refine': 'Refine brief',
+  'annual.refine': 'Refine',
   'annual.section': 'Write a section',
-  'annual.section_refine': 'Refine a section',
+  'annual.department_draft': 'Department draft',
   'annual.chat': 'Department chat message',
   'centriyon.copilot': 'AI Copilot message',
 };

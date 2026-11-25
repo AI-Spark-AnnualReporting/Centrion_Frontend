@@ -58,7 +58,10 @@ function creditsSummary(overrides: Partial<NonNullable<AiCreditsSummary["subscri
       balance: { included: 1, packs: 500, carried: 0, used: 4.05, total: 501, balance: 496.95, low: false },
       credit_packs: PACKS,
       packs: [],
-      by_action: [{ action: "annual.brief", jobs: 1, credits: 0.2, cost_usd: 0.004 }],
+      by_action: [
+        { action: "annual.brief", jobs: 1, credits: 0.2, cost_usd: 0.004 },
+        { action: "annual.design.extract", jobs: 14, credits: 3.1, cost_usd: 0.06, label: "Design extract" },
+      ],
       ...overrides,
     },
   };
@@ -85,6 +88,9 @@ describe("Usage page", () => {
     expect(screen.getByText("Plan card")).toBeInTheDocument();
     expect(await screen.findByText("Generate brief")).toBeInTheDocument();
     expect(screen.getByText("0.2")).toBeInTheDocument();                    // small use isn't shown as 0
+    // The full name the backend sends, as on Spark's screens — not the shortened "Extract".
+    expect(screen.getByText("Design extract")).toBeInTheDocument();
+    expect(screen.queryByText("Extract")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Buy credits" })).toHaveAttribute("href", "/admin-console/usage/buy-credits");
     expect(screen.queryByText("Invoices")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add payment method" })).toBeNull();

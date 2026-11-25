@@ -81,6 +81,34 @@ describe("Spark company dashboard", () => {
     await waitFor(() => expect(companyDashboard).toHaveBeenLastCalledWith("c1", "90d"));
   });
 
+  it("lists every feature, with no 'Other' row", async () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({
+      action: `annual.step_${index}`, label: `Feature ${index + 1}`, credits: 10 - index, jobs: 1,
+    }));
+    companyDashboard.mockResolvedValue({ ...DASHBOARD, usage: { ...DASHBOARD.usage, by_feature: many } });
+    open();
+    await screen.findByText("Feature 9");
+    expect(screen.getByText("Feature 1")).toBeTruthy();
+    expect(screen.queryByText(/^Other/)).toBeNull();
+    expect(screen.getByText("· 9")).toBeTruthy();
+  });
+
+  it("shows skeletons while a new range loads, then the new numbers", async () => {
+    open();
+    await screen.findByText("Custom template");
+    let answer: (value: unknown) => void = () => undefined;
+    companyDashboard.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    fireEvent.click(screen.getByRole("tab", { name: "30 days" }));
+    expect(await screen.findByTestId("chart-skeleton")).toBeTruthy();
+    expect(screen.getAllByTestId("feature-skeleton").length).toBe(8);
+    expect(screen.getAllByTestId("user-skeleton").length).toBe(3);
+    expect(screen.queryByText("Custom template")).toBeNull();
+    answer({ ...DASHBOARD, usage: { ...DASHBOARD.usage, range: "30d",
+      by_feature: [{ action: "annual.brief", label: "Generate brief", credits: 3, jobs: 2 }] } });
+    expect(await screen.findByText("Generate brief")).toBeTruthy();
+    expect(screen.queryByTestId("chart-skeleton")).toBeNull();
+  });
+
   it("handles a company with no plan and no AI use", async () => {
     companyDashboard.mockResolvedValue({
       ...DASHBOARD, plan: null, credits: null, users: { used: 1, limit: null },

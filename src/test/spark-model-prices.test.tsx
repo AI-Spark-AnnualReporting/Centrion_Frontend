@@ -103,7 +103,7 @@ function action(key: string, group: "generate" | "refine" | "chat", label: strin
 
 const ACTIONS = [
   action("annual.brief", "generate", "Generate brief"),
-  action("annual.brief_refine", "refine", "Refine brief"),
+  action("annual.refine", "refine", "Refine"),
   action("centriyon.copilot", "chat", "AI Copilot message"),
   action("annual.chat", "chat", "Department chat message"),
 ];
@@ -124,12 +124,12 @@ describe("Spark minimums in groups", () => {
     expect(chat).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: /Generate/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("AI Copilot message")).not.toBeInTheDocument();
-    expect(screen.queryByText("Refine brief")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Refine")).toHaveLength(1);   // the heading only: the group is closed
 
     fireEvent.click(chat);
     expect(chat).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("AI Copilot message")).toBeInTheDocument();
-    expect(screen.queryByText("Refine brief")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Refine")).toHaveLength(1);   // the heading only: the group is closed
 
     fireEvent.click(chat);
     expect(screen.queryByText("AI Copilot message")).not.toBeInTheDocument();
@@ -137,8 +137,9 @@ describe("Spark minimums in groups", () => {
   });
 
   it("names the new and renamed actions", () => {
-    expect(actionName("annual.brief_refine")).toBe("Refine brief");
+    expect(actionName("annual.refine")).toBe("Refine");
     expect(actionName("annual.section")).toBe("Write a section");
+    expect(actionName("annual.department_draft")).toBe("Department draft");
     expect(actionName("centriyon.copilot")).toBe("AI Copilot message");
     expect(actionName("annual.chat")).toBe("Department chat message");
     expect(actionName("annual.design.custom_template")).toBe("Custom template");

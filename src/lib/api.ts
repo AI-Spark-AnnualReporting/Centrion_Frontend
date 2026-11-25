@@ -56,7 +56,7 @@ import { clearActingCompany, getActingCompany } from "@/lib/acting-company";
 import { clearAllSparkLoginKeys } from "@/lib/sparkLogins";
 import type { DetectedBrandColors } from "@/types/brand";
 import type {
-  ActionList, AiCreditsSummary, CreditPack, CreditPackDraft, CreditSettings, InvoicePage, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
+  ActionList, AiCreditStatus, AiCreditsSummary, CreditPack, CreditPackDraft, CreditSettings, InvoicePage, ModelPriceList, MonthlyUsage, PackCheckout, SettingsChanges,
 } from "@/types/ai-credits";
 import type { MetricsMode } from "@/types/quarterly";
 import type { RegisterRequest, RegisterResponse } from "@/types/register";
@@ -5871,6 +5871,9 @@ export const subscriptions = {
 
 export const aiCredits = {
   summary: () => request<AiCreditsSummary>("/api/v1/ai-credits"),
+
+  // Which AI steps the company can start now (any signed-in user).
+  status: () => request<AiCreditStatus>("/api/v1/ai-credits/status"),
 
   // Buy one of Spark's packs by id; the price comes from the server.
   startPackCheckout: (idempotencyKey: string, packId: string) =>

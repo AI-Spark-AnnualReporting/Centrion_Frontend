@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { chat, type ChatHistoryMessage, type ChatToolCall } from '@/lib/api';
+import { aiCredits, chat, type ChatHistoryMessage, type ChatToolCall } from '@/lib/api';
+import type { AiCreditStatus } from '@/types/ai-credits';
 import { useAuth } from '@/context/AuthContext';
 
 // One row in the message list. v2 backend owns the persisted history; this
@@ -41,6 +42,32 @@ function hydrateTools(calls: ChatToolCall[] | null | undefined) {
   return calls.map((c) => ({ name: c.name, done: true }));
 }
 
+// How often the credit status is read again while the page is open.
+const CREDIT_STATUS_REFRESH_MS = 60_000;
+
+/** The company's AI credit status: read on open, every minute and when the tab
+ *  comes back. A failed read leaves it unknown, which never blocks. */
+function useCreditStatus(): AiCreditStatus | null {
+  const [status, setStatus] = useState<AiCreditStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      aiCredits.status()
+        .then((next) => { if (alive) setStatus(next); })
+        .catch(() => undefined);
+    };
+    load();
+    const timer = window.setInterval(load, CREDIT_STATUS_REFRESH_MS);
+    window.addEventListener('focus', load);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', load);
+    };
+  }, []);
+  return status;
+}
+
 export default function AIPage() {
   const { user } = useAuth();
   const location = useLocation();
@@ -49,6 +76,14 @@ export default function AIPage() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  // Greys out the send box, with the reason, when the company can't afford a
+  // Copilot message. The server still checks each message, so a failed or
+  // stale read never blocks by mistake. Plan: Centriton/.claude/plans/ai-credits-before-start.md
+  const creditStatus = useCreditStatus();
+  const copilotStep = creditStatus?.applies ? creditStatus.actions['centriyon.copilot'] : undefined;
+  const creditsReason = copilotStep && !copilotStep.allowed
+    ? copilotStep.reason ?? 'Not enough AI credits for this step. Ask your admin to buy more.'
+    : null;
   const [sessionLoading, setSessionLoading] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isClearing, setIsClearing] = useState(false);
@@ -130,7 +165,7 @@ export default function AIPage() {
   };
 
   const sendMessage = async (textOverride?: string) => {
-    if (isStreaming) return;
+    if (isStreaming || creditsReason) return;
     const text = (textOverride ?? input).trim();
     if (!text) return;
     setInput('');
@@ -587,7 +622,7 @@ export default function AIPage() {
               style={{ flex: 1, borderRadius: 22, padding: '9px 13px' }}
               placeholder="Ask about ESG, reports, compliance..."
               value={input}
-              disabled={isStreaming || sessionLoading}
+              disabled={isStreaming || sessionLoading || !!creditsReason}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -599,7 +634,7 @@ export default function AIPage() {
             <button
               type="button"
               onClick={handleSendClick}
-              disabled={sessionLoading}
+              disabled={sessionLoading || (!isStreaming && !!creditsReason)}
               aria-label={isStreaming ? 'Stop generating' : 'Send'}
               title={isStreaming ? 'Stop generating' : 'Send'}
               style={{
@@ -608,8 +643,8 @@ export default function AIPage() {
                 borderRadius: '50%',
                 border: 'none',
                 background: isStreaming ? '#E5484D' : '#4040C8',
-                cursor: sessionLoading ? 'not-allowed' : 'pointer',
-                opacity: sessionLoading ? 0.5 : 1,
+                cursor: sessionLoading || (!isStreaming && creditsReason) ? 'not-allowed' : 'pointer',
+                opacity: sessionLoading || (!isStreaming && creditsReason) ? 0.5 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -636,6 +671,11 @@ export default function AIPage() {
               )}
             </button>
           </div>
+          {creditsReason && (
+            <p role="status" style={{ margin: 0, padding: '0 16px 10px', fontSize: 11.5, color: '#B45309', background: '#fff' }}>
+              {creditsReason}
+            </p>
+          )}
         </div>
       </div>
     </div>

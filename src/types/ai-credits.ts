@@ -38,6 +38,7 @@ export interface ActionUsage {
   jobs: number;
   credits: number;          // what clients were charged
   cost_usd: number;         // what OpenAI charged Spark
+  label?: string | null;    // full name, as on Spark's screens ("Design extract"); client Usage only
 }
 
 export interface PackPurchase {
@@ -177,4 +178,12 @@ export interface MonthlyUsage {
   by_model: { model: string; input_tokens: number; output_tokens: number; cost_usd: number }[];
   unpriced_models: string[];
   companies: { items: CompanyUsageRow[]; total: number; page: number; limit: number };
+}
+
+// GET /api/v1/ai-credits/status — which AI steps the company can start now.
+// Plan: Centriton/.claude/plans/ai-credits-before-start.md
+export interface AiCreditStatus {
+  applies: boolean;                 // false: Spark staff / on-premises — never blocked
+  balance: number | null;           // the company admin only
+  actions: Record<string, { minimum: number; allowed: boolean; reason: string | null }>;
 }

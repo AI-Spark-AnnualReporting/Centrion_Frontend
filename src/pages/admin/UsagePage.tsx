@@ -120,7 +120,7 @@ function CreditsSection() {
           )}
           {period.by_action.map((row) => (
             <tr key={row.action} className="urow">
-              <td><b>{actionName(row.action)}</b></td>
+              <td><b>{row.label ?? actionName(row.action)}</b></td>
               <td style={{ textAlign: 'right' }}>{row.jobs}</td>
               <td style={{ textAlign: 'right' }}>{formatCreditsDetail(row.credits)}</td>
             </tr>
