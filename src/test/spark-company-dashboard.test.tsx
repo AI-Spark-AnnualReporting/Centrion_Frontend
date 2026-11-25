@@ -43,6 +43,7 @@ const DASHBOARD = {
     by_user: [{ user_id: "u1", full_name: "Sara Haddad", role: "admin", credits: 142.6, jobs: 71 }],
   },
   purchases: [{ id: "p1", paid_at: "2026-11-21T10:00:00Z", credits: 50, price: 36, bought_by: "Sara Haddad" }],
+  paused: [] as { action: string; label: string; minimum: number }[],
 };
 
 const open = () =>
@@ -79,6 +80,31 @@ describe("Spark company dashboard", () => {
     await screen.findByText("Aramco");
     fireEvent.click(screen.getByRole("tab", { name: "90 days" }));
     await waitFor(() => expect(companyDashboard).toHaveBeenLastCalledWith("c1", "90d"));
+  });
+
+  it("shows paused features on the credits tile and in By feature", async () => {
+    companyDashboard.mockResolvedValue({
+      ...DASHBOARD,
+      paused: [
+        { action: "annual.design.custom_template", label: "Custom template", minimum: 120 },
+        { action: "annual.assemble", label: "Assemble the report", minimum: 115 },
+      ],
+    });
+    open();
+    expect(await screen.findByText("⚠ 2 features paused")).toBeTruthy();
+    expect(screen.getByText("⚠ 2 features paused").getAttribute("title"))
+      .toBe("Paused right now: Custom template (needs 120), Assemble the report (needs 115)");
+    // Used and paused: tagged in its row. Paused but unused here: added with a tag.
+    expect(screen.getByText("Paused · needs 120")).toBeTruthy();
+    expect(screen.getByText("Assemble the report")).toBeTruthy();
+    expect(screen.getByText("Paused · needs 115")).toBeTruthy();
+  });
+
+  it("shows no paused chip when nothing is paused", async () => {
+    open();
+    await screen.findByText("Custom template");
+    expect(screen.queryByText(/features? paused/)).toBeNull();
+    expect(screen.queryByText(/^Paused/)).toBeNull();
   });
 
   it("lists every feature, with no 'Other' row", async () => {

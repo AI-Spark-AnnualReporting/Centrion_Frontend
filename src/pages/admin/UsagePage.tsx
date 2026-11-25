@@ -18,7 +18,7 @@ import {
   actionName, formatCredits, formatCreditsDetail,
 } from '@/components/ai-credits/creditFormat';
 import { aiCredits } from '@/lib/api';
-import type { AiCreditsSummary } from '@/types/ai-credits';
+import type { ActionUsage, AiCreditStatus, AiCreditsSummary } from '@/types/ai-credits';
 
 export const BUY_CREDITS_PAGE = '/admin-console/usage/buy-credits';
 
@@ -33,6 +33,42 @@ export function balanceText(balance: number, total: number): string {
 export function creditsLeftPercent(balance: number, total: number): number {
   if (total <= 0 || balance <= 0) return 0;
   return Math.min(100, Math.round((balance / total) * 100));
+}
+
+/** One row of "What used them": a feature with its use this period, its
+ *  minimum to start (0 = none) and whether it's paused right now. */
+export interface FeatureRow {
+  action: string;
+  name: string;
+  jobs: number;
+  credits: number;
+  minimum: number | null;    // null when the status couldn't be read
+  paused: boolean;
+}
+
+/** Every feature: the ones used this period first (most credits first), then
+ *  the unused ones, so a paused feature always has a row. Without a status
+ *  only the used ones show, with no minimum. */
+export function featureRows(used: ActionUsage[], status: AiCreditStatus | null): FeatureRow[] {
+  const steps = status?.applies ? status.actions : {};
+  const rows: FeatureRow[] = [];
+  const seen = new Set<string>();
+  const sorted = [...used].sort((a, b) => b.credits - a.credits);
+  for (const row of sorted) {
+    const step = steps[row.action];
+    rows.push({
+      action: row.action, name: row.label ?? step?.label ?? actionName(row.action),
+      jobs: row.jobs, credits: row.credits,
+      minimum: step ? step.minimum : null, paused: step ? !step.allowed : false,
+    });
+    seen.add(row.action);
+  }
+  for (const [action, step] of Object.entries(steps)) {
+    if (seen.has(action)) continue;
+    rows.push({ action, name: step.label ?? actionName(action), jobs: 0, credits: 0,
+      minimum: step.minimum, paused: !step.allowed });
+  }
+  return rows;
 }
 
 export default function UsagePage() {
@@ -53,12 +89,15 @@ export default function UsagePage() {
 
 function CreditsSection() {
   const [summary, setSummary] = useState<AiCreditsSummary | null>(null);
+  const [status, setStatus] = useState<AiCreditStatus | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     aiCredits.summary()
       .then((next) => { setSummary(next); setError(''); })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load AI credits.'));
+    // Minimums and what's paused. A failed read just leaves those columns empty.
+    aiCredits.status().then(setStatus).catch(() => undefined);
   }, []);
 
   if (error) return <div className="card" style={{ padding: 14, fontSize: 12, color: '#DC2626' }}>{error}</div>;
@@ -78,6 +117,7 @@ function CreditsSection() {
   const { balance } = period;
   const percent = creditsLeftPercent(balance.balance, balance.total);
   const canBuy = period.credit_packs.length > 0;
+  const rows = featureRows(period.by_action, status);
   return (
     <Section title="AI credits"
       line={`This period: ${formatLicenseDate(period.period.starts_at)} – ${formatLicenseDate(period.period.ends_at)}. Unused credits don't carry over.`}>
@@ -112,17 +152,28 @@ function CreditsSection() {
       <div style={{ fontSize: 12, fontWeight: 800, margin: '18px 0 6px' }}>What used them</div>
       <table className="utable">
         <thead>
-          <tr><th>Feature</th><th style={{ textAlign: 'right' }}>Times used</th><th style={{ textAlign: 'right' }}>Credits</th></tr>
+          <tr>
+            <th>Feature</th><th style={{ textAlign: 'right' }}>Times used</th><th style={{ textAlign: 'right' }}>Credits</th>
+            <th style={{ textAlign: 'right' }}>Minimum to start</th><th aria-label="State" />
+          </tr>
         </thead>
         <tbody>
-          {period.by_action.length === 0 && (
-            <tr className="urow"><td colSpan={3} style={{ color: '#9BA3C4' }}>No AI used yet this period.</td></tr>
+          {rows.length === 0 && (
+            <tr className="urow"><td colSpan={5} style={{ color: '#9BA3C4' }}>No AI used yet this period.</td></tr>
           )}
-          {period.by_action.map((row) => (
+          {rows.map((row) => (
             <tr key={row.action} className="urow">
-              <td><b>{row.label ?? actionName(row.action)}</b></td>
+              <td><b>{row.name}</b></td>
               <td style={{ textAlign: 'right' }}>{row.jobs}</td>
               <td style={{ textAlign: 'right' }}>{formatCreditsDetail(row.credits)}</td>
+              <td style={{ textAlign: 'right' }}>{row.minimum ? formatCredits(row.minimum) : '—'}</td>
+              <td style={{ textAlign: 'right', width: 90 }}>
+                {row.paused && (
+                  <span className="badge b-am" title="Your balance is below this feature's minimum, so it can't start. Buy credits to turn it back on.">
+                    Paused
+                  </span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

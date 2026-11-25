@@ -185,5 +185,5 @@ export interface MonthlyUsage {
 export interface AiCreditStatus {
   applies: boolean;                 // false: Spark staff / on-premises — never blocked
   balance: number | null;           // the company admin only
-  actions: Record<string, { minimum: number; allowed: boolean; reason: string | null }>;
+  actions: Record<string, { label?: string; minimum: number; allowed: boolean; reason: string | null }>;
 }

@@ -88,7 +88,7 @@ export default function SparkCompanyDashboardPage() {
         {error && <div style={{ fontSize: 12, color: '#DC2626', marginBottom: 8 }}>{error}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
           {updating ? <ChartSkeleton /> : <OverTime usage={dashboard.usage} />}
-          {updating ? <FeaturesSkeleton /> : <ByFeature features={dashboard.usage.by_feature} />}
+          {updating ? <FeaturesSkeleton /> : <ByFeature features={dashboard.usage.by_feature} paused={dashboard.paused} />}
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
@@ -130,9 +130,9 @@ function Header({ dashboard }: { dashboard: SparkCompanyDashboard }) {
   );
 }
 
-function Tile({ title, children, hint }: { title: string; children: React.ReactNode; hint?: string }) {
+function Tile({ title, children, hint, warn }: { title: string; children: React.ReactNode; hint?: string; warn?: boolean }) {
   return (
-    <div className="card" style={{ padding: '14px 16px', minWidth: 0 }}>
+    <div className="card" style={{ padding: '14px 16px', minWidth: 0, borderColor: warn ? '#FCD9A8' : undefined }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: FAINT, textTransform: 'uppercase', letterSpacing: '.04em' }}>{title}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: INK, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{children}</div>
       {hint && <div style={{ fontSize: 11, color: FAINT, marginTop: 2 }}>{hint}</div>}
@@ -150,8 +150,9 @@ function KpiTiles({ dashboard }: { dashboard: SparkCompanyDashboard }) {
         {users.used} <span style={{ fontSize: 13, color: MUTED, fontWeight: 600 }}>/ {users.limit ?? '—'}</span>
         {users.limit !== null && <Meter percent={userPercent} tone={usersFull ? 'red' : ''} label="Users" />}
       </Tile>
-      <Tile title="AI credits left">
+      <Tile title="AI credits left" warn={dashboard.paused.length > 0}>
         {credits ? <div style={{ fontSize: 14, fontWeight: 600 }}><CreditsLeft credits={credits} /></div> : '—'}
+        <PausedChip paused={dashboard.paused} />
       </Tile>
       <Tile title="Used this period" hint={credits ? `of ${formatCredits(credits.total)} credits` : 'no plan'}>
         {credits ? formatCredits(credits.used) : '—'}
@@ -243,7 +244,28 @@ function OverTime({ usage }: { usage: SparkCompanyDashboard['usage'] }) {
 // Same height as the chart beside it; more features than fit scroll inside.
 const USAGE_BOX_HEIGHT = 220;
 
-function ByFeature({ features }: { features: SparkCompanyDashboard['usage']['by_feature'] }) {
+/** "⚠ 2 features paused" on the AI credits tile; hover lists them with their minimums. */
+function PausedChip({ paused }: { paused: SparkCompanyDashboard['paused'] }) {
+  if (paused.length === 0) return null;
+  const list = paused.map((step) => `${step.label} (needs ${formatCredits(step.minimum)})`).join(', ');
+  return (
+    <span title={`Paused right now: ${list}`}
+      style={{ display: 'inline-block', marginTop: 4, fontSize: 11, fontWeight: 700, color: '#B45309',
+        background: '#FFF4E5', borderRadius: 99, padding: '1px 8px' }}>
+      ⚠ {paused.length} {paused.length === 1 ? 'feature' : 'features'} paused
+    </span>
+  );
+}
+
+function ByFeature({ features: used, paused }: {
+  features: SparkCompanyDashboard['usage']['by_feature']; paused: SparkCompanyDashboard['paused'];
+}) {
+  // Paused right now but not used in this range: added with an empty bar, so
+  // every paused feature has a row to carry its tag.
+  const usedActions = new Set(used.map((feature) => feature.action));
+  const features = [...used, ...paused.filter((step) => !usedActions.has(step.action))
+    .map((step) => ({ action: step.action, label: step.label, credits: 0, jobs: 0 }))];
+  const minimumOf = new Map(paused.map((step) => [step.action, step.minimum]));
   const largest = Math.max(...features.map((feature) => feature.credits), 0);
   return (
     <div style={{ minWidth: 0 }}>
@@ -254,11 +276,19 @@ function ByFeature({ features }: { features: SparkCompanyDashboard['usage']['by_
       <div data-testid="by-feature-list" style={{ maxHeight: USAGE_BOX_HEIGHT, overflowY: 'auto', paddingRight: 6 }}>
         {features.map((feature) => (
           <div key={feature.action} title={`${feature.label}: ${formatCreditsDetail(feature.credits)} credits · ${feature.jobs} ${feature.jobs === 1 ? 'use' : 'uses'}`}
-            style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 160px) minmax(40px, 1fr)', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12 }}>
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 160px) minmax(40px, 1fr) auto', alignItems: 'center', gap: 10, padding: '5px 0', fontSize: 12 }}>
             <span style={{ color: INK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{feature.label}</span>
             <span style={{ height: 10, background: '#ECEDF7', borderRadius: 4, position: 'relative' }}>
               <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: '0 4px 4px 0', background: BAR_COLOUR,
-                width: `${largest > 0 ? Math.max(1, (feature.credits / largest) * 100) : 0}%` }} />
+                width: `${largest > 0 && feature.credits > 0 ? Math.max(1, (feature.credits / largest) * 100) : 0}%` }} />
+            </span>
+            <span>
+              {minimumOf.has(feature.action) && (
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: '#B45309', background: '#FFF4E5', borderRadius: 99,
+                  padding: '1px 7px', whiteSpace: 'nowrap' }}>
+                  Paused · needs {formatCredits(minimumOf.get(feature.action) ?? 0)}
+                </span>
+              )}
             </span>
           </div>
         ))}

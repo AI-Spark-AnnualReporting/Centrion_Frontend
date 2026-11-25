@@ -20,12 +20,14 @@ const startPackCheckout = vi.fn();
 const payPack = vi.fn();
 const modelPrices = vi.fn();
 const saveCreditPacks = vi.fn();
+const creditStatus = vi.fn();
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
     aiCredits: {
       summary: () => summary(),
+      status: () => creditStatus(),
       invoices: (page: number, limit: number) => invoices(page, limit),
       startPackCheckout: (key: string, packId: string) => startPackCheckout(key, packId),
       payPack: (id: string, key: string) => payPack(id, key),
@@ -39,7 +41,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-const { default: UsagePage } = await import("@/pages/admin/UsagePage");
+const { default: UsagePage, featureRows } = await import("@/pages/admin/UsagePage");
 const { default: BillingPage } = await import("@/pages/admin/BillingPage");
 const { default: BuyCreditsPage } = await import("@/pages/admin/BuyCreditsPage");
 const { default: SparkAiCreditsPage } = await import("@/pages/spark/SparkAiCreditsPage");
@@ -77,6 +79,36 @@ function invoicePage(total: number, page = 1, limit = 10): InvoicePage {
 
 beforeEach(() => {
   for (const mock of [summary, invoices, startPackCheckout, payPack, modelPrices, saveCreditPacks, toast]) mock.mockReset();
+  creditStatus.mockReset().mockResolvedValue({
+    applies: true, balance: 114,
+    actions: { "annual.assemble": { label: "Assemble the report", minimum: 115, allowed: false, reason: "Needs 115" } },
+  });
+});
+
+// Minimum column + Paused (all features; Paused only when below the minimum).
+describe("What used them: minimums", () => {
+  const status = {
+    applies: true, balance: 114,
+    actions: {
+      "annual.brief": { label: "Generate brief", minimum: 5, allowed: true, reason: null },
+      "annual.assemble": { label: "Assemble the report", minimum: 115, allowed: false, reason: "Needs 115" },
+      "annual.refine": { label: "Refine", minimum: 0, allowed: true, reason: null },
+    },
+  };
+
+  it("lists every feature: used ones first, then unused ones, with minimums and Paused", () => {
+    const rows = featureRows(
+      [{ action: "annual.brief", jobs: 5, credits: 7.7, cost_usd: 0.1, label: "Generate brief" }], status);
+    expect(rows.map((row) => row.name)).toEqual(["Generate brief", "Assemble the report", "Refine"]);
+    expect(rows[0]).toMatchObject({ jobs: 5, minimum: 5, paused: false });
+    expect(rows[1]).toMatchObject({ jobs: 0, credits: 0, minimum: 115, paused: true });
+  });
+
+  it("without the status shows only the used features and no minimums", () => {
+    const rows = featureRows([{ action: "annual.brief", jobs: 1, credits: 1, cost_usd: 0, label: "Generate brief" }], null);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ minimum: null, paused: false });
+  });
 });
 
 describe("Usage page", () => {
@@ -91,6 +123,11 @@ describe("Usage page", () => {
     // The full name the backend sends, as on Spark's screens — not the shortened "Extract".
     expect(screen.getByText("Design extract")).toBeInTheDocument();
     expect(screen.queryByText("Extract")).not.toBeInTheDocument();
+    // Unused but paused: it still gets a row, its minimum and the Paused warning.
+    expect(await screen.findByText("Assemble the report")).toBeInTheDocument();
+    expect(screen.getByText("Minimum to start")).toBeInTheDocument();
+    expect(screen.getByText("115")).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Buy credits" })).toHaveAttribute("href", "/admin-console/usage/buy-credits");
     expect(screen.queryByText("Invoices")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add payment method" })).toBeNull();

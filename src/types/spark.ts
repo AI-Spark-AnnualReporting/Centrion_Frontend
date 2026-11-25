@@ -76,6 +76,8 @@ export interface SparkCompanyDashboard {
     by_user: { user_id: string | null; full_name: string; role: string | null; credits: number; jobs: number }[];
   };
   purchases: { id: string; paid_at: string | null; credits: number; price: number; bought_by: string | null }[];
+  // AI features the company can't start right now (below their minimum). Not range-dependent.
+  paused: { action: string; label: string; minimum: number }[];
 }
 
 export interface SparkOverview {
