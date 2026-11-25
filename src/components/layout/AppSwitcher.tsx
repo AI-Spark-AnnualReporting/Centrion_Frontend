@@ -11,7 +11,7 @@ import { redirectToApp } from '@/lib/appRouting';
 import type { AppKey } from '@/types/auth';
 
 const APP_LABELS: Record<AppKey, string> = {
-  centriton_dashboard: 'Centriton',
+  centriton_dashboard: 'Centriyon',
   spark_studio: 'Annual Report',
 };
 
