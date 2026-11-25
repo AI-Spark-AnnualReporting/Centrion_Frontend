@@ -57,6 +57,8 @@ export interface AiCreditsSummary {
     credit_packs: CreditPack[];     // Spark's packs on sale (the same for every client)
     packs: PackPurchase[];          // bought this period
     by_action: ActionUsage[];
+    // What would move to a new plan paid now: unused bought credits (> 0) or the minus (< 0).
+    carry_to_next?: number;
   } | null;
 }
 

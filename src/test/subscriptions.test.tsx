@@ -20,7 +20,9 @@ const subscriptions = { plans: vi.fn(), current: vi.fn(), startCheckout: vi.fn()
 const sparkAiCredits = {
   settings: vi.fn(() => Promise.resolve({ credit_value_usd: 0.02, low_balance_percent: 20, action_minimums: {} })),
 };
-vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions, sparkAiCredits }));
+// The checkout previews AI credits that move to the new plan.
+const aiCredits = { summary: vi.fn(() => Promise.resolve({ subscription: null })) };
+vi.mock("@/lib/api", () => ({ sparkPlans, subscriptions, sparkAiCredits, aiCredits }));
 
 const { default: SparkPlanEditorPage, limitsChanged } = await import("@/pages/spark/SparkPlanEditorPage");
 const { default: SparkSubscriptionsPage } = await import("@/pages/spark/SparkSubscriptionsPage");
@@ -29,7 +31,7 @@ const { CardStrip, PlanCard, aiCreditsLine, fitScale, scrollingListHeight } = aw
 const { default: SparkQuotesPage } = await import("@/pages/spark/SparkQuotesPage");
 const { QuoteForm } = await import("@/components/subscriptions/QuoteForm");
 const { default: SubscriptionPage, orderPlans } = await import("@/pages/admin/SubscriptionPage");
-const { default: CheckoutPage } = await import("@/pages/admin/CheckoutPage");
+const { default: CheckoutPage, carryLine } = await import("@/pages/admin/CheckoutPage");
 const { offerAddedUp } = await import("@/components/subscriptions/OfferBreakdown");
 
 const CATALOGUE = [
@@ -733,6 +735,24 @@ describe("CheckoutPage", () => {
     expect(screen.getByText("Starter", { selector: ".old" })).toBeInTheDocument();
     expect(screen.getByText("✗ Board Report")).toBeInTheDocument();
     expect(screen.getByText(/Switched off \(you confirmed\):/)).toBeInTheDocument();
+  });
+
+  it("shows the bought AI credits that move to the new plan", async () => {
+    aiCredits.summary.mockResolvedValueOnce({ subscription: { carry_to_next: 114 } } as never);
+    renderCheckout({ checkout: { ...CHECKOUT, ai_credits: 200 }, catalogue: CATALOGUE, replaces: "Test Plan v1" });
+    expect(await screen.findByTestId("carried-credits")).toHaveTextContent("+114");
+    expect(screen.getByText(/114 unused bought AI credits move to Standard, so you start with 314/)).toBeInTheDocument();
+  });
+
+  it("shows nothing about carried credits when nothing moves", async () => {
+    renderCheckout({ checkout: CHECKOUT, catalogue: CATALOGUE, replaces: "Starter" });
+    await waitFor(() => expect(aiCredits.summary).toHaveBeenCalled());
+    expect(screen.queryByTestId("carried-credits")).toBeNull();
+  });
+
+  it("words a carried minus", () => {
+    expect(carryLine(-40, "Starter", "Standard", 500))
+      .toBe("Starter ended 40 AI credits below zero; that comes off Standard's credits, so you start with 460.");
   });
 
   it("Pay activates it once, refreshes the login and shows the branded success popup", async () => {

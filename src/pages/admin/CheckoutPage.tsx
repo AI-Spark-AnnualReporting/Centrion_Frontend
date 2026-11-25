@@ -11,14 +11,14 @@
 //
 // Plans: Centriton/.claude/plans/cloud-subscriptions.md, cloud-subscriptions-v2-redesign.md
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { SUBSCRIPTION_PAGE, formatLicenseDate } from '@/components/license/LicenseBanner';
 import { ErrorPopup } from '@/components/shared/ErrorPopup';
 import { FormDialog } from '@/components/subscriptions/FormDialog';
 import { durationLabel, durationPer, formatMoney } from '@/components/subscriptions/PlanFields';
 import { useAuth } from '@/context/AuthContext';
-import { subscriptions } from '@/lib/api';
+import { aiCredits, subscriptions } from '@/lib/api';
 import type { LicensableModule } from '@/types/license';
 import type { CompanySubscription, PaidDuration } from '@/types/subscription';
 import '@/components/subscriptions/subscriptions.css';
@@ -106,6 +106,16 @@ function Success({ checkout, onDone }: { checkout: CompanySubscription; onDone: 
   );
 }
 
+/** The "Changing plan" sentence about AI credits that move across. */
+export function carryLine(carry: number, oldPlan: string, newPlan: string, included: number): string {
+  const start = Math.round(included + carry).toLocaleString('en-US');
+  const amount = Math.round(Math.abs(carry)).toLocaleString('en-US');
+  if (carry > 0) {
+    return `${amount} unused bought AI credits move to ${newPlan}, so you start with ${start}. Included credits from ${oldPlan} end today.`;
+  }
+  return `${oldPlan} ended ${amount} AI credits below zero; that comes off ${newPlan}'s credits, so you start with ${start}.`;
+}
+
 export default function CheckoutPage() {
   const navigate = useNavigate();
   const { user, refreshPermissions } = useAuth();
@@ -114,6 +124,15 @@ export default function CheckoutPage() {
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
   const [paid, setPaid] = useState<CompanySubscription | null>(null);
+  // AI credits that move to the new plan (bought and unused, or a minus).
+  // A preview: worked out again when they pay. Unknown = nothing shown.
+  const [carry, setCarry] = useState(0);
+
+  useEffect(() => {
+    aiCredits.summary()
+      .then((summary) => setCarry(summary.subscription?.carry_to_next ?? 0))
+      .catch(() => undefined);
+  }, []);
 
   // Opened without a checkout (e.g. a refresh): start again from the plans.
   const checkout = state?.checkout;
@@ -171,6 +190,14 @@ export default function CheckoutPage() {
                 <b>{(checkout.ai_credits ?? 0).toLocaleString('en-US')}</b>
                 <span>{aiCreditsBoxLabel(checkout)}</span>
               </div>
+              {carry !== 0 && (
+                <div className="sub-co-pbox" data-testid="carried-credits">
+                  <b style={{ color: carry < 0 ? '#DC2626' : undefined }}>
+                    {carry > 0 ? '+' : '−'}{Math.round(Math.abs(carry)).toLocaleString('en-US')}
+                  </b>
+                  <span>{carry > 0 ? 'AI credits carried over (bought, unused)' : 'AI credits carried over (below zero on your last plan)'}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -182,6 +209,11 @@ export default function CheckoutPage() {
                 <span className="new">{checkout.plan_name}</span>
                 <span style={{ color: '#9BA3C4' }}>· {state.replaces} ends today</span>
               </div>
+              {carry !== 0 && (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: '#5A6080' }}>
+                  {carryLine(carry, state.replaces, checkout.plan_name, checkout.ai_credits ?? 0)}
+                </p>
+              )}
               {switchedOff.length > 0 && (
                 <>
                   <div className="sub-co-confirmed">
