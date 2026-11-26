@@ -387,6 +387,12 @@ export default function ExtractionReviewPage() {
           reportId={reportId}
           data={data}
           onAddFiles={companyId ? () => setAddOpen(true) : undefined}
+          onConfirmUnits={companyId ? async (answers) => {
+            // The response IS the fresh screen; an error is thrown back to the card,
+            // which shows it and keeps the user's choices.
+            const fresh = await quarterlyReports.confirmFigureUnits(companyId, reportId, answers);
+            setData(fresh);
+          } : undefined}
         />
         {addOpen && companyId && (
           <AddFinancialFilesDialog

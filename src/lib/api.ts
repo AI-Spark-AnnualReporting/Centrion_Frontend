@@ -2420,6 +2420,18 @@ export const quarterlyReports = {
       { method: "POST", body: { edits } },
     ),
 
+  // User lane: confirm the unit of figures the backend guessed. All or nothing;
+  // returns the fresh Extraction screen payload.
+  confirmFigureUnits: (
+    companyId: string,
+    reportId: string,
+    answers: import("@/types/quarterly").UnitAnswer[],
+  ): Promise<import("@/types/quarterly").ExtractionReviewResponse> =>
+    request(
+      `/api/v1/reports/${encodeURIComponent(companyId)}/quarterly/${encodeURIComponent(reportId)}/figure-units`,
+      { method: "POST", body: { answers } },
+    ),
+
   // Add or replace a user-metrics report's financial data, from the Extraction
   // screen, at any point in the flow. `onConflict` is required by the backend:
   // "replace" wipes every figure on the report first, "keep_both" gives a table

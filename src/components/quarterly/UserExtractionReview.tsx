@@ -5,11 +5,13 @@ import type {
   CustomExtractionRow,
   CustomExtractionSection,
   ExtractionReviewResponse,
+  UnitAnswer,
   UserExtractionTable,
 } from '@/types/quarterly';
 // Shared with the report tables and with report_export.py — the extraction screen
 // and the report must not disagree about what a figure's units are.
 import { gridValue, NIL_CELL } from './figureUnits';
+import UnitQuestions from './UnitQuestions';
 
 /**
  * User-metrics extraction — read-only.
@@ -43,6 +45,12 @@ interface Props {
    * the dialog and the refresh. Its test harness renders it with no api mock at all.
    */
   onAddFiles?: () => void;
+  /**
+   * Saves the units the user confirmed. Same rule as onAddFiles: the page makes the
+   * call, so this component stays network-free. Without it the questions still show
+   * but can't be answered.
+   */
+  onConfirmUnits?: (answers: UnitAnswer[]) => Promise<void>;
 }
 
 /** "01_Aramco_Q3_2023_Income_Statement.xlsx" — the tail is what identifies it. */
@@ -403,7 +411,7 @@ function HowWeRead({ t, period }: { t: UserExtractionTable; period?: string | nu
   );
 }
 
-export default function UserExtractionReview({ reportId, data, onAddFiles }: Props) {
+export default function UserExtractionReview({ reportId, data, onAddFiles, onConfirmUnits }: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -428,6 +436,9 @@ export default function UserExtractionReview({ reportId, data, onAddFiles }: Pro
 
   const isOpen = (code: string) => open[code] !== false; // sections start expanded
   const nothingRead = sections.length === 0;
+  // Units still to confirm. The outline can't be locked until this is 0, so the
+  // way forward stays closed here too, rather than failing one screen later.
+  const unconfirmed = s?.unconfirmed_count ?? 0;
 
   return (
     <div style={{ padding: '22px 28px', overflowY: 'auto', flex: 1 }}>
@@ -471,6 +482,13 @@ export default function UserExtractionReview({ reportId, data, onAddFiles }: Pro
           </span>
         )}
       </div>
+
+      <UnitQuestions
+        sections={sections}
+        defaultCurrency={data.financial_currency || 'SAR'}
+        editable={data.editable !== false && !!onConfirmUnits}
+        onConfirm={onConfirmUnits ?? (async () => {})}
+      />
 
       {nothingRead && (
         <div
@@ -610,14 +628,17 @@ export default function UserExtractionReview({ reportId, data, onAddFiles }: Pro
           ← Back
         </button>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: MUTED }}>
-          {nothingRead
-            ? 'You can continue, but the report will have no financial sections.'
-            : `${s?.section_count ?? sections.length} sections will be offered on the outline.`}
+          {unconfirmed > 0
+            ? `Confirm ${unconfirmed} unit${unconfirmed === 1 ? '' : 's'} first.`
+            : nothingRead
+              ? 'You can continue, but the report will have no financial sections.'
+              : `${s?.section_count ?? sections.length} sections will be offered on the outline.`}
         </span>
         <button
           type="button"
           className="btn bp"
           style={{ padding: '11px 24px', fontSize: 13 }}
+          disabled={unconfirmed > 0}
           onClick={() => navigate(`/quarterly-report/${reportId}/outline`)}
         >
           Continue to outline →

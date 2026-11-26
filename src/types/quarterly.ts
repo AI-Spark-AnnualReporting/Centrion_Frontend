@@ -232,6 +232,31 @@ export interface CustomExtractionRow {
   group?: string | null;
   column?: string | null;
   table?: string | null;
+  // User lane: the stored unit parts, and the question to ask when the unit was a
+  // guess (null when the backend is sure).
+  currency?: string | null;
+  scale?: string | null;
+  unit_raw?: string | null;
+  question?: UnitQuestion | null;
+}
+
+// ─── Confirming a unit the backend guessed (user lane) ──────────────────────
+export type UnitKind = 'money' | 'per_share' | 'percent' | 'ratio' | 'count' | 'other';
+
+// One answer, in the shape POST .../figure-units takes. `ids` lists every figure
+// the answer applies to — one row, or all of a table's questioned rows.
+export interface UnitAnswer {
+  ids: string[];
+  kind: UnitKind;
+  currency?: string;
+  scale?: string;
+  text?: string;
+}
+
+export interface UnitQuestion {
+  reason_code: 'label' | 'odd_name' | 'small_value' | 'scale_conflict' | string;
+  reason: string;
+  guess: Omit<UnitAnswer, 'ids'>;
 }
 
 export interface CustomExtractionSection {
@@ -287,6 +312,9 @@ export interface UserExtractionSummary {
   section_count: number;
   assumed_count: number;
   confirmed_count: number;
+  // Figures whose unit still needs the user's confirmation; the outline cannot be
+  // locked until this is 0.
+  unconfirmed_count?: number;
   // How many separate uploads fed this report.
   upload_count: number;
 }
