@@ -287,3 +287,18 @@ describe("outline — sections the user's files do not fill", () => {
     expect(screen.getByText(/of 4 included/)).toBeInTheDocument();
   });
 });
+
+describe("unconfirmed units", () => {
+  it("holds Generate until the Extraction step's units are confirmed", async () => {
+    getOutline.mockResolvedValue(response({ unconfirmed_units: 3 }));
+    await renderPage();
+    const button = await screen.findByRole("button", { name: /Confirm 3 units first/ });
+    expect(button).toBeDisabled();
+  });
+
+  it("offers Generate when there is nothing to confirm", async () => {
+    getOutline.mockResolvedValue(response({ unconfirmed_units: 0 }));
+    await renderPage();
+    expect(await screen.findByRole("button", { name: /Generate & Preview/ })).toBeEnabled();
+  });
+});

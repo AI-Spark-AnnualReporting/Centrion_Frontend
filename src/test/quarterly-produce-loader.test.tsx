@@ -228,6 +228,29 @@ describe('the failure card only appears when the server actually refused', () =>
     expect(produceAll).not.toHaveBeenCalled();
   });
 
+  it('shows the unconfirmed-units refusal and sends Try Again to the Extraction step', async () => {
+    // The lock answers 412 (not 409) when units still need confirming. A 409 from
+    // the lock means "already locked" and goes to Preview — this used to be that,
+    // which hid the reason and left nothing built.
+    lockOutline.mockRejectedValue(
+      new ApiError(
+        412,
+        'Precondition Failed',
+        { detail: '3 figure(s) need their unit confirmed on the Extraction step before the report can be built.' },
+        '/api/v1/reports/co_1/quarterly/rpt_1/outline/lock',
+      ),
+    );
+
+    renderLoader();
+
+    expect(await screen.findByText(/3 figure\(s\) need their unit confirmed/i)).toBeInTheDocument();
+    expect(produceAll).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Try Again/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId('went-to')).toHaveTextContent('/quarterly-report/rpt_1/extraction'),
+    );
+  });
+
   it('reports a missing report id immediately rather than after a wait', async () => {
     renderLoader({ ...bootState, reportId: null });
     expect(await screen.findByText(/missing its report or company id/i)).toBeInTheDocument();

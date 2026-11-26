@@ -432,6 +432,9 @@ export default function OutlinePage() {
   const [isLocked, setIsLocked] = useState(false);
   // Ingest worker still writing figures — badges are provisional until it clears.
   const [ingesting, setIngesting] = useState(false);
+  // Units the user still has to confirm on the Extraction step. The report can't be
+  // built until they do, so Generate waits here instead of failing one screen later.
+  const [unconfirmedUnits, setUnconfirmedUnits] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -514,6 +517,7 @@ export default function OutlinePage() {
         (res.sections.length > 0 && res.sections.every((s) => s.locked)),
     );
     setIngesting(res.ingest_running === true);
+    setUnconfirmedUnits(res.unconfirmed_units ?? 0);
     defaultIncludedRef.current = Object.fromEntries(
       all
         .filter((s) => s.requirement === 'optional')
@@ -1223,11 +1227,13 @@ export default function OutlinePage() {
             is unaffected — that report's set is already committed. */}
         <button
           className="bp"
-          disabled={submitting || (ingesting && !isLocked)}
+          disabled={submitting || (ingesting && !isLocked) || (unconfirmedUnits > 0 && !isLocked)}
           title={
             ingesting && !isLocked
               ? 'Waiting for document extraction to finish'
-              : undefined
+              : unconfirmedUnits > 0 && !isLocked
+                ? 'Confirm the figures’ units on the Extraction step first'
+                : undefined
           }
           style={{
             fontSize: 14,
@@ -1236,9 +1242,11 @@ export default function OutlinePage() {
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            opacity: submitting || (ingesting && !isLocked) ? 0.6 : 1,
+            opacity: submitting || (ingesting && !isLocked) || (unconfirmedUnits > 0 && !isLocked) ? 0.6 : 1,
             cursor:
-              submitting || (ingesting && !isLocked) ? 'not-allowed' : 'pointer',
+              submitting || (ingesting && !isLocked) || (unconfirmedUnits > 0 && !isLocked)
+                ? 'not-allowed'
+                : 'pointer',
           }}
           onClick={onGenerate}
         >
@@ -1246,7 +1254,9 @@ export default function OutlinePage() {
             ? 'View report'
             : ingesting
               ? 'Preparing data…'
-              : submitting
+              : unconfirmedUnits > 0
+                ? `Confirm ${unconfirmedUnits} unit${unconfirmedUnits === 1 ? '' : 's'} first`
+                : submitting
                 ? 'Locking…'
                 : 'Generate & Preview'}
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none">

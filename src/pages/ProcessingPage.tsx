@@ -196,6 +196,9 @@ export default function ProcessingPage() {
   // 409 can only mean "already locked".
   const lockAttempted = useRef(false);
   const [bootError, setBootError] = useState<string | null>(null);
+  // Which screen can fix a refused start: the outline (default) or, when units are
+  // unconfirmed, the Extraction step.
+  const [bootFixStep, setBootFixStep] = useState<'outline' | 'extraction'>('outline');
   // Which call is in flight, for the loader caption. Not a deadline — see BootStep.
   const [bootStep, setBootStep] = useState<BootStep | null>(null);
 
@@ -292,6 +295,11 @@ export default function ProcessingPage() {
             navigate(`/quarterly-report/${reportId}/preview`, { replace: true });
             return;
           }
+        }
+        // 412 from the lock: figures still need their unit confirmed. Only the
+        // Extraction step can fix that, so the way back goes there, not the outline.
+        if (err instanceof ApiError && err.status === 412) {
+          setBootFixStep('extraction');
         }
         setBootError(
           err instanceof Error
@@ -439,7 +447,11 @@ export default function ProcessingPage() {
     return (
       <GeneratingScreen
         phase="failed"
-        errorMessage={`${bootError} — nothing is being generated. Go back to the outline and try again.`}
+        errorMessage={
+          bootFixStep === 'extraction'
+            ? `${bootError} Nothing is being generated yet.`
+            : `${bootError} — nothing is being generated. Go back to the outline and try again.`
+        }
         onCancel={() => navigate("/reports", { replace: true })}
         onRetry={() =>
           // The old handler reset three flags and fired zero requests: the bootstrap
@@ -452,7 +464,7 @@ export default function ProcessingPage() {
           // something only the outline can fix (a mandatory section unticked). Its
           // Continue also already handles the already-locked case by going to Preview.
           navigate(
-            state.reportId ? `/quarterly-report/${state.reportId}/outline` : "/reports",
+            state.reportId ? `/quarterly-report/${state.reportId}/${bootFixStep}` : "/reports",
             { replace: true },
           )
         }

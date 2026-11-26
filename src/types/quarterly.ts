@@ -540,6 +540,9 @@ export interface OutlineResponse {
   // "not extracted yet". The page polls on this and freezes edits while it's true.
   ingest_running?: boolean;
   ingest_run_id?: string | null;
+  // User lane: figures whose unit still needs confirming on the Extraction step.
+  // The backend refuses the lock (412) until this is 0.
+  unconfirmed_units?: number;
   sections: OutlineSection[];
 }
 
