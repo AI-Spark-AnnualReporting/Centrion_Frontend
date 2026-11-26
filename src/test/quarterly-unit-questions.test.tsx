@@ -11,7 +11,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
 import { buildQuestionItems, choiceProblem } from '@/components/quarterly/UnitQuestions';
-import type { CustomExtractionSection, ExtractionReviewResponse, UnitAnswer } from '@/types/quarterly';
+import type { CustomExtractionRow, CustomExtractionSection, ExtractionReviewResponse, UnitAnswer } from '@/types/quarterly';
 
 const EPS_ROW = {
   id: 'eps', label: 'Earnings per share (basic and diluted)', value: 0.71,
@@ -35,7 +35,7 @@ const PLAIN_ROW = {
   unit: 'SAR_million', sheet: 'Income', question: null,
 };
 
-function sections(rows = [EPS_ROW, SHARES_ROW, PLAIN_ROW]): CustomExtractionSection[] {
+function sections(rows: CustomExtractionRow[] = [EPS_ROW, SHARES_ROW, PLAIN_ROW]): CustomExtractionSection[] {
   return [{ section_code: 'sec_income', title: 'Income Statement', is_custom: true, rows }];
 }
 
@@ -169,5 +169,21 @@ describe('the way to the outline', () => {
   it('opens once every unit is confirmed', () => {
     renderScreen(payload({ sections: sections([PLAIN_ROW]) }, 0), vi.fn());
     expect(screen.getByRole('button', { name: 'Continue to outline →' })).toBeEnabled();
+  });
+});
+
+describe('the section header', () => {
+  it('says when some lines carry their own unit', () => {
+    const data = payload({
+      sections: sections([{ ...PLAIN_ROW }, { ...SHARES_ROW, question: null, unit_raw: 'billion shares' }]),
+      tables: [{
+        file: 'x.xlsx', table: 'Income Statement', status: 'extracted', reason: null, rows: 2,
+        section_code: 'sec_income', section_title: 'Income Statement', currency: 'SAR', scale: 'million',
+        header_row: 0, label_col: 0, value_col: 1, value_col_header: 'SAR millions',
+        period_source: 'declared', grouped_with: [],
+      }],
+    }, 0);
+    renderScreen(data, vi.fn());
+    expect(screen.getByText('SAR · million · 1 with their own unit')).toBeInTheDocument();
   });
 });

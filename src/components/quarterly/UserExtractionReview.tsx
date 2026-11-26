@@ -53,6 +53,11 @@ interface Props {
   onConfirmUnits?: (answers: UnitAnswer[]) => Promise<void>;
 }
 
+/** How many of a section's lines carry their own unit rather than the table's. */
+function ownUnitCount(sec: CustomExtractionSection): number {
+  return sec.rows.filter((r) => !!r.unit_raw).length;
+}
+
 /** "01_Aramco_Q3_2023_Income_Statement.xlsx" — the tail is what identifies it. */
 function shortFile(name: string): string {
   const base = name.split('/').pop() || name;
@@ -540,6 +545,9 @@ export default function UserExtractionReview({ reportId, data, onAddFiles, onCon
                 {units?.currency && (
                   <span style={{ fontSize: 11, color: MUTED }}>
                     {units.currency} · {units.scale}
+                    {/* The table's unit is not every line's: some carry their own
+                        (a Unit column, a per-share line, a confirmed answer). */}
+                    {ownUnitCount(sec) > 0 && ` · ${ownUnitCount(sec)} with their own unit`}
                   </span>
                 )}
                 <span style={{ fontSize: 12, color: MUTED }}>{sec.rows.length} lines</span>
