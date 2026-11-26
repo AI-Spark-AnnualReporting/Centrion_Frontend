@@ -80,6 +80,32 @@ export function buildQuestionItems(sections: CustomExtractionSection[]): Questio
   return items;
 }
 
+/**
+ * Splits answers into requests of at most `maxIds` figures each. The endpoint takes
+ * up to 2,000 ids per call, and one "every amount in this table" answer on a big
+ * file can carry more. Saving is safe to repeat, so a batch that fails can simply
+ * be sent again.
+ */
+export function batchUnitAnswers(answers: UnitAnswer[], maxIds = 1000): UnitAnswer[][] {
+  const batches: UnitAnswer[][] = [];
+  let current: UnitAnswer[] = [];
+  let size = 0;
+  for (const answer of answers) {
+    for (let start = 0; start < answer.ids.length; start += maxIds) {
+      const ids = answer.ids.slice(start, start + maxIds);
+      if (size + ids.length > maxIds && current.length > 0) {
+        batches.push(current);
+        current = [];
+        size = 0;
+      }
+      current.push({ ...answer, ids });
+      size += ids.length;
+    }
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
 type Choice = { kind: UnitKind; currency: string; scale: string; text: string };
 
 function choiceFromGuess(guess: Omit<UnitAnswer, 'ids'>, fallbackCurrency: string): Choice {

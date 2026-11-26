@@ -20,6 +20,7 @@ import { SectionPicker, flattenSections } from '@/components/quarterly/SectionPi
 import { ExcludedLines } from '@/components/quarterly/ExcludedLines';
 import { AddFinancialFilesDialog } from '@/components/quarterly/AddFinancialFilesDialog';
 import UserExtractionReview from '@/components/quarterly/UserExtractionReview';
+import { batchUnitAnswers } from '@/components/quarterly/UnitQuestions';
 import type {
   ExtractionReviewFigure,
   ExtractionReviewResponse,
@@ -390,8 +391,12 @@ export default function ExtractionReviewPage() {
           onConfirmUnits={companyId ? async (answers) => {
             // The response IS the fresh screen; an error is thrown back to the card,
             // which shows it and keeps the user's choices.
-            const fresh = await quarterlyReports.confirmFigureUnits(companyId, reportId, answers);
-            setData(fresh);
+            // In batches: one table-wide answer on a big file can exceed what one
+            // request takes. Each batch's response is the whole fresh screen.
+            for (const batch of batchUnitAnswers(answers)) {
+              const fresh = await quarterlyReports.confirmFigureUnits(companyId, reportId, batch);
+              setData(fresh);
+            }
           } : undefined}
         />
         {addOpen && companyId && (

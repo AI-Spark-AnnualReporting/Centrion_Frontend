@@ -187,3 +187,24 @@ describe('the section header', () => {
     expect(screen.getByText('SAR · million · 1 with their own unit')).toBeInTheDocument();
   });
 });
+
+describe('large saves', () => {
+  it('splits answers into requests of at most 1,000 figures, keeping every id once', async () => {
+    const { batchUnitAnswers } = await import('@/components/quarterly/UnitQuestions');
+    const ids = (n: number, p: string) => Array.from({ length: n }, (_, i) => `${p}${i}`);
+    const batches = batchUnitAnswers([
+      { ids: ids(2500, 'a'), kind: 'money', currency: 'SAR', scale: 'millions' },
+      { ids: ids(10, 'b'), kind: 'percent' },
+    ]);
+    expect(batches.every((b) => b.reduce((n, a) => n + a.ids.length, 0) <= 1000)).toBe(true);
+    const sent = batches.flat().flatMap((a) => a.ids);
+    expect(sent).toHaveLength(2510);
+    expect(new Set(sent).size).toBe(2510);
+    expect(batches.flat().filter((a) => a.kind === 'percent').flatMap((a) => a.ids)).toEqual(ids(10, 'b'));
+  });
+
+  it('keeps a small save in one request', async () => {
+    const { batchUnitAnswers } = await import('@/components/quarterly/UnitQuestions');
+    expect(batchUnitAnswers([{ ids: ['x'], kind: 'ratio' }, { ids: ['y'], kind: 'percent' }])).toHaveLength(1);
+  });
+});
