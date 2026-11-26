@@ -208,3 +208,17 @@ describe('large saves', () => {
     expect(batchUnitAnswers([{ ids: ['x'], kind: 'ratio' }, { ids: ['y'], kind: 'percent' }])).toHaveLength(1);
   });
 });
+
+describe('a line read across a grid', () => {
+  it('is asked once, covering every cell', () => {
+    const cell = (id: string, column: string) => ({ ...EPS_ROW, id, column, table: 'Segments' });
+    const items = buildQuestionItems(sections([cell('u', 'Upstream'), cell('d', 'Downstream'), cell('c', 'Corporate')]));
+    expect(items).toHaveLength(1);
+    expect(items[0].ids).toEqual(['u', 'd', 'c']);
+  });
+
+  it('keeps different lines apart', () => {
+    const items = buildQuestionItems(sections([EPS_ROW, { ...EPS_ROW, id: 'eps2', label: 'Diluted EPS' }]));
+    expect(items).toHaveLength(2);
+  });
+});

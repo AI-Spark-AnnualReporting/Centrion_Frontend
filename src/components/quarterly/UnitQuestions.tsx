@@ -50,7 +50,7 @@ export interface QuestionItem {
   guess: Omit<UnitAnswer, 'ids'>;
 }
 
-/** One question per row, except a scale disagreement, which is asked once per table. */
+/** One question per line (a grid line's cells share one), and a scale disagreement once per table. */
 export function buildQuestionItems(sections: CustomExtractionSection[]): QuestionItem[] {
   const items: QuestionItem[] = [];
   const byTable: Record<string, QuestionItem> = {};
@@ -71,10 +71,20 @@ export function buildQuestionItems(sections: CustomExtractionSection[]): Questio
         byTable[key].ids.push(row.id);
         continue;
       }
-      items.push({
-        key: `row:${row.id}`, ids: [row.id], label: row.label || '(no name)', where: sec.title,
+      // The same line read across a grid's columns (EPS under every segment) is one
+      // question, not one per cell: same line, same table, same reason, same guess.
+      const lineKey = `line:${sec.section_code}:${tableName}:${row.label}:${q.reason_code}:${JSON.stringify(q.guess)}`;
+      const existing = byTable[lineKey];
+      if (existing) {
+        existing.ids.push(row.id);
+        existing.valueDisplay = null;     // several values now; the reason says what is asked
+        continue;
+      }
+      byTable[lineKey] = {
+        key: lineKey, ids: [row.id], label: row.label || '(no name)', where: sec.title,
         valueDisplay: row.value_display, reason: q.reason, guess: q.guess,
-      });
+      };
+      items.push(byTable[lineKey]);
     }
   }
   return items;
