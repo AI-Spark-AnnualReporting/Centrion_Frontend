@@ -687,7 +687,7 @@ function FinancialTable({
                         {stringifyCell(c ? c.prior_display : null) || '—'}
                       </td>,
                       <td key={`c-${p.key}`} style={{ ...cellPad, textAlign: 'right', borderTop: topBorder }}>
-                        <ChangeCell value={c ? c.change_pct : null} dir={c ? c.change_direction : null} />
+                        <ChangeCell value={c ? c.change_pct : null} dir={c ? c.change_direction : null} unit={c ? c.change_unit : null} />
                       </td>,
                     ];
                   })
@@ -701,7 +701,7 @@ function FinancialTable({
                     ) : null,
                     showChange ? (
                       <td key="change" style={{ ...cellPad, textAlign: 'right', borderTop: topBorder }}>
-                        <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} />
+                        <ChangeCell value={cell(r, 'change_pct', 'change')} dir={cell(r, 'change_direction', 'direction')} unit={cell(r, 'change_unit')} />
                       </td>
                     ) : null,
                   ]}
@@ -824,14 +824,15 @@ function GenericTable({ rows: given, columns }: { rows: LooseRow[]; columns?: st
   );
 }
 
-function ChangeCell({ value, dir }: { value: unknown; dir: unknown }) {
+function ChangeCell({ value, dir, unit }: { value: unknown; dir: unknown; unit?: unknown }) {
   const pct = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : null;
   if (pct == null || Number.isNaN(pct)) return <span style={{ color: MUTED }}>—</span>;
   const color = dir === 'up' ? GREEN : dir === 'down' ? RED : MUTED;
   const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '';
   return (
     <span style={{ color, fontFamily: MONO, fontWeight: 600 }}>
-      {arrow} {Math.abs(pct).toFixed(1)}%
+      {/* A rate row changes in percentage points ("pp"), not a % of a %. */}
+      {arrow} {Math.abs(pct).toFixed(1)}{unit === 'pp' ? ' pp' : '%'}
     </span>
   );
 }

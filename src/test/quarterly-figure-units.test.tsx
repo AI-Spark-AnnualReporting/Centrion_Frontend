@@ -250,3 +250,24 @@ describe('money written into a sentence', () => {
       .toBe('Free cash flow was SAR 76,280 million.');
   });
 });
+
+describe('a rate row compared with last year', () => {
+  it('shows the change in percentage points, an amount in percent', () => {
+    const section = {
+      section_code: 'key', title: 'Key Measures', display_order: 1,
+      source_type: 'Extraction', mode: 'table', status: 'produced', feeder_status: 'ready',
+      content: JSON.stringify({
+        title: 'Key Measures',
+        rows: [
+          { label: 'Gearing', role: 'line', indent: 0, current_display: '(7.6%)', prior_display: '6.7%',
+            change_pct: -14.3, change_unit: 'pp', change_direction: 'down' },
+          { label: 'Net income', role: 'line', indent: 0, current_display: 'SAR 122,188M',
+            prior_display: 'SAR 159,115M', change_pct: -23.2, change_unit: '%', change_direction: 'down' },
+        ],
+      }),
+    } as ProducedSection;
+    render(<SectionContent section={section} />);
+    expect(screen.getByText(/14\.3 pp/)).toBeInTheDocument();
+    expect(screen.getByText(/23\.2%/)).toBeInTheDocument();
+  });
+});
