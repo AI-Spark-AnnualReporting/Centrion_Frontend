@@ -24,6 +24,7 @@ import {
   EMPTY_LIMITS, ModulesCard, UsersCard, usersSummary,
 } from '@/components/subscriptions/PlanFields';
 import { sparkLicenses } from '@/lib/api';
+import { copyTextToClipboard } from '@/lib/copyText';
 import type { GeneratedLicense, LicensableModule, SparkLicenseRow } from '@/types/license';
 import type { PlanLimits } from '@/types/subscription';
 
@@ -320,12 +321,11 @@ function ReviewChanges({ mode, company, changes, error, saving, onBack, onConfir
 function KeyReady({ company, made, onDone }: { company: string; made: GeneratedLicense; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(made.license_key);
-      setCopied(true);
-    } catch {
-      // Clipboard blocked (e.g. not https): the key can still be selected in the box.
-    }
+    const ok = await copyTextToClipboard(made.license_key);
+    // If copy is blocked, the key can still be selected in the box.
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
   if (made.activated) {
     return (

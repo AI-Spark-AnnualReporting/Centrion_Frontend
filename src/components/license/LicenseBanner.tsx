@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { loadCompanyLicense } from '@/lib/license-cache';
+import { copyTextToClipboard } from '@/lib/copyText';
 import type { CompanyLicense } from '@/types/license';
 import { useLicenseRoom } from './useLicenseRoom';
 
@@ -290,12 +291,12 @@ export function LicenseBanner() {
 
   const copy = async (action: Action, value: string | null) => {
     if (!value) return;
-    try {
-      await navigator.clipboard.writeText(value);
+    const ok = await copyTextToClipboard(value);
+    if (ok) {
       flash(action, 'Copied');
-    } catch {
-      goToLicense(LICENSE_CARD_ID); // clipboard blocked: the card shows it to select
+      return;
     }
+    goToLicense(LICENSE_CARD_ID); // copy blocked: the card shows it to select
   };
 
   const close = (kind: Closable) => {

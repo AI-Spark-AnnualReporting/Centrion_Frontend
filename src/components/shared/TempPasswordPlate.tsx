@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { copyTextToClipboard } from '@/lib/copyText';
 
 // The temporary-password "plate": the password in DM Mono on a grey card with a
 // Copy button. Same look as InviteResultModal (AdminUsersPage.tsx), pulled out
@@ -75,21 +76,16 @@ export function TempPasswordPlate({ password, size, extraActions, disabled = fal
     showFeedback('manual');
   }
 
-  // writeText is missing on non-secure origins and rejects when permission is
-  // denied. Today's InviteResultModal then shows nothing at all, so here we
-  // select the text and tell the user which keys to press instead.
+  // copyTextToClipboard tries the clipboard API, then the execCommand fallback
+  // that works on plain http. If both fail, select the text and tell the user
+  // which keys to press instead.
   async function copyPassword(): Promise<void> {
-    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
-    if (!clipboard || typeof clipboard.writeText !== 'function') {
+    const ok = await copyTextToClipboard(password);
+    if (!ok) {
       fallBackToManualCopy();
       return;
     }
-    try {
-      await clipboard.writeText(password);
-      showFeedback('copied');
-    } catch {
-      fallBackToManualCopy();
-    }
+    showFeedback('copied');
   }
 
   const sizeStyle = SIZE_STYLES[size];

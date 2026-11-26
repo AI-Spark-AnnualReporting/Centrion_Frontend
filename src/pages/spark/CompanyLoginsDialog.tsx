@@ -26,6 +26,7 @@ import {
 } from '@/lib/api';
 import { TempPasswordPlate } from '@/components/shared/TempPasswordPlate';
 import { colorFor } from '@/lib/departmentColors';
+import { copyTextToClipboard } from '@/lib/copyText';
 import {
   COMPANY_SLUG_MAX_LENGTH,
   isSparkPlaceholderEmail,
@@ -351,11 +352,8 @@ function CopyEmailButton({ email }: { email: string }) {
 
   /** Copy the email. If the browser refuses, nothing happens: the email is selectable text. */
   async function copyEmail(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(email);
-    } catch {
-      return;
-    }
+    const ok = await copyTextToClipboard(email);
+    if (!ok) return;
     setCopied(true);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), COPIED_MS);
@@ -413,11 +411,8 @@ function RevealedPasswordChip({ password, disabled }: { password: string; disabl
 
   /** Copy the password. If the browser refuses, the chip text is still selectable. */
   async function copyPassword(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(password);
-    } catch {
-      return;
-    }
+    const ok = await copyTextToClipboard(password);
+    if (!ok) return;
     setCopied(true);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), COPIED_MS);

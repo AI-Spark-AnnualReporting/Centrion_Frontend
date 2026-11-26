@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { team, type TeamMember } from '@/lib/api';
 import { downloadText } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/copyText';
 
 // Backend `position_type` enum — only these five values are accepted by the
 // API. Anything else returns 422, so the form must never send a stale value.
@@ -197,11 +198,11 @@ export default function AddPersonDialog({
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(undelivered.tempPassword).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 1800);
-                    });
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(undelivered.tempPassword);
+                    if (!ok) return;
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1800);
                   }}
                   style={{
                     padding: '6px 12px',

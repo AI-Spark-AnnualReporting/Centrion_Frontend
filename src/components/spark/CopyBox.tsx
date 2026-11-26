@@ -1,19 +1,23 @@
 // A long value (license key, unlock code, Client ID) shown once with a Copy
 // button, so Spark staff can send it to the client without retyping it.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { copyTextToClipboard } from '@/lib/copyText';
 
 export function CopyBox({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  /** Copy the value. If the browser refuses, select it so the user can press Ctrl+C. */
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard blocked (e.g. not https): the value is still selectable below.
+    const ok = await copyTextToClipboard(value);
+    if (!ok) {
+      textareaRef.current?.focus();
+      textareaRef.current?.select();
+      return;
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -25,6 +29,7 @@ export function CopyBox({ label, value }: { label: string; value: string }) {
         </button>
       </div>
       <textarea
+        ref={textareaRef}
         readOnly
         value={value}
         rows={value.length > 80 ? 4 : 1}

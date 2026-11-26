@@ -25,6 +25,7 @@ import type {
 import type { FeatureAction, FeaturePermissions } from '@/types/auth';
 import { initialsOf, gradientFor } from '@/lib/avatar';
 import { downloadText } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/copyText';
 import { useToast } from '@/hooks/use-toast';
 
 const PRIMARY = '#4040C8';
@@ -389,11 +390,11 @@ export function InviteResultModal({
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(result.temp_password).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
+  const copy = async () => {
+    const ok = await copyTextToClipboard(result.temp_password);
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   };
   // A .txt the admin can hand over / keep until the user is onboarded. The
   // email address is in the file too — a bare password in Downloads is useless
@@ -529,12 +530,12 @@ function TempPasswordControls({ user }: { user: AdminUserRow }) {
     }
   };
 
-  const copy = () => {
+  const copy = async () => {
     if (!password) return;
-    navigator.clipboard?.writeText(password).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
+    const ok = await copyTextToClipboard(password);
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   };
 
   return (
@@ -1301,15 +1302,7 @@ function UsersView(props: {
                             )}
 
                             {u.status === 'invited' && u.invite_link && (
-                              <button
-                                className="btn bs bsm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigator.clipboard?.writeText(u.invite_link as string);
-                                }}
-                              >
-                                Copy invite link
-                              </button>
+                              <CopyInviteLinkButton link={u.invite_link} />
                             )}
 
                             {/* With role + suspend hidden, an active admin/PM with no temp
@@ -1878,5 +1871,24 @@ function AnnualReportCapabilities({ highlight }: { highlight: BackendRole | null
         document requires admin.
       </div>
     </div>
+  );
+}
+
+/** "Copy invite link" button for an invited user's row. Shows "Copied" for 2 seconds when it works. */
+function CopyInviteLinkButton({ link }: { link: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const ok = await copyTextToClipboard(link);
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button className="btn bs bsm" onClick={copy}>
+      {copied ? 'Copied' : 'Copy invite link'}
+    </button>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/shared/Spinner';
 import MemberProfileModal from '@/components/MemberProfileModal';
 import { team, type TeamExperience, type TeamMember } from '@/lib/api';
+import { copyTextToClipboard } from '@/lib/copyText';
 import { useAuth } from '@/context/AuthContext';
 import { canCreateFeature } from '@/lib/features';
 
@@ -711,14 +712,11 @@ function CredentialBanner({ credential, onDismiss }: CredentialBannerProps) {
   const handCarry = credential.tempPassword != null;
   const handleCopy = async () => {
     if (!credential.tempPassword) return;
-    try {
-      await navigator.clipboard.writeText(credential.tempPassword);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // Older browsers / non-https contexts — silently ignore; the value is
-      // visible in the banner so the admin can copy by hand.
-    }
+    const ok = await copyTextToClipboard(credential.tempPassword);
+    // If copy is blocked, the value is visible in the banner to copy by hand.
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   };
   return (
     <div
