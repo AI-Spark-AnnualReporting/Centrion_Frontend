@@ -87,14 +87,9 @@ export function deriveUnits(displays: Array<string | null | undefined>): FigureU
   }
   if (counts.size === 0) return null;
 
-  const scalesByCurrency = new Map<string, Set<string>>();
-  for (const { units } of counts.values()) {
-    const scales = scalesByCurrency.get(units.currency) ?? new Set<string>();
-    scales.add(units.scale);
-    scalesByCurrency.set(units.currency, scales);
-  }
-  for (const scales of scalesByCurrency.values()) if (scales.size > 1) return null;
-
+  // The same currency at several scales no longer declines: the caption names the
+  // majority unit and bareFigure strips only cells in exactly that scale, so "SAR
+  // 0.51" (EPS) keeps its own text instead of every cell repeating "SAR …M".
   const ranked = [...counts.values()].sort((a, b) => b.n - a.n);
   if (ranked.length > 1 && ranked[0].n === ranked[1].n) return null;
   return ranked[0].units;
@@ -109,15 +104,23 @@ export function deriveUnits(displays: Array<string | null | undefined>): FigureU
  * currency, so a percentage row ("4.7%", a coupon rate) is left exactly as it is, and a
  * genuinely foreign cell stays visibly foreign.
  */
-export function bareFigure(display: string | null | undefined, currency?: string | null): string {
+export function bareFigure(
+  display: string | null | undefined,
+  currency?: string | null,
+  scale?: string | null,
+): string {
   const raw = (display ?? '').trim();
   if (!raw || !currency) return raw;
   const cur = currency.toUpperCase().replace(/[^A-Z]/g, '');
   if (!cur) return raw;
+  // With the caption's scale given, only a cell in exactly that scale is stripped:
+  // "SAR 0.51" or "SAR 5B" under a millions caption keep their full text.
+  const scaleOk = (letter?: string) =>
+    scale === undefined || scale === null || (letter ?? '').toUpperCase() === scale.toUpperCase();
   const negative = raw.match(new RegExp(`^\\((?:${cur})\\s*(.+?)([KMB])?\\)$`, 'i'));
-  if (negative) return `(${negative[1]})`;
+  if (negative) return scaleOk(negative[2]) ? `(${negative[1]})` : raw;
   const plain = raw.match(new RegExp(`^${cur}\\s*(.+?)([KMB])?$`, 'i'));
-  if (plain) return plain[1];
+  if (plain) return scaleOk(plain[2]) ? plain[1] : raw;
   // The pre-_fmt_value earnings shape (see LEGACY_MONEY_RE). The minus becomes
   // accounting parentheses, which is what the string would have carried had it
   // been written today.
@@ -144,8 +147,12 @@ export const NIL_CELL = '—';
 const NIL_RE = /^\(?\s*(?:[A-Z]{3}\s*)?0(?:[.,]0+)?\s*[KMB]?\s*\)?$/i;
 
 /** How one grid cell prints: currency stripped, nil as a dash. */
-export function gridValue(display: string | null | undefined, currency?: string | null): string {
-  const value = bareFigure(display, currency);
+export function gridValue(
+  display: string | null | undefined,
+  currency?: string | null,
+  scale?: string | null,
+): string {
+  const value = bareFigure(display, currency, scale);
   return !value || NIL_RE.test(value) ? NIL_CELL : value;
 }
 

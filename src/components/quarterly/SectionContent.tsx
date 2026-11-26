@@ -529,6 +529,7 @@ function TableBlock({ table, showTitle }: { table: NormTable; showTitle: boolean
           currentLabel={table.currentLabel}
           matrixColumns={table.matrixColumns}
           currency={units?.currency}
+          scale={units?.scale}
         />
       ) : (
         <GenericTable rows={rows} columns={table.columns} />
@@ -574,6 +575,7 @@ function FinancialTable({
   currentLabel,
   matrixColumns,
   currency,
+  scale,
 }: {
   rows: LooseRow[];
   comparePeriods?: ComparePeriod[];
@@ -582,6 +584,8 @@ function FinancialTable({
   // Set only for a grid whose cells agree on one currency — the caption above the
   // table then states it, and each cell drops it.
   currency?: string;
+  // The caption's scale letter: only cells in exactly that unit drop it.
+  scale?: string;
 }) {
   // A grid wins over a comparison: eight categories times two periods is not a table
   // anyone can read, and a section printed as a grid is not comparing.
@@ -669,7 +673,7 @@ function FinancialTable({
                     ...cellPad, textAlign: 'right', fontFamily: MONO, color: BRAND,
                     fontWeight: isTotal ? 700 : 400, borderTop: topBorder,
                   }}>
-                    {gridValue(cellFor(r, c.key), currency)}
+                    {gridValue(cellFor(r, c.key), currency, scale)}
                   </td>
                 ))}
               {hasCompare

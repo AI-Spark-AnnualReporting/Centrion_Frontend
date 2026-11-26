@@ -40,7 +40,7 @@ function flatUnits(table: NormTable): FigureUnits | null {
 function flatValue(row: unknown, units: FigureUnits | null): string {
   const raw = stringifyCell(cell(row as never, 'current_display', 'current', 'value'));
   if (!units) return raw || '—';
-  return gridValue(raw, units.currency);
+  return gridValue(raw, units.currency, units.scale);
 }
 
 // A section the source printed as a GRID — line items down the side, categories
@@ -91,7 +91,7 @@ function MatrixTable({ table, TH }: { table: NormTable; TH: React.CSSProperties 
               >
                 {/* A blank cell is information — this line does not exist for
                     that category — so it reads as a dash, not as missing data. */}
-                {(units ? gridValue(matrixCell(r, c.key), units.currency)
+                {(units ? gridValue(matrixCell(r, c.key), units.currency, units.scale)
                         : matrixCell(r, c.key)) ?? '—'}
               </td>
             ))}
@@ -148,7 +148,7 @@ function ColumnsTable({ table, TH }: { table: NormTable; TH: React.CSSProperties
                   whiteSpace: ci === 0 ? undefined : 'nowrap',
                 }}
               >
-                {(units ? gridValue(stringifyCell(r[c]), units.currency)
+                {(units ? gridValue(stringifyCell(r[c]), units.currency, units.scale)
                         : stringifyCell(r[c])) || '—'}
               </td>
             ))}

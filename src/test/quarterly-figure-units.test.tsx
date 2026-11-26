@@ -60,10 +60,16 @@ describe('agreeing on one unit for a table', () => {
     expect(deriveUnits(['SAR 100M', 'SAR 5M', 'USD 9M', 'USD 3M'])).toBeNull();
   });
 
-  it('declines on mixed scales even when one is the clear majority', () => {
-    // bareFigure strips the scale letter with the code, so captioning this in
-    // millions would print 5B as "5" — the figure wrong by a factor of a thousand.
-    expect(deriveUnits(['SAR 100M', 'SAR 5M', 'SAR 2M', 'SAR 9B'])).toBeNull();
+  it('names the majority unit when scales are mixed, and only that scale is stripped', () => {
+    // The odd cell keeps its full text, so "SAR 9B" can never read as 9 million and
+    // an EPS of "SAR 0.51" never as 0.51 million.
+    const units = deriveUnits(['SAR 100M', 'SAR 5M', 'SAR 2M', 'SAR 9B', 'SAR 0.51']);
+    expect(units).toEqual({ currency: 'SAR', scale: 'M' });
+    expect(bareFigure('SAR 100M', 'SAR', units!.scale)).toBe('100');
+    expect(bareFigure('(SAR 5M)', 'SAR', units!.scale)).toBe('(5)');
+    expect(bareFigure('SAR 9B', 'SAR', units!.scale)).toBe('SAR 9B');
+    expect(bareFigure('SAR 0.51', 'SAR', units!.scale)).toBe('SAR 0.51');
+    expect(bareFigure('$42.4B', 'SAR', units!.scale)).toBe('$42.4B');
   });
 });
 
